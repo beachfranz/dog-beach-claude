@@ -2,36 +2,21 @@
 // Fetches weekly crowd forecast from BestTime.app Forecasting API.
 // Docs: https://besttime.app/api/v1/docs
 //
-// Flow:
-//   1. If beach has no besttime_venue_id → call newForecast() to register the
-//      venue and get a venue_id back. Persist it to the beaches table.
-//   2. If beach already has a besttime_venue_id → call weekForecast() to get
-//      the latest weekly pattern without consuming extra credits.
-//
-// Output: Map<"DAY_OF_WEEK:HOUR", number> where value is busyness 0–100.
-// DAY_OF_WEEK: 0 = Monday … 6 = Sunday (BestTime convention).
-// HOUR: 0–23.
-//
-// The caller maps this to actual calendar dates by using JavaScript's
-// date.getDay() (0 = Sunday … 6 = Saturday) with a conversion offset.
+// NOTE: BestTime requires all params as query string on POST requests,
+// not in the request body. This matches the confirmed working pattern.
 
 const BASE_URL = "https://besttime.app/api/v1";
 
 // BestTime day index → JS getDay() mapping:
 //   BestTime: 0=Mon 1=Tue 2=Wed 3=Thu 4=Fri 5=Sat 6=Sun
 //   JS:       0=Sun 1=Mon 2=Tue 3=Wed 4=Thu 5=Fri 6=Sat
-// Convert JS getDay() → BestTime day index:
 export function jsDayToBestTimeDay(jsDay: number): number {
-  // jsDay: 0(Sun)→6, 1(Mon)→0, 2(Tue)→1 ... 6(Sat)→5
   return jsDay === 0 ? 6 : jsDay - 1;
 }
 
 export interface BestTimeWeekResult {
-  // Keyed by `${bestTimeDayIndex}:${hour}` → busyness score 0–100
   busynessMap: Map<string, number>;
-  // venue_id returned by BestTime — persist if this was a new venue registration
   venueId: string;
-  // True if this was a new venue registration (caller should persist venue_id)
   isNewVenue: boolean;
 }
 
@@ -46,11 +31,9 @@ export async function fetchCrowds(
   apiKeyPublic: string,
 ): Promise<BestTimeWeekResult> {
   if (beach.besttime_venue_id) {
-    // Venue already registered — fetch existing weekly forecast (no credit cost)
     return fetchWeekForecast(beach.besttime_venue_id, apiKeyPublic);
   } else {
-    // First time — register venue and get forecast (consumes credits)
-    return newForecast(beach, apiKeyPrivate, apiKeyPublic);
+    return newForecast(beach, apiKeyPrivate);
   }
 }
 
@@ -63,7 +46,6 @@ async function newForecast(
     address: string | null;
   },
   apiKeyPrivate: string,
-  apiKeyPublic: string,
 ): Promise<BestTimeWeekResult> {
   if (!beach.address) {
     throw new Error(
@@ -71,44 +53,53 @@ async function newForecast(
     );
   }
 
-  const body = new URLSearchParams();
-  body.append("api_key_private", apiKeyPrivate);
-  body.append("venue_name",      beach.display_name);
-  body.append("venue_address",   beach.address);
+  // Send all params as query string on POST — BestTime's required pattern
+  const params = new URLSearchParams({
+    api_key_private: apiKeyPrivate,
+    venue_name:      beach.display_name,
+    venue_address:   beach.address,
+  });
 
-  console.log("BestTime request — venue_name:", beach.display_name);
-  console.log("BestTime request — venue_address:", beach.address);
-  console.log("BestTime request — api_key_private length:", apiKeyPrivate?.length ?? "UNDEFINED");
+  console.log(`BestTime newForecast — venue: ${beach.display_name}`);
+  console.log(`BestTime newForecast — address: ${beach.address}`);
+  console.log(`BestTime newForecast — key length: ${apiKeyPrivate?.length ?? "UNDEFINED"}`);
 
   const res = await fetchWithRetry(
-    `${BASE_URL}/forecasts`,
-    { method: "POST", body: body.toString(), headers: { "Content-Type": "application/x-www-form-urlencoded" } },
+    `${BASE_URL}/forecasts?${params.toString()}`,
+    { method: "POST" },
     3,
   );
 
+  const raw = await res.text();
+  console.log(`BestTime newForecast — HTTP status: ${res.status}`);
+  console.log(`BestTime newForecast — response: ${raw.slice(0, 200)}`);
+
   if (!res.ok) {
     throw new Error(
-      `BestTime new forecast error ${res.status} for ${beach.location_id}: ${await res.text()}`
+      `BestTime new forecast error ${res.status} for ${beach.location_id}: ${raw}`
     );
   }
 
-  const json = await res.json();
+  let json: Record<string, unknown>;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    throw new Error(`BestTime returned non-JSON: ${raw}`);
+  }
 
-  if (!json.status || json.status !== "OK") {
+  if (json.status !== "OK" || !Array.isArray(json.analysis)) {
     throw new Error(
       `BestTime new forecast failed for ${beach.location_id}: ${JSON.stringify(json)}`
     );
   }
 
-  const venueId: string = json.venue_info?.venue_id ?? json.venue_id;
+  const venueInfo = json.venue_info as Record<string, unknown> | undefined;
+  const venueId = (venueInfo?.venue_id ?? json.venue_id) as string;
   if (!venueId) {
-    throw new Error(
-      `BestTime did not return a venue_id for ${beach.location_id}: ${JSON.stringify(json)}`
-    );
+    throw new Error(`BestTime did not return a venue_id for ${beach.location_id}`);
   }
 
-  const busynessMap = parseWeekAnalysis(json.analysis);
-
+  const busynessMap = parseWeekAnalysis(json.analysis as unknown[]);
   return { busynessMap, venueId, isNewVenue: true };
 }
 
@@ -124,60 +115,59 @@ async function fetchWeekForecast(
   });
 
   const res = await fetchWithRetry(
-    `${BASE_URL}/forecasts/week?${params}`,
+    `${BASE_URL}/forecasts/week?${params.toString()}`,
     { method: "GET" },
     3,
   );
 
+  const raw = await res.text();
   if (!res.ok) {
     throw new Error(
-      `BestTime week forecast error ${res.status} for venue ${venueId}: ${await res.text()}`
+      `BestTime week forecast error ${res.status} for venue ${venueId}: ${raw}`
     );
   }
 
-  const json = await res.json();
+  let json: Record<string, unknown>;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    throw new Error(`BestTime week forecast returned non-JSON: ${raw}`);
+  }
 
-  if (!json.status || json.status !== "OK") {
+  if (json.status !== "OK" || !Array.isArray(json.analysis)) {
     throw new Error(
       `BestTime week forecast failed for venue ${venueId}: ${JSON.stringify(json)}`
     );
   }
 
-  const busynessMap = parseWeekAnalysis(json.analysis);
-
+  const busynessMap = parseWeekAnalysis(json.analysis as unknown[]);
   return { busynessMap, venueId, isNewVenue: false };
 }
 
 // ── Response parser ───────────────────────────────────────────────────────────
 //
-// BestTime week analysis structure:
+// BestTime analysis structure:
 // analysis: [
-//   {                              ← day 0 = Monday
-//     day_raw: [
-//       { hour: 6, intensity_nr: 12 },
-//       { hour: 7, intensity_nr: 18 },
-//       ...
-//     ]
-//   },
-//   ...                            ← days 1–6
+//   { day_info: { day_int: 0 }, day_raw: [score0, score1, ...] }  ← Monday
+//   ...
 // ]
+// day_raw index 0 = 6am, index 17 = 11pm, index 18 = 12am, ..., index 23 = 5am
 
-function parseWeekAnalysis(analysis: unknown): Map<string, number> {
+function parseWeekAnalysis(analysis: unknown[]): Map<string, number> {
   const map = new Map<string, number>();
 
-  if (!Array.isArray(analysis)) return map;
+  for (const day of analysis) {
+    const d = day as { day_info?: { day_int?: number }; day_raw?: number[] };
+    const dayIndex = d.day_info?.day_int;
+    if (dayIndex === undefined || !Array.isArray(d.day_raw)) continue;
 
-  analysis.forEach((day: unknown, dayIndex: number) => {
-    const d = day as { day_raw?: Array<{ hour: number; intensity_nr: number }> };
-    if (!Array.isArray(d.day_raw)) return;
-
-    for (const slot of d.day_raw) {
-      if (typeof slot.hour === "number" && typeof slot.intensity_nr === "number") {
-        const key = `${dayIndex}:${slot.hour}`;
-        map.set(key, Math.max(0, Math.min(100, slot.intensity_nr)));
-      }
-    }
-  });
+    d.day_raw.forEach((score: number, ix: number) => {
+      // BestTime index 0 = 6am, wraps around midnight
+      const actualHour = (ix + 6) % 24;
+      const key = `${dayIndex}:${actualHour}`;
+      map.set(key, Math.max(0, Math.min(100, score)));
+    });
+  }
 
   return map;
 }

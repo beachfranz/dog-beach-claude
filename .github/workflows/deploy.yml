@@ -21,10 +21,10 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 
-      - run: supabase functions deploy get-beach-summary --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
+      - run: supabase functions deploy get-beach-summary --no-verify-jwt --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          
-      - run: supabase functions deploy get-beach-detail --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
-        env: 
+
+      - run: supabase functions deploy get-beach-detail --no-verify-jwt --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
+        env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

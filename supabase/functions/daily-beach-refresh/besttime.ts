@@ -71,15 +71,18 @@ async function newForecast(
     );
   }
 
-  const body = new URLSearchParams({
-    api_key_private: apiKeyPrivate,
-    venue_name:      beach.display_name,
-    venue_address:   beach.address,
-  });
+  const body = new URLSearchParams();
+  body.append("api_key_private", apiKeyPrivate);
+  body.append("venue_name",      beach.display_name);
+  body.append("venue_address",   beach.address);
+
+  console.log("BestTime request — venue_name:", beach.display_name);
+  console.log("BestTime request — venue_address:", beach.address);
+  console.log("BestTime request — api_key_private length:", apiKeyPrivate?.length ?? "UNDEFINED");
 
   const res = await fetchWithRetry(
     `${BASE_URL}/forecasts`,
-    { method: "POST", body, headers: { "Content-Type": "application/x-www-form-urlencoded" } },
+    { method: "POST", body: body.toString(), headers: { "Content-Type": "application/x-www-form-urlencoded" } },
     3,
   );
 

@@ -224,6 +224,45 @@
     .narrative-text.amber { color: var(--amber); }
     .narrative-text.red   { color: var(--red); }
 
+    /* ── Tooltip ─────────────────────────────────────────────────── */
+    .bar-col { position: relative; }
+
+    .tooltip {
+      display: none;
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1e2333;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 8px;
+      white-space: nowrap;
+      z-index: 20;
+      pointer-events: none;
+    }
+
+    .tooltip-hour {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      color: var(--text);
+      font-weight: 500;
+      margin-bottom: 3px;
+    }
+
+    .tooltip-line {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .tooltip-status-go      { color: var(--green); }
+    .tooltip-status-caution { color: var(--amber); }
+    .tooltip-status-no_go   { color: var(--red); }
+
+    .bar-col:hover .tooltip { display: block; }
+
     /* ── Loading / error ──────────────────────────────────────────── */
     .state {
       display: flex;
@@ -248,7 +287,7 @@
 <div class="page">
 
   <header class="header">
-    <div class="header-left">
+    <div class="header-left" id="header-left">
       <div class="header-title">
         <span>🐶</span>
         <span id="day-title">Loading...</span>
@@ -268,8 +307,8 @@
 </div>
 <script>
   // ── Config ────────────────────────────────────────────────────────
-  const SUPABASE_URL  = 'https://ehlzbwtrsxaaukurekau.supabase.co';
-  const ANON_KEY     = 'sb_publishable_o2d4Kg0xMZoMw92feO2uWQ_PdDfQXKj';
+  const SUPABASE_URL = 'https://YOUR_PROJECT_REF.supabase.co';
+  const ANON_KEY     = 'YOUR_ANON_KEY';
 
   // ── Params ────────────────────────────────────────────────────────
   const params     = new URLSearchParams(window.location.search);
@@ -312,6 +351,12 @@
     if (day.best_window_label) {
       winLabel.textContent = day.best_window_label;
       winLabel.className = `window-label ${day.best_window_status ?? ''}`;
+    }
+    if (day.best_window_text) {
+      const bwt = document.createElement('div');
+      bwt.style.cssText = "font-family:'DM Sans',sans-serif;font-size:12px;line-height:1.5;color:var(--text-muted);margin-top:4px;max-width:340px;";
+      bwt.textContent = day.best_window_text;
+      document.getElementById('header-left').appendChild(bwt);
     }
 
     if (hours.length === 0) {
@@ -393,11 +438,20 @@
       const display = metric.fmt(val);
       const dog     = h.is_in_best_window ? '🐶' : '';
 
+      const statusLabel = h.is_in_best_window ? '✓ Best Window' : h.hour_status === 'go' ? '✓ Go' : h.hour_status === 'caution' ? '⚠ Caution' : '✕ No Go';
+      const statusClass = `tooltip-status-${h.hour_status}`;
+      const metricLine  = display ? `${metric.label}: ${display}` : '';
+
       return `
         <div class="bar-col">
           <div class="bar-dog">${dog}</div>
           <div class="bar-value">${display}</div>
           <div class="bar ${barClass}" style="height:${height}px"></div>
+          <div class="tooltip">
+            <div class="tooltip-hour">${h.hour_label}</div>
+            ${metricLine ? `<div class="tooltip-line">${metricLine}</div>` : ''}
+            <div class="tooltip-line ${statusClass}">${statusLabel}</div>
+          </div>
         </div>`;
     }).join('');
 
@@ -410,14 +464,6 @@
 
   function buildNarrative(day) {
     const blocks = [];
-
-    if (day.best_window_text) {
-      blocks.push(`
-        <div class="narrative-block">
-          <div class="narrative-label">Best Window</div>
-          <div class="narrative-text">${day.best_window_text}</div>
-        </div>`);
-    }
 
     if (day.day_text) {
       blocks.push(`
@@ -459,4 +505,3 @@
 </script>
 </body>
 </html>
-

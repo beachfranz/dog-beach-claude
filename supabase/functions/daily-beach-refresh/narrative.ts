@@ -12,7 +12,9 @@
 // a short chip label like "0.3ft · calm · quiet"
 
 import type { ScoredHour, BestWindow } from "./scoring.ts";
-import type { DayStatus, BusynessCategory } from "../../src/lib/types.ts";
+// Types inlined — no external path imports in edge functions
+type DayStatus        = "go" | "caution" | "no_go";
+type BusynessCategory = "quiet" | "moderate" | "dog_party" | "too_crowded";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-sonnet-4-20250514";

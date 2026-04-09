@@ -12,11 +12,44 @@
 //
 // All thresholds and weights come from a ScoringConfig row — never hardcoded.
 
-import type {
-  ScoringConfig,
-  HourStatus,
-  BusynessCategory,
-} from "../../src/lib/types.ts";
+// Types inlined — no external path imports in edge functions
+type HourStatus       = "go" | "caution" | "no_go";
+type BusynessCategory = "quiet" | "moderate" | "dog_party" | "too_crowded";
+
+interface ScoringConfig {
+  scoring_version: string;
+  nogo_precip_chance: number;
+  nogo_wind_speed: number;
+  nogo_wmo_codes: number[];
+  caution_precip_chance: number;
+  caution_wind_speed: number;
+  caution_tide_height: number;
+  caution_uv_index: number;
+  positive_low_tide: number;
+  positive_very_low_tide: number;
+  positive_low_precip: number;
+  positive_calm_wind: number;
+  positive_temp_min: number;
+  positive_temp_max: number;
+  positive_low_uv: number;
+  busy_quiet_max: number;
+  busy_moderate_max: number;
+  busy_dog_party_max: number;
+  weight_tide: number;
+  weight_rain: number;
+  weight_wind: number;
+  weight_crowd: number;
+  weight_temp: number;
+  weight_uv: number;
+  norm_tide_max: number;
+  norm_wind_max: number;
+  norm_temp_target: number;
+  norm_temp_range: number;
+  norm_uv_max: number;
+  window_min_hours: number;
+  window_max_hours: number;
+  window_caution_penalty: number;
+}
 import { SEVERE_WMO_CODES } from "./openmeteo.ts";
 
 // ─── Input / output types ─────────────────────────────────────────────────────

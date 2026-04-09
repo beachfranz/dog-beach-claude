@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dog Beach Scout</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Outfit:wght@500;600;700&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #0f1117;
+      --surface:      #181c27;
+      --border:       #252a3a;
+      --text:         #e8eaf0;
+      --text-muted:   #6b7280;
+      --text-dim:     #4b5268;
+      --green:        #4ade80;
+      --amber:        #fbbf24;
+      --red:          #f87171;
+      --blue:         #60a5fa;
+      --bar-blue:     #38bdf8;
+      --bar-green:    #4ade80;
+      --bar-red:      #f87171;
+      --radius:       14px;
+      --radius-sm:    8px;
+    }
+
+    html, body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+    }
+
+    .page {
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 0 0 48px;
+    }
+
+    /* ── Header ───────────────────────────────────────────────────── */
+    .header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      padding: 24px 20px 12px;
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      z-index: 10;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .header-left { display: flex; flex-direction: column; gap: 2px; }
+
+    .header-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .window-label {
+      font-family: 'Outfit', sans-serif;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--green);
+    }
+
+    .window-label.caution { color: var(--amber); }
+    .window-label.no_go   { color: var(--red); }
+
+    .close-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 4px;
+      text-decoration: none;
+    }
+
+    .close-btn:hover { color: var(--text); background: #1e2333; }
+
+    /* ── Charts ───────────────────────────────────────────────────── */
+    .charts { padding: 16px 20px 0; display: flex; flex-direction: column; gap: 20px; }
+
+    .metric-row { display: flex; flex-direction: column; gap: 6px; }
+
+    .metric-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-muted);
+      letter-spacing: 0.04em;
+    }
+
+    .bars-wrap {
+      display: flex;
+      align-items: flex-end;
+      gap: 3px;
+      height: 64px;
+      position: relative;
+    }
+
+    .bar-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .bar-value {
+      font-family: 'DM Mono', monospace;
+      font-size: 9px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      line-height: 1;
+    }
+
+    .bar-dog {
+      font-size: 10px;
+      line-height: 1;
+      min-height: 12px;
+    }
+
+    .bar {
+      width: 100%;
+      border-radius: 3px 3px 0 0;
+      min-height: 4px;
+      transition: opacity 0.15s;
+    }
+
+    .bar.go      { background: var(--bar-blue); }
+    .bar.best    { background: var(--bar-green); }
+    .bar.no_go   { background: var(--bar-red); }
+    .bar.caution { background: var(--bar-blue); opacity: 0.6; }
+
+    /* x-axis labels */
+    .x-axis {
+      display: flex;
+      gap: 3px;
+      padding: 4px 0 0;
+    }
+
+    .x-label {
+      flex: 1;
+      text-align: center;
+      font-family: 'DM Mono', monospace;
+      font-size: 9px;
+      color: var(--text-dim);
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    /* ── Legend ───────────────────────────────────────────────────── */
+    .legend {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      padding: 16px 20px 0;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    /* ── Narrative ────────────────────────────────────────────────── */
+    .narrative {
+      margin: 20px 20px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      border-top: 1px solid var(--border);
+      padding-top: 16px;
+    }
+
+    .narrative-block { display: flex; flex-direction: column; gap: 4px; }
+
+    .narrative-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    .narrative-text {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--text-muted);
+    }
+
+    .narrative-text.amber { color: var(--amber); }
+    .narrative-text.red   { color: var(--red); }
+
+    /* ── Loading / error ──────────────────────────────────────────── */
+    .state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 80px 20px;
+      gap: 12px;
+    }
+
+    .state-icon { font-size: 36px; }
+
+    .state-text {
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <header class="header">
+    <div class="header-left">
+      <div class="header-title">
+        <span>🐶</span>
+        <span id="day-title">Loading...</span>
+      </div>
+      <div class="window-label" id="window-label"></div>
+    </div>
+    <a class="close-btn" id="close-btn" href="index.html">✕</a>
+  </header>
+
+  <div id="main-content">
+    <div class="state">
+      <div class="state-icon">🐾</div>
+      <div class="state-text">Loading forecast...</div>
+    </div>
+  </div>
+
+</div>
+<script>
+  // ── Config ────────────────────────────────────────────────────────
+  const SUPABASE_URL = 'https://YOUR_PROJECT_REF.supabase.co';
+  const ANON_KEY     = 'sb_publishable_o2d4Kg0xMZoMw92feO2uWQ_PdDfQXKj';
+
+  // ── Params ────────────────────────────────────────────────────────
+  const params     = new URLSearchParams(window.location.search);
+  const locationId = params.get('location') ?? 'huntington-dog-beach';
+  const date       = params.get('date');
+
+  // Fix close button to preserve location
+  document.getElementById('close-btn').href = `index.html?location=${locationId}`;
+
+  if (!date) {
+    showError('No date specified.');
+  } else {
+    loadDetail(locationId, date);
+  }
+
+  // ── Fetch ─────────────────────────────────────────────────────────
+  async function loadDetail(locationId, date) {
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/functions/v1/get-beach-detail?location_id=${locationId}&date=${date}`,
+        { headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' } }
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      render(data);
+    } catch (err) {
+      showError(err.message);
+    }
+  }
+
+  // ── Render ────────────────────────────────────────────────────────
+  function render({ beach, day, hours }) {
+    // Header
+    const dateObj  = new Date(date + 'T12:00:00');
+    const dayName  = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
+    document.title = `${dayName} — ${beach.display_name}`;
+    document.getElementById('day-title').textContent = dayName;
+
+    const winLabel = document.getElementById('window-label');
+    if (day.best_window_label) {
+      winLabel.textContent = day.best_window_label;
+      winLabel.className = `window-label ${day.best_window_status ?? ''}`;
+    }
+
+    if (hours.length === 0) {
+      showError('No hourly data available for this date.');
+      return;
+    }
+
+    // Build metrics
+    const metrics = [
+      {
+        label: 'Tide (ft)',
+        key:   'tide_height',
+        fmt:   v => v !== null ? v.toFixed(1) : '',
+        max:   h => Math.max(...hours.map(x => x.tide_height ?? 0), 0.1),
+      },
+      {
+        label: 'Wind (mph)',
+        key:   'wind_speed',
+        fmt:   v => v !== null ? Math.round(v) : '',
+        max:   h => Math.max(...hours.map(x => x.wind_speed ?? 0), 1),
+      },
+      {
+        label: 'Temp (°F)',
+        key:   'temp_air',
+        fmt:   v => v !== null ? Math.round(v) : '',
+        max:   h => Math.max(...hours.map(x => x.temp_air ?? 0), 1),
+        // Temp bars all same height — show relative variation from min
+        relative: true,
+      },
+      {
+        label: 'Rain (%)',
+        key:   'precip_chance',
+        fmt:   v => v !== null ? Math.round(v) : '',
+        max:   h => 100,
+      },
+      {
+        label: 'Crowd (%)',
+        key:   'busyness_score',
+        fmt:   v => v !== null ? Math.round(v) : '',
+        max:   h => 100,
+      },
+    ];
+
+    const chartsHtml = metrics.map(m => buildMetricRow(m, hours, day)).join('');
+
+    // x-axis: show label every 2 hours
+    const xAxisHtml = hours.map((h, i) => {
+      const label = (i % 2 === 0) ? h.hour_label : '';
+      return `<div class="x-label">${label}</div>`;
+    }).join('');
+
+    // Narrative
+    const narrativeHtml = buildNarrative(day);
+
+    document.getElementById('main-content').innerHTML = `
+      <div class="charts">${chartsHtml}</div>
+      <div class="x-axis" style="padding: 4px 20px 0;">${xAxisHtml}</div>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:var(--bar-green)"></div> Best Time</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--bar-blue)"></div> Okay</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--bar-red)"></div> Bad Weather</div>
+      </div>
+      ${narrativeHtml}
+    `;
+  }
+
+  function buildMetricRow(metric, hours, day) {
+    const values  = hours.map(h => h[metric.key]);
+    const maxVal  = metric.max ? metric.max(hours) : Math.max(...values.filter(v => v !== null), 1);
+    const minVal  = metric.relative ? Math.min(...values.filter(v => v !== null)) : 0;
+    const range   = Math.max(maxVal - minVal, 1);
+    const maxHeight = 48; // px
+
+    const barsHtml = hours.map(h => {
+      const val     = h[metric.key];
+      const barClass = h.is_in_best_window ? 'best' : h.hour_status === 'no_go' ? 'no_go' : h.hour_status === 'caution' ? 'caution' : 'go';
+      const pct     = val !== null ? Math.max((val - minVal) / range, 0.05) : 0.05;
+      const height  = Math.round(pct * maxHeight);
+      const display = metric.fmt(val);
+      const dog     = h.is_in_best_window ? '🐶' : '';
+
+      return `
+        <div class="bar-col">
+          <div class="bar-dog">${dog}</div>
+          <div class="bar-value">${display}</div>
+          <div class="bar ${barClass}" style="height:${height}px"></div>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="metric-row">
+        <div class="metric-label">${metric.label}</div>
+        <div class="bars-wrap">${barsHtml}</div>
+      </div>`;
+  }
+
+  function buildNarrative(day) {
+    const blocks = [];
+
+    if (day.best_window_text) {
+      blocks.push(`
+        <div class="narrative-block">
+          <div class="narrative-label">Best Window</div>
+          <div class="narrative-text">${day.best_window_text}</div>
+        </div>`);
+    }
+
+    if (day.day_text) {
+      blocks.push(`
+        <div class="narrative-block">
+          <div class="narrative-label">Day Summary</div>
+          <div class="narrative-text">${day.day_text}</div>
+        </div>`);
+    }
+
+    if (day.caution_text) {
+      blocks.push(`
+        <div class="narrative-block">
+          <div class="narrative-label">Caution</div>
+          <div class="narrative-text amber">${day.caution_text}</div>
+        </div>`);
+    }
+
+    if (day.no_go_text) {
+      blocks.push(`
+        <div class="narrative-block">
+          <div class="narrative-label">No Go</div>
+          <div class="narrative-text red">${day.no_go_text}</div>
+        </div>`);
+    }
+
+    if (blocks.length === 0) return '';
+
+    return `<div class="narrative">${blocks.join('')}</div>`;
+  }
+
+  // ── Error ─────────────────────────────────────────────────────────
+  function showError(msg) {
+    document.getElementById('main-content').innerHTML = `
+      <div class="state">
+        <div class="state-icon">🐕</div>
+        <div class="state-text">${msg}</div>
+      </div>`;
+  }
+</script>
+</body>
+</html>

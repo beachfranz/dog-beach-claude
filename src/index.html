@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dog Beach Scout</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Outfit:wght@500;600&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #0f1117;
+      --surface:      #181c27;
+      --surface-hover:#1e2333;
+      --border:       #252a3a;
+      --text:         #e8eaf0;
+      --text-muted:   #6b7280;
+      --text-dim:     #4b5268;
+      --green:        #4ade80;
+      --green-dim:    #1a3a27;
+      --amber:        #fbbf24;
+      --amber-dim:    #3a2e10;
+      --red:          #f87171;
+      --red-dim:      #3a1a1a;
+      --blue:         #60a5fa;
+      --radius:       14px;
+      --radius-sm:    8px;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 15px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Layout ───────────────────────────────────────────────────── */
+    .app {
+      max-width: 480px;
+      margin: 0 auto;
+      min-height: 100vh;
+      padding: 0 0 40px;
+    }
+
+    /* ── Header ───────────────────────────────────────────────────── */
+    .header {
+      padding: 24px 20px 12px;
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      z-index: 10;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .header-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    .wordmark {
+      font-family: 'Syne', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    .live-badge {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--green);
+      background: var(--green-dim);
+      border: 1px solid var(--green);
+      border-radius: 4px;
+      padding: 2px 7px;
+      letter-spacing: 0.05em;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .live-badge::before {
+      content: '';
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    .location-name {
+      font-family: 'Outfit', sans-serif;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1.2;
+    }
+
+    /* Location switcher */
+    .location-select {
+      margin-top: 10px;
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      padding: 7px 10px;
+      cursor: pointer;
+      outline: none;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 30px;
+    }
+
+    /* ── Day list ─────────────────────────────────────────────────── */
+    .day-list {
+      padding: 12px 16px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .day-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, transform 0.1s;
+      display: grid;
+      grid-template-columns: 48px 36px 1fr 20px;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: inherit;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .day-card:hover  { background: var(--surface-hover); border-color: #303650; }
+    .day-card:active { transform: scale(0.99); }
+
+    .day-card.status-go      { border-left: 3px solid var(--green); }
+    .day-card.status-caution { border-left: 3px solid var(--amber); }
+    .day-card.status-no_go   { border-left: 3px solid var(--red); opacity: 0.7; }
+
+    /* Day label */
+    .day-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .day-label.today { color: var(--text); }
+
+    /* Weather icon */
+    .weather-icon { font-size: 22px; line-height: 1; text-align: center; }
+
+    /* Main content */
+    .day-content { min-width: 0; }
+
+    .window-label {
+      font-family: 'Outfit', sans-serif;
+      font-size: 15px;
+      font-weight: 600;
+      line-height: 1.2;
+      margin-bottom: 3px;
+    }
+
+    .status-go      .window-label { color: var(--green); }
+    .status-caution .window-label { color: var(--amber); }
+    .status-no_go   .window-label { color: var(--red); }
+
+    .no-window-label {
+      font-family: 'Outfit', sans-serif;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--red);
+      margin-bottom: 3px;
+    }
+
+    /* Metric chips row */
+    .chips {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 4px;
+      align-items: center;
+      overflow: hidden;
+    }
+
+    .chip {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .chip-sep { color: var(--text-dim); }
+
+    .chip.crowd-quiet      { color: #4ade80; }
+    .chip.crowd-moderate   { color: var(--text-muted); }
+    .chip.crowd-dog_party  { color: #f97316; }
+    .chip.crowd-too_crowded{ color: var(--red); }
+
+    /* Chevron */
+    .chevron {
+      color: var(--text-dim);
+      font-size: 16px;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+
+    /* ── Loading / error states ────────────────────────────────────── */
+    .state-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 80px 20px;
+      gap: 12px;
+    }
+
+    .state-icon { font-size: 40px; }
+
+    .state-text {
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
+    .skeleton {
+      background: linear-gradient(90deg, var(--surface) 25%, var(--surface-hover) 50%, var(--surface) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s infinite;
+      border-radius: var(--radius);
+      height: 80px;
+    }
+
+    @keyframes shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    /* ── Footer ───────────────────────────────────────────────────── */
+    .footer {
+      padding: 24px 20px 0;
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--text-dim);
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-top">
+      <span class="wordmark">🐾 Dog Beach Scout</span>
+    </div>
+    <div class="location-name" id="location-name" onclick="toggleLocationMenu()" style="cursor:pointer">Loading... <span style="font-size:12px;color:var(--text-dim)">▾</span></div>
+    <div id="location-menu" style="display:none;position:absolute;background:#1e2333;border:1px solid var(--border);border-radius:var(--radius-sm);min-width:240px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,0.4);overflow:hidden"></div>
+  </header>
+
+  <!-- Day list -->
+  <main class="day-list" id="day-list">
+    <!-- Skeletons while loading -->
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+  </main>
+
+  <div class="footer" id="footer"></div>
+</div>
+
+<script>
+  // ── Config ────────────────────────────────────────────────────────
+  const SUPABASE_URL  = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+  const ANON_KEY      = 'sb_publishable_o2d4Kg0xMZoMw92feO2uWQ_PdDfQXKj';
+  const DEFAULT_LOCATION = 'huntington-dog-beach';
+
+  // ── State ─────────────────────────────────────────────────────────
+  let currentLocation = new URLSearchParams(window.location.search).get('location') ?? DEFAULT_LOCATION;
+
+  // ── Boot ──────────────────────────────────────────────────────────
+  loadSummary(currentLocation);
+
+  function toggleLocationMenu() {
+    const menu = document.getElementById('location-menu');
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+  }
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#location-name') && !e.target.closest('#location-menu')) {
+      document.getElementById('location-menu').style.display = 'none';
+    }
+  });
+
+  function selectLocation(locationId) {
+    currentLocation = locationId;
+    const url = new URL(window.location);
+    url.searchParams.set('location', currentLocation);
+    window.history.pushState({}, '', url);
+    document.getElementById('location-menu').style.display = 'none';
+    loadSummary(currentLocation);
+  }
+
+  // ── Data fetching ─────────────────────────────────────────────────
+  async function loadSummary(locationId) {
+    showSkeletons();
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/functions/v1/get-beach-summary?location_id=${locationId}`,
+        { headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' } }
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      render(data);
+    } catch (err) {
+      showError(err.message);
+    }
+  }
+
+  // ── Render ────────────────────────────────────────────────────────
+  function render({ beach, days, allBeaches }) {
+    // Location name
+    document.getElementById('location-name').textContent = beach.display_name;
+    document.title = `${beach.display_name} — Dog Beach Scout`;
+
+    // Location menu
+    const menu = document.getElementById('location-menu');
+    menu.innerHTML = allBeaches.map(b =>
+      `<div onclick="selectLocation('${b.location_id}')" style="padding:10px 14px;font-family:'DM Sans',sans-serif;font-size:14px;color:${b.location_id === currentLocation ? 'var(--green)' : 'var(--text-muted)'};cursor:pointer;" onmouseover="this.style.background='#252a3a'" onmouseout="this.style.background=''">${b.display_name}</div>`
+    ).join('');
+
+    // Day list
+    const list = document.getElementById('day-list');
+    if (!days || days.length === 0) {
+      list.innerHTML = `
+        <div class="state-container">
+          <div class="state-icon">🏖️</div>
+          <div class="state-text">No forecast data yet.<br>Run the daily refresh to populate.</div>
+        </div>`;
+      return;
+    }
+
+    list.innerHTML = days.map((day, i) => buildDayCard(day, i)).join('');
+
+    // Footer
+    const lastUpdated = days[0]?.updated_at
+      ? new Date(days[0].updated_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+      : null;
+    document.getElementById('footer').textContent = lastUpdated ? `Updated ${lastUpdated}` : '';
+  }
+
+  function buildDayCard(day, index) {
+    const isToday    = index === 0;
+    const isTomorrow = index === 1;
+    const date       = new Date(day.local_date + 'T12:00:00');
+    const dayShort   = isToday ? 'Tdy' : isTomorrow ? 'Tmw' : date.toLocaleDateString('en-US', { weekday: 'short' });
+    const statusClass = `status-${day.day_status}`;
+
+    // Window label
+    const windowHtml = day.best_window_label
+      ? `<div class="window-label">${day.best_window_label}</div>`
+      : `<div class="no-window-label">No good window</div>`;
+
+    // Metric chips
+    const chips = buildChips(day);
+
+    // Weather icon
+    const weatherIcon = getWeatherIcon(day.summary_weather, day.weather_code);
+
+    return `
+      <div class="day-card ${statusClass}" onclick="openDetail('${day.location_id}', '${day.local_date}')">
+        <div class="day-label ${isToday ? 'today' : ''}">${dayShort}</div>
+        <div class="weather-icon">${weatherIcon}</div>
+        <div class="day-content">
+          ${windowHtml}
+          <div class="chips">${chips}</div>
+        </div>
+        <div class="chevron">›</div>
+      </div>`;
+  }
+
+  function buildChips(day) {
+    const parts = [];
+
+    if (day.lowest_tide_height !== null) {
+      parts.push(`<span class="chip">🌊 ${day.lowest_tide_height}ft</span>`);
+    }
+    if (day.avg_temp !== null) {
+      parts.push(`<span class="chip">🌡 ${Math.round(day.avg_temp)}°</span>`);
+    }
+    if (day.avg_wind !== null) {
+      parts.push(`<span class="chip">💨 ${Math.round(day.avg_wind)}mph</span>`);
+    }
+    if (day.busyness_category) {
+      const crowdLabel = {
+        quiet:       '✌️ Quiet',
+        moderate:    '⚖️ Moderate',
+        dog_party:   '🎉 Dog Party',
+        too_crowded: '🚫 Too Crowded',
+      }[day.busyness_category] ?? day.busyness_category;
+      const crowdClass = `crowd-${day.busyness_category}`;
+      parts.push(`<span class="chip ${crowdClass}">${crowdLabel}</span>`);
+    }
+    if (day.avg_uv !== null) {
+      parts.push(`<span class="chip">☀️ UV ${Math.round(day.avg_uv)}</span>`);
+    }
+
+    return parts.join(`<span class="chip-sep">·</span>`);
+  }
+
+  function getWeatherIcon(summaryWeather, wmoCode) {
+    const map = {
+      sunny:        '☀️',
+      partly_cloudy:'⛅',
+      cloudy:       '☁️',
+      foggy:        '🌫️',
+      rainy:        '🌧️',
+      windy:        '💨',
+    };
+    if (summaryWeather && map[summaryWeather]) return map[summaryWeather];
+    // Fallback from WMO code
+    if (wmoCode === 0) return '☀️';
+    if (wmoCode <= 2)  return '⛅';
+    if (wmoCode === 3) return '☁️';
+    if (wmoCode <= 48) return '🌫️';
+    if (wmoCode <= 67) return '🌧️';
+    if (wmoCode <= 77) return '🌨️';
+    if (wmoCode <= 82) return '🌧️';
+    return '⛈️';
+  }
+
+  // ── Detail navigation ─────────────────────────────────────────────
+  function openDetail(locationId, date) {
+    window.location.href = `detail.html?location=${locationId}&date=${date}`;
+  }
+
+  // ── UI states ─────────────────────────────────────────────────────
+  function showSkeletons() {
+    document.getElementById('location-name').textContent = 'Loading...';
+    document.getElementById('day-list').innerHTML = Array(5).fill(0)
+      .map(() => `<div class="skeleton"></div>`).join('');
+    document.getElementById('footer').textContent = '';
+  }
+
+  function showError(msg) {
+    document.getElementById('day-list').innerHTML = `
+      <div class="state-container">
+        <div class="state-icon">🐕</div>
+        <div class="state-text">Couldn't load forecast<br><small>${msg}</small></div>
+      </div>`;
+  }
+</script>
+</body>
+</html>

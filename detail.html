@@ -56,7 +56,7 @@
       border-bottom: 1px solid var(--border);
     }
 
-    .header-left { display: flex; flex-direction: column; gap: 2px; }
+    .header-left { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; padding-right: 12px; }
 
     .header-title {
       font-family: 'Outfit', sans-serif;
@@ -148,10 +148,8 @@
       transition: opacity 0.15s;
     }
 
-    .bar.go      { background: var(--bar-blue); }
-    .bar.best    { background: var(--bar-green); }
     .bar.no_go   { background: var(--bar-red); }
-    .bar.caution { background: var(--bar-blue); opacity: 0.6; }
+    /* go/caution/best bars use inline score-based color via JS */
 
     /* x-axis labels */
     .x-axis {
@@ -415,12 +413,35 @@
       <div class="charts">${chartsHtml}</div>
       <div class="x-axis" style="padding: 4px 20px 0;">${xAxisHtml}</div>
       <div class="legend">
-        <div class="legend-item"><div class="legend-dot" style="background:var(--bar-green)"></div> Best Time</div>
-        <div class="legend-item"><div class="legend-dot" style="background:var(--bar-blue)"></div> Okay</div>
-        <div class="legend-item"><div class="legend-dot" style="background:var(--bar-red)"></div> Bad Weather</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#0ea5e9"></div> High Score</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#e8eaf0"></div> Mid Score</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#d97706"></div> Low Score</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--bar-red)"></div> No Go</div>
       </div>
       ${narrativeHtml}
     `;
+  }
+
+  // Maps hour_score (0-100) to amber → white → blue gradient
+  // 0=amber (#d97706), 50=white (#e8eaf0), 100=blue (#0ea5e9)
+  function scoreToColor(score) {
+    if (score === null || score === undefined) return '#6b7280';
+    const s = Math.max(0, Math.min(100, score));
+    if (s <= 50) {
+      // amber to white
+      const t = s / 50;
+      const r = Math.round(217 + (232 - 217) * t);
+      const g = Math.round(119 + (234 - 119) * t);
+      const b = Math.round(6   + (240 - 6)   * t);
+      return `rgb(${r},${g},${b})`;
+    } else {
+      // white to blue
+      const t = (s - 50) / 50;
+      const r = Math.round(232 + (14  - 232) * t);
+      const g = Math.round(234 + (165 - 234) * t);
+      const b = Math.round(240 + (233 - 240) * t);
+      return `rgb(${r},${g},${b})`;
+    }
   }
 
   function buildMetricRow(metric, hours, day) {
@@ -432,7 +453,8 @@
 
     const barsHtml = hours.map(h => {
       const val     = h[metric.key];
-      const barClass = h.is_in_best_window ? 'best' : h.hour_status === 'no_go' ? 'no_go' : h.hour_status === 'caution' ? 'caution' : 'go';
+      const barClass = h.hour_status === 'no_go' ? 'no_go' : '';
+      const barColor = h.hour_status === 'no_go' ? '' : scoreToColor(h.hour_score);
       const pct     = val !== null ? Math.max((val - minVal) / range, 0.05) : 0.05;
       const height  = Math.round(pct * maxHeight);
       const display = metric.fmt(val);
@@ -446,7 +468,7 @@
         <div class="bar-col">
           <div class="bar-dog">${dog}</div>
           <div class="bar-value">${display}</div>
-          <div class="bar ${barClass}" style="height:${height}px"></div>
+          <div class="bar ${barClass}" style="height:${height}px;${barColor ? `background:${barColor}` : ''}"></div>
           <div class="tooltip">
             <div class="tooltip-hour">${h.hour_label}</div>
             ${metricLine ? `<div class="tooltip-line">${metricLine}</div>` : ''}
@@ -465,19 +487,19 @@
   function buildNarrative(day) {
     const blocks = [];
 
-    if (day.day_text) {
-      blocks.push(`
-        <div class="narrative-block">
-          <div class="narrative-label">Day Summary</div>
-          <div class="narrative-text">${day.day_text}</div>
-        </div>`);
-    }
-
     if (day.caution_text) {
       blocks.push(`
         <div class="narrative-block">
           <div class="narrative-label">Caution</div>
           <div class="narrative-text amber">${day.caution_text}</div>
+        </div>`);
+    }
+
+    if (day.day_text) {
+      blocks.push(`
+        <div class="narrative-block">
+          <div class="narrative-label">Day Summary</div>
+          <div class="narrative-text">${day.day_text}</div>
         </div>`);
     }
 

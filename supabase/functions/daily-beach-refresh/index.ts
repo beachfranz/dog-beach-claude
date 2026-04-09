@@ -4,7 +4,7 @@
 // Execution order per beach:
 //   1. Fetch active beaches from DB
 //   2. For each beach (sequential to respect API rate limits):
-//      a. Fetch weather        ← Open-Meteo 
+//      a. Fetch weather        ← Open-Meteo
 //      b. Fetch tides          ← NOAA CO-OPS
 //      c. Fetch crowds         ← BestTime.app
 //      d. Merge into RawHourData[]
@@ -55,6 +55,18 @@ const BESTTIME_KEY_PRIVATE    = Deno.env.get("besttime_api_key_private")!;
 const BESTTIME_KEY_PUBLIC     = Deno.env.get("besttime_api_key_public")!;
 const ANTHROPIC_API_KEY       = Deno.env.get("anthropic_api_key")!;
 const SCORING_VERSION         = Deno.env.get("scoring_version") ?? "v1";
+
+// Temporary debug logging — remove after confirming secrets are loaded
+console.log("ENV CHECK — besttime_api_key_private length:", BESTTIME_KEY_PRIVATE?.length ?? "UNDEFINED");
+console.log("ENV CHECK — besttime_api_key_public length:", BESTTIME_KEY_PUBLIC?.length ?? "UNDEFINED");
+console.log("ENV CHECK — anthropic_api_key length:", ANTHROPIC_API_KEY?.length ?? "UNDEFINED");
+console.log("ENV CHECK — scoring_version:", SCORING_VERSION);
+console.log("All env keys present:", [
+  "besttime_api_key_private",
+  "besttime_api_key_public",
+  "anthropic_api_key",
+  "scoring_version",
+].map(k => `${k}=${Deno.env.get(k) ? "SET" : "MISSING"}`).join(", "));
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
 

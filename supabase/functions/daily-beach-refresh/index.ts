@@ -4,7 +4,7 @@
 // Execution order per beach:
 //   1. Fetch active beaches from DB
 //   2. For each beach (sequential to respect API rate limits):
-//      a. Fetch weather        ← Open-Meteo
+//      a. Fetch weather        ← Open-Meteo 
 //      b. Fetch tides          ← NOAA CO-OPS
 //      c. Fetch crowds         ← BestTime.app
 //      d. Merge into RawHourData[]

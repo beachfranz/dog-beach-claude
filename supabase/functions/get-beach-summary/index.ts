@@ -1,4 +1,4 @@
-// get-beach-summary/index.ts
+// get-beach-summary/index.ts 
 // Serves 7-day beach recommendations for the summary screen.
 // 
 // GET /functions/v1/get-beach-summary?location_id=huntington-dog-beach

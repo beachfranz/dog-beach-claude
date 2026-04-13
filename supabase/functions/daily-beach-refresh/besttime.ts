@@ -1,6 +1,6 @@
 // besttime.ts
 // Fetches weekly crowd forecast from BestTime.app Forecasting API.
-// Docs: https://besttime.app/api/v1/docs
+// Docs: https://besttime.app/api/v1/docs 
 //
 // NOTE: BestTime requires all params as query string on POST requests,
 // not in the request body. This matches the confirmed working pattern.

@@ -1,7 +1,7 @@
 // get-beach-detail/index.ts
 // Serves hourly scores + daily recommendation for the detail drawer.
 // 
-// GET /functions/v1/get-beach-detail?location_id=huntington-dog-beach&date=2026-04-09
+// GET /functions/v1/get-beach-detail?location_id=huntington-dog-beach&date=2026-04-09 
 // Returns: { beach, day: DayRecommendation, hours: HourlyScore[] } 
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";

@@ -2,7 +2,7 @@
 // Core scoring logic for Dog Beach Scout.
 //
 // Responsibilities:
-//   1. Derive busyness category from raw busyness score
+//   1. Derive busyness category from raw busyness score 
 //   2. Run hard NO-GO checks → hour_status = 'no_go'
 //   3. Run caution checks    → hour_status = 'caution'
 //   4. Compute 0-100 composite hour_score for candidate hours

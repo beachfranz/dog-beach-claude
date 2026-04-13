@@ -6,7 +6,7 @@
 //   2. Run hard NO-GO checks → hour_status = 'no_go'
 //   3. Run caution checks    → hour_status = 'caution'
 //   4. Compute 0-100 composite hour_score for candidate hours
-//   5. Collect passed/failed checks and reason codes
+//   5. Collect passed/failed checks and reason codes 
 //   6. Select best 2-5 contiguous window from candidate hours
 //   7. Build explainability payload per hour
 //

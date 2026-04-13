@@ -6,7 +6,7 @@
 //   - day_text:          2-3 sentence day overview
 //   - best_window_text:  1-2 sentences on why this window was chosen
 //   - caution_text:      1 sentence caveat (omitted for clean 'go' days)
-//   - no_go_text:        1 sentence explanation for no_go days
+//   - no_go_text:        1 sentence explanation for no_go days 
 //
 // Also produces hour_text for each hour in beach_day_hourly_scores —
 // a short chip label like "0.3ft · calm · quiet"

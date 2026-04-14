@@ -19,6 +19,7 @@ import {
   generateDayNarrative,
   generateHourLabels,
   type NarrativeInput,
+  type WindowHour,
 } from "./narrative.ts";
 
 // ─── Inlined types (replaces ../../src/lib/types.ts import) ──────────────────
@@ -492,6 +493,7 @@ function buildNarrativeInput(
 ): NarrativeInput {
   const jsDate    = new Date(`${date}T12:00:00`);
   const dayOfWeek = jsDate.toLocaleDateString("en-US", { weekday: "long" });
+  const isWeekend = dayOfWeek === "Saturday" || dayOfWeek === "Sunday";
 
   const goHours      = dayHours.filter((h) => h.hourStatus === "go");
   const cautionHours = dayHours.filter((h) => h.hourStatus === "caution");
@@ -503,6 +505,31 @@ function buildNarrativeInput(
     : cautionHours.length > 0 ? "caution"
     : "no_go";
 
+  // Tide direction: compare first vs last tide in best window (or agg hours)
+  const tideSeries = aggHours.map((h) => h.tideHeight).filter(nonNull);
+  let tideDirection: "rising" | "falling" | "steady" = "steady";
+  if (tideSeries.length >= 2) {
+    const diff = tideSeries[tideSeries.length - 1] - tideSeries[0];
+    if (diff > 0.15)       tideDirection = "rising";
+    else if (diff < -0.15) tideDirection = "falling";
+  }
+
+  // Dominant weather code across agg hours
+  const weatherCode = mostCommon(aggHours.map((h) => h.weatherCode).filter(nonNull));
+
+  // Per-hour breakdown of best window
+  const windowHourBreakdown: WindowHour[] = (window?.hours ?? [])
+    .filter((h) => h.hourStatus === "go" || h.hourStatus === "caution")
+    .map((h) => ({
+      hour:   h.hourLabel,
+      tide:   h.tideHeight !== null ? round1(h.tideHeight) : null,
+      wind:   h.windSpeed  !== null ? Math.round(h.windSpeed) : null,
+      temp:   h.tempAir    !== null ? Math.round(h.tempAir)   : null,
+      rain:   h.precipChance !== null ? Math.round(h.precipChance) : null,
+      crowd:  h.busynessCategory,
+      status: h.hourStatus as "go" | "caution",
+    }));
+
   const positiveSet = new Set<string>();
   const riskSet     = new Set<string>();
   for (const h of aggHours) {
@@ -511,24 +538,28 @@ function buildNarrativeInput(
   }
 
   return {
-    beachName:           beach.display_name,
-    localDate:           date,
+    beachName:            beach.display_name,
+    localDate:            date,
     dayOfWeek,
+    isWeekend,
     dayStatus,
-    bestWindow:          window,
-    avgTemp:             round1(average(aggHours.map((h) => h.tempAir).filter(nonNull))),
-    avgWind:             round1(average(aggHours.map((h) => h.windSpeed).filter(nonNull))),
-    avgPrecip:           round1(average(aggHours.map((h) => h.precipChance).filter(nonNull))),
-    avgTide:             round1(average(aggHours.map((h) => h.tideHeight).filter(nonNull))),
-    lowestTide:          round1(Math.min(...aggHours.map((h) => h.tideHeight ?? Infinity))),
-    avgUv:               round1(average(aggHours.map((h) => h.uvIndex).filter(nonNull))),
-    avgBusyness:         round1(average(aggHours.map((h) => h.busynessScore).filter(nonNull))),
-    busynessCategory:    window?.hours[0]?.busynessCategory ?? null,
-    positiveReasonCodes: [...positiveSet],
-    riskReasonCodes:     [...riskSet],
-    goHoursCount:        goHours.length,
-    cautionHoursCount:   cautionHours.length,
-    noGoHoursCount:      noGoHours.length,
+    bestWindow:           window,
+    weatherCode,
+    tideDirection,
+    windowHourBreakdown,
+    avgTemp:              round1(average(aggHours.map((h) => h.tempAir).filter(nonNull))),
+    avgWind:              round1(average(aggHours.map((h) => h.windSpeed).filter(nonNull))),
+    avgPrecip:            round1(average(aggHours.map((h) => h.precipChance).filter(nonNull))),
+    avgTide:              round1(average(aggHours.map((h) => h.tideHeight).filter(nonNull))),
+    lowestTide:           round1(Math.min(...aggHours.map((h) => h.tideHeight ?? Infinity))),
+    avgUv:                round1(average(aggHours.map((h) => h.uvIndex).filter(nonNull))),
+    avgBusyness:          round1(average(aggHours.map((h) => h.busynessScore).filter(nonNull))),
+    busynessCategory:     window?.hours[0]?.busynessCategory ?? null,
+    positiveReasonCodes:  [...positiveSet],
+    riskReasonCodes:      [...riskSet],
+    goHoursCount:         goHours.length,
+    cautionHoursCount:    cautionHours.length,
+    noGoHoursCount:       noGoHours.length,
   };
 }
 

@@ -15,6 +15,7 @@ import type { ScoredHour, BestWindow } from "./scoring.ts";
 // Types inlined — no external path imports in edge functions
 type DayStatus        = "go" | "caution" | "no_go";
 type BusynessCategory = "quiet" | "moderate" | "dog_party" | "too_crowded";
+type TideDirection    = "rising" | "falling" | "steady";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-sonnet-4-20250514";
@@ -22,12 +23,26 @@ const MAX_TOKENS = 1000;
 
 // ─── Input types ──────────────────────────────────────────────────────────────
 
+export interface WindowHour {
+  hour: string;           // "9am"
+  tide: number | null;    // ft
+  wind: number | null;    // mph
+  temp: number | null;    // °F
+  rain: number | null;    // %
+  crowd: string | null;   // busyness category
+  status: "go" | "caution";
+}
+
 export interface NarrativeInput {
   beachName: string;
   localDate: string;          // "YYYY-MM-DD"
   dayOfWeek: string;          // "Sunday"
+  isWeekend: boolean;
   dayStatus: DayStatus;
   bestWindow: BestWindow | null;
+  weatherCode: number | null;
+  tideDirection: TideDirection;
+  windowHourBreakdown: WindowHour[];
   // Aggregates over the best window hours (or full day if no window)
   avgTemp: number | null;
   avgWind: number | null;
@@ -125,15 +140,34 @@ function buildDayPrompt(input: NarrativeInput): string {
     tips.push("go earlier in the window to beat the crowds");
   }
 
+  const weatherDesc = input.weatherCode !== null
+    ? wmoToDescription(input.weatherCode)
+    : null;
+
+  const weekendNote = input.isWeekend
+    ? "Weekend — expect more people than a weekday."
+    : "Weekday — likely quieter than usual.";
+
+  const tideNote = `Tide is ${input.tideDirection} through the window.`;
+
   const windowSection = input.bestWindow
     ? `Best visit window: ${input.bestWindow.label} (${input.bestWindow.status})
-  - Avg tide: ${fmt(input.avgTide, "ft")}  (lowest: ${fmt(input.lowestTide, "ft")})
+  - Weather: ${weatherDesc ?? "unknown"}
+  - Avg tide: ${fmt(input.avgTide, "ft")} (lowest: ${fmt(input.lowestTide, "ft")}, ${tideNote})
   - Avg wind: ${fmt(input.avgWind, "mph")}
   - Rain chance: ${fmt(input.avgPrecip, "%")}
   - Temperature: ${fmt(input.avgTemp, "°F")}${feelsLike !== null ? ` (feels like ${feelsLike}°F)` : ""}
   - UV index: ${fmt(input.avgUv, "")}
-  - Crowds: ${input.busynessCategory ?? "unknown"}${tips.length ? `\n  - Practical tips: ${tips.join("; ")}` : ""}`
-    : "No suitable visit window found today.";
+  - Crowds: ${input.busynessCategory ?? "unknown"}
+  - ${weekendNote}${tips.length ? `\n  - Practical tips: ${tips.join("; ")}` : ""}
+
+Hour-by-hour breakdown:
+${input.windowHourBreakdown.map(h =>
+  `  ${h.hour}: tide=${fmt(h.tide, "ft")} wind=${fmt(h.wind, "mph")} temp=${fmt(h.temp, "°F")} rain=${fmt(h.rain, "%")} crowd=${h.crowd ?? "unknown"} [${h.status.toUpperCase()}]`
+).join("\n")}`
+    : `No suitable visit window found today.
+  - Weather: ${weatherDesc ?? "unknown"}
+  - ${weekendNote}`;
 
   const reasonSection = [
     input.positiveReasonCodes.length
@@ -156,8 +190,8 @@ ${windowSection}
 ${reasonSection ? `\n  ${reasonSection}` : ""}
 
 Write four fields as a JSON object. Rules:
-- day_text: 3-4 sentences. Lead with the most important condition (tide, weather, or crowds) with specific numbers. Work in any practical tips naturally. Casual first-person tone — like texting a friend who's deciding whether to go. Not corny, not over-enthusiastic.
-- best_window_text: 1-2 sentences on exactly why this window beats the others. Reference specific conditions. Omit if status is "no_go".
+- day_text: 3-4 sentences. Lead with the most important condition (tide, weather, or crowds) with specific numbers. Reference tide direction, weather description, and any specific caution hours if relevant. Work in practical tips naturally. Casual first-person tone — like texting a friend. Not corny, not over-enthusiastic. Mention weekend/weekday context if it affects crowds.
+- best_window_text: 1-2 sentences on exactly why this window beats the others. Reference specific hours or conditions from the breakdown. Omit if status is "no_go".
 - caution_text: 1 sentence on the main caveat. Omit (empty string) if day_status is "go" with no risk reason codes.
 - no_go_text: 1 sentence explaining why today's a skip. Omit (empty string) if day_status is not "no_go".
 
@@ -343,6 +377,30 @@ function buildStaticHourText(h: ScoredHour): string {
 }
 
 // ─── Misc helpers ─────────────────────────────────────────────────────────────
+
+function wmoToDescription(code: number): string {
+  if (code === 0)                          return "clear sky";
+  if (code === 1)                          return "mainly clear";
+  if (code === 2)                          return "partly cloudy";
+  if (code === 3)                          return "overcast";
+  if (code === 45 || code === 48)          return "foggy";
+  if (code === 51 || code === 53)          return "light drizzle";
+  if (code === 55)                         return "drizzle";
+  if (code === 56 || code === 57)          return "freezing drizzle";
+  if (code === 61)                         return "light rain";
+  if (code === 63)                         return "rain";
+  if (code === 65)                         return "heavy rain";
+  if (code === 66 || code === 67)          return "freezing rain";
+  if (code >= 71 && code <= 75)            return "snow";
+  if (code === 77)                         return "snow grains";
+  if (code === 80)                         return "light showers";
+  if (code === 81)                         return "rain showers";
+  if (code === 82)                         return "heavy showers";
+  if (code === 85 || code === 86)          return "snow showers";
+  if (code === 95)                         return "thunderstorm";
+  if (code === 96 || code === 99)          return "thunderstorm with hail";
+  return "unknown";
+}
 
 function fmt(val: number | null, unit: string): string {
   return val !== null ? `${val}${unit}` : "n/a";

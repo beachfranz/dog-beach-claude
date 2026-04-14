@@ -601,7 +601,7 @@
     transform: translate(-50%, 100%);
     width: 100%;
     max-width: 480px;
-    height: 70vh;
+    height: 35vh;
     background: var(--surface);
     border-top: 1px solid var(--border);
     border-radius: 16px 16px 0 0;
@@ -616,9 +616,14 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 16px 12px;
+    padding: 14px 14px 12px;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+  }
+  .chat-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
   .chat-header-title {
     font-family: 'DM Sans', sans-serif;
@@ -722,13 +727,16 @@
 
 <div class="chat-panel" id="chat-panel">
   <div class="chat-header">
-    <span class="chat-header-title">Ask about conditions</span>
+    <div class="chat-header-left">
+      <img src="src/avatar.png" class="chat-avatar" alt="">
+      <span class="chat-header-title">Ask Cooper</span>
+    </div>
     <button class="chat-close" onclick="toggleChat()">✕</button>
   </div>
   <div class="chat-messages" id="chat-messages"></div>
   <div class="chat-input-row">
     <input class="chat-input" id="chat-input" type="text" placeholder="Best time to go this week?" onkeydown="if(event.key==='Enter')sendChatMessage()" />
-    <button class="chat-send" onclick="sendChatMessage()">Send</button>
+    <button class="chat-send" onclick="sendChatMessage()">Ask Coop</button>
   </div>
 </div>
 

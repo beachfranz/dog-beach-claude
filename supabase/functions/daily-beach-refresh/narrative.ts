@@ -96,14 +96,43 @@ export async function generateHourLabels(
 // ─── Prompt builders ──────────────────────────────────────────────────────────
 
 function buildDayPrompt(input: NarrativeInput): string {
+  // Feels-like temperature using wind chill formula
+  const temp = input.avgTemp ?? null;
+  const wind = input.avgWind ?? null;
+  let feelsLike: number | null = null;
+  if (temp !== null && wind !== null) {
+    if (temp <= 50 || wind >= 3) {
+      feelsLike = Math.round(
+        35.74 + 0.6215 * temp - 35.75 * Math.pow(wind, 0.16) + 0.4275 * temp * Math.pow(wind, 0.16)
+      );
+    } else {
+      feelsLike = Math.round(temp);
+    }
+  }
+
+  // Practical tips based on conditions
+  const tips: string[] = [];
+  if (input.avgUv !== null && input.avgUv >= 6) {
+    tips.push("sunscreen recommended (UV " + Math.round(input.avgUv) + ")");
+  }
+  if (feelsLike !== null && feelsLike < 62) {
+    tips.push("bring a layer or hoodie (feels like " + feelsLike + "°F)");
+  }
+  if (input.lowestTide !== null && input.lowestTide <= 0.5) {
+    tips.push("low tide means extra beach space");
+  }
+  if (input.busynessCategory === "moderate" || input.busynessCategory === "dog_party") {
+    tips.push("go earlier in the window to beat the crowds");
+  }
+
   const windowSection = input.bestWindow
     ? `Best visit window: ${input.bestWindow.label} (${input.bestWindow.status})
   - Avg tide: ${fmt(input.avgTide, "ft")}  (lowest: ${fmt(input.lowestTide, "ft")})
   - Avg wind: ${fmt(input.avgWind, "mph")}
   - Rain chance: ${fmt(input.avgPrecip, "%")}
-  - Temperature: ${fmt(input.avgTemp, "°F")}
+  - Temperature: ${fmt(input.avgTemp, "°F")}${feelsLike !== null ? ` (feels like ${feelsLike}°F)` : ""}
   - UV index: ${fmt(input.avgUv, "")}
-  - Crowds: ${input.busynessCategory ?? "unknown"}`
+  - Crowds: ${input.busynessCategory ?? "unknown"}${tips.length ? `\n  - Practical tips: ${tips.join("; ")}` : ""}`
     : "No suitable visit window found today.";
 
   const reasonSection = [
@@ -117,7 +146,7 @@ function buildDayPrompt(input: NarrativeInput): string {
     .filter(Boolean)
     .join("\n  ");
 
-  return `You write friendly, concise beach visit recommendations for dog owners at ${input.beachName}.
+  return `You're a local who surfs and brings their dog to ${input.beachName} regularly. Write a beach forecast for dog owners.
 
 DATE: ${input.dayOfWeek}, ${formatDisplayDate(input.localDate)}
 STATUS: ${input.dayStatus.toUpperCase()}
@@ -127,13 +156,13 @@ ${windowSection}
 ${reasonSection ? `\n  ${reasonSection}` : ""}
 
 Write four fields as a JSON object. Rules:
-- day_text: 2-3 sentences summarising the overall day. Lead with the most important fact (tide, weather, or crowds). Mention specific numbers. End with a general vibe.
-- best_window_text: 1-2 sentences explaining exactly WHY this window was chosen over others. Reference the specific conditions that make it the best block. Omit if status is "no_go".
-- caution_text: 1 sentence about the main caveat or risk to be aware of. Omit (empty string) if day_status is "go" with no risk reason codes.
-- no_go_text: 1 sentence explaining why today is not a good beach day. Omit (empty string) if day_status is not "no_go".
+- day_text: 3-4 sentences. Lead with the most important condition (tide, weather, or crowds) with specific numbers. Work in any practical tips naturally. Casual first-person tone — like texting a friend who's deciding whether to go. Not corny, not over-enthusiastic.
+- best_window_text: 1-2 sentences on exactly why this window beats the others. Reference specific conditions. Omit if status is "no_go".
+- caution_text: 1 sentence on the main caveat. Omit (empty string) if day_status is "go" with no risk reason codes.
+- no_go_text: 1 sentence explaining why today's a skip. Omit (empty string) if day_status is not "no_go".
 
-Tone: direct, friendly, written for a dog owner planning their morning. No fluff, no emojis. Use plain numbers (e.g. "0.3ft tide", "62°F", "14mph winds"). 
-Crowd terms: quiet = few people, moderate = getting busy, dog_party = very crowded with dogs, too_crowded = avoid.
+Tone: casual, first-person, like a local giving real advice. No fluff, no emojis. Use plain numbers (e.g. "0.3ft tide", "62°F", "14mph winds").
+Crowd terms: quiet = few people, moderate = getting busy, dog_party = packed with dogs, too_crowded = avoid.
 
 Respond ONLY with a valid JSON object, no markdown, no preamble:
 {"day_text":"...","best_window_text":"...","caution_text":"...","no_go_text":"..."}`;

@@ -148,11 +148,6 @@
       transition: opacity 0.15s;
     }
 
-    .bar.go      { background: var(--bar-blue); }
-    .bar.best    { background: var(--bar-green); }
-    .bar.no_go   { background: var(--bar-red); }
-    .bar.caution { background: var(--bar-blue); opacity: 0.6; }
-
     /* x-axis labels */
     .x-axis {
       display: flex;
@@ -415,9 +410,10 @@
       <div class="charts">${chartsHtml}</div>
       <div class="x-axis" style="padding: 4px 20px 0;">${xAxisHtml}</div>
       <div class="legend">
-        <div class="legend-item"><div class="legend-dot" style="background:var(--bar-green)"></div> Best Time</div>
-        <div class="legend-item"><div class="legend-dot" style="background:var(--bar-blue)"></div> Okay</div>
-        <div class="legend-item"><div class="legend-dot" style="background:var(--bar-red)"></div> No Go</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#16a34a"></div> Best Time</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#4ade80"></div> Go</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Caution</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#f87171"></div> No Go</div>
       </div>
       ${narrativeHtml}
     `;
@@ -432,7 +428,7 @@
 
     const barsHtml = hours.map(h => {
       const val     = h[metric.key];
-      const barClass = h.is_in_best_window ? 'best' : h.hour_status === 'no_go' ? 'no_go' : h.hour_status === 'caution' ? 'caution' : 'go';
+      const barColor = h.is_in_best_window ? '#16a34a' : h.hour_status === 'caution' ? '#f59e0b' : h.hour_status === 'no_go' ? '#f87171' : '#4ade80';
       const pct     = val !== null ? Math.max((val - minVal) / range, 0.05) : 0.05;
       const height  = Math.round(pct * maxHeight);
       const display = metric.fmt(val);
@@ -446,7 +442,7 @@
         <div class="bar-col">
           <div class="bar-dog">${dog}</div>
           <div class="bar-value">${display}</div>
-          <div class="bar ${barClass}" style="height:${height}px"></div>
+          <div class="bar" style="height:${height}px;background:${barColor}"></div>
           <div class="tooltip">
             <div class="tooltip-hour">${h.hour_label}</div>
             ${metricLine ? `<div class="tooltip-line">${metricLine}</div>` : ''}

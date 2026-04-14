@@ -3,7 +3,10 @@
 // Docs: https://api.tidesandcurrents.noaa.gov/api/prod/
 // No API key required.
 
-import type { Beach } from "../../src/lib/types.ts";
+interface Beach {
+  location_id: string;
+  noaa_station_id: string | null;
+}
 
 const BASE_URL = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter";
 

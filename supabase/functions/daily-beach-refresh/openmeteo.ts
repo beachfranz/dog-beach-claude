@@ -2,7 +2,12 @@
 // Fetches 7-day hourly weather forecast from Open-Meteo (no API key required).
 // Docs: https://open-meteo.com/en/docs
 
-import type { Beach } from "../../src/lib/types.ts";
+interface Beach {
+  location_id: string;
+  latitude: number;
+  longitude: number;
+  timezone: string;
+}
 
 const BASE_URL = "https://api.open-meteo.com/v1/forecast";
 

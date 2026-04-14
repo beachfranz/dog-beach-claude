@@ -19,11 +19,11 @@
       --text-dim:     #4b5268;
       --green:        #4ade80;
       --amber:        #fbbf24;
-      --red:          #f87171;
+      --red:          #ef4444;
       --blue:         #60a5fa;
       --bar-blue:     #38bdf8;
       --bar-green:    #4ade80;
-      --bar-red:      #f87171;
+      --bar-red:      #ef4444;
       --radius:       14px;
       --radius-sm:    8px;
     }
@@ -413,7 +413,7 @@
         <div class="legend-item"><div class="legend-dot" style="background:#16a34a"></div> Best Time</div>
         <div class="legend-item"><div class="legend-dot" style="background:#4ade80"></div> Go</div>
         <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Caution</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#f87171"></div> No Go</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div> No Go</div>
       </div>
       ${narrativeHtml}
     `;
@@ -428,7 +428,7 @@
 
     const barsHtml = hours.map(h => {
       const val     = h[metric.key];
-      const barColor = h.is_in_best_window ? '#16a34a' : h.hour_status === 'caution' ? '#f59e0b' : h.hour_status === 'no_go' ? '#f87171' : '#4ade80';
+      const barColor = h.is_in_best_window ? '#16a34a' : h.hour_status === 'caution' ? '#f59e0b' : h.hour_status === 'no_go' ? '#ef4444' : '#4ade80';
       const pct     = val !== null ? Math.max((val - minVal) / range, 0.05) : 0.05;
       const height  = Math.round(pct * maxHeight);
       const display = metric.fmt(val);

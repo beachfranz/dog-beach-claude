@@ -153,7 +153,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // 4. Trigger notification dispatch (non-fatal)
-    await triggerNotificationDispatch(supabase);
+    // await triggerNotificationDispatch(supabase);
 
     return json({ ok: true, runAt: runAt.toISOString(), results });
 

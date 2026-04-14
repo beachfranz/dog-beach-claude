@@ -152,7 +152,7 @@
     .x-axis {
       display: flex;
       gap: 3px;
-      padding: 4px 0 0;
+      padding: 2px 0 0;
     }
 
     .x-label {
@@ -397,18 +397,12 @@
 
     const chartsHtml = metrics.map(m => buildMetricRow(m, hours, day)).join('');
 
-    // x-axis: show label every 2 hours
-    const xAxisHtml = hours.map((h, i) => {
-      const label = (i % 2 === 0) ? h.hour_label : '';
-      return `<div class="x-label">${label}</div>`;
-    }).join('');
 
     // Narrative
     const narrativeHtml = buildNarrative(day);
 
     document.getElementById('main-content').innerHTML = `
       <div class="charts">${chartsHtml}</div>
-      <div class="x-axis" style="padding: 4px 20px 0;">${xAxisHtml}</div>
       <div class="legend">
         <div class="legend-item"><div class="legend-dot" style="background:#16a34a"></div> Best Time</div>
         <div class="legend-item"><div class="legend-dot" style="background:#4ade80"></div> Good</div>
@@ -451,10 +445,16 @@
         </div>`;
     }).join('');
 
+    const xAxisHtml = hours.map((h, i) => {
+      const label = (i % 2 === 0) ? h.hour_label : '';
+      return `<div class="x-label">${label}</div>`;
+    }).join('');
+
     return `
       <div class="metric-row">
         <div class="metric-label">${metric.label}</div>
         <div class="bars-wrap">${barsHtml}</div>
+        <div class="x-axis">${xAxisHtml}</div>
       </div>`;
   }
 

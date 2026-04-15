@@ -49,6 +49,10 @@ interface ScoringConfig {
   window_min_hours: number;
   window_max_hours: number;
   window_caution_penalty: number;
+  caution_temp_min: number;
+  caution_temp_max: number;
+  nogo_temp_min: number;
+  nogo_temp_max: number;
 }
 import { SEVERE_WMO_CODES } from "./openmeteo.ts";
 
@@ -95,6 +99,7 @@ export interface ScoredHour {
   positiveReasonCodes: string[];
   riskReasonCodes: string[];
   explainability: Record<string, number>;
+  metricStatuses: Record<string, HourStatus | null>;
   hourText: string;
 }
 
@@ -267,6 +272,24 @@ function scoreOneHour(raw: RawHourData, cfg: ScoringConfig): ScoredHour {
     passedChecks.push("crowds_ok");
   }
 
+  if (raw.tempAir !== null && (raw.tempAir < cfg.nogo_temp_min || raw.tempAir > cfg.nogo_temp_max)) {
+    failedChecks.push("nogo_temp");
+    riskReasonCodes.push("extreme_temp");
+    return buildResult(raw, "no_go", null, false,
+      passedChecks, failedChecks, positiveReasonCodes, riskReasonCodes, {}, undefined, {
+        tide_status: null, wind_status: null, crowd_status: null,
+        rain_status: null, temp_status: "no_go", uv_status: null,
+      });
+  }
+
+  if (raw.tempAir !== null && (raw.tempAir < cfg.caution_temp_min || raw.tempAir > cfg.caution_temp_max)) {
+    isCaution = true;
+    riskReasonCodes.push("temp_out_of_range");
+    failedChecks.push("caution_temp");
+  } else {
+    passedChecks.push("temp_ok");
+  }
+
   const hourStatus: HourStatus = isCaution ? "caution" : "go";
 
   // ── 4. Positive reason codes ──────────────────────────────────────────────
@@ -335,12 +358,38 @@ function scoreOneHour(raw: RawHourData, cfg: ScoringConfig): ScoredHour {
     hour_score:  hourScore,
   };
 
+  // Per-metric statuses
+  const metricStatuses: Record<string, HourStatus | null> = {
+    tide_status:  raw.tideHeight !== null
+      ? (raw.tideHeight >= cfg.caution_tide_height ? "caution" : "go")
+      : null,
+    wind_status:  raw.windSpeed !== null
+      ? (raw.windSpeed >= cfg.nogo_wind_speed ? "no_go"
+        : raw.windSpeed >= cfg.caution_wind_speed ? "caution" : "go")
+      : null,
+    rain_status:  raw.precipChance !== null
+      ? (raw.precipChance >= cfg.nogo_precip_chance ? "no_go"
+        : raw.precipChance >= cfg.caution_precip_chance ? "caution" : "go")
+      : null,
+    crowd_status: busynessCategory === "too_crowded" ? "no_go"
+      : busynessCategory === "dog_party" ? "caution"
+      : busynessCategory !== null ? "go" : null,
+    temp_status:  raw.tempAir !== null
+      ? (raw.tempAir < cfg.nogo_temp_min || raw.tempAir > cfg.nogo_temp_max ? "no_go"
+        : raw.tempAir < cfg.caution_temp_min || raw.tempAir > cfg.caution_temp_max ? "caution" : "go")
+      : null,
+    uv_status:    raw.uvIndex !== null
+      ? (raw.uvIndex >= cfg.caution_uv_index ? "caution" : "go")
+      : null,
+  };
+
   return buildResult(
     raw, hourStatus, hourScore, true,
     passedChecks, failedChecks,
     positiveReasonCodes, riskReasonCodes,
     explainability,
     busynessCategory,
+    metricStatuses,
   );
 }
 
@@ -455,6 +504,7 @@ function buildResult(
   riskReasonCodes: string[],
   explainability: Record<string, number>,
   busynessCategory?: BusynessCategory | null,
+  metricStatuses?: Record<string, HourStatus | null>,
 ): ScoredHour {
   const cat = busynessCategory ?? null;
 
@@ -488,6 +538,10 @@ function buildResult(
     positiveReasonCodes,
     riskReasonCodes,
     explainability,
+    metricStatuses: metricStatuses ?? {
+      tide_status: null, wind_status: null, crowd_status: null,
+      rain_status: null, temp_status: null, uv_status: null,
+    },
     hourText,
   };
 }

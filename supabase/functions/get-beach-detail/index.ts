@@ -61,7 +61,8 @@ Deno.serve(async (req: Request) => {
       .select(
         "local_hour, hour_label, hour_status, is_in_best_window, " +
         "tide_height, wind_speed, temp_air, precip_chance, busyness_score, " +
-        "uv_index, weather_code, hour_text, is_daylight, hour_score"
+        "uv_index, weather_code, hour_text, is_daylight, hour_score, " +
+        "tide_score, wind_score, crowd_score, rain_score, temp_score, uv_score"
       )
       .eq("location_id", locationId)
       .eq("local_date", date)

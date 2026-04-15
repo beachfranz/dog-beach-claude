@@ -359,13 +359,6 @@
     // Build metrics
     const metrics = [
       {
-        label: 'Score',
-        key:   'hour_score',
-        fmt:   v => v !== null ? Math.round(Number(v)) : '',
-        max:   h => 100,
-        parse: v => v !== null ? Number(v) : null,
-      },
-      {
         label: 'Tide (ft)',
         key:   'tide_height',
         fmt:   v => v !== null ? v.toFixed(1) : '',
@@ -425,12 +418,11 @@
     const maxHeight = 32; // px
 
     const barsHtml = hours.map(h => {
-      const raw     = h[metric.key];
-      const val     = metric.parse ? metric.parse(raw) : raw;
+      const val     = h[metric.key];
       const barColor = h.is_in_best_window ? '#16a34a' : h.hour_status === 'caution' ? '#f59e0b' : h.hour_status === 'no_go' ? '#ef4444' : '#4ade80';
       const pct     = val !== null ? Math.max((val - minVal) / range, 0.05) : 0.05;
       const height  = Math.round(pct * maxHeight);
-      const display = metric.fmt(raw);
+      const display = metric.fmt(val);
       const dog     = h.is_in_best_window ? '🐶' : '';
 
       const statusLabel = h.is_in_best_window ? '✓ Best Window' : h.hour_status === 'go' ? '✓ Go' : h.hour_status === 'caution' ? '⚠ Caution' : '✕ No Go';

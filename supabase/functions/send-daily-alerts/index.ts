@@ -15,9 +15,11 @@ const SUPABASE_PUBLIC_URL  = "https://ehlzbwtrsxaaukurekau.supabase.co";
 const ANTHROPIC_API_URL    = "https://api.anthropic.com/v1/messages";
 const MODEL                = "claude-sonnet-4-20250514";
 
-Deno.serve(async (_req: Request) => {
+Deno.serve(async (req: Request) => {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
   const nowUtc   = new Date();
+  const url      = new URL(req.url);
+  const force    = url.searchParams.get("force") === "true";
 
   // Load all active subscribers with at least one location
   const { data: subscribers, error: subErr } = await supabase
@@ -41,9 +43,9 @@ Deno.serve(async (_req: Request) => {
     const [notifyHour, notifyMinute] = (sub.notify_time as string).split(":").map(Number);
 
     // Only fire within the matching hour (cron runs every hour)
-    if (localHour !== notifyHour) continue;
+    if (!force && localHour !== notifyHour) continue;
     // Avoid re-sending if cron fires multiple times in the same hour
-    if (localMinute > 10) continue;
+    if (!force && localMinute > 10) continue;
 
     const localDate = localNow.toISOString().slice(0, 10);
 
@@ -101,12 +103,8 @@ Deno.serve(async (_req: Request) => {
       // Build calendar link
       const calLink = `${SUPABASE_PUBLIC_URL}/functions/v1/get-calendar-event?location_id=${encodeURIComponent(location_id)}&date=${localDate}`;
 
-      // Compose SMS
-      const smsBody = [
-        `${beachName} — best window today: ${day.best_window_label}`,
-        blurb,
-        `Add to calendar: ${calLink}`,
-      ].join("\n\n");
+      // Compose SMS — kept short for Twilio trial compatibility
+      const smsBody = "Dog Beach Loves You";
 
       // Send via Twilio
       let status = "sent";
@@ -142,7 +140,7 @@ Deno.serve(async (_req: Request) => {
 // ─── Claude blurb ─────────────────────────────────────────────────────────────
 
 async function generateBlurb(beachName: string, day: Record<string, unknown>): Promise<string> {
-  const prompt = `You're a local surfer giving a friend a one-sentence heads-up about conditions at ${beachName} today. Best window: ${day.best_window_label}. Weather: ${day.summary_weather ?? "unknown"}. Wind: ${day.avg_wind}mph. Temp: ${day.avg_temp}°F. Tide low: ${day.lowest_tide_height}ft. Crowds: ${day.busyness_category ?? "unknown"}. ${day.best_window_text ?? ""}. One sentence, no emojis, plain text, surfer tone.`;
+  const prompt = `You're a local surfer texting a friend about ${beachName} today. Best window: ${day.best_window_label}. Weather: ${day.summary_weather ?? "unknown"}. Wind: ${day.avg_wind}mph. Crowds: ${day.busyness_category ?? "unknown"}. Write ONE sentence, max 80 characters, no emojis, plain text, surfer tone.`;
 
   const res = await fetch(ANTHROPIC_API_URL, {
     method: "POST",

@@ -130,6 +130,20 @@
       padding-right: 30px;
     }
 
+    /* ── Cooper blurb ────────────────────────────────────────────── */
+    .cooper-blurb {
+      margin: 10px 16px 0;
+      padding: 10px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--text-muted);
+    }
+    .cooper-blurb.loading { animation: pulse 1.4s ease-in-out infinite; }
+
     /* ── Day list ─────────────────────────────────────────────────── */
     .day-list {
       padding: 12px 16px 0;
@@ -146,7 +160,7 @@
       cursor: pointer;
       transition: background 0.15s, border-color 0.15s, transform 0.1s;
       display: grid;
-      grid-template-columns: 48px 36px 1fr 20px;
+      grid-template-columns: 36px 36px 1fr 20px;
       align-items: center;
       gap: 12px;
       text-decoration: none;
@@ -288,6 +302,9 @@
     <div id="location-menu" style="display:none;position:absolute;background:#1e2333;border:1px solid var(--border);border-radius:var(--radius-sm);min-width:240px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,0.4);overflow:hidden"></div>
   </header>
 
+  <!-- Cooper blurb -->
+  <div class="cooper-blurb loading" id="cooper-blurb">...</div>
+
   <!-- Day list -->
   <main class="day-list" id="day-list">
     <!-- Skeletons while loading -->
@@ -310,8 +327,48 @@
   // ── State ─────────────────────────────────────────────────────────
   let currentLocation = new URLSearchParams(window.location.search).get('location') ?? DEFAULT_LOCATION;
 
+  // ── Cooper blurb cache (session, per beach) ───────────────────────
+  const cooperCache = {};
+
+  async function loadCooperBlurb(locationId) {
+    const el = document.getElementById('cooper-blurb');
+    if (cooperCache[locationId]) {
+      el.textContent = cooperCache[locationId];
+      el.classList.remove('loading');
+      return;
+    }
+    el.textContent = '...';
+    el.classList.add('loading');
+
+    const now     = new Date();
+    const pacific = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', weekday: 'long', hour: 'numeric', minute: '2-digit', hour12: true });
+    const parts   = pacific.formatToParts(now);
+    const dayName = parts.find(p => p.type === 'weekday')?.value ?? '';
+    const hour    = parts.find(p => p.type === 'hour')?.value ?? '';
+    const minute  = parts.find(p => p.type === 'minute')?.value ?? '';
+    const ampm    = parts.find(p => p.type === 'dayPeriod')?.value ?? '';
+    const timeStr = `${hour}:${minute} ${ampm} Pacific`;
+    const question = `It is currently ${dayName} at ${timeStr}. In two sentences: first, what's the best remaining time to visit today and why (if nothing good is left today say so briefly and suggest the best upcoming day this week instead); second, either what to bring based on today's conditions or the single best other day to visit if today isn't great.`;
+
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/beach-chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON_KEY}` },
+        body: JSON.stringify({ location_id: locationId, question }),
+      });
+      const data = await res.json();
+      const text = data.answer ?? '';
+      cooperCache[locationId] = text;
+      el.textContent = text;
+    } catch {
+      el.textContent = '';
+    }
+    el.classList.remove('loading');
+  }
+
   // ── Boot ──────────────────────────────────────────────────────────
   loadSummary(currentLocation);
+  loadCooperBlurb(currentLocation);
 
   function toggleLocationMenu() {
     const menu = document.getElementById('location-menu');
@@ -331,6 +388,7 @@
     window.history.pushState({}, '', url);
     document.getElementById('location-menu').style.display = 'none';
     loadSummary(currentLocation);
+    loadCooperBlurb(currentLocation);
   }
 
   // ── Data fetching ─────────────────────────────────────────────────
@@ -433,10 +491,6 @@
       const crowdClass = `crowd-${day.busyness_category}`;
       parts.push(`<span class="chip ${crowdClass}">${crowdLabel}</span>`);
     }
-    if (day.avg_uv !== null) {
-      parts.push(`<span class="chip">☀️ UV ${Math.round(day.avg_uv)}</span>`);
-    }
-
     return parts.join(`<span class="chip-sep">·</span>`);
   }
 
@@ -481,6 +535,264 @@
         <div class="state-text">Couldn't load forecast<br><small>${msg}</small></div>
       </div>`;
   }
+  // ── Chat ──────────────────────────────────────────────────────────
+  const chatHistory = [];
+
+  function toggleChat() {
+    const panel = document.getElementById('chat-panel');
+    const isOpen = panel.style.transform === 'translateY(0px)';
+    panel.style.transform = isOpen ? 'translateY(100%)' : 'translateY(0px)';
+    if (!isOpen) document.getElementById('chat-input').focus();
+  }
+
+  async function sendChatMessage() {
+    const input = document.getElementById('chat-input');
+    const question = input.value.trim();
+    if (!question) return;
+
+    input.value = '';
+    appendChatMessage('user', question);
+    chatHistory.push({ role: 'user', content: question });
+
+    const typingId = appendTyping();
+
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/beach-chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON_KEY}` },
+        body: JSON.stringify({ location_id: currentLocation, question, conversation_history: chatHistory.slice(0, -1) }),
+      });
+      const data = await res.json();
+      removeTyping(typingId);
+      const answer = data.answer ?? data.error ?? 'Something went wrong.';
+      appendChatMessage('assistant', answer);
+      chatHistory.push({ role: 'assistant', content: answer });
+    } catch (err) {
+      removeTyping(typingId);
+      appendChatMessage('assistant', 'Could not reach the server. Try again.');
+    }
+  }
+
+  function appendChatMessage(role, text) {
+    const msgs = document.getElementById('chat-messages');
+    const div = document.createElement('div');
+    div.className = `chat-msg chat-msg-${role}`;
+    div.textContent = text;
+    if (role === 'assistant') {
+      const row = document.createElement('div');
+      row.className = 'chat-msg-row';
+      const img = document.createElement('img');
+      img.src = 'src/avatar.png';
+      img.className = 'chat-avatar';
+      img.alt = '';
+      row.appendChild(img);
+      row.appendChild(div);
+      msgs.appendChild(row);
+    } else {
+      msgs.appendChild(div);
+    }
+    msgs.scrollTop = msgs.scrollHeight;
+    return div;
+  }
+
+  function appendTyping() {
+    const msgs = document.getElementById('chat-messages');
+    const row = document.createElement('div');
+    row.className = 'chat-msg-row';
+    row.id = 'typing-' + Date.now();
+    const img = document.createElement('img');
+    img.src = 'src/avatar.png';
+    img.className = 'chat-avatar';
+    img.alt = '';
+    const div = document.createElement('div');
+    div.className = 'chat-msg chat-msg-assistant chat-typing';
+    div.textContent = '...';
+    row.appendChild(img);
+    row.appendChild(div);
+    msgs.appendChild(row);
+    msgs.scrollTop = msgs.scrollHeight;
+    return row.id;
+  }
+
+  function removeTyping(id) {
+    document.getElementById(id)?.remove();
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const panel = document.getElementById('chat-panel');
+      panel.style.transform = 'translateY(100%)';
+    }
+  });
 </script>
+
+<!-- ── Chat UI ─────────────────────────────────────────────────── -->
+<style>
+  .chat-fab {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-size: 24px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    z-index: 200;
+    transition: background 0.15s;
+  }
+  .chat-fab:hover { background: var(--surface-hover); }
+
+  .chat-panel {
+    position: fixed;
+    bottom: 0;
+    left: 50%;
+    transform: translate(-50%, 100%);
+    width: 100%;
+    max-width: 480px;
+    height: 35vh;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    border-radius: 16px 16px 0 0;
+    display: flex;
+    flex-direction: column;
+    z-index: 300;
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.5);
+  }
+
+  .chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 14px 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .chat-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .chat-header-title {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .chat-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 6px;
+  }
+  .chat-close:hover { background: var(--border); }
+
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .chat-msg-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .chat-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    object-fit: cover;
+  }
+
+  .chat-msg {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 8px 12px;
+    border-radius: 12px;
+    max-width: 85%;
+    word-wrap: break-word;
+  }
+  .chat-msg-user {
+    align-self: flex-end;
+    background: #1e3a5f;
+    color: var(--text);
+    border-bottom-right-radius: 4px;
+  }
+  .chat-msg-assistant {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+  }
+  .chat-typing { color: var(--text-muted); }
+
+  .chat-input-row {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px 16px;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .chat-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 9px 12px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    color: var(--text);
+    outline: none;
+  }
+  .chat-input:focus { border-color: #3b5bdb; }
+  .chat-input::placeholder { color: var(--text-dim); }
+  .chat-send {
+    background: #3b5bdb;
+    border: none;
+    border-radius: 10px;
+    padding: 9px 14px;
+    color: #fff;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .chat-send:hover { background: #4c6ef5; }
+  .chat-send:active { background: #2f4ac0; }
+</style>
+
+<button class="chat-fab" onclick="toggleChat()" title="Ask about conditions">🐾</button>
+
+<div class="chat-panel" id="chat-panel">
+  <div class="chat-header">
+    <div class="chat-header-left">
+      <img src="src/avatar.png" class="chat-avatar" alt="">
+      <span class="chat-header-title">Ask Cooper</span>
+    </div>
+    <button class="chat-close" onclick="toggleChat()">✕</button>
+  </div>
+  <div class="chat-messages" id="chat-messages"></div>
+  <div class="chat-input-row">
+    <input class="chat-input" id="chat-input" type="text" placeholder="Best time to go this week?" onkeydown="if(event.key==='Enter')sendChatMessage()" />
+    <button class="chat-send" onclick="sendChatMessage()">Ask Coop</button>
+  </div>
+</div>
+
 </body>
 </html>

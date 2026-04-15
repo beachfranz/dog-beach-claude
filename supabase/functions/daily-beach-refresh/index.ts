@@ -252,21 +252,24 @@ async function processBeach(
   const narrativesByDate = new Map<string, Awaited<ReturnType<typeof generateDayNarrative>>>();
   const hourLabelsByTs   = new Map<string, string>();
 
-  for (const date of dates) {
+  // Process all days in parallel — safe since we're only parallelizing within one beach
+  await Promise.all(dates.map(async (date) => {
     const dayHours = scoredHours.filter((h) => h.localDate === date);
     const window   = windows.get(date) ?? null;
     const narInput = buildNarrativeInput(beach, date, dayHours, window);
     try {
-      const narrative  = await generateDayNarrative(narInput, ANTHROPIC_API_KEY);
+      const [narrative, hourLabels] = await Promise.all([
+        generateDayNarrative(narInput, ANTHROPIC_API_KEY),
+        generateHourLabels(dayHours, beach.display_name, ANTHROPIC_API_KEY),
+      ]);
       narrativesByDate.set(date, narrative);
-      const hourLabels = await generateHourLabels(dayHours, beach.display_name, ANTHROPIC_API_KEY);
       for (const [ts, label] of hourLabels) hourLabelsByTs.set(ts, label);
       phases.narrative = "ok";
     } catch (err) {
       await logError(supabase, beach.location_id, "narrative", err);
       phases.narrative = "error";
     }
-  }
+  }));
 
   // h. Upsert hourly rows
   try {

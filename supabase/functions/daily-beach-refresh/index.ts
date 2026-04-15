@@ -85,6 +85,10 @@ interface ScoringConfig {
   window_min_hours: number;
   window_max_hours: number;
   window_caution_penalty: number;
+  caution_temp_min: number;
+  caution_temp_max: number;
+  nogo_temp_min: number;
+  nogo_temp_max: number;
   created_at: string;
   updated_at: string;
 }
@@ -391,6 +395,18 @@ function buildHourlyRow(
     positive_reason_codes: h.positiveReasonCodes,
     risk_reason_codes:     h.riskReasonCodes,
     explainability:        h.explainability,
+    tide_score:            h.explainability.tide_score  ?? null,
+    wind_score:            h.explainability.wind_score  ?? null,
+    crowd_score:           h.explainability.crowd_score ?? null,
+    rain_score:            h.explainability.rain_score  ?? null,
+    temp_score:            h.explainability.temp_score  ?? null,
+    uv_score:              h.explainability.uv_score    ?? null,
+    tide_status:           h.metricStatuses.tide_status  ?? null,
+    wind_status:           h.metricStatuses.wind_status  ?? null,
+    crowd_status:          h.metricStatuses.crowd_status ?? null,
+    rain_status:           h.metricStatuses.rain_status  ?? null,
+    temp_status:           h.metricStatuses.temp_status  ?? null,
+    uv_status:             h.metricStatuses.uv_status    ?? null,
     hour_text:             hourText,
     timezone:              beach.timezone,
     scoring_version:       config.scoring_version,

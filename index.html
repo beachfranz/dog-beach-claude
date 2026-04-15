@@ -130,6 +130,20 @@
       padding-right: 30px;
     }
 
+    /* ── Cooper blurb ────────────────────────────────────────────── */
+    .cooper-blurb {
+      margin: 10px 16px 0;
+      padding: 10px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--text-muted);
+    }
+    .cooper-blurb.loading { animation: pulse 1.4s ease-in-out infinite; }
+
     /* ── Day list ─────────────────────────────────────────────────── */
     .day-list {
       padding: 12px 16px 0;
@@ -146,7 +160,7 @@
       cursor: pointer;
       transition: background 0.15s, border-color 0.15s, transform 0.1s;
       display: grid;
-      grid-template-columns: 48px 36px 1fr 20px;
+      grid-template-columns: 36px 36px 1fr 20px;
       align-items: center;
       gap: 12px;
       text-decoration: none;
@@ -288,6 +302,9 @@
     <div id="location-menu" style="display:none;position:absolute;background:#1e2333;border:1px solid var(--border);border-radius:var(--radius-sm);min-width:240px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,0.4);overflow:hidden"></div>
   </header>
 
+  <!-- Cooper blurb -->
+  <div class="cooper-blurb loading" id="cooper-blurb">...</div>
+
   <!-- Day list -->
   <main class="day-list" id="day-list">
     <!-- Skeletons while loading -->
@@ -310,8 +327,42 @@
   // ── State ─────────────────────────────────────────────────────────
   let currentLocation = new URLSearchParams(window.location.search).get('location') ?? DEFAULT_LOCATION;
 
+  // ── Cooper blurb cache (session, per beach) ───────────────────────
+  const cooperCache = {};
+
+  async function loadCooperBlurb(locationId) {
+    const el = document.getElementById('cooper-blurb');
+    if (cooperCache[locationId]) {
+      el.textContent = cooperCache[locationId];
+      el.classList.remove('loading');
+      return;
+    }
+    el.textContent = '...';
+    el.classList.add('loading');
+
+    const now   = new Date();
+    const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    const question = `It's currently ${timeStr}. In two sentences: first, what's the best remaining time to visit today and why (if nothing good is left today, say so briefly and suggest the best upcoming day this week instead); second, either what to bring based on today's conditions or the single best other day to visit if today isn't great.`;
+
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/beach-chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON_KEY}` },
+        body: JSON.stringify({ location_id: locationId, question }),
+      });
+      const data = await res.json();
+      const text = data.answer ?? '';
+      cooperCache[locationId] = text;
+      el.textContent = text;
+    } catch {
+      el.textContent = '';
+    }
+    el.classList.remove('loading');
+  }
+
   // ── Boot ──────────────────────────────────────────────────────────
   loadSummary(currentLocation);
+  loadCooperBlurb(currentLocation);
 
   function toggleLocationMenu() {
     const menu = document.getElementById('location-menu');
@@ -331,6 +382,7 @@
     window.history.pushState({}, '', url);
     document.getElementById('location-menu').style.display = 'none';
     loadSummary(currentLocation);
+    loadCooperBlurb(currentLocation);
   }
 
   // ── Data fetching ─────────────────────────────────────────────────
@@ -433,10 +485,6 @@
       const crowdClass = `crowd-${day.busyness_category}`;
       parts.push(`<span class="chip ${crowdClass}">${crowdLabel}</span>`);
     }
-    if (day.avg_uv !== null) {
-      parts.push(`<span class="chip">☀️ UV ${Math.round(day.avg_uv)}</span>`);
-    }
-
     return parts.join(`<span class="chip-sep">·</span>`);
   }
 

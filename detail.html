@@ -362,6 +362,12 @@
     // Build metrics
     const metrics = [
       {
+        label: 'Score',
+        key:   'hour_score',
+        fmt:   v => v !== null ? Math.round(v) : '',
+        max:   h => 100,
+      },
+      {
         label: 'Tide (ft)',
         key:   'tide_height',
         fmt:   v => v !== null ? v.toFixed(1) : '',

@@ -98,7 +98,7 @@
     .close-btn:hover { color: var(--text); background: #1e2333; }
 
     /* ── Charts ───────────────────────────────────────────────────── */
-    .charts { padding: 16px 20px 0; display: flex; flex-direction: column; gap: 20px; }
+    .charts { padding: 16px 20px 0; display: flex; flex-direction: column; gap: 12px; }
 
     .metric-row { display: flex; flex-direction: column; gap: 6px; }
 
@@ -114,7 +114,7 @@
       display: flex;
       align-items: flex-end;
       gap: 3px;
-      height: 64px;
+      height: 44px;
       position: relative;
     }
 
@@ -418,7 +418,7 @@
     const maxVal  = metric.max ? metric.max(hours) : Math.max(...values.filter(v => v !== null), 1);
     const minVal  = metric.relative ? Math.min(...values.filter(v => v !== null)) : 0;
     const range   = Math.max(maxVal - minVal, 1);
-    const maxHeight = 48; // px
+    const maxHeight = 32; // px
 
     const barsHtml = hours.map(h => {
       const val     = h[metric.key];

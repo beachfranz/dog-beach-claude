@@ -340,9 +340,15 @@
     el.textContent = '...';
     el.classList.add('loading');
 
-    const now   = new Date();
-    const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-    const question = `It's currently ${timeStr}. In two sentences: first, what's the best remaining time to visit today and why (if nothing good is left today, say so briefly and suggest the best upcoming day this week instead); second, either what to bring based on today's conditions or the single best other day to visit if today isn't great.`;
+    const now     = new Date();
+    const pacific = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', weekday: 'long', hour: 'numeric', minute: '2-digit', hour12: true });
+    const parts   = pacific.formatToParts(now);
+    const dayName = parts.find(p => p.type === 'weekday')?.value ?? '';
+    const hour    = parts.find(p => p.type === 'hour')?.value ?? '';
+    const minute  = parts.find(p => p.type === 'minute')?.value ?? '';
+    const ampm    = parts.find(p => p.type === 'dayPeriod')?.value ?? '';
+    const timeStr = `${hour}:${minute} ${ampm} Pacific`;
+    const question = `It is currently ${dayName} at ${timeStr}. In two sentences: first, what's the best remaining time to visit today and why (if nothing good is left today say so briefly and suggest the best upcoming day this week instead); second, either what to bring based on today's conditions or the single best other day to visit if today isn't great.`;
 
     try {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/beach-chat`, {

@@ -308,16 +308,13 @@
   // ── Params ────────────────────────────────────────────────────────
   const params     = new URLSearchParams(window.location.search);
   const locationId = params.get('location') ?? 'huntington-dog-beach';
-  const date       = params.get('date');
+  const today      = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })).toISOString().slice(0, 10);
+  const date       = params.get('date') ?? today;
 
   // Fix close button to preserve location
   document.getElementById('close-btn').href = `index.html?location=${locationId}`;
 
-  if (!date) {
-    showError('No date specified.');
-  } else {
-    loadDetail(locationId, date);
-  }
+  loadDetail(locationId, date);
 
   // ── Fetch ─────────────────────────────────────────────────────────
   async function loadDetail(locationId, date) {

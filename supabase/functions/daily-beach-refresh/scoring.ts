@@ -180,6 +180,54 @@ function scoreOneHour(raw: RawHourData, cfg: ScoringConfig): ScoredHour {
   const positiveReasonCodes: string[] = [];
   const riskReasonCodes: string[]    = [];
 
+  // ── Composite score + per-metric statuses (always computed upfront)
+  const tideScoreEarly  = raw.tideHeight !== null
+    ? clamp(1 - raw.tideHeight / cfg.norm_tide_max) : 0.5;
+  const rainScoreEarly  = raw.precipChance !== null
+    ? clamp(1 - raw.precipChance / 100) : 0.5;
+  const windScoreEarly  = raw.windSpeed !== null
+    ? clamp(1 - raw.windSpeed / cfg.norm_wind_max) : 0.5;
+  const crowdScoreEarly = raw.busynessScore !== null
+    ? clamp(1 - raw.busynessScore / 100) : 0.5;
+  const tempScoreEarly  = raw.tempAir !== null
+    ? clamp(1 - Math.abs(raw.tempAir - cfg.norm_temp_target) / cfg.norm_temp_range) : 0.5;
+  const uvScoreEarly    = raw.uvIndex !== null
+    ? clamp(1 - raw.uvIndex / cfg.norm_uv_max) : 0.5;
+  const earlyHourScore = Math.round((
+    tideScoreEarly  * cfg.weight_tide  +
+    rainScoreEarly  * cfg.weight_rain  +
+    windScoreEarly  * cfg.weight_wind  +
+    crowdScoreEarly * cfg.weight_crowd +
+    tempScoreEarly  * cfg.weight_temp  +
+    uvScoreEarly    * cfg.weight_uv
+  ) * 100);
+
+  const busynessCategoryEarly = deriveBusynessCategory(raw.busynessScore, cfg);
+  const earlyMetricStatuses: Record<string, HourStatus | null> = {
+    tide_status: raw.tideHeight !== null
+      ? (raw.tideHeight >= cfg.caution_tide_height ? "caution" : "go")
+      : null,
+    wind_status: raw.windSpeed !== null
+      ? (raw.windSpeed >= cfg.nogo_wind_speed   ? "no_go"
+       : raw.windSpeed >= cfg.caution_wind_speed ? "caution" : "go")
+      : null,
+    rain_status: raw.precipChance !== null
+      ? (raw.precipChance >= cfg.nogo_precip_chance    ? "no_go"
+       : raw.precipChance >= cfg.caution_precip_chance  ? "caution" : "go")
+      : null,
+    crowd_status: busynessCategoryEarly === "too_crowded" ? "no_go"
+      : busynessCategoryEarly === "dog_party"  ? "caution"
+      : busynessCategoryEarly !== null         ? "go" : null,
+    temp_status: raw.tempAir !== null
+      ? (raw.tempAir < cfg.nogo_temp_min || raw.tempAir > cfg.nogo_temp_max ? "no_go"
+       : raw.tempAir < cfg.caution_temp_min || raw.tempAir > cfg.caution_temp_max ? "caution"
+       : "go")
+      : null,
+    uv_status: raw.uvIndex !== null
+      ? (raw.uvIndex >= cfg.caution_uv_index ? "caution" : "go")
+      : null,
+  };
+
   // ── 1. Availability checks (before any scoring) ───────────────────────────
   if (!raw.isDaylight) {
     failedChecks.push("no_daylight");
@@ -199,33 +247,33 @@ function scoreOneHour(raw: RawHourData, cfg: ScoringConfig): ScoredHour {
   if (raw.weatherCode !== null && SEVERE_WMO_CODES.has(raw.weatherCode)) {
     failedChecks.push("severe_weather");
     riskReasonCodes.push("severe_weather");
-    return buildResult(raw, "no_go", null, false,
-      passedChecks, failedChecks, positiveReasonCodes, riskReasonCodes, {});
+    return buildResult(raw, "no_go", earlyHourScore, false,
+      passedChecks, failedChecks, positiveReasonCodes, riskReasonCodes, {}, undefined, earlyMetricStatuses);
   }
   passedChecks.push("weather_ok");
 
   if (raw.precipChance !== null && raw.precipChance >= cfg.nogo_precip_chance) {
     failedChecks.push("high_rain_risk");
     riskReasonCodes.push("high_rain_risk");
-    return buildResult(raw, "no_go", null, false,
-      passedChecks, failedChecks, positiveReasonCodes, riskReasonCodes, {});
+    return buildResult(raw, "no_go", earlyHourScore, false,
+      passedChecks, failedChecks, positiveReasonCodes, riskReasonCodes, {}, undefined, earlyMetricStatuses);
   }
   passedChecks.push("rain_ok");
 
   if (raw.windSpeed !== null && raw.windSpeed >= cfg.nogo_wind_speed) {
     failedChecks.push("dangerous_wind");
     riskReasonCodes.push("dangerous_wind");
-    return buildResult(raw, "no_go", null, false,
-      passedChecks, failedChecks, positiveReasonCodes, riskReasonCodes, {});
+    return buildResult(raw, "no_go", earlyHourScore, false,
+      passedChecks, failedChecks, positiveReasonCodes, riskReasonCodes, {}, undefined, earlyMetricStatuses);
   }
   passedChecks.push("wind_ok");
 
-  const busynessCategory = deriveBusynessCategory(raw.busynessScore, cfg);
+  const busynessCategory = busynessCategoryEarly;
   if (busynessCategory === "too_crowded") {
     failedChecks.push("too_crowded");
     riskReasonCodes.push("too_crowded");
-    return buildResult(raw, "no_go", null, false,
-      passedChecks, failedChecks, positiveReasonCodes, riskReasonCodes, {});
+    return buildResult(raw, "no_go", earlyHourScore, false,
+      passedChecks, failedChecks, positiveReasonCodes, riskReasonCodes, {}, undefined, earlyMetricStatuses);
   }
   passedChecks.push("crowd_ok");
 
@@ -275,11 +323,8 @@ function scoreOneHour(raw: RawHourData, cfg: ScoringConfig): ScoredHour {
   if (raw.tempAir !== null && (raw.tempAir < cfg.nogo_temp_min || raw.tempAir > cfg.nogo_temp_max)) {
     failedChecks.push("nogo_temp");
     riskReasonCodes.push("extreme_temp");
-    return buildResult(raw, "no_go", null, false,
-      passedChecks, failedChecks, positiveReasonCodes, riskReasonCodes, {}, undefined, {
-        tide_status: null, wind_status: null, crowd_status: null,
-        rain_status: null, temp_status: "no_go", uv_status: null,
-      });
+    return buildResult(raw, "no_go", earlyHourScore, false,
+      passedChecks, failedChecks, positiveReasonCodes, riskReasonCodes, {}, undefined, earlyMetricStatuses);
   }
 
   if (raw.tempAir !== null && (raw.tempAir < cfg.caution_temp_min || raw.tempAir > cfg.caution_temp_max)) {

@@ -359,43 +359,71 @@
     // Build metrics
     const metrics = [
       {
-        label: 'Score',
-        key:   'hour_score',
-        fmt:   v => v !== null ? Math.round(Number(v)) : '',
-        max:   () => 100,
-        parse: v => v !== null ? Number(v) : null,
+        label:    'Score',
+        key:      'hour_score',
+        fmt:      v => v !== null ? Math.round(Number(v)) : '',
+        max:      () => 100,
+        parse:    v => v !== null ? Number(v) : null,
+        reasonFn: h => h.is_in_best_window ? 'Best window of the day'
+          : h.hour_status === 'no_go'   ? 'Not recommended'
+          : h.hour_status === 'caution' ? 'Some concerns this hour'
+          : 'Looks good',
       },
       {
-        label: 'Tide (ft)',
-        key:   'tide_height',
-        fmt:   v => v !== null ? v.toFixed(1) : '',
-        max:   h => Math.max(...hours.map(x => x.tide_height ?? 0), 0.1),
+        label:     'Tide (ft)',
+        key:       'tide_height',
+        statusKey: 'tide_status',
+        scoreKey:  'tide_score',
+        fmt:       v => v !== null ? v.toFixed(1) : '',
+        max:       h => Math.max(...hours.map(x => x.tide_height ?? 0), 0.1),
+        reasonFn:  h => h.tide_status === 'no_go'   ? 'Dangerously high tide'
+          : h.tide_status === 'caution' ? 'High tide — less beach'
+          : 'Good tide level',
       },
       {
-        label: 'Wind (mph)',
-        key:   'wind_speed',
-        fmt:   v => v !== null ? Math.round(v) : '',
-        max:   h => Math.max(...hours.map(x => x.wind_speed ?? 0), 1),
+        label:     'Wind (mph)',
+        key:       'wind_speed',
+        statusKey: 'wind_status',
+        scoreKey:  'wind_score',
+        fmt:       v => v !== null ? Math.round(v) : '',
+        max:       h => Math.max(...hours.map(x => x.wind_speed ?? 0), 1),
+        reasonFn:  h => h.wind_status === 'no_go'   ? 'Dangerous wind speed'
+          : h.wind_status === 'caution' ? 'Strong wind'
+          : 'Calm wind',
       },
       {
-        label: 'Temp (°F)',
-        key:   'temp_air',
-        fmt:   v => v !== null ? Math.round(v) : '',
-        max:   h => Math.max(...hours.map(x => x.temp_air ?? 0), 1),
-        // Temp bars all same height — show relative variation from min
-        relative: true,
+        label:     'Temp (°F)',
+        key:       'temp_air',
+        statusKey: 'temp_status',
+        scoreKey:  'temp_score',
+        fmt:       v => v !== null ? Math.round(v) : '',
+        max:       h => Math.max(...hours.map(x => x.temp_air ?? 0), 1),
+        relative:  true,
+        reasonFn:  h => h.temp_status === 'no_go'   ? 'Extreme temperature'
+          : h.temp_status === 'caution' ? 'Temp outside comfort zone'
+          : 'Comfortable temperature',
       },
       {
-        label: 'Rain (%)',
-        key:   'precip_chance',
-        fmt:   v => v !== null ? Math.round(v) : '',
-        max:   h => 100,
+        label:     'Rain (%)',
+        key:       'precip_chance',
+        statusKey: 'rain_status',
+        scoreKey:  'rain_score',
+        fmt:       v => v !== null ? Math.round(v) : '',
+        max:       h => 100,
+        reasonFn:  h => h.rain_status === 'no_go'   ? 'High rain risk'
+          : h.rain_status === 'caution' ? 'Rain possible'
+          : 'Clear skies',
       },
       {
-        label: 'Crowd (%)',
-        key:   'busyness_score',
-        fmt:   v => v !== null ? Math.round(v) : '',
-        max:   h => 100,
+        label:     'Crowd (%)',
+        key:       'busyness_score',
+        statusKey: 'crowd_status',
+        scoreKey:  'crowd_score',
+        fmt:       v => v !== null ? Math.round(v) : '',
+        max:       h => 100,
+        reasonFn:  h => h.crowd_status === 'no_go'   ? 'Too crowded'
+          : h.crowd_status === 'caution' ? 'Getting busy'
+          : 'Good crowd level',
       },
     ];
 
@@ -427,14 +455,27 @@
     const barsHtml = hours.map(h => {
       const raw     = h[metric.key];
       const val     = metric.parse ? metric.parse(raw) : raw;
-      const barColor = h.is_in_best_window ? '#16a34a' : h.hour_status === 'caution' ? '#f59e0b' : h.hour_status === 'no_go' ? '#ef4444' : '#4ade80';
+      const metricStatus = metric.statusKey ? h[metric.statusKey] : null;
+      const barColor = metric.statusKey
+        ? (metricStatus === 'no_go'   ? '#ef4444'
+         : metricStatus === 'caution' ? '#f59e0b'
+         :                              '#4ade80')
+        : (h.is_in_best_window        ? '#16a34a'
+         : h.hour_status === 'caution' ? '#f59e0b'
+         : h.hour_status === 'no_go'   ? '#ef4444'
+         :                               '#4ade80');
       const pct     = val !== null ? Math.max((val - minVal) / range, 0.05) : 0.05;
       const height  = Math.round(pct * maxHeight);
       const display = metric.fmt(raw);
       const dog     = h.is_in_best_window ? '🐶' : '';
 
-      const statusLabel = h.is_in_best_window ? '✓ Best Window' : h.hour_status === 'go' ? '✓ Go' : h.hour_status === 'caution' ? '⚠ Caution' : '✕ No Go';
-      const statusClass = `tooltip-status-${h.hour_status}`;
+      const activeStatus = metric.statusKey ? h[metric.statusKey] : h.hour_status;
+      const statusIcon  = activeStatus === 'go' ? '✓' : activeStatus === 'caution' ? '⚠' : '✕';
+      const statusText  = activeStatus === 'go' ? 'Go' : activeStatus === 'caution' ? 'Caution' : 'No Go';
+      const statusClass = `tooltip-status-${activeStatus}`;
+      const reason      = metric.reasonFn ? metric.reasonFn(h) : '';
+      const scoreVal    = metric.scoreKey ? h[metric.scoreKey] : null;
+      const scoreLine   = scoreVal !== null ? Math.round(scoreVal * 100) : (metric.key === 'hour_score' && val !== null ? Math.round(val) : null);
       const metricLine  = display ? `${metric.label}: ${display}` : '';
 
       return `
@@ -444,8 +485,10 @@
           <div class="bar" style="height:${height}px;background:${barColor}"></div>
           <div class="tooltip">
             <div class="tooltip-hour">${h.hour_label}</div>
+            <div class="tooltip-line ${statusClass}">${statusIcon} ${statusText}</div>
             ${metricLine ? `<div class="tooltip-line">${metricLine}</div>` : ''}
-            <div class="tooltip-line ${statusClass}">${statusLabel}</div>
+            ${reason     ? `<div class="tooltip-line">${reason}</div>` : ''}
+            ${scoreLine !== null ? `<div class="tooltip-line">Score: ${scoreLine}</div>` : ''}
           </div>
         </div>`;
     }).join('');

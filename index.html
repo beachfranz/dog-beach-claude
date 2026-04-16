@@ -174,7 +174,7 @@
       cursor: pointer;
       transition: background 0.15s, border-color 0.15s, transform 0.1s;
       display: grid;
-      grid-template-columns: 36px 36px 1fr 20px;
+      grid-template-columns: 36px 38px 36px 1fr 20px;
       align-items: center;
       gap: 12px;
       text-decoration: none;
@@ -200,6 +200,19 @@
     }
 
     .day-label.today { color: var(--text); }
+
+    /* Day score */
+    .day-score {
+      font-family: 'DM Mono', monospace;
+      font-size: 15px;
+      font-weight: 500;
+      text-align: center;
+      line-height: 1;
+    }
+    .day-score.score-go      { color: var(--green); }
+    .day-score.score-caution { color: var(--amber); }
+    .day-score.score-no_go   { color: var(--red);   opacity: 0.6; }
+    .day-score.score-none    { color: var(--text-dim); }
 
     /* Weather icon */
     .weather-icon { font-size: 22px; line-height: 1; text-align: center; }
@@ -475,9 +488,16 @@
     // Weather icon
     const weatherIcon = getWeatherIcon(day.summary_weather, day.weather_code);
 
+    const scoreVal  = day.composite_score ?? null;
+    const scoreClass = scoreVal !== null ? `score-${day.day_status}` : 'score-none';
+    const scoreHtml  = scoreVal !== null
+      ? `<div class="day-score ${scoreClass}">${scoreVal}</div>`
+      : `<div class="day-score score-none">—</div>`;
+
     return `
       <div class="day-card ${statusClass}" onclick="openDetail('${day.location_id}', '${day.local_date}')">
         <div class="day-label ${isToday ? 'today' : ''}">${dayShort}</div>
+        ${scoreHtml}
         <div class="weather-icon">${weatherIcon}</div>
         <div class="day-content">
           ${windowHtml}

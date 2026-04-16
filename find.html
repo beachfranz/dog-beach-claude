@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Find Your Beach — Dog Beach Scout</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Outfit:wght@500;600&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="src/chat.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #0f1117;
+      --surface:      #181c27;
+      --surface-hover:#1e2333;
+      --border:       #252a3a;
+      --text:         #e8eaf0;
+      --text-muted:   #6b7280;
+      --text-dim:     #4b5268;
+      --green:        #4ade80;
+      --amber:        #fbbf24;
+      --red:          #f87171;
+      --radius:       14px;
+      --radius-sm:    8px;
+    }
+
+    html, body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 15px;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+    }
+
+    .app { max-width: 480px; margin: 0 auto; padding: 0 0 40px; }
+
+    /* ── Header ───────────────────────────────────────────────────── */
+    .header {
+      padding: 16px 16px 0;
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      z-index: 10;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .header-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .wordmark {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'Outfit', sans-serif;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+
+    .back-link {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+    .back-link:hover { color: var(--text); }
+
+    .page-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 10px;
+    }
+
+    /* ── Day pills ────────────────────────────────────────────────── */
+    .day-pills {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      padding-bottom: 12px;
+    }
+    .day-pills::-webkit-scrollbar { display: none; }
+
+    .day-pill {
+      flex-shrink: 0;
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 5px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .day-pill:hover { border-color: #303650; color: var(--text); }
+    .day-pill.active { background: var(--surface-hover); border-color: #3b5bdb; color: var(--text); }
+
+    /* ── Search controls ──────────────────────────────────────────── */
+    .search-controls {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .sort-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .sort-label {
+      font-size: 13px;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    .sort-select {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      padding: 7px 10px;
+      cursor: pointer;
+      outline: none;
+    }
+    .sort-select:focus { border-color: #3b5bdb; }
+    .sort-select option:disabled { color: var(--text-dim); }
+
+    .location-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .location-label {
+      flex: 1;
+      font-size: 13px;
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .locate-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 12px;
+      padding: 5px 10px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+    .locate-btn:hover { border-color: #3b5bdb; color: var(--text); }
+
+    .zip-row {
+      display: flex;
+      gap: 6px;
+    }
+
+    .zip-input {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      padding: 7px 10px;
+      outline: none;
+      letter-spacing: 0.06em;
+    }
+    .zip-input:focus { border-color: #3b5bdb; }
+    .zip-input::placeholder { color: var(--text-dim); font-family: 'DM Sans', sans-serif; letter-spacing: 0; }
+
+    .zip-btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      padding: 7px 14px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .zip-btn:hover { border-color: #3b5bdb; color: var(--text); }
+
+    /* ── Beach cards ──────────────────────────────────────────────── */
+    .beach-list { padding: 14px 16px 0; display: flex; flex-direction: column; gap: 10px; }
+
+    .beach-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .beach-card:hover { border-color: #303650; }
+
+    .beach-card.rank-1 { border-left: 3px solid var(--green); }
+    .beach-card.rank-2 { border-left: 3px solid #a3e635; }
+    .beach-card.rank-3 { border-left: 3px solid var(--amber); }
+    .beach-card.rank-4 { border-left: 3px solid #fb923c; }
+    .beach-card.rank-5 { border-left: 3px solid var(--red); opacity: 0.8; }
+
+    .beach-card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .beach-rank-name { display: flex; align-items: center; gap: 10px; }
+
+    .rank-badge {
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-dim);
+      width: 18px;
+      text-align: center;
+    }
+
+    .beach-name {
+      font-family: 'Outfit', sans-serif;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .composite-score {
+      font-family: 'DM Mono', monospace;
+      font-size: 20px;
+      font-weight: 500;
+    }
+    .score-no_data { color: var(--text-dim); }
+    .score-go      { color: var(--green); }
+    .score-caution { color: var(--amber); }
+    .score-no_go   { color: var(--red); }
+
+    .beach-meta {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+      padding-left: 28px;
+    }
+
+    .distance-badge {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-right: 6px;
+    }
+
+    /* ── Component bars ───────────────────────────────────────────── */
+    .component-scores { display: flex; gap: 8px; padding-left: 28px; }
+
+    .comp-item { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; }
+    .comp-icon { font-size: 14px; line-height: 1; }
+    .comp-bar-track { width: 100%; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+    .comp-bar-fill  { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
+    .bar-green { background: var(--green); }
+    .bar-amber { background: var(--amber); }
+    .bar-red   { background: var(--red); }
+    .comp-label { font-family: 'DM Mono', monospace; font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
+
+    /* ── States ───────────────────────────────────────────────────── */
+    .no-data { padding: 40px 20px; text-align: center; font-size: 13px; color: var(--text-dim); }
+
+    .skeleton {
+      height: 110px;
+      background: linear-gradient(90deg, var(--surface) 25%, var(--surface-hover) 50%, var(--surface) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s infinite;
+      border-radius: var(--radius);
+    }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <header class="header">
+    <div class="header-top">
+      <a href="index.html" class="wordmark">
+        <img src="src/avatar.png" style="width:28px;height:28px;border-radius:50%;cursor:pointer;" alt="Scout" onclick="event.preventDefault();toggleChat()" title="Ask Scout">
+        Dog Beach Scout
+      </a>
+      <a href="index.html" class="back-link">← Back</a>
+    </div>
+    <div class="page-title">Find Your Beach</div>
+    <div class="day-pills" id="day-pills"></div>
+  </header>
+
+  <!-- Search controls -->
+  <div class="search-controls">
+    <div class="sort-row">
+      <span class="sort-label">Sort by</span>
+      <select class="sort-select" id="sort-select" onchange="onSortChange(this.value)">
+        <option value="conditions">Best Conditions</option>
+        <option value="distance" id="opt-distance" disabled>Closest First</option>
+        <option value="blend"    id="opt-blend"    disabled>Best Nearby (50/50)</option>
+      </select>
+    </div>
+    <div class="location-row">
+      <span class="location-label" id="location-label">📍 Detecting location…</span>
+      <button class="locate-btn" id="locate-btn" onclick="requestLocation()">Use My Location</button>
+    </div>
+    <div class="zip-row">
+      <input class="zip-input" id="zip-input" type="text" inputmode="numeric" maxlength="5" placeholder="ZIP code override" />
+      <button class="zip-btn" onclick="onZipGo()">Go</button>
+    </div>
+  </div>
+
+  <div class="beach-list" id="beach-list">
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+  </div>
+
+</div>
+
+<script>
+  const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+  const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+  // ── State ──────────────────────────────────────────────────────────
+  let rawBeaches  = [];
+  let userLat     = null;
+  let userLng     = null;
+  let currentSort = 'conditions';
+
+  // ── Day pills ──────────────────────────────────────────────────────
+  const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+  const days  = [];
+  for (let i = 0; i < 7; i++) {
+    const d     = new Date(today);
+    d.setDate(today.getDate() + i);
+    const iso   = d.toISOString().slice(0, 10);
+    const label = i === 0 ? 'TDY' : i === 1 ? 'TMW'
+                : d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+    days.push({ iso, label });
+  }
+
+  let selectedDate = days[0].iso;
+
+  const pillsEl = document.getElementById('day-pills');
+  days.forEach(({ iso, label }) => {
+    const btn = document.createElement('button');
+    btn.className = 'day-pill' + (iso === selectedDate ? ' active' : '');
+    btn.textContent = label;
+    btn.onclick = () => {
+      document.querySelectorAll('.day-pill').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      selectedDate = iso;
+      loadBeaches(iso);
+    };
+    pillsEl.appendChild(btn);
+  });
+
+  // ── Load beach data ────────────────────────────────────────────────
+  async function loadBeaches(date) {
+    document.getElementById('beach-list').innerHTML =
+      Array(5).fill('<div class="skeleton"></div>').join('');
+    try {
+      const res  = await fetch(`${SUPABASE_URL}/functions/v1/get-beach-compare?date=${date}`,
+        { headers: { 'Authorization': `Bearer ${ANON_KEY}` } });
+      const data = await res.json();
+      if (!data.beaches?.length) {
+        document.getElementById('beach-list').innerHTML =
+          '<div class="no-data">No data available for this date.</div>';
+        return;
+      }
+      rawBeaches = data.beaches;
+      sortAndRender();
+    } catch {
+      document.getElementById('beach-list').innerHTML =
+        '<div class="no-data">Failed to load data.</div>';
+    }
+  }
+
+  // ── Sort and render ────────────────────────────────────────────────
+  function sortAndRender() {
+    if (!rawBeaches.length) return;
+
+    // Attach distance to each beach
+    const withDist = rawBeaches.map(b => ({
+      ...b,
+      distance: userLat !== null
+        ? haversine(userLat, userLng, parseFloat(b.latitude), parseFloat(b.longitude))
+        : null,
+    }));
+
+    let sorted;
+    if (currentSort === 'distance') {
+      sorted = [...withDist].sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999));
+    } else if (currentSort === 'blend') {
+      const maxDist = Math.max(...withDist.map(b => b.distance ?? 0), 1);
+      sorted = [...withDist].sort((a, b) => blendScore(b, maxDist) - blendScore(a, maxDist));
+    } else {
+      sorted = [...withDist].sort((a, b) => b.composite_score - a.composite_score);
+    }
+
+    document.getElementById('beach-list').innerHTML =
+      sorted.map((b, i) => renderCard(b, i + 1)).join('');
+  }
+
+  // ── Haversine distance (miles) ─────────────────────────────────────
+  function haversine(lat1, lon1, lat2, lon2) {
+    const R    = 3958.8;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a    = Math.sin(dLat / 2) ** 2 +
+                 Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                 Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.asin(Math.sqrt(a));
+  }
+
+  // ── 50/50 blend score (higher = better) ───────────────────────────
+  function blendScore(beach, maxDist) {
+    const normScore = beach.composite_score / 100;
+    const normDist  = beach.distance !== null ? 1 - (beach.distance / maxDist) : 0.5;
+    return (normScore + normDist) / 2;
+  }
+
+  // ── Geolocation ────────────────────────────────────────────────────
+  function requestLocation() {
+    document.getElementById('location-label').textContent = '📍 Detecting…';
+    navigator.geolocation.getCurrentPosition(
+      async pos => {
+        userLat = pos.coords.latitude;
+        userLng = pos.coords.longitude;
+        const name = await reverseGeocode(userLat, userLng);
+        document.getElementById('location-label').textContent = '📍 ' + name;
+        document.getElementById('locate-btn').textContent = 'Update';
+        enableDistanceSorts();
+        sortAndRender();
+      },
+      () => {
+        document.getElementById('location-label').textContent = '📍 Location unavailable — enter ZIP below';
+      }
+    );
+  }
+
+  // ── ZIP geocoding ──────────────────────────────────────────────────
+  async function onZipGo() {
+    const zip = document.getElementById('zip-input').value.trim();
+    if (!/^\d{5}$/.test(zip)) return;
+    document.getElementById('location-label').textContent = '📍 Looking up ZIP…';
+    try {
+      const res  = await fetch(
+        `https://nominatim.openstreetmap.org/search?postalcode=${zip}&countrycodes=us&format=json&limit=1`,
+        { headers: { 'User-Agent': 'DogBeachScout/1.0' } }
+      );
+      const data = await res.json();
+      if (!data[0]) {
+        document.getElementById('location-label').textContent = '📍 ZIP not found';
+        return;
+      }
+      userLat = parseFloat(data[0].lat);
+      userLng = parseFloat(data[0].lon);
+      document.getElementById('location-label').textContent = `📍 ZIP ${zip}`;
+      enableDistanceSorts();
+      sortAndRender();
+    } catch {
+      document.getElementById('location-label').textContent = '📍 Lookup failed — try again';
+    }
+  }
+
+  // ── Reverse geocode ────────────────────────────────────────────────
+  async function reverseGeocode(lat, lng) {
+    try {
+      const res  = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+        { headers: { 'User-Agent': 'DogBeachScout/1.0' } }
+      );
+      const data = await res.json();
+      const city  = data.address?.city || data.address?.town || data.address?.village || '';
+      const state = (data.address?.state_code || '').replace(/^US-/, '');
+      return city && state ? `${city}, ${state}` : 'Your Location';
+    } catch {
+      return 'Your Location';
+    }
+  }
+
+  // ── Enable distance sort options ───────────────────────────────────
+  function enableDistanceSorts() {
+    document.getElementById('opt-distance').disabled = false;
+    document.getElementById('opt-blend').disabled    = false;
+  }
+
+  // ── Sort change ────────────────────────────────────────────────────
+  function onSortChange(val) {
+    currentSort = val;
+    sortAndRender();
+  }
+
+  // ── ZIP enter key ──────────────────────────────────────────────────
+  document.getElementById('zip-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') onZipGo();
+  });
+
+  // ── Render a beach card ────────────────────────────────────────────
+  function renderCard(b, rank) {
+    const hasScore = b.composite_score > 0;
+
+    const scoreHtml = hasScore
+      ? `<span class="composite-score score-${b.day_status}">${b.composite_score}</span>`
+      : `<span class="composite-score score-no_data">—</span>`;
+
+    const distHtml = b.distance !== null
+      ? `<span class="distance-badge">${b.distance.toFixed(1)} mi</span>`
+      : '';
+
+    const windowText = b.best_window_label
+      ? `${b.best_window_label}${b.go_hours_count ? ` · ${b.go_hours_count}h go` : ''}`
+      : 'No good window';
+    const metaColor = b.best_window_label ? '' : 'style="color:var(--text-dim)"';
+
+    const components = [
+      { key: 'tide_score',  icon: '🌊', label: 'Tide'    },
+      { key: 'wind_score',  icon: '💨', label: 'Wind'    },
+      { key: 'crowd_score', icon: '🐾', label: 'Crowd'   },
+      { key: 'rain_score',  icon: '🌤',  label: 'Weather' },
+      { key: 'temp_score',  icon: '🌡',  label: 'Temp'   },
+    ];
+
+    const barsHtml = hasScore ? `
+      <div class="component-scores">
+        ${components.map(c => {
+          const val = b[c.key];
+          if (val === null) return '';
+          const pct   = Math.round(val * 100);
+          const color = val >= 0.7 ? 'bar-green' : val >= 0.4 ? 'bar-amber' : 'bar-red';
+          return `<div class="comp-item">
+            <span class="comp-icon">${c.icon}</span>
+            <div class="comp-bar-track"><div class="comp-bar-fill ${color}" style="width:${pct}%"></div></div>
+            <span class="comp-label">${c.label}</span>
+          </div>`;
+        }).join('')}
+      </div>` : '';
+
+    return `
+      <div class="beach-card rank-${rank}" onclick="window.location.href='detail.html?location=${b.location_id}&date=${selectedDate}'">
+        <div class="beach-card-top">
+          <div class="beach-rank-name">
+            <span class="rank-badge">${rank}</span>
+            <span class="beach-name">${b.display_name}</span>
+          </div>
+          ${scoreHtml}
+        </div>
+        <div class="beach-meta" ${metaColor}>${distHtml}${windowText}</div>
+        ${barsHtml}
+      </div>`;
+  }
+
+  // ── Boot ───────────────────────────────────────────────────────────
+  requestLocation();
+  loadBeaches(selectedDate);
+</script>
+<script>
+  window.CHAT_CONFIG = {
+    getLocationId: () => null,
+    placeholder: 'Which beach is best this weekend?',
+  };
+</script>
+<script src="src/chat.js"></script>
+</body>
+</html>

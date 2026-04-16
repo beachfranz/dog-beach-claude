@@ -24,7 +24,7 @@ Deno.serve(async (req: Request) => {
   // All active beaches
   const { data: beaches, error: beachErr } = await supabase
     .from("beaches")
-    .select("location_id, display_name")
+    .select("location_id, display_name, latitude, longitude")
     .eq("is_active", true)
     .order("display_name");
 
@@ -91,6 +91,8 @@ Deno.serve(async (req: Request) => {
     return {
       location_id:       beach.location_id,
       display_name:      beach.display_name,
+      latitude:          beach.latitude,
+      longitude:         beach.longitude,
       day_status:        day?.day_status ?? "no_data",
       best_window_label: day?.best_window_label ?? null,
       go_hours_count:    day?.go_hours_count ?? 0,

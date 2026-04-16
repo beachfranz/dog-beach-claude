@@ -71,7 +71,20 @@
       letter-spacing: 0.15em;
       text-transform: uppercase;
       color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
+
+    .wordmark-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+
+    .wordmark-avatar:hover { opacity: 0.8; }
 
     .live-badge {
       font-family: 'DM Mono', monospace;
@@ -130,8 +143,8 @@
       padding-right: 30px;
     }
 
-    /* ── Cooper blurb ────────────────────────────────────────────── */
-    .cooper-blurb {
+    /* ── Scout blurb ────────────────────────────────────────────── */
+    .scout-blurb {
       margin: 10px 16px 0;
       padding: 10px 12px;
       background: var(--surface);
@@ -142,7 +155,7 @@
       line-height: 1.55;
       color: var(--text-muted);
     }
-    .cooper-blurb.loading { animation: pulse 1.4s ease-in-out infinite; }
+    .scout-blurb.loading { animation: pulse 1.4s ease-in-out infinite; }
 
     /* ── Day list ─────────────────────────────────────────────────── */
     .day-list {
@@ -296,14 +309,17 @@
   <!-- Header -->
   <header class="header">
     <div class="header-top">
-      <span class="wordmark">🐾 Dog Beach Scout</span>
+      <span class="wordmark">
+        <img src="src/avatar.png" class="wordmark-avatar" onclick="toggleChat()" alt="Scout" title="Ask Scout">
+        Dog Beach Scout
+      </span>
     </div>
     <div class="location-name" id="location-name" onclick="toggleLocationMenu()" style="cursor:pointer">Loading... <span style="font-size:12px;color:var(--text-dim)">▾</span></div>
     <div id="location-menu" style="display:none;position:absolute;background:#1e2333;border:1px solid var(--border);border-radius:var(--radius-sm);min-width:240px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,0.4);overflow:hidden"></div>
   </header>
 
-  <!-- Cooper blurb -->
-  <div class="cooper-blurb loading" id="cooper-blurb">...</div>
+  <!-- Scout blurb -->
+  <div class="scout-blurb loading" id="scout-blurb" onclick="toggleChat()" style="cursor:pointer" title="Ask Scout">...</div>
 
   <!-- Day list -->
   <main class="day-list" id="day-list">
@@ -327,13 +343,13 @@
   // ── State ─────────────────────────────────────────────────────────
   let currentLocation = new URLSearchParams(window.location.search).get('location') ?? DEFAULT_LOCATION;
 
-  // ── Cooper blurb cache (session, per beach) ───────────────────────
-  const cooperCache = {};
+  // ── Scout blurb cache (session, per beach) ───────────────────────
+  const scoutCache = {};
 
-  async function loadCooperBlurb(locationId) {
-    const el = document.getElementById('cooper-blurb');
-    if (cooperCache[locationId]) {
-      el.textContent = cooperCache[locationId];
+  async function loadScoutBlurb(locationId) {
+    const el = document.getElementById('scout-blurb');
+    if (scoutCache[locationId]) {
+      el.textContent = scoutCache[locationId];
       el.classList.remove('loading');
       return;
     }
@@ -358,7 +374,7 @@
       });
       const data = await res.json();
       const text = data.answer ?? '';
-      cooperCache[locationId] = text;
+      scoutCache[locationId] = text;
       el.textContent = text;
     } catch {
       el.textContent = '';
@@ -368,7 +384,7 @@
 
   // ── Boot ──────────────────────────────────────────────────────────
   loadSummary(currentLocation);
-  loadCooperBlurb(currentLocation);
+  loadScoutBlurb(currentLocation);
 
   function toggleLocationMenu() {
     const menu = document.getElementById('location-menu');
@@ -388,7 +404,7 @@
     window.history.pushState({}, '', url);
     document.getElementById('location-menu').style.display = 'none';
     loadSummary(currentLocation);
-    loadCooperBlurb(currentLocation);
+    loadScoutBlurb(currentLocation);
   }
 
   // ── Data fetching ─────────────────────────────────────────────────
@@ -539,9 +555,11 @@
   const chatHistory = [];
 
   function toggleChat() {
-    const panel = document.getElementById('chat-panel');
-    const isOpen = panel.style.transform === 'translateY(0px)';
-    panel.style.transform = isOpen ? 'translateY(100%)' : 'translateY(0px)';
+    const panel   = document.getElementById('chat-panel');
+    const overlay = document.getElementById('chat-overlay');
+    const isOpen  = panel.classList.contains('open');
+    panel.classList.toggle('open', !isOpen);
+    overlay.classList.toggle('open', !isOpen);
     if (!isOpen) document.getElementById('chat-input').focus();
   }
 
@@ -620,8 +638,8 @@
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      const panel = document.getElementById('chat-panel');
-      panel.style.transform = 'translateY(100%)';
+      document.getElementById('chat-panel').classList.remove('open');
+      document.getElementById('chat-overlay').classList.remove('open');
     }
   });
 </script>
@@ -648,40 +666,50 @@
   }
   .chat-fab:hover { background: var(--surface-hover); }
 
-  .chat-panel {
+  .chat-overlay {
+    display: none;
     position: fixed;
-    bottom: 0;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    z-index: 299;
+  }
+  .chat-overlay.open { display: block; }
+
+  .chat-panel {
+    display: none;
+    position: fixed;
+    top: 50%;
     left: 50%;
-    transform: translate(-50%, 100%);
-    width: 100%;
-    max-width: 480px;
-    height: 35vh;
+    transform: translate(-50%, -50%);
+    width: 78%;
+    max-width: 408px;
+    height: 31vh;
+    max-height: 260px;
     background: var(--surface);
-    border-top: 1px solid var(--border);
-    border-radius: 16px 16px 0 0;
-    display: flex;
+    border: 1px solid var(--border);
+    border-radius: 16px;
     flex-direction: column;
     z-index: 300;
-    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 -8px 32px rgba(0,0,0,0.5);
+    box-shadow: 0 12px 48px rgba(0,0,0,0.6);
   }
+  .chat-panel.open { display: flex; }
 
   .chat-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 14px 12px;
+    padding: 8px 10px 7px;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
   .chat-header-left {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
   }
   .chat-header-title {
     font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--text);
   }
@@ -712,8 +740,8 @@
   }
 
   .chat-avatar {
-    width: 40px;
-    height: 40px;
+    width: 24px;
+    height: 24px;
     border-radius: 50%;
     flex-shrink: 0;
     object-fit: cover;
@@ -777,20 +805,20 @@
   .chat-send:active { background: #2f4ac0; }
 </style>
 
-<button class="chat-fab" onclick="toggleChat()" title="Ask about conditions">🐾</button>
 
+<div class="chat-overlay" id="chat-overlay" onclick="toggleChat()"></div>
 <div class="chat-panel" id="chat-panel">
   <div class="chat-header">
     <div class="chat-header-left">
       <img src="src/avatar.png" class="chat-avatar" alt="">
-      <span class="chat-header-title">Ask Cooper</span>
+      <span class="chat-header-title">Ask Scout</span>
     </div>
     <button class="chat-close" onclick="toggleChat()">✕</button>
   </div>
   <div class="chat-messages" id="chat-messages"></div>
   <div class="chat-input-row">
     <input class="chat-input" id="chat-input" type="text" placeholder="Best time to go this week?" onkeydown="if(event.key==='Enter')sendChatMessage()" />
-    <button class="chat-send" onclick="sendChatMessage()">Ask Coop</button>
+    <button class="chat-send" onclick="sendChatMessage()">Ask Scout</button>
   </div>
 </div>
 

@@ -46,9 +46,7 @@ interface ScoringConfig {
   norm_temp_target: number;
   norm_temp_range: number;
   norm_uv_max: number;
-  window_min_hours: number;
-  window_max_hours: number;
-  window_caution_penalty: number;
+  window_score_threshold: number;   // e.g. 0.93 — adjacent hours must score >= peak * threshold
   caution_temp_min: number;
   caution_temp_max: number;
   nogo_temp_min: number;
@@ -444,51 +442,67 @@ function findBestWindow(
   hours: ScoredHour[],
   cfg: ScoringConfig,
 ): BestWindow | null {
-  // Only candidate hours (passed all NO-GO checks) are eligible
+  // Rule 1: only candidate hours are eligible
   const candidates = hours.filter((h) => h.isCandidateWindow);
   if (candidates.length === 0) return null;
 
-  let bestWindow: BestWindow | null = null;
-  let bestScore = -Infinity;
+  // Find the peak — highest scoring candidate hour
+  const peak = candidates.reduce((best, h) =>
+    (h.hourScore ?? 0) > (best.hourScore ?? 0) ? h : best
+  );
+  const peakScore  = peak.hourScore ?? 0;
+  const peakIndex  = hours.indexOf(peak);
+  const STEP       = 0.05;
+  let   threshold  = cfg.window_score_threshold ?? 0.93;
 
-  for (
-    let size = cfg.window_max_hours;
-    size >= cfg.window_min_hours;
-    size--
-  ) {
-    // Slide a window of `size` hours across the candidate list.
-    // Hours must be contiguous (no gaps in localHour).
-    for (let start = 0; start <= hours.length - size; start++) {
-      const slice = hours.slice(start, start + size);
+  let window: ScoredHour[] = [];
 
-      // Verify all hours in slice are candidates and contiguous
-      if (!slice.every((h) => h.isCandidateWindow)) continue;
-      if (!isContiguous(slice)) continue;
+  // Lower threshold progressively until we have ≥ 2 hours (or exhaust)
+  while (true) {
+    const minScore = peakScore * threshold;
+    window = [peak];
 
-      // Score the window
-      const goHours      = slice.filter((h) => h.hourStatus === "go");
-      const cautionHours = slice.filter((h) => h.hourStatus === "caution");
-      const avgScore     = average(slice.map((h) => h.hourScore ?? 0));
-      const penalty      = cautionHours.length * cfg.window_caution_penalty;
-      const windowScore  = avgScore - penalty;
-
-      if (windowScore > bestScore) {
-        bestScore = windowScore;
-        const startTs = slice[0].forecastTs;
-        const endTs   = slice[slice.length - 1].forecastTs;
-        bestWindow = {
-          hours:       slice,
-          startTs,
-          endTs,
-          label:       buildWindowLabel(slice[0].localHour, slice[slice.length - 1].localHour),
-          windowScore: round2(windowScore),
-          status:      goHours.length === slice.length ? "go" : "caution",
-        };
-      }
+    // Expand forward
+    for (let i = peakIndex + 1; i < hours.length; i++) {
+      const h    = hours[i];
+      const prev = window[window.length - 1];
+      if (h.localHour !== prev.localHour + 1) break; // gap
+      if (!h.isCandidateWindow)               break; // no-go stops expansion
+      if ((h.hourScore ?? 0) < minScore)      break; // below threshold
+      window.push(h);
     }
+
+    // Expand backward
+    for (let i = peakIndex - 1; i >= 0; i--) {
+      const h    = hours[i];
+      const next = window[0];
+      if (next.localHour !== h.localHour + 1) break; // gap
+      if (!h.isCandidateWindow)               break; // no-go stops expansion
+      if ((h.hourScore ?? 0) < minScore)      break; // below threshold
+      window.unshift(h);
+    }
+
+    if (window.length >= 2) break;
+
+    // Still only 1 hour — lower threshold and retry
+    if (threshold <= 0) break;
+    threshold = Math.max(0, threshold - STEP);
   }
 
-  return bestWindow;
+  // Minimum 2 hours — if still isolated, no window
+  if (window.length < 2) return null;
+
+  const goHours  = window.filter((h) => h.hourStatus === "go");
+  const avgScore = average(window.map((h) => h.hourScore ?? 0));
+
+  return {
+    hours:       window,
+    startTs:     window[0].forecastTs,
+    endTs:       window[window.length - 1].forecastTs,
+    label:       buildWindowLabel(window[0].localHour, window[window.length - 1].localHour),
+    windowScore: round2(avgScore),
+    status:      goHours.length === window.length ? "go" : "caution",
+  };
 }
 
 function isContiguous(hours: ScoredHour[]): boolean {

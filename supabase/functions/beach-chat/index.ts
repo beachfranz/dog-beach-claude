@@ -92,7 +92,7 @@ Deno.serve(async (req: Request) => {
         return json({ error: `Beach not found: ${location_id}` }, 404);
       }
 
-      const [{ data: days, error: daysErr }, { data: hours, error: hoursErr }] = await Promise.all([
+      const [{ data: days, error: daysErr }, { data: hours, error: hoursErr }, nowData] = await Promise.all([
         supabase
           .from("beach_day_recommendations")
           .select("*")
@@ -107,12 +107,13 @@ Deno.serve(async (req: Request) => {
           .gte("local_date", today)
           .order("local_date", { ascending: true })
           .order("local_hour", { ascending: true }),
+        fetchNowConditions(location_id),
       ]);
 
       if (daysErr) throw new Error(`Failed to load daily data: ${daysErr.message}`);
       if (hoursErr) throw new Error(`Failed to load hourly data: ${hoursErr.message}`);
 
-      systemPrompt = buildSystemPrompt(beach, days ?? [], hours ?? []);
+      systemPrompt = buildSystemPrompt(beach, days ?? [], hours ?? [], nowData);
     }
 
     const answer = await callAnthropic(systemPrompt, conversation_history, question);
@@ -133,10 +134,38 @@ interface ConversationTurn {
 
 // ─── Prompt builder ───────────────────────────────────────────────────────────
 
+interface NowConditions {
+  is_day: boolean;
+  temp: number;
+  wind_speed: number;
+  weather_code: number;
+  summary_weather: string;
+  uv_index: number;
+  precip_chance: number;
+  tide_height: number | null;
+  tide_direction: "rising" | "falling" | "steady";
+  hour_status: "go" | "caution" | "no_go";
+  score: number | null;
+}
+
+async function fetchNowConditions(locationId: string): Promise<NowConditions | null> {
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/functions/v1/get-beach-now?location_id=${encodeURIComponent(locationId)}`,
+      { headers: { "Authorization": `Bearer ${SUPABASE_SERVICE_KEY}` } },
+    );
+    if (!res.ok) return null;
+    return await res.json() as NowConditions;
+  } catch {
+    return null;
+  }
+}
+
 function buildSystemPrompt(
   beach: Record<string, unknown>,
   days: Record<string, unknown>[],
   hours: Record<string, unknown>[],
+  now: NowConditions | null = null,
 ): string {
   const hoursByDate = new Map<string, Record<string, unknown>[]>();
   for (const h of hours) {
@@ -229,6 +258,15 @@ function buildSystemPrompt(
 ${hourLines || "    (none)"}`;
   }).join("\n");
 
+  const nowSection = (() => {
+    if (!now || !now.is_day) return "";
+    const tideStr = now.tide_height !== null ? `${now.tide_height.toFixed(1)}ft ${now.tide_direction}` : `unknown, ${now.tide_direction}`;
+    const scoreStr = now.score !== null ? ` | score: ${now.score}/100` : "";
+    return `\nCURRENT CONDITIONS RIGHT NOW (live):
+  Status: ${now.hour_status.toUpperCase()} | Weather: ${now.summary_weather} | Temp: ${now.temp}°F | Wind: ${now.wind_speed}mph | UV: ${now.uv_index} | Rain chance: ${now.precip_chance}% | Tide: ${tideStr}${scoreStr}
+  (Use this to answer "right now / should I go now" questions — you can speak to current conditions with confidence)\n`;
+  })();
+
   return `You are Scout — a local surfer who's been bringing your dog to ${beach.display_name} for years. You know every sandbar, every swell window, when the kooks show up, and when it's firing. You text like a surfer — laid back, uses surf/beach slang naturally (swell, glassy, onshore, sectiony, blown out, dawn patrol, dropping in, firing, going off, closeout, mushy, punchy, clean, choppy, overhead, waist-high), first-person, never formal. You're stoked to help but keep it real — if it's blown out, say it's blown out.
 
 BEACH: ${beach.display_name}
@@ -237,12 +275,13 @@ ${beach.open_time ? `Hours: ${beach.open_time} – ${beach.close_time}` : ""}
 ${beach.description ? `About: ${beach.description}` : ""}
 ${beach.website ? `Website: ${beach.website}` : ""}
 Timezone: ${beach.timezone}
-
+${nowSection}
 7-DAY FORECAST DATA:
 ${daysContext}
 
 Rules:
 - Answer questions about conditions, timing, crowds, tides, weather using the data above
+- If CURRENT CONDITIONS are provided and the user asks about right now / today / whether to go, lead with the live conditions before forecasts
 - Reference specific hours, dates, and numbers when relevant — but weave them in naturally, don't just list them
 - If the user asks about a day not in the data, say you only have 7 days ahead
 - Keep answers to 2 sentences max, 3 only if a third sentence meaningfully adds context to your answer

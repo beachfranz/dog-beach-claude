@@ -191,7 +191,7 @@ ${reasonSection ? `\n  ${reasonSection}` : ""}
 
 Write four fields as a JSON object. Rules:
 - day_text: 3-4 sentences. Lead with the most important condition (tide, weather, or crowds) with specific numbers. Reference tide direction, weather description, and any specific caution hours if relevant. Work in practical tips naturally. Casual first-person tone — like texting a friend. Not corny, not over-enthusiastic. Mention weekend/weekday context if it affects crowds.
-- best_window_text: 1-2 sentences on exactly why this window beats the others. Reference specific hours or conditions from the breakdown. Omit if status is "no_go".
+- best_window_text: 2 sentences. First sentence: why this window beats the others — reference specific conditions (tide, wind, crowds, temp). Second sentence: a practical suggestion — what to do (fetch, play in waves, explore tide pools) or what to bring (sunscreen, hoodie, water for the dog) based on the actual conditions. Omit if status is "no_go".
 - caution_text: 1 sentence on the main caveat. Omit (empty string) if day_status is "go" with no risk reason codes.
 - no_go_text: 1 sentence explaining why today's a skip. Omit (empty string) if day_status is not "no_go".
 

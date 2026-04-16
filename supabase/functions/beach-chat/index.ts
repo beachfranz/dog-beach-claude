@@ -44,46 +44,64 @@ Deno.serve(async (req: Request) => {
   }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+  const today = new Date().toISOString().slice(0, 10);
 
   try {
-    // 1. Fetch beach metadata
-    const { data: beach, error: beachErr } = await supabase
-      .from("beaches")
-      .select("location_id, display_name, address, timezone, open_time, close_time, description, website")
-      .eq("location_id", location_id)
-      .single();
+    let systemPrompt: string;
 
-    if (beachErr || !beach) {
-      return json({ error: `Beach not found: ${location_id}` }, 404);
+    if (isComparativeQuestion(question)) {
+      // ── Cross-beach mode: summary data for all beaches ──────────────
+      const [{ data: beaches }, { data: allDays }] = await Promise.all([
+        supabase
+          .from("beaches")
+          .select("location_id, display_name, timezone"),
+        supabase
+          .from("beach_day_recommendations")
+          .select("location_id, local_date, day_status, best_window_label, best_window_text, avg_temp, avg_wind, avg_uv, avg_tide_height, lowest_tide_height, busyness_category, go_hours_count, caution_hours_count, no_go_hours_count, caution_text, risk_reason_codes, positive_reason_codes, summary_weather")
+          .gte("local_date", today)
+          .order("local_date", { ascending: true })
+          .order("location_id", { ascending: true })
+          .limit(50),
+      ]);
+
+      systemPrompt = buildCrossBeachPrompt(beaches ?? [], allDays ?? []);
+
+    } else {
+      // ── Single-beach mode: full detail for current beach ─────────────
+      const { data: beach, error: beachErr } = await supabase
+        .from("beaches")
+        .select("location_id, display_name, address, timezone, open_time, close_time, description, website")
+        .eq("location_id", location_id)
+        .single();
+
+      if (beachErr || !beach) {
+        return json({ error: `Beach not found: ${location_id}` }, 404);
+      }
+
+      const [{ data: days, error: daysErr }, { data: hours, error: hoursErr }] = await Promise.all([
+        supabase
+          .from("beach_day_recommendations")
+          .select("*")
+          .eq("location_id", location_id)
+          .gte("local_date", today)
+          .order("local_date", { ascending: true })
+          .limit(7),
+        supabase
+          .from("beach_day_hourly_scores")
+          .select("local_date, local_hour, hour_label, hour_status, hour_score, tide_height, wind_speed, temp_air, precip_chance, uv_index, busyness_category, is_in_best_window, is_candidate_window, tide_status, wind_status, crowd_status, rain_status, temp_status, uv_status")
+          .eq("location_id", location_id)
+          .gte("local_date", today)
+          .order("local_date", { ascending: true })
+          .order("local_hour", { ascending: true }),
+      ]);
+
+      if (daysErr) throw new Error(`Failed to load daily data: ${daysErr.message}`);
+      if (hoursErr) throw new Error(`Failed to load hourly data: ${hoursErr.message}`);
+
+      systemPrompt = buildSystemPrompt(beach, days ?? [], hours ?? []);
     }
 
-    // 2. Fetch next 7 days of daily recommendations
-    const today = new Date().toISOString().slice(0, 10);
-    const { data: days, error: daysErr } = await supabase
-      .from("beach_day_recommendations")
-      .select("*")
-      .eq("location_id", location_id)
-      .gte("local_date", today)
-      .order("local_date", { ascending: true })
-      .limit(7);
-
-    if (daysErr) throw new Error(`Failed to load daily data: ${daysErr.message}`);
-
-    // 3. Fetch hourly scores for those days
-    const { data: hours, error: hoursErr } = await supabase
-      .from("beach_day_hourly_scores")
-      .select("local_date, local_hour, hour_label, hour_status, hour_score, tide_height, wind_speed, temp_air, precip_chance, uv_index, busyness_category, is_in_best_window, is_candidate_window")
-      .eq("location_id", location_id)
-      .gte("local_date", today)
-      .order("local_date", { ascending: true })
-      .order("local_hour", { ascending: true });
-
-    if (hoursErr) throw new Error(`Failed to load hourly data: ${hoursErr.message}`);
-
-    // 4. Build context and call Anthropic
-    const systemPrompt = buildSystemPrompt(beach, days ?? [], hours ?? []);
     const answer = await callAnthropic(systemPrompt, conversation_history, question);
-
     return json({ answer });
 
   } catch (err) {
@@ -117,23 +135,80 @@ function buildSystemPrompt(
   const daysContext = days.map((d) => {
     const date = d.local_date as string;
     const dayHours = hoursByDate.get(date) ?? [];
-    const candidateHours = dayHours.filter((h) => h.is_candidate_window);
 
-    const hourLines = candidateHours.map((h) =>
-      `    ${h.hour_label}: status=${h.hour_status}${h.is_in_best_window ? " (BEST WINDOW)" : ""} tide=${fmtNum(h.tide_height, "ft")} wind=${fmtNum(h.wind_speed, "mph")} temp=${fmtNum(h.temp_air, "°F")} rain=${fmtNum(h.precip_chance, "%")} crowd=${h.busyness_category ?? "unknown"} score=${h.hour_score ?? "n/a"}`
-    ).join("\n");
+    // is_weekend
+    const jsDate = new Date(`${date}T12:00:00`);
+    const dayOfWeek = jsDate.toLocaleDateString("en-US", { weekday: "long" });
+    const isWeekend = dayOfWeek === "Saturday" || dayOfWeek === "Sunday";
+
+    // feelsLike wind chill
+    const avgTemp = d.avg_temp !== null ? parseFloat(String(d.avg_temp)) : null;
+    const avgWind = d.avg_wind !== null ? parseFloat(String(d.avg_wind)) : null;
+    let feelsLike: number | null = null;
+    if (avgTemp !== null && avgWind !== null) {
+      if (avgTemp <= 50 || avgWind >= 3) {
+        feelsLike = Math.round(
+          35.74 + 0.6215 * avgTemp - 35.75 * Math.pow(avgWind, 0.16) + 0.4275 * avgTemp * Math.pow(avgWind, 0.16)
+        );
+      } else {
+        feelsLike = Math.round(avgTemp);
+      }
+    }
+
+    // tide direction from best window hours
+    const bestWindowHours = dayHours.filter((h) => h.is_in_best_window);
+    const tideSeries = bestWindowHours
+      .map((h) => h.tide_height !== null ? parseFloat(String(h.tide_height)) : null)
+      .filter((v): v is number => v !== null);
+    let tideDirection = "steady";
+    if (tideSeries.length >= 2) {
+      const diff = tideSeries[tideSeries.length - 1] - tideSeries[0];
+      if (diff > 0.15)       tideDirection = "rising";
+      else if (diff < -0.15) tideDirection = "falling";
+    }
+
+    // practical tips
+    const tips: string[] = [];
+    const avgUv = d.avg_uv !== null ? parseFloat(String(d.avg_uv)) : null;
+    if (avgUv !== null && avgUv >= 6) tips.push(`sunscreen (UV ${Math.round(avgUv)})`);
+    if (feelsLike !== null && feelsLike < 62) tips.push(`hoodie/layer (feels like ${feelsLike}°F)`);
+    const lowestTide = d.lowest_tide_height !== null ? parseFloat(String(d.lowest_tide_height)) : null;
+    if (lowestTide !== null && lowestTide <= 0.5) tips.push("low tide = extra beach space");
+    if (d.busyness_category === "moderate" || d.busyness_category === "dog_party") tips.push("go early in the window to beat crowds");
+
+    // reason codes
+    const positives = Array.isArray(d.positive_reason_codes) ? (d.positive_reason_codes as string[]).join(", ") : "";
+    const risks     = Array.isArray(d.risk_reason_codes)     ? (d.risk_reason_codes     as string[]).join(", ") : "";
+
+    // all daylight hours with status flags
+    const allDaylightHours = dayHours.filter((h) => h.is_candidate_window || h.is_in_best_window);
+    const hourLines = allDaylightHours.map((h) => {
+      const flags = [
+        h.tide_status  !== "go" && h.tide_status  ? `tide:${h.tide_status}`   : null,
+        h.wind_status  !== "go" && h.wind_status  ? `wind:${h.wind_status}`   : null,
+        h.rain_status  !== "go" && h.rain_status  ? `rain:${h.rain_status}`   : null,
+        h.crowd_status !== "go" && h.crowd_status ? `crowd:${h.crowd_status}` : null,
+        h.temp_status  !== "go" && h.temp_status  ? `temp:${h.temp_status}`   : null,
+        h.uv_status    !== "go" && h.uv_status    ? `uv:${h.uv_status}`       : null,
+      ].filter(Boolean).join(", ");
+      const marker = h.is_in_best_window ? " ★" : "";
+      return `    ${h.hour_label}${marker}: tide=${fmtNum(h.tide_height, "ft")} wind=${fmtNum(h.wind_speed, "mph")} temp=${fmtNum(h.temp_air, "°F")} rain=${fmtNum(h.precip_chance, "%")} crowd=${h.busyness_category ?? "?"} [${h.hour_status}]${flags ? ` flags: ${flags}` : ""}`;
+    }).join("\n");
 
     return `
-  ${date} (${d.day_status?.toString().toUpperCase()})
-  Best window: ${d.best_window_label ?? "none"} | Weather: ${d.summary_weather ?? "unknown"} | Avg tide: ${fmtNum(d.avg_tide_height, "ft")} | Low tide: ${fmtNum(d.lowest_tide_height, "ft")} | Wind: ${fmtNum(d.avg_wind, "mph")} | Temp: ${fmtNum(d.avg_temp, "°F")} | UV: ${fmtNum(d.avg_uv, "")} | Crowds: ${d.busyness_category ?? "unknown"}
-  Summary: ${d.day_text ?? "no summary"}
+  ${date} ${dayOfWeek.toUpperCase()} (${d.day_status?.toString().toUpperCase()}) ${isWeekend ? "[WEEKEND]" : "[WEEKDAY]"}
+  Hours: ${d.go_hours_count ?? 0} go / ${d.caution_hours_count ?? 0} caution / ${d.no_go_hours_count ?? 0} no-go
+  Best window: ${d.best_window_label ?? "none"} | Weather: ${d.summary_weather ?? "unknown"} | Tide: ${fmtNum(d.avg_tide_height, "ft")} avg, ${fmtNum(lowestTide, "ft")} low, ${tideDirection} | Wind: ${fmtNum(d.avg_wind, "mph")} | Temp: ${fmtNum(d.avg_temp, "°F")}${feelsLike !== null ? ` (feels ${feelsLike}°F)` : ""} | UV: ${fmtNum(d.avg_uv, "")} | Crowds: ${d.busyness_category ?? "unknown"}
+  ${positives ? `Positives: ${positives}` : ""}
+  ${risks ? `Risks: ${risks}` : ""}
+  ${tips.length ? `Tips: ${tips.join("; ")}` : ""}
   Best window note: ${d.best_window_text ?? "n/a"}
   ${d.caution_text ? `Caution: ${d.caution_text}` : ""}${d.no_go_text ? `No-go reason: ${d.no_go_text}` : ""}
-  Candidate hours:
+  Hourly breakdown (★ = best window):
 ${hourLines || "    (none)"}`;
   }).join("\n");
 
-  return `You're a local surfer who's been bringing your dog to ${beach.display_name} for years. You know every sandbar, every swell window, when the kooks show up, and when it's firing. You text like a surfer — laid back, uses surf/beach slang naturally (swell, glassy, onshore, sectiony, blown out, dawn patrol, dropping in, firing, going off, closeout, mushy, punchy, clean, choppy, overhead, waist-high), first-person, never formal. You're stoked to help but keep it real — if it's blown out, say it's blown out.
+  return `You are Scout — a local surfer who's been bringing your dog to ${beach.display_name} for years. You know every sandbar, every swell window, when the kooks show up, and when it's firing. You text like a surfer — laid back, uses surf/beach slang naturally (swell, glassy, onshore, sectiony, blown out, dawn patrol, dropping in, firing, going off, closeout, mushy, punchy, clean, choppy, overhead, waist-high), first-person, never formal. You're stoked to help but keep it real — if it's blown out, say it's blown out.
 
 BEACH: ${beach.display_name}
 ${beach.address ? `Address: ${beach.address}` : ""}
@@ -153,7 +228,54 @@ Rules:
 - Lead with a direct answer to the question — no preamble, no restating the question
 - No emojis, no markdown formatting, plain text only
 - If conditions are bad, say so honestly — don't sugarcoat it
-- Crowd terms: quiet = few people, moderate = getting busy, dog_party = packed with dogs`;
+- Crowd terms: quiet = few people, moderate = getting busy, dog_party = packed with dogs, too_crowded = avoid
+- Never mention numeric scores (hour_score, tide_score, etc.) unless the user explicitly asks about them — use the conditions and statuses to inform your language instead`;
+}
+
+// ─── Comparative question detection ──────────────────────────────────────────
+
+function isComparativeQuestion(question: string): boolean {
+  const q = question.toLowerCase();
+  return /\b(which beach|what beach|best beach|other beach|all beach|compare|versus|vs\.?|least crowded|most crowded|quietest|busiest|better beach|anywhere else|other option|other spot)\b/.test(q);
+}
+
+// ─── Cross-beach prompt builder ───────────────────────────────────────────────
+
+function buildCrossBeachPrompt(
+  beaches: Record<string, unknown>[],
+  allDays: Record<string, unknown>[],
+): string {
+  const daysByBeach = new Map<string, Record<string, unknown>[]>();
+  for (const d of allDays) {
+    const loc = d.location_id as string;
+    const arr = daysByBeach.get(loc) ?? [];
+    arr.push(d);
+    daysByBeach.set(loc, arr);
+  }
+
+  const beachContext = beaches.map((b) => {
+    const days = daysByBeach.get(b.location_id as string) ?? [];
+    const dayLines = days.map((d) => {
+      const risks = Array.isArray(d.risk_reason_codes) ? (d.risk_reason_codes as string[]).join(", ") : "";
+      return `    ${d.local_date} (${d.day_status?.toString().toUpperCase()}): window=${d.best_window_label ?? "none"} weather=${d.summary_weather ?? "?"} wind=${fmtNum(d.avg_wind, "mph")} temp=${fmtNum(d.avg_temp, "°F")} crowds=${d.busyness_category ?? "?"} go=${d.go_hours_count ?? 0}h${risks ? ` risks=${risks}` : ""}${d.caution_text ? ` caution="${d.caution_text}"` : ""}`;
+    }).join("\n");
+    return `\n${b.display_name} (${b.location_id}):\n${dayLines || "    (no data)"}`;
+  }).join("\n");
+
+  return `You are Scout — a local surfer who knows every dog beach in Southern California. You've scouted all of them and know their differences — which ones get crowded on weekends, which have the best low tides, which get blown out in the afternoon. Casual surfer tone, first-person, no fluff.
+
+ALL BEACHES — 7-DAY SUMMARY:
+${beachContext}
+
+Rules:
+- Answer cross-beach comparison questions using the data above
+- Recommend specific beaches and days with reasons — be direct
+- Use descriptive language for conditions, not raw numbers where possible
+- Keep answers to 2-3 sentences
+- Lead with the direct answer, no preamble
+- No emojis, no markdown, plain text only
+- Never mention numeric scores unless asked
+- Crowd terms: quiet = few people, moderate = getting busy, dog_party = packed with dogs, too_crowded = avoid`;
 }
 
 // ─── Anthropic call ───────────────────────────────────────────────────────────

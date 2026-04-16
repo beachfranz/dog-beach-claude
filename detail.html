@@ -258,6 +258,13 @@
 
     .bar-col:hover .tooltip { display: block; }
 
+    /* ── Score tooltip breakdown bars ───────────────────────────── */
+    .tt-breakdown { margin-top: 5px; display: flex; flex-direction: column; gap: 3px; }
+    .tt-row { display: flex; align-items: center; gap: 5px; }
+    .tt-label { font-family: 'DM Mono', monospace; font-size: 9px; color: var(--text-muted); width: 32px; text-align: right; flex-shrink: 0; }
+    .tt-track { width: 64px; height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
+    .tt-fill  { height: 100%; border-radius: 3px; }
+
     /* ── Loading / error ──────────────────────────────────────────── */
     .state {
       display: flex;
@@ -284,7 +291,7 @@
   <header class="header">
     <div class="header-left" id="header-left">
       <div class="header-title">
-        <span>🐶</span>
+        <img src="src/avatar.png" style="width:28px;height:28px;border-radius:50%;cursor:pointer;" alt="Scout" onclick="toggleChat()" title="Ask Scout">
         <span id="day-title">Loading...</span>
       </div>
       <div class="window-label" id="window-label"></div>
@@ -337,19 +344,22 @@
     const dateObj  = new Date(date + 'T12:00:00');
     const dayName  = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
     document.title = `${dayName} — ${beach.display_name}`;
-    document.getElementById('day-title').textContent = dayName;
+    document.getElementById('day-title').textContent = `${beach.display_name} — ${dayName}`;
 
     const winLabel = document.getElementById('window-label');
     if (day.best_window_label) {
       winLabel.textContent = day.best_window_label;
       winLabel.className = `window-label ${day.best_window_status ?? ''}`;
     }
-    if (day.best_window_text) {
-      const bwt = document.createElement('div');
-      bwt.style.cssText = "font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.5;color:var(--text-muted);margin-top:4px;";
-      bwt.textContent = day.best_window_text;
-      document.getElementById('header-left').appendChild(bwt);
-    }
+    // Scout blurb — loads async, shows shimmer until ready
+    const blurbEl = document.createElement('div');
+    blurbEl.id = 'scout-blurb';
+    blurbEl.style.cssText = "font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.5;color:var(--text-muted);margin-top:6px;opacity:0.4;cursor:pointer;";
+    blurbEl.title = 'Ask Scout';
+    blurbEl.onclick = toggleChat;
+    blurbEl.textContent = 'Getting Scout\'s take…';
+    document.getElementById('header-left').appendChild(blurbEl);
+    loadScoutBlurb(locationId, date, day);
 
     if (hours.length === 0) {
       showError('No hourly data available for this date.');
@@ -478,6 +488,28 @@
       const scoreLine   = scoreVal !== null ? Math.round(scoreVal * 100) : (metric.key === 'hour_score' && val !== null ? Math.round(val) : null);
       const metricLine  = display ? `${metric.label}: ${display}` : '';
 
+      // Score bar gets a component breakdown chart
+      const isScoreBar = metric.key === 'hour_score';
+      const breakdownHtml = isScoreBar ? (() => {
+        const components = [
+          { label: 'Tide',  score: h.tide_score,  status: h.tide_status  },
+          { label: 'Wind',  score: h.wind_score,  status: h.wind_status  },
+          { label: 'Rain',  score: h.rain_score,  status: h.rain_status  },
+          { label: 'Crowd', score: h.crowd_score, status: h.crowd_status },
+          { label: 'Temp',  score: h.temp_score,  status: h.temp_status  },
+          { label: 'UV',    score: h.uv_score,    status: h.uv_status    },
+        ];
+        const rows = components.map(c => {
+          const pct   = c.score !== null ? Math.round(c.score * 100) : 0;
+          const color = c.status === 'no_go' ? '#ef4444' : c.status === 'caution' ? '#f59e0b' : '#4ade80';
+          return `<div class="tt-row">
+            <div class="tt-label">${c.label}</div>
+            <div class="tt-track"><div class="tt-fill" style="width:${pct}%;background:${color}"></div></div>
+          </div>`;
+        }).join('');
+        return `<div class="tt-breakdown">${rows}</div>`;
+      })() : '';
+
       return `
         <div class="bar-col">
           <div class="bar-dog">${dog}</div>
@@ -488,7 +520,7 @@
             <div class="tooltip-line ${statusClass}">${statusIcon} ${statusText}</div>
             ${metricLine ? `<div class="tooltip-line">${metricLine}</div>` : ''}
             ${reason     ? `<div class="tooltip-line">${reason}</div>` : ''}
-            ${scoreLine !== null ? `<div class="tooltip-line">Score: ${scoreLine}</div>` : ''}
+            ${breakdownHtml}
           </div>
         </div>`;
     }).join('');
@@ -507,35 +539,45 @@
   }
 
   function buildNarrative(day) {
-    const blocks = [];
+    if (!day.no_go_text) return '';
 
-    if (day.day_text) {
-      blocks.push(`
-        <div class="narrative-block">
-          <div class="narrative-label">Day Summary</div>
-          <div class="narrative-text">${day.day_text}</div>
-        </div>`);
-    }
-
-    if (day.caution_text) {
-      blocks.push(`
-        <div class="narrative-block">
-          <div class="narrative-label">Caution</div>
-          <div class="narrative-text amber">${day.caution_text}</div>
-        </div>`);
-    }
-
-    if (day.no_go_text) {
-      blocks.push(`
+    return `
+      <div class="narrative">
         <div class="narrative-block">
           <div class="narrative-label">No Go</div>
           <div class="narrative-text red">${day.no_go_text}</div>
-        </div>`);
+        </div>
+      </div>`;
+  }
+
+  // ── Scout header blurb ───────────────────────────────────────────
+  async function loadScoutBlurb(locationId, date, day) {
+    const el = document.getElementById('scout-blurb');
+    if (!el) return;
+
+    const windowLabel = day.best_window_label ?? 'the best window';
+    const question = `For ${date}, write 2-3 tight sentences about visiting during ${windowLabel}: ` +
+      `why it's the best window today (use descriptive words like 'super low tide', 'high tide', 'mild sun', 'blazing sun' — not numbers), ` +
+      `one quick practical tip (what to bring or do), ` +
+      `and any caution folded in at the end if relevant. Be concise — every word should earn its place.`;
+
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/beach-chat`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ location_id: locationId, question, conversation_history: [] }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { answer } = await res.json();
+      if (answer) {
+        el.style.opacity = '1';
+        el.textContent = answer;
+      } else {
+        el.remove();
+      }
+    } catch {
+      el.remove();
     }
-
-    if (blocks.length === 0) return '';
-
-    return `<div class="narrative">${blocks.join('')}</div>`;
   }
 
   // ── Error ─────────────────────────────────────────────────────────
@@ -551,9 +593,11 @@
   const chatHistory = [];
 
   function toggleChat() {
-    const panel = document.getElementById('chat-panel');
-    const isOpen = panel.style.transform === 'translateY(0px)';
-    panel.style.transform = isOpen ? 'translateY(100%)' : 'translateY(0px)';
+    const panel   = document.getElementById('chat-panel');
+    const overlay = document.getElementById('chat-overlay');
+    const isOpen  = panel.classList.contains('open');
+    panel.classList.toggle('open', !isOpen);
+    overlay.classList.toggle('open', !isOpen);
     if (!isOpen) document.getElementById('chat-input').focus();
   }
 
@@ -632,8 +676,8 @@
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      const panel = document.getElementById('chat-panel');
-      panel.style.transform = 'translateY(100%)';
+      document.getElementById('chat-panel').classList.remove('open');
+      document.getElementById('chat-overlay').classList.remove('open');
     }
   });
 </script>
@@ -660,40 +704,50 @@
   }
   .chat-fab:hover { background: #1e2333; }
 
-  .chat-panel {
+  .chat-overlay {
+    display: none;
     position: fixed;
-    bottom: 0;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    z-index: 299;
+  }
+  .chat-overlay.open { display: block; }
+
+  .chat-panel {
+    display: none;
+    position: fixed;
+    top: 50%;
     left: 50%;
-    transform: translate(-50%, 100%);
-    width: 100%;
-    max-width: 480px;
-    height: 35vh;
+    transform: translate(-50%, -50%);
+    width: 78%;
+    max-width: 408px;
+    height: 31vh;
+    max-height: 260px;
     background: var(--surface);
-    border-top: 1px solid var(--border);
-    border-radius: 16px 16px 0 0;
-    display: flex;
+    border: 1px solid var(--border);
+    border-radius: 16px;
     flex-direction: column;
     z-index: 300;
-    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 -8px 32px rgba(0,0,0,0.5);
+    box-shadow: 0 12px 48px rgba(0,0,0,0.6);
   }
+  .chat-panel.open { display: flex; }
 
   .chat-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 14px 12px;
+    padding: 8px 10px 7px;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
   .chat-header-left {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
   }
   .chat-header-title {
     font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--text);
   }
@@ -724,8 +778,8 @@
   }
 
   .chat-avatar {
-    width: 40px;
-    height: 40px;
+    width: 24px;
+    height: 24px;
     border-radius: 50%;
     flex-shrink: 0;
     object-fit: cover;
@@ -789,20 +843,20 @@
   .chat-send:active { background: #2f4ac0; }
 </style>
 
-<button class="chat-fab" onclick="toggleChat()" title="Ask about conditions">🐾</button>
 
+<div class="chat-overlay" id="chat-overlay" onclick="toggleChat()"></div>
 <div class="chat-panel" id="chat-panel">
   <div class="chat-header">
     <div class="chat-header-left">
       <img src="src/avatar.png" class="chat-avatar" alt="">
-      <span class="chat-header-title">Ask Cooper</span>
+      <span class="chat-header-title">Ask Scout</span>
     </div>
     <button class="chat-close" onclick="toggleChat()">✕</button>
   </div>
   <div class="chat-messages" id="chat-messages"></div>
   <div class="chat-input-row">
     <input class="chat-input" id="chat-input" type="text" placeholder="What time should I go today?" onkeydown="if(event.key==='Enter')sendChatMessage()" />
-    <button class="chat-send" onclick="sendChatMessage()">Ask Coop</button>
+    <button class="chat-send" onclick="sendChatMessage()">Ask Scout</button>
   </div>
 </div>
 

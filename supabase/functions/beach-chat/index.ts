@@ -28,6 +28,23 @@ Deno.serve(async (req: Request) => {
     return json({ error: "Method not allowed" }, 405);
   }
 
+  // ── Rate limiting: 20 requests per IP per hour ──────────────────────────────
+  const ip   = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const hour = new Date(Math.floor(Date.now() / 3_600_000) * 3_600_000).toISOString();
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+  const { data: rateCount } = await supabase.rpc("increment_chat_rate", { p_ip: ip, p_hour: hour });
+  if ((rateCount ?? 0) > 20) {
+    return json({ answer: "I'm taking a quick break — try again in a little while." }, 429);
+  }
+
+  // Occasionally clean up old rate limit rows (older than 24 hours)
+  if (Math.random() < 0.1) {
+    await supabase.from("chat_rate_limits")
+      .delete()
+      .lt("hour", new Date(Date.now() - 86_400_000).toISOString());
+  }
+
   let body: { location_id?: string; question?: string; conversation_history?: ConversationTurn[] };
   try {
     body = await req.json();
@@ -40,8 +57,6 @@ Deno.serve(async (req: Request) => {
   if (!location_id || !question) {
     return json({ error: "location_id and question are required" }, 400);
   }
-
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
   const today = new Date().toISOString().slice(0, 10);
 
   try {

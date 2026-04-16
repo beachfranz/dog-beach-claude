@@ -50,6 +50,29 @@ Deno.serve(async (req: Request) => {
       return json({ error: daysErr.message }, 500);
     }
 
+    // Fetch best-window hourly scores for the next 7 days to compute composite scores
+    const dates = (days ?? []).map(d => d.local_date);
+    const { data: hours } = dates.length ? await supabase
+      .from("beach_day_hourly_scores")
+      .select("local_date, hour_score")
+      .eq("location_id", locationId)
+      .in("local_date", dates)
+      .eq("is_in_best_window", true) : { data: [] };
+
+    // Average hour_score per date → composite_score
+    const scoreByDate: Record<string, { sum: number; count: number }> = {};
+    for (const h of hours ?? []) {
+      if (!scoreByDate[h.local_date]) scoreByDate[h.local_date] = { sum: 0, count: 0 };
+      scoreByDate[h.local_date].sum   += Number(h.hour_score ?? 0);
+      scoreByDate[h.local_date].count += 1;
+    }
+    const daysWithScore = (days ?? []).map(d => ({
+      ...d,
+      composite_score: scoreByDate[d.local_date]
+        ? Math.round(scoreByDate[d.local_date].sum / scoreByDate[d.local_date].count)
+        : null,
+    }));
+
     // Fetch all active beaches for location switcher
     const { data: allBeaches } = await supabase
       .from("beaches")
@@ -57,7 +80,7 @@ Deno.serve(async (req: Request) => {
       .eq("is_active", true)
       .order("display_name");
 
-    return json({ beach, days: days ?? [], allBeaches: allBeaches ?? [] });
+    return json({ beach, days: daysWithScore, allBeaches: allBeaches ?? [] });
 
   } catch (err) {
     return json({ error: String(err) }, 500);

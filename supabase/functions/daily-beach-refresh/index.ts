@@ -28,6 +28,7 @@ type HourStatus       = "go" | "caution" | "no_go";
 type BusynessCategory = "quiet" | "moderate" | "dog_party" | "too_crowded";
 type DayStatus        = "go" | "caution" | "no_go";
 type SummaryWeather   = "sunny" | "partly_cloudy" | "cloudy" | "foggy" | "rainy" | "windy";
+type BacteriaRisk     = "none" | "low" | "moderate" | "high";
 
 interface Beach {
   location_id: string;
@@ -89,6 +90,8 @@ interface ScoringConfig {
   caution_temp_max: number;
   nogo_temp_min: number;
   nogo_temp_max: number;
+  bacteria_caution_mm?: number;
+  bacteria_nogo_mm?: number;
   created_at: string;
   updated_at: string;
 }
@@ -235,6 +238,15 @@ async function processBeach(
   const rawHours = buildRawHours(beach, weatherResult, tideMap, crowdResult.busynessMap);
   console.log(`[${beach.location_id}] Built ${rawHours.length} raw hours`);
 
+  // d2. Bacteria risk from recent precipitation
+  const recentPrecip   = computeRecentPrecip(rawHours, weatherResult.hours, runAt);
+  const bacteriaRisk   = deriveBacteriaRisk(
+    recentPrecip.precip72hMm,
+    config.bacteria_caution_mm ?? 2.5,
+    config.bacteria_nogo_mm    ?? 25.0,
+  );
+  console.log(`[${beach.location_id}] Precip 72h=${recentPrecip.precip72hMm}mm → bacteria_risk=${bacteriaRisk}`);
+
   // e. Score hours
   let scoredHours: ScoredHour[];
   try {
@@ -260,7 +272,7 @@ async function processBeach(
   await Promise.all(dates.map(async (date) => {
     const dayHours = scoredHours.filter((h) => h.localDate === date);
     const window   = windows.get(date) ?? null;
-    const narInput = buildNarrativeInput(beach, date, dayHours, window);
+    const narInput = buildNarrativeInput(beach, date, dayHours, window, recentPrecip, bacteriaRisk);
     try {
       const [narrative, hourLabels] = await Promise.all([
         generateDayNarrative(narInput, ANTHROPIC_API_KEY),
@@ -300,7 +312,7 @@ async function processBeach(
       const dayHours  = scoredHours.filter((h) => h.localDate === date);
       const window    = windows.get(date) ?? null;
       const narrative = narrativesByDate.get(date);
-      return buildDailyRow(beach, date, dayHours, window, narrative, config, runAt);
+      return buildDailyRow(beach, date, dayHours, window, narrative, config, runAt, recentPrecip, bacteriaRisk);
     });
     const { error } = await supabase
       .from("beach_day_recommendations")
@@ -316,6 +328,51 @@ async function processBeach(
 
   console.log(`[${beach.location_id}] Refresh complete — ${dates.length} days`);
   return { locationId: beach.location_id, ok: true, daysProcessed: dates.length, phases };
+}
+
+// ─── Bacteria risk helpers ────────────────────────────────────────────────────
+
+/**
+ * Sum actual precipitation (mm) from past 24h and 72h windows.
+ * Uses the UTC forecastTs from rawHours matched to weatherResult hours by index.
+ * Only counts hours that have already occurred (forecastTs < runAt).
+ */
+function computeRecentPrecip(
+  rawHours: RawHourData[],
+  weatherHours: Awaited<ReturnType<typeof fetchWeather>>["hours"],
+  runAt: Date,
+): { precip24hMm: number; precip72hMm: number } {
+  const nowMs  = runAt.getTime();
+  const ms24h  = 24 * 3_600_000;
+  const ms72h  = 72 * 3_600_000;
+  let precip24h = 0;
+  let precip72h = 0;
+
+  const len = Math.min(rawHours.length, weatherHours.length);
+  for (let i = 0; i < len; i++) {
+    const tsMs  = new Date(rawHours[i].forecastTs).getTime();
+    if (tsMs >= nowMs) continue;           // future — skip
+    const ageMs = nowMs - tsMs;
+    const mm    = weatherHours[i].precipitation ?? 0;
+    if (ageMs <= ms72h) precip72h += mm;
+    if (ageMs <= ms24h) precip24h += mm;
+  }
+
+  return {
+    precip24hMm: Math.round(precip24h * 10) / 10,
+    precip72hMm: Math.round(precip72h * 10) / 10,
+  };
+}
+
+function deriveBacteriaRisk(
+  precip72hMm: number,
+  cautionMm: number,
+  nogoMm: number,
+): BacteriaRisk {
+  if (precip72hMm >= nogoMm)    return "high";
+  if (precip72hMm >= cautionMm) return "moderate";
+  if (precip72hMm > 0)          return "low";
+  return "none";
 }
 
 // ─── Data merging ─────────────────────────────────────────────────────────────
@@ -422,15 +479,22 @@ function buildDailyRow(
   narrative: Awaited<ReturnType<typeof generateDayNarrative>> | undefined,
   config: ScoringConfig,
   runAt: Date,
+  recentPrecip: { precip24hMm: number; precip72hMm: number },
+  bacteriaRisk: BacteriaRisk,
 ) {
   const goHours      = dayHours.filter((h) => h.hourStatus === "go");
   const cautionHours = dayHours.filter((h) => h.hourStatus === "caution");
   const noGoHours    = dayHours.filter((h) => h.hourStatus === "no_go");
 
-  const dayStatus: DayStatus =
-    goHours.length > 0       ? "go"
+  // Bacteria risk forces day_status to at least caution
+  const weatherStatus: DayStatus =
+    goHours.length > 0        ? "go"
     : cautionHours.length > 0 ? "caution"
     : "no_go";
+  const dayStatus: DayStatus =
+    (bacteriaRisk === "moderate" || bacteriaRisk === "high") && weatherStatus === "go"
+      ? "caution"
+      : weatherStatus;
 
   const aggHours    = window?.hours ?? dayHours.filter((h) => h.isDaylight);
   const avgTemp     = average(aggHours.map((h) => h.tempAir).filter(nonNull));
@@ -451,6 +515,8 @@ function buildDailyRow(
     h.positiveReasonCodes.forEach((c) => positiveSet.add(c));
     h.riskReasonCodes.forEach((c) => riskSet.add(c));
   }
+  if (bacteriaRisk === "none")                                  positiveSet.add("clean_water");
+  if (bacteriaRisk === "moderate" || bacteriaRisk === "high")   riskSet.add("bacteria_risk");
 
   const thresholdsUsed = {
     scoring_version:       config.scoring_version,
@@ -499,6 +565,9 @@ function buildDailyRow(
     timezone:              beach.timezone,
     scoring_version:       config.scoring_version,
     generated_at:          runAt.toISOString(),
+    precip_24h_mm:         recentPrecip.precip24hMm,
+    precip_72h_mm:         recentPrecip.precip72hMm,
+    bacteria_risk:         bacteriaRisk,
   };
 }
 
@@ -509,6 +578,8 @@ function buildNarrativeInput(
   date: string,
   dayHours: ScoredHour[],
   window: BestWindow | null,
+  recentPrecip: { precip24hMm: number; precip72hMm: number },
+  bacteriaRisk: BacteriaRisk,
 ): NarrativeInput {
   const jsDate    = new Date(`${date}T12:00:00`);
   const dayOfWeek = jsDate.toLocaleDateString("en-US", { weekday: "long" });
@@ -579,6 +650,8 @@ function buildNarrativeInput(
     goHoursCount:         goHours.length,
     cautionHoursCount:    cautionHours.length,
     noGoHoursCount:       noGoHours.length,
+    bacteriaRisk,
+    precip72hMm:          recentPrecip.precip72hMm,
   };
 }
 

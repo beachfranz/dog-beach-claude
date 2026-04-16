@@ -174,7 +174,7 @@
       cursor: pointer;
       transition: background 0.15s, border-color 0.15s, transform 0.1s;
       display: grid;
-      grid-template-columns: 36px 36px 1fr 20px;
+      grid-template-columns: auto 1fr 20px;
       align-items: center;
       gap: 12px;
       text-decoration: none;
@@ -201,6 +201,39 @@
 
     .day-label.today { color: var(--text); }
 
+    /* Left cluster: day label + score + weather icon */
+    .day-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    /* Day score */
+    .day-score {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1px;
+    }
+    .day-score-value {
+      font-family: 'DM Mono', monospace;
+      font-size: 15px;
+      font-weight: 500;
+      line-height: 1;
+    }
+    .day-score-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 8px;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+      line-height: 1;
+    }
+    .day-score.score-go      .day-score-value { color: var(--green); }
+    .day-score.score-caution .day-score-value { color: var(--amber); }
+    .day-score.score-no_go   .day-score-value { color: var(--red); opacity: 0.6; }
+    .day-score.score-none    .day-score-value { color: var(--text-dim); }
+
     /* Weather icon */
     .weather-icon { font-size: 22px; line-height: 1; text-align: center; }
 
@@ -226,6 +259,22 @@
       color: var(--red);
       margin-bottom: 3px;
     }
+
+    /* Bacteria risk warning */
+    .bacteria-warning {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-top: 3px;
+    }
+    .bacteria-warning.risk-moderate { background: rgba(251,191,36,0.15); color: var(--amber); }
+    .bacteria-warning.risk-high     { background: rgba(239,68,68,0.15);  color: var(--red);   }
 
     /* Metric chips row */
     .chips {
@@ -469,18 +518,37 @@
       ? `<div class="window-label">${day.best_window_label}</div>`
       : `<div class="no-window-label">No good window</div>`;
 
+    // Bacteria warning
+    const bacteriaRisk = day.bacteria_risk ?? 'none';
+    const bacteriaHtml = bacteriaRisk === 'high'
+      ? `<div class="bacteria-warning risk-high">⚠ 72h rain advisory</div>`
+      : bacteriaRisk === 'moderate'
+      ? `<div class="bacteria-warning risk-moderate">⚠ 72h rain advisory</div>`
+      : '';
+
     // Metric chips
     const chips = buildChips(day);
 
     // Weather icon
     const weatherIcon = getWeatherIcon(day.summary_weather, day.weather_code);
 
+    const scoreVal   = day.composite_score ?? null;
+    const scoreClass = scoreVal !== null ? `score-${day.day_status}` : 'score-none';
+    const scoreHtml  = `<div class="day-score ${scoreClass}">
+        <span class="day-score-value">${scoreVal !== null ? scoreVal : '—'}</span>
+        <span class="day-score-label">SCORE</span>
+      </div>`;
+
     return `
       <div class="day-card ${statusClass}" onclick="openDetail('${day.location_id}', '${day.local_date}')">
-        <div class="day-label ${isToday ? 'today' : ''}">${dayShort}</div>
-        <div class="weather-icon">${weatherIcon}</div>
+        <div class="day-left">
+          <div class="day-label ${isToday ? 'today' : ''}">${dayShort}</div>
+          ${scoreHtml}
+          <div class="weather-icon">${weatherIcon}</div>
+        </div>
         <div class="day-content">
           ${windowHtml}
+          ${bacteriaHtml}
           <div class="chips">${chips}</div>
         </div>
         <div class="chevron">›</div>

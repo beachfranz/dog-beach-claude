@@ -16,6 +16,7 @@ import type { ScoredHour, BestWindow } from "./scoring.ts";
 type DayStatus        = "go" | "caution" | "no_go";
 type BusynessCategory = "quiet" | "moderate" | "dog_party" | "too_crowded";
 type TideDirection    = "rising" | "falling" | "steady";
+type BacteriaRisk     = "none" | "low" | "moderate" | "high";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-sonnet-4-20250514";
@@ -57,6 +58,8 @@ export interface NarrativeInput {
   goHoursCount: number;
   cautionHoursCount: number;
   noGoHoursCount: number;
+  bacteriaRisk: BacteriaRisk;
+  precip72hMm: number;
 }
 
 export interface NarrativeOutput {
@@ -169,6 +172,16 @@ ${input.windowHourBreakdown.map(h =>
   - Weather: ${weatherDesc ?? "unknown"}
   - ${weekendNote}`;
 
+  // Bacteria risk advisory
+  const bacteriaNote =
+    input.bacteriaRisk === "high"
+      ? `⚠️ HIGH BACTERIA RISK: ${input.precip72hMm}mm rain in past 72h — SoCal advisory threshold exceeded. Strongly advise against letting dogs swim.`
+    : input.bacteriaRisk === "moderate"
+      ? `⚠️ BACTERIA ADVISORY: ${input.precip72hMm}mm rain in past 72h — above the 2.5mm/72h SoCal threshold. Elevated bacteria risk; avoid swimming.`
+    : input.bacteriaRisk === "low"
+      ? `Note: ${input.precip72hMm}mm rain in past 72h — below advisory threshold but some runoff possible.`
+    : null;
+
   const reasonSection = [
     input.positiveReasonCodes.length
       ? `Positives: ${input.positiveReasonCodes.join(", ")}`
@@ -176,6 +189,7 @@ ${input.windowHourBreakdown.map(h =>
     input.riskReasonCodes.length
       ? `Risks: ${input.riskReasonCodes.join(", ")}`
       : null,
+    bacteriaNote,
   ]
     .filter(Boolean)
     .join("\n  ");
@@ -190,7 +204,7 @@ ${windowSection}
 ${reasonSection ? `\n  ${reasonSection}` : ""}
 
 Write four fields as a JSON object. Rules:
-- day_text: 3-4 sentences. Lead with the most important condition (tide, weather, or crowds) with specific numbers. Reference tide direction, weather description, and any specific caution hours if relevant. Work in practical tips naturally. Casual first-person tone — like texting a friend. Not corny, not over-enthusiastic. Mention weekend/weekday context if it affects crowds.
+- day_text: 3-4 sentences. Lead with the most important condition (tide, weather, or crowds) with specific numbers. Reference tide direction, weather description, and any specific caution hours if relevant. Work in practical tips naturally. If bacteria_risk is moderate or high, mention recent rain and advise against swimming — work it in naturally, not as a separate warning. Casual first-person tone — like texting a friend. Not corny, not over-enthusiastic. Mention weekend/weekday context if it affects crowds.
 - best_window_text: 2 sentences. First sentence: why this window beats the others — reference specific conditions (tide, wind, crowds, temp). Second sentence: a practical suggestion — what to do (fetch, play in waves, explore tide pools) or what to bring (sunscreen, hoodie, water for the dog) based on the actual conditions. Omit if status is "no_go".
 - caution_text: 1 sentence on the main caveat. Omit (empty string) if day_status is "go" with no risk reason codes.
 - no_go_text: 1 sentence explaining why today's a skip. Omit (empty string) if day_status is not "no_go".

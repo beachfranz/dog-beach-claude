@@ -544,15 +544,32 @@
   }
 
   function buildNarrative(day) {
-    if (!day.no_go_text) return '';
+    const blocks = [];
 
-    return `
-      <div class="narrative">
+    if (day.bacteria_risk === 'high' || day.bacteria_risk === 'moderate') {
+      const color  = day.bacteria_risk === 'high' ? 'red' : 'amber';
+      const label  = day.bacteria_risk === 'high' ? 'Water Quality Advisory' : 'Water Quality Notice';
+      const precip = day.precip_72h_mm != null ? ` (${day.precip_72h_mm}mm in past 72h)` : '';
+      const msg    = day.bacteria_risk === 'high'
+        ? `Heavy recent rainfall${precip} has likely elevated bacteria levels. Avoid letting your dog swim — stick to dry sand play.`
+        : `Recent rainfall${precip} exceeds the 0.1"/72h SoCal advisory threshold. Bacteria levels may be elevated — consider limiting swimming.`;
+      blocks.push(`
+        <div class="narrative-block">
+          <div class="narrative-label">${label}</div>
+          <div class="narrative-text ${color}">${msg}</div>
+        </div>`);
+    }
+
+    if (day.no_go_text) {
+      blocks.push(`
         <div class="narrative-block">
           <div class="narrative-label">No Go</div>
           <div class="narrative-text red">${day.no_go_text}</div>
-        </div>
-      </div>`;
+        </div>`);
+    }
+
+    if (blocks.length === 0) return '';
+    return `<div class="narrative">${blocks.join('')}</div>`;
   }
 
   // ── Scout header blurb ───────────────────────────────────────────

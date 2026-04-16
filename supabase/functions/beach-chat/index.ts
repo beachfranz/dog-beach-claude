@@ -4,6 +4,7 @@
 // Returns { answer: string }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { corsHeaders } from "../_shared/cors.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -12,18 +13,15 @@ const ANTHROPIC_API_URL    = "https://api.anthropic.com/v1/messages";
 const MODEL                = "claude-sonnet-4-20250514";
 const MAX_TOKENS           = 1024;
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin":  "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-  "Content-Type": "application/json",
-};
-
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
+  const cors = { ...corsHeaders(req, "POST, OPTIONS"), "Content-Type": "application/json" };
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: cors });
+
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS_HEADERS });
+    return new Response(null, { status: 204, headers: cors });
   }
 
   if (req.method !== "POST") {
@@ -327,6 +325,3 @@ function fmtNum(val: unknown, unit: string): string {
   return isNaN(n) ? "n/a" : `${n}${unit}`;
 }
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: CORS_HEADERS });
-}

@@ -29,7 +29,8 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── Rate limiting: 20 requests per IP per hour ──────────────────────────────
-  const ip   = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const forwarded = req.headers.get("x-forwarded-for") ?? "";
+  const ip        = forwarded.split(",").at(-1)?.trim() || "unknown";
   const hour = new Date(Math.floor(Date.now() / 3_600_000) * 3_600_000).toISOString();
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 

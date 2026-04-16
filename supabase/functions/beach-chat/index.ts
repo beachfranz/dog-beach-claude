@@ -71,7 +71,7 @@ Deno.serve(async (req: Request) => {
           .select("location_id, display_name, timezone"),
         supabase
           .from("beach_day_recommendations")
-          .select("location_id, local_date, day_status, best_window_label, best_window_text, avg_temp, avg_wind, avg_uv, avg_tide_height, lowest_tide_height, busyness_category, go_hours_count, caution_hours_count, no_go_hours_count, caution_text, risk_reason_codes, positive_reason_codes, summary_weather")
+          .select("location_id, local_date, day_status, best_window_label, best_window_text, avg_temp, avg_wind, avg_uv, avg_tide_height, lowest_tide_height, busyness_category, go_hours_count, caution_hours_count, no_go_hours_count, caution_text, risk_reason_codes, positive_reason_codes, summary_weather, bacteria_risk, precip_72h_mm")
           .gte("local_date", today)
           .order("local_date", { ascending: true })
           .order("location_id", { ascending: true })
@@ -209,12 +209,19 @@ function buildSystemPrompt(
       return `    ${h.hour_label}${marker}: tide=${fmtNum(h.tide_height, "ft")} wind=${fmtNum(h.wind_speed, "mph")} temp=${fmtNum(h.temp_air, "°F")} rain=${fmtNum(h.precip_chance, "%")} crowd=${h.busyness_category ?? "?"} [${h.hour_status}]${flags ? ` flags: ${flags}` : ""}`;
     }).join("\n");
 
+    const bacteriaRisk = d.bacteria_risk ?? "none";
+    const bacteriaLine = bacteriaRisk === "high"     ? `  ⚠️ BACTERIA RISK HIGH: ${d.precip_72h_mm ?? 0}mm rain in past 72h — advise against swimming`
+                       : bacteriaRisk === "moderate" ? `  ⚠️ BACTERIA ADVISORY: ${d.precip_72h_mm ?? 0}mm rain in past 72h — above 2.5mm advisory threshold`
+                       : bacteriaRisk === "low"      ? `  Note: ${d.precip_72h_mm ?? 0}mm rain in past 72h (below advisory threshold)`
+                       : "";
+
     return `
   ${date} ${dayOfWeek.toUpperCase()} (${d.day_status?.toString().toUpperCase()}) ${isWeekend ? "[WEEKEND]" : "[WEEKDAY]"}
   Hours: ${d.go_hours_count ?? 0} go / ${d.caution_hours_count ?? 0} caution / ${d.no_go_hours_count ?? 0} no-go
   Best window: ${d.best_window_label ?? "none"} | Weather: ${d.summary_weather ?? "unknown"} | Tide: ${fmtNum(d.avg_tide_height, "ft")} avg, ${fmtNum(lowestTide, "ft")} low, ${tideDirection} | Wind: ${fmtNum(d.avg_wind, "mph")} | Temp: ${fmtNum(d.avg_temp, "°F")}${feelsLike !== null ? ` (feels ${feelsLike}°F)` : ""} | UV: ${fmtNum(d.avg_uv, "")} | Crowds: ${d.busyness_category ?? "unknown"}
   ${positives ? `Positives: ${positives}` : ""}
   ${risks ? `Risks: ${risks}` : ""}
+  ${bacteriaLine}
   ${tips.length ? `Tips: ${tips.join("; ")}` : ""}
   Best window note: ${d.best_window_text ?? "n/a"}
   ${d.caution_text ? `Caution: ${d.caution_text}` : ""}${d.no_go_text ? `No-go reason: ${d.no_go_text}` : ""}

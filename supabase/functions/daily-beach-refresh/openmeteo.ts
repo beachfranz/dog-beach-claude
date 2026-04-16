@@ -37,6 +37,7 @@ export interface OpenMeteoHour {
   time: string;           // ISO local datetime, e.g. "2026-04-08T14:00"
   temperature_2m: number; // °F
   precipitation_probability: number; // %
+  precipitation: number;  // mm — actual (past hours) or forecast (future hours)
   weathercode: number;    // WMO code
   windspeed_10m: number;  // mph
   uv_index: number;
@@ -61,6 +62,7 @@ export async function fetchWeather(beach: Beach): Promise<OpenMeteoResult> {
     hourly:           [
       "temperature_2m",
       "precipitation_probability",
+      "precipitation",
       "weathercode",
       "windspeed_10m",
       "uv_index",
@@ -69,7 +71,9 @@ export async function fetchWeather(beach: Beach): Promise<OpenMeteoResult> {
     daily:            "sunrise,sunset",
     temperature_unit: "fahrenheit",
     windspeed_unit:   "mph",
+    precipitation_unit: "mm",
     timezone:         beach.timezone,
+    past_days:        "3",
     forecast_days:    "7",
   });
 
@@ -90,6 +94,7 @@ export async function fetchWeather(beach: Beach): Promise<OpenMeteoResult> {
     time,
     temperature_2m:             json.hourly.temperature_2m[i],
     precipitation_probability:  json.hourly.precipitation_probability[i],
+    precipitation:              json.hourly.precipitation[i] ?? 0,
     weathercode:                json.hourly.weathercode[i],
     windspeed_10m:              json.hourly.windspeed_10m[i],
     uv_index:                   json.hourly.uv_index[i],

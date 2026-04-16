@@ -260,6 +260,22 @@
       margin-bottom: 3px;
     }
 
+    /* Bacteria risk warning */
+    .bacteria-warning {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-top: 3px;
+    }
+    .bacteria-warning.risk-moderate { background: rgba(251,191,36,0.15); color: var(--amber); }
+    .bacteria-warning.risk-high     { background: rgba(239,68,68,0.15);  color: var(--red);   }
+
     /* Metric chips row */
     .chips {
       display: flex;
@@ -502,6 +518,14 @@
       ? `<div class="window-label">${day.best_window_label}</div>`
       : `<div class="no-window-label">No good window</div>`;
 
+    // Bacteria warning
+    const bacteriaRisk = day.bacteria_risk ?? 'none';
+    const bacteriaHtml = bacteriaRisk === 'high'
+      ? `<div class="bacteria-warning risk-high">⚠ 72h rain advisory</div>`
+      : bacteriaRisk === 'moderate'
+      ? `<div class="bacteria-warning risk-moderate">⚠ 72h rain advisory</div>`
+      : '';
+
     // Metric chips
     const chips = buildChips(day);
 
@@ -524,6 +548,7 @@
         </div>
         <div class="day-content">
           ${windowHtml}
+          ${bacteriaHtml}
           <div class="chips">${chips}</div>
         </div>
         <div class="chevron">›</div>

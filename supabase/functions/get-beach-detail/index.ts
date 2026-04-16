@@ -5,21 +5,19 @@
 // Returns: { beach, day: DayRecommendation, hours: HourlyScore[] } 
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { corsHeaders } from "../_shared/cors.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin":  "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Content-Type": "application/json",
-};
-
 Deno.serve(async (req: Request) => {
+  const cors = { ...corsHeaders(req, "GET, OPTIONS"), "Content-Type": "application/json" };
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return new Response("ok", { headers: cors });
   }
+
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: cors });
 
   try {
     const url        = new URL(req.url);
@@ -81,6 +79,3 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: corsHeaders });
-}

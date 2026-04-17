@@ -369,9 +369,6 @@
     <div id="location-menu" style="display:none;position:absolute;background:#1e2333;border:1px solid var(--border);border-radius:var(--radius-sm);min-width:240px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,0.4);overflow:hidden"></div>
   </header>
 
-  <!-- NOW card -->
-  <div class="day-list" id="now-card-container" style="padding-bottom:0"></div>
-
   <!-- Scout blurb -->
   <div class="scout-blurb loading" id="scout-blurb" onclick="toggleChat()" style="cursor:pointer" title="Ask Scout">...</div>
 
@@ -438,7 +435,6 @@
 
   // ── Boot ──────────────────────────────────────────────────────────
   loadSummary(currentLocation);
-  loadNowCard(currentLocation);
   loadScoutBlurb(currentLocation);
 
   function toggleLocationMenu() {
@@ -459,7 +455,6 @@
     window.history.pushState({}, '', url);
     document.getElementById('location-menu').style.display = 'none';
     loadSummary(currentLocation);
-    loadNowCard(currentLocation);
     loadScoutBlurb(currentLocation);
   }
 
@@ -477,66 +472,6 @@
     } catch (err) {
       showError(err.message);
     }
-  }
-
-  // ── NOW card ──────────────────────────────────────────────────────
-  async function loadNowCard(locationId) {
-    const container = document.getElementById('now-card-container');
-    container.innerHTML = '<div class="skeleton"></div>';
-    try {
-      const res = await fetch(
-        `${SUPABASE_URL}/functions/v1/get-beach-now?location_id=${locationId}`,
-        { headers: { 'Authorization': `Bearer ${ANON_KEY}` } }
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json();
-      container.innerHTML = buildNowCard(d, locationId);
-    } catch (err) {
-      container.innerHTML = ''; // fail silently — NOW card is supplementary
-    }
-  }
-
-  function buildNowCard(d, locationId) {
-    if (!d.is_day) return ''; // night — no NOW card
-
-    const statusClass  = `status-${d.hour_status}`;
-    const weatherIcon  = getWeatherIcon(d.summary_weather, d.weather_code);
-    const scoreClass   = `score-${d.hour_status}`;
-    const scoreHtml    = d.score !== null
-      ? `<div class="day-score ${scoreClass}">
-           <span class="day-score-value">${d.score}</span>
-           <span class="day-score-label">NOW</span>
-         </div>`
-      : `<div class="day-score score-none"><span class="day-score-value">—</span><span class="day-score-label">NOW</span></div>`;
-
-    const statusLabel = d.hour_status === 'go'     ? 'Good right now'
-                      : d.hour_status === 'caution' ? 'Use caution'
-                      : 'Not recommended';
-    const windowHtml = `<div class="window-label">${statusLabel}</div>`;
-
-    const chips = [];
-    if (d.tide_height !== null) {
-      const arrow = d.tide_direction === 'rising' ? '↑' : d.tide_direction === 'falling' ? '↓' : '';
-      chips.push(`<span class="chip">🌊 ${d.tide_height.toFixed(1)}ft${arrow}</span>`);
-    }
-    if (d.temp !== null)       chips.push(`<span class="chip">🌡 ${Math.round(d.temp)}°</span>`);
-    if (d.wind_speed !== null) chips.push(`<span class="chip">💨 ${Math.round(d.wind_speed)}mph</span>`);
-
-    const today = new Date().toISOString().slice(0, 10);
-
-    return `
-      <div class="day-card ${statusClass}" onclick="openDetail('${locationId}', '${today}')">
-        <div class="day-left">
-          <div class="day-label" style="font-size:11px;letter-spacing:0.05em;">NOW</div>
-          ${scoreHtml}
-          <div class="weather-icon">${weatherIcon}</div>
-        </div>
-        <div class="day-content">
-          ${windowHtml}
-          <div class="chips">${chips.join('')}</div>
-        </div>
-        <div class="chevron">›</div>
-      </div>`;
   }
 
   // ── Render ────────────────────────────────────────────────────────

@@ -58,10 +58,11 @@ Deno.serve(async (req: Request) => {
       .from("beach_day_hourly_scores")
       .select(
         "local_hour, hour_label, hour_status, is_in_best_window, " +
-        "tide_height, wind_speed, temp_air, precip_chance, busyness_score, " +
+        "tide_height, wind_speed, temp_air, feels_like, precip_chance, busyness_score, " +
         "uv_index, weather_code, hour_text, is_daylight, hour_score, " +
         "tide_score, wind_score, crowd_score, rain_score, temp_score, uv_score, " +
-        "tide_status, wind_status, crowd_status, rain_status, temp_status, uv_status"
+        "tide_status, wind_status, crowd_status, rain_status, temp_status, uv_status, " +
+        "temp_cold_status, temp_hot_status, sand_temp, asphalt_temp, sand_status, asphalt_status"
       )
       .eq("location_id", locationId)
       .eq("local_date", date)

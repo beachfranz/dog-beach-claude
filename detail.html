@@ -418,27 +418,42 @@
       return;
     }
 
-    // Build metrics
-    const metrics = [
-      {
-        label:    'Score',
-        key:      'hour_score',
-        fmt:      v => v !== null ? Math.round(Number(v)) : '',
-        max:      () => 100,
-        parse:    v => v !== null ? Number(v) : null,
-        reasonFn: h => h.is_in_best_window ? 'Best window of the day'
-          : h.hour_status === 'no_go'    ? 'Not recommended'
-          : h.hour_status === 'caution'  ? 'Some concerns this hour'
-          : h.hour_status === 'advisory' ? 'Minor advisory'
-          : 'Looks good',
-      },
+    // All possible metric definitions (Score and Temp handled separately)
+    const scoreMetric = {
+      label:    'Score',
+      key:      'hour_score',
+      fmt:      v => v !== null ? Math.round(Number(v)) : '',
+      max:      () => 100,
+      parse:    v => v !== null ? Number(v) : null,
+      reasonFn: h => h.is_in_best_window ? 'Best window of the day'
+        : h.hour_status === 'no_go'    ? 'Not recommended'
+        : h.hour_status === 'caution'  ? 'Some concerns this hour'
+        : h.hour_status === 'advisory' ? 'Minor advisory'
+        : 'Looks good',
+    };
+
+    const tempMetric = {
+      label:     'Temp (°F)',
+      key:       'temp_air',
+      statusKey: 'temp_status',
+      scoreKey:  'temp_score',
+      fmt:       v => v !== null ? Math.round(v) : '',
+      max:       () => Math.max(...hours.map(x => x.temp_air ?? 0), 1),
+      relative:  true,
+      reasonFn:  h => h.temp_status === 'no_go'    ? 'Extreme temperature'
+        : h.temp_status === 'caution'  ? 'Temp outside comfort zone'
+        : h.temp_status === 'advisory' ? 'Slightly warm or cool'
+        : 'Comfortable temperature',
+    };
+
+    const candidateMetrics = [
       {
         label:     'Tide (ft)',
         key:       'tide_height',
         statusKey: 'tide_status',
         scoreKey:  'tide_score',
         fmt:       v => v !== null ? v.toFixed(1) : '',
-        max:       h => Math.max(...hours.map(x => x.tide_height ?? 0), 0.1),
+        max:       () => Math.max(...hours.map(x => x.tide_height ?? 0), 0.1),
         reasonFn:  h => h.tide_status === 'no_go'    ? 'Dangerously high tide'
           : h.tide_status === 'caution'  ? 'High tide — less beach'
           : h.tide_status === 'advisory' ? 'Tide rising'
@@ -450,24 +465,11 @@
         statusKey: 'wind_status',
         scoreKey:  'wind_score',
         fmt:       v => v !== null ? Math.round(v) : '',
-        max:       h => Math.max(...hours.map(x => x.wind_speed ?? 0), 1),
+        max:       () => Math.max(...hours.map(x => x.wind_speed ?? 0), 1),
         reasonFn:  h => h.wind_status === 'no_go'    ? 'Dangerous wind speed'
           : h.wind_status === 'caution'  ? 'Strong wind'
           : h.wind_status === 'advisory' ? 'Breezy'
           : 'Calm wind',
-      },
-      {
-        label:     'Temp (°F)',
-        key:       'temp_air',
-        statusKey: 'temp_status',
-        scoreKey:  'temp_score',
-        fmt:       v => v !== null ? Math.round(v) : '',
-        max:       h => Math.max(...hours.map(x => x.temp_air ?? 0), 1),
-        relative:  true,
-        reasonFn:  h => h.temp_status === 'no_go'    ? 'Extreme temperature'
-          : h.temp_status === 'caution'  ? 'Temp outside comfort zone'
-          : h.temp_status === 'advisory' ? 'Slightly warm or cool'
-          : 'Comfortable temperature',
       },
       {
         label:     'Rain (%)',
@@ -475,7 +477,7 @@
         statusKey: 'rain_status',
         scoreKey:  'rain_score',
         fmt:       v => v !== null ? Math.round(v) : '',
-        max:       h => 100,
+        max:       () => 100,
         reasonFn:  h => h.rain_status === 'no_go'    ? 'High rain risk'
           : h.rain_status === 'caution'  ? 'Rain possible'
           : h.rain_status === 'advisory' ? 'Small chance of rain'
@@ -487,13 +489,60 @@
         statusKey: 'crowd_status',
         scoreKey:  'crowd_score',
         fmt:       v => v !== null ? Math.round(v) : '',
-        max:       h => 100,
+        max:       () => 100,
         reasonFn:  h => h.crowd_status === 'no_go'    ? 'Too crowded'
           : h.crowd_status === 'caution'  ? 'Getting busy'
           : h.crowd_status === 'advisory' ? 'Moderate crowds'
           : 'Good crowd level',
       },
+      {
+        label:     'UV',
+        key:       'uv_index',
+        statusKey: 'uv_status',
+        scoreKey:  'uv_score',
+        fmt:       v => v !== null ? v.toFixed(1) : '',
+        max:       () => Math.max(...hours.map(x => x.uv_index ?? 0), 1),
+        reasonFn:  h => h.uv_status === 'no_go'    ? 'Extreme UV — danger'
+          : h.uv_status === 'caution'  ? 'High UV — protect skin'
+          : h.uv_status === 'advisory' ? 'Elevated UV'
+          : 'UV manageable',
+      },
+      {
+        label:     'Sand (°F)',
+        key:       'sand_temp',
+        statusKey: 'sand_status',
+        fmt:       v => v !== null ? Math.round(v) : '',
+        max:       () => Math.max(...hours.map(x => x.sand_temp ?? 0), 1),
+        reasonFn:  h => h.sand_status === 'no_go'    ? 'Sand dangerously hot'
+          : h.sand_status === 'caution'  ? 'Sand very hot — paw risk'
+          : h.sand_status === 'advisory' ? 'Sand warm — monitor paws'
+          : 'Sand temp fine',
+      },
+      {
+        label:     'Asphalt (°F)',
+        key:       'asphalt_temp',
+        statusKey: 'asphalt_status',
+        fmt:       v => v !== null ? Math.round(v) : '',
+        max:       () => Math.max(...hours.map(x => x.asphalt_temp ?? 0), 1),
+        reasonFn:  h => h.asphalt_status === 'no_go'    ? 'Asphalt dangerously hot'
+          : h.asphalt_status === 'caution'  ? 'Asphalt very hot — paw risk'
+          : h.asphalt_status === 'advisory' ? 'Asphalt warm — monitor paws'
+          : 'Asphalt temp fine',
+      },
     ];
+
+    // Keep only metrics that appear on the status board (have ≥1 non-go hour)
+    const statusRank = { no_go: 3, caution: 2, advisory: 1 };
+    const worstStatus = m => hours.reduce((worst, h) => {
+      const s = h[m.statusKey];
+      return s && s !== 'go' && (statusRank[s] ?? 0) > (statusRank[worst] ?? 0) ? s : worst;
+    }, null);
+
+    const activeMiddle = candidateMetrics
+      .filter(m => hours.some(h => { const s = h[m.statusKey]; return s && s !== 'go'; }))
+      .sort((a, b) => (statusRank[worstStatus(b)] ?? 0) - (statusRank[worstStatus(a)] ?? 0));
+
+    const metrics = [scoreMetric, ...activeMiddle, tempMetric];
 
     const chartsHtml = metrics.map(m => buildMetricRow(m, hours, day)).join('');
 

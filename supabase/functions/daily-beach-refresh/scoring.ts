@@ -13,7 +13,7 @@
 // All thresholds and weights come from a ScoringConfig row — never hardcoded.
 
 // Types inlined — no external path imports in edge functions
-type HourStatus       = "go" | "caution" | "no_go";
+type HourStatus       = "go" | "advisory" | "caution" | "no_go";
 type BusynessCategory = "quiet" | "moderate" | "dog_party" | "too_crowded";
 
 interface ScoringConfig {

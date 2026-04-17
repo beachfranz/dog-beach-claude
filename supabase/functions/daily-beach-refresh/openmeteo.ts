@@ -34,14 +34,15 @@ export function wmoToSummaryWeather(
 }
 
 export interface OpenMeteoHour {
-  time: string;           // ISO local datetime, e.g. "2026-04-08T14:00"
-  temperature_2m: number; // °F
-  precipitation_probability: number; // %
-  precipitation: number;  // mm — actual (past hours) or forecast (future hours)
-  weathercode: number;    // WMO code
-  windspeed_10m: number;  // mph
+  time: string;                       // ISO local datetime, e.g. "2026-04-08T14:00"
+  temperature_2m: number;             // °F
+  apparent_temperature: number;       // °F — feels-like (wind chill / heat index)
+  precipitation_probability: number;  // %
+  precipitation: number;              // mm — actual (past hours) or forecast (future hours)
+  weathercode: number;                // WMO code
+  windspeed_10m: number;              // mph
   uv_index: number;
-  is_day: number;         // 1 = daylight, 0 = night
+  is_day: number;                     // 1 = daylight, 0 = night
 }
 
 export interface OpenMeteoDay {
@@ -61,6 +62,7 @@ export async function fetchWeather(beach: Beach): Promise<OpenMeteoResult> {
     longitude:        String(beach.longitude),
     hourly:           [
       "temperature_2m",
+      "apparent_temperature",
       "precipitation_probability",
       "precipitation",
       "weathercode",
@@ -93,6 +95,7 @@ export async function fetchWeather(beach: Beach): Promise<OpenMeteoResult> {
   const hours: OpenMeteoHour[] = times.map((time: string, i: number) => ({
     time,
     temperature_2m:             json.hourly.temperature_2m[i],
+    apparent_temperature:       json.hourly.apparent_temperature[i],
     precipitation_probability:  json.hourly.precipitation_probability[i],
     precipitation:              json.hourly.precipitation[i] ?? 0,
     weathercode:                json.hourly.weathercode[i],

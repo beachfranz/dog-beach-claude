@@ -1,39 +1,51 @@
 // get-beach-now/index.ts
-// Returns current real-time conditions for a beach.
-// Fetches live weather from Open-Meteo + tide from NOAA.
-// Borrows crowd score for the current hour from beach_day_hourly_scores
-// (BestTime forecasts don't change intra-day, so the pipeline value is valid).
-// Computes a full 6-metric composite score identical to the day cards.
+// Fetches actual current-hour conditions, runs them through the full
+// scoring engine, and writes the result to beach_day_hourly_scores
+// with is_now = true — overwriting the forecast row for that hour.
 //
-// GET ?location_id=huntington-dog-beach
-// Returns: { location_id, display_name, as_of, is_day, temp, wind_speed,
-//            weather_code, summary_weather, uv_index, precip_chance,
-//            tide_height, tide_direction, hour_score, busyness_category }
+// GET  ?location_id=X              → refresh single beach, return its NOW row
+// POST { location_ids?: string[] } → refresh all (or listed) beaches (used by cron)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import {
+  scoreHours,
+  buildHourLabel,
+  type RawHourData,
+  type ScoredHour,
+} from "../_shared/scoring.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 Deno.serve(async (req: Request) => {
-  const cors = { ...corsHeaders(req, "GET, OPTIONS"), "Content-Type": "application/json" };
+  const cors = { ...corsHeaders(req, "GET, POST, OPTIONS"), "Content-Type": "application/json" };
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: cors });
 
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
-  const url        = new URL(req.url);
-  const locationId = url.searchParams.get("location_id") ?? "huntington-dog-beach";
-
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+  const runAt    = new Date();
 
-  // ── Load beach + scoring config in parallel ───────────────────────────────
+  // ── Which beaches to refresh ─────────────────────────────────────────────────
+  let locationIds: string[] | null = null;
+
+  if (req.method === "GET") {
+    const id = new URL(req.url).searchParams.get("location_id");
+    if (id) locationIds = [id];
+  } else if (req.method === "POST") {
+    const body = await req.json().catch(() => ({}));
+    if (Array.isArray(body?.location_ids) && body.location_ids.length > 0) {
+      locationIds = body.location_ids;
+    }
+  }
+
+  // ── Load beaches + scoring config in parallel ────────────────────────────────
   const [beachRes, configRes] = await Promise.all([
-    supabase.from("beaches")
-      .select("location_id, display_name, latitude, longitude, timezone, noaa_station_id")
-      .eq("location_id", locationId)
-      .single(),
+    locationIds?.length
+      ? supabase.from("beaches").select("*").eq("is_active", true).in("location_id", locationIds)
+      : supabase.from("beaches").select("*").eq("is_active", true),
     supabase.from("scoring_config")
       .select("*")
       .eq("is_active", true)
@@ -42,70 +54,197 @@ Deno.serve(async (req: Request) => {
       .single(),
   ]);
 
-  if (beachRes.error || !beachRes.data) return json({ error: "Beach not found" }, 404);
-  if (configRes.error || !configRes.data) return json({ error: "Scoring config not found" }, 500);
+  if (beachRes.error || !beachRes.data?.length) return json({ error: "No beaches found" }, 404);
+  if (configRes.error || !configRes.data)        return json({ error: "Scoring config not found" }, 500);
 
-  const beach = beachRes.data;
-  const cfg   = configRes.data;
+  const beaches = beachRes.data;
+  const config  = configRes.data;
 
-  // ── Current date/hour in beach timezone ──────────────────────────────────
-  const now       = new Date();
-  const localParts = new Intl.DateTimeFormat("en-US", {
-    timeZone: beach.timezone,
-    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
-  const get = (t: string) => localParts.find(p => p.type === t)?.value ?? "";
-  const localDate = `${get("year")}-${get("month")}-${get("day")}`;
-  const localHour = parseInt(get("hour")) % 24;
+  // ── Process each beach ───────────────────────────────────────────────────────
+  const results = await Promise.all(
+    beaches.map(beach => refreshNow(beach, config, supabase, runAt))
+  );
 
-  // ── Fetch weather, tide, and crowd score in parallel ──────────────────────
-  const [weather, tide, hourRow] = await Promise.all([
-    fetchCurrentWeather(beach.latitude, beach.longitude, beach.timezone),
-    fetchCurrentTide(beach.noaa_station_id),
-    supabase.from("beach_day_hourly_scores")
-      .select("busyness_score, busyness_category, hour_status")
-      .eq("location_id", locationId)
-      .eq("local_date", localDate)
-      .eq("local_hour", localHour)
-      .maybeSingle(),
-  ]);
+  // Single-beach GET: return the NOW row directly (frontend call)
+  if (req.method === "GET" && locationIds?.length === 1) {
+    const r = results[0];
+    if (!r.ok) return json({ error: r.error }, 500);
+    return json(r.row);
+  }
 
-  const busynessScore    = hourRow.data?.busyness_score    ?? null;
-  const busynessCategory = hourRow.data?.busyness_category ?? null;
-
-  // ── Compute full 6-metric score + per-metric statuses ────────────────────
-  const score          = computeScore(weather, tide, busynessScore, cfg);
-  const metricStatuses = computeMetricStatuses(weather, tide, busynessCategory, cfg);
-
+  // Batch POST: return summary (cron call)
   return json({
-    location_id:       beach.location_id,
-    display_name:      beach.display_name,
-    as_of:             now.toISOString(),
-    is_day:            weather.is_day,
-    temp:              weather.temp,
-    wind_speed:        weather.wind_speed,
-    weather_code:      weather.weather_code,
-    summary_weather:   wmoToSummaryWeather(weather.weather_code, weather.wind_speed),
-    uv_index:          weather.uv_index,
-    precip_chance:     weather.precip_chance,
-    tide_height:       tide.height,
-    tide_direction:    tide.direction,
-    hour_score:        score,
-    busyness_category: busynessCategory,
-    metric_statuses:   metricStatuses,
+    ok:      true,
+    runAt:   runAt.toISOString(),
+    results: results.map(r => ({ locationId: r.locationId, ok: r.ok, error: r.error })),
   });
 });
+
+// ─── Per-beach NOW refresh ────────────────────────────────────────────────────
+
+interface Beach {
+  location_id: string;
+  display_name: string;
+  latitude: number;
+  longitude: number;
+  noaa_station_id: string | null;
+  timezone: string;
+  open_time: string | null;
+  close_time: string | null;
+}
+
+async function refreshNow(
+  beach: Beach,
+  config: Record<string, unknown>,
+  supabase: ReturnType<typeof createClient>,
+  runAt: Date,
+): Promise<{ locationId: string; ok: boolean; row?: unknown; error?: string }> {
+  try {
+    // ── Current local date + hour for this beach ────────────────────────────
+    const localParts = new Intl.DateTimeFormat("en-US", {
+      timeZone: beach.timezone,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", hour12: false,
+    }).formatToParts(runAt);
+    const get = (t: string) => localParts.find(p => p.type === t)?.value ?? "";
+    const localDate = `${get("year")}-${get("month")}-${get("day")}`;
+    const localHour = parseInt(get("hour")) % 24;
+
+    // ── Fetch weather + tide + crowd in parallel ────────────────────────────
+    const [weather, tide, crowdRow] = await Promise.all([
+      fetchCurrentWeather(beach.latitude, beach.longitude, beach.timezone),
+      fetchCurrentTide(beach.noaa_station_id, localHour),
+      supabase.from("beach_day_hourly_scores")
+        .select("busyness_score, busyness_category")
+        .eq("location_id", beach.location_id)
+        .eq("local_date", localDate)
+        .eq("local_hour", localHour)
+        .maybeSingle(),
+    ]);
+
+    // ── Build RawHourData ───────────────────────────────────────────────────
+    const openMinutes  = timeToMinutes(beach.open_time  ?? "00:00");
+    const closeMinutes = timeToMinutes(beach.close_time ?? "23:59");
+    const isBeachOpen  = (localHour * 60) >= openMinutes && (localHour * 60) < closeMinutes;
+
+    const rawHour: RawHourData = {
+      forecastTs:    localToUtcIso(localDate, localHour, beach.timezone),
+      localDate,
+      localHour,
+      hourLabel:     buildHourLabel(localHour),
+      isDaylight:    weather.is_day,
+      weatherCode:   weather.weather_code,
+      tempAir:       weather.temperature_2m,
+      feelsLike:     weather.apparent_temperature,
+      windSpeed:     weather.wind_speed_10m,
+      precipChance:  weather.precip_chance,
+      uvIndex:       weather.uv_index,
+      tideHeight:    tide.height,
+      busynessScore: crowdRow.data?.busyness_score ?? null,
+      isBeachOpen,
+    };
+
+    // ── Score through shared engine ─────────────────────────────────────────
+    const [scored] = scoreHours([rawHour], config as Parameters<typeof scoreHours>[1]);
+
+    // ── Build DB row ────────────────────────────────────────────────────────
+    const row = buildNowRow(scored, beach, config as { scoring_version: string }, runAt);
+
+    // ── Clear old is_now flag for this beach, then upsert ──────────────────
+    await supabase
+      .from("beach_day_hourly_scores")
+      .update({ is_now: false })
+      .eq("location_id", beach.location_id)
+      .eq("is_now", true);
+
+    const { error: upsertErr } = await supabase
+      .from("beach_day_hourly_scores")
+      .upsert(row, { onConflict: "location_id,forecast_ts" });
+
+    if (upsertErr) throw new Error(upsertErr.message);
+
+    // Return row with tide direction for frontend display
+    return {
+      locationId: beach.location_id,
+      ok:         true,
+      row:        { ...row, tide_direction: tide.direction },
+    };
+
+  } catch (err) {
+    console.error(`[${beach.location_id}] NOW refresh error:`, String(err));
+    return { locationId: beach.location_id, ok: false, error: String(err) };
+  }
+}
+
+// ─── Row builder ─────────────────────────────────────────────────────────────
+
+function buildNowRow(
+  h: ScoredHour,
+  beach: { location_id: string; timezone: string },
+  config: { scoring_version: string },
+  runAt: Date,
+) {
+  return {
+    location_id:           beach.location_id,
+    local_date:            h.localDate,
+    forecast_ts:           h.forecastTs,
+    local_hour:            h.localHour,
+    hour_label:            h.hourLabel,
+    is_daylight:           h.isDaylight,
+    is_candidate_window:   h.isCandidateWindow,
+    is_in_best_window:     false,
+    is_now:                true,
+    weather_code:          h.weatherCode,
+    temp_air:              h.tempAir,
+    feels_like:            h.feelsLike,
+    wind_speed:            h.windSpeed,
+    precip_chance:         h.precipChance,
+    uv_index:              h.uvIndex,
+    tide_height:           h.tideHeight,
+    busyness_score:        h.busynessScore,
+    busyness_category:     h.busynessCategory,
+    hour_status:           h.hourStatus,
+    hour_score:            h.hourScore,
+    passed_checks:         h.passedChecks,
+    failed_checks:         h.failedChecks,
+    positive_reason_codes: h.positiveReasonCodes,
+    risk_reason_codes:     h.riskReasonCodes,
+    explainability:        h.explainability,
+    tide_score:            h.explainability.tide_score   ?? null,
+    wind_score:            h.explainability.wind_score   ?? null,
+    crowd_score:           h.explainability.crowd_score  ?? null,
+    rain_score:            h.explainability.rain_score   ?? null,
+    temp_score:            h.explainability.temp_score   ?? null,
+    uv_score:              h.explainability.uv_score     ?? null,
+    tide_status:           h.metricStatuses.tide_status      ?? null,
+    wind_status:           h.metricStatuses.wind_status      ?? null,
+    crowd_status:          h.metricStatuses.crowd_status     ?? null,
+    rain_status:           h.metricStatuses.rain_status      ?? null,
+    temp_status:           h.metricStatuses.temp_status      ?? null,
+    temp_cold_status:      h.metricStatuses.temp_cold_status ?? null,
+    temp_hot_status:       h.metricStatuses.temp_hot_status  ?? null,
+    uv_status:             h.metricStatuses.uv_status        ?? null,
+    sand_temp:             h.sandTemp,
+    asphalt_temp:          h.asphaltTemp,
+    sand_status:           h.metricStatuses.sand_status      ?? null,
+    asphalt_status:        h.metricStatuses.asphalt_status   ?? null,
+    hour_text:             h.hourText,
+    timezone:              beach.timezone,
+    scoring_version:       config.scoring_version,
+    generated_at:          runAt.toISOString(),
+  };
+}
 
 // ─── Weather fetch ────────────────────────────────────────────────────────────
 
 interface CurrentWeather {
-  temp: number;
-  wind_speed: number;
-  weather_code: number;
-  uv_index: number;
-  precip_chance: number;
-  is_day: boolean;
+  temperature_2m:      number;
+  apparent_temperature: number;
+  wind_speed_10m:      number;
+  weather_code:        number;
+  uv_index:            number;
+  precip_chance:       number;
+  is_day:              boolean;
 }
 
 async function fetchCurrentWeather(
@@ -114,50 +253,52 @@ async function fetchCurrentWeather(
   timezone: string,
 ): Promise<CurrentWeather> {
   const params = new URLSearchParams({
-    latitude:         String(lat),
-    longitude:        String(lng),
-    current:          "temperature_2m,wind_speed_10m,weather_code,uv_index,is_day",
-    hourly:           "precipitation_probability",
-    forecast_days:    "1",
-    temperature_unit: "fahrenheit",
-    windspeed_unit:   "mph",
+    latitude:           String(lat),
+    longitude:          String(lng),
+    current:            "temperature_2m,apparent_temperature,wind_speed_10m,weather_code,uv_index,is_day",
+    hourly:             "precipitation_probability",
+    forecast_days:      "1",
+    temperature_unit:   "fahrenheit",
+    windspeed_unit:     "mph",
     timezone,
   });
 
-  const res  = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
+  const res = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
   if (!res.ok) throw new Error(`Open-Meteo error ${res.status}`);
   const data = await res.json();
+  const cur  = data.current;
 
-  const cur = data.current;
-
-  // Current hour's precipitation probability from hourly forecast
-  const now       = new Date();
-  const currentH  = now.getHours();
+  // precipitation_probability only available in hourly; take current hour's value
+  const nowHour  = new Date().getHours();
   const precipArr = data.hourly?.precipitation_probability ?? [];
-  const precip    = precipArr[currentH] ?? 0;
+  const precip    = precipArr[nowHour] ?? 0;
 
   return {
-    temp:          cur.temperature_2m,
-    wind_speed:    cur.wind_speed_10m,
-    weather_code:  cur.weather_code,
-    uv_index:      cur.uv_index ?? 0,
-    precip_chance: precip,
-    is_day:        cur.is_day === 1,
+    temperature_2m:       cur.temperature_2m,
+    apparent_temperature: cur.apparent_temperature ?? cur.temperature_2m,
+    wind_speed_10m:       cur.wind_speed_10m,
+    weather_code:         cur.weather_code,
+    uv_index:             cur.uv_index ?? 0,
+    precip_chance:        precip,
+    is_day:               cur.is_day === 1,
   };
 }
 
 // ─── Tide fetch ───────────────────────────────────────────────────────────────
 
 interface CurrentTide {
-  height: number | null;
+  height:    number | null;
   direction: "rising" | "falling" | "steady";
 }
 
-async function fetchCurrentTide(stationId: string | null): Promise<CurrentTide> {
+async function fetchCurrentTide(
+  stationId: string | null,
+  localHour: number,
+): Promise<CurrentTide> {
   if (!stationId) return { height: null, direction: "steady" };
 
   const now   = new Date();
-  const today = formatNoaaDate(now);
+  const today = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
 
   const params = new URLSearchParams({
     station:    stationId,
@@ -171,104 +312,53 @@ async function fetchCurrentTide(stationId: string | null): Promise<CurrentTide> 
     end_date:   today,
   });
 
-  const res = await fetch(`https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?${params}`);
-  if (!res.ok) return { height: null, direction: "steady" };
+  try {
+    const res  = await fetch(`https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?${params}`);
+    if (!res.ok) return { height: null, direction: "steady" };
+    const data = await res.json();
+    if (!Array.isArray(data.predictions)) return { height: null, direction: "steady" };
 
-  const data = await res.json();
-  if (!Array.isArray(data.predictions)) return { height: null, direction: "steady" };
+    const tides     = data.predictions as Array<{ t: string; v: string }>;
+    const curEntry  = tides.find(p => parseInt(p.t.slice(11, 13)) === localHour);
+    const nextEntry = tides.find(p => parseInt(p.t.slice(11, 13)) === (localHour + 1) % 24);
 
-  const nowHour   = now.getHours();
-  const tides     = data.predictions as Array<{ t: string; v: string }>;
-  const curEntry  = tides.find(p => parseInt(p.t.slice(11, 13)) === nowHour);
-  const nextEntry = tides.find(p => parseInt(p.t.slice(11, 13)) === (nowHour + 1) % 24);
+    const height = curEntry  ? parseFloat(curEntry.v)  : null;
+    const next   = nextEntry ? parseFloat(nextEntry.v) : null;
 
-  const height = curEntry  ? parseFloat(curEntry.v)  : null;
-  const next   = nextEntry ? parseFloat(nextEntry.v) : null;
+    let direction: "rising" | "falling" | "steady" = "steady";
+    if (height !== null && next !== null) {
+      if (next - height > 0.1)      direction = "rising";
+      else if (height - next > 0.1) direction = "falling";
+    }
 
-  let direction: "rising" | "falling" | "steady" = "steady";
-  if (height !== null && next !== null) {
-    if (next - height > 0.1)      direction = "rising";
-    else if (height - next > 0.1) direction = "falling";
+    return { height, direction };
+  } catch {
+    return { height: null, direction: "steady" };
   }
-
-  return { height, direction };
 }
 
-// ─── Scoring ──────────────────────────────────────────────────────────────────
+// ─── Utilities ────────────────────────────────────────────────────────────────
 
-function computeScore(
-  weather: CurrentWeather,
-  tide: CurrentTide,
-  busynessScore: number | null,
-  cfg: Record<string, number>,
-): number | null {
-  if (!weather.is_day) return null;
-
-  const tideScore  = tide.height !== null
-    ? clamp(1 - tide.height / cfg.norm_tide_max) : 0.5;
-  const rainScore  = clamp(1 - weather.precip_chance / 100);
-  const windScore  = clamp(1 - weather.wind_speed / cfg.norm_wind_max);
-  const crowdScore = busynessScore !== null
-    ? clamp(1 - busynessScore / 100) : 0.5;
-  const tempScore  = clamp(1 - Math.abs(weather.temp - cfg.norm_temp_target) / cfg.norm_temp_range);
-  const uvScore    = clamp(1 - weather.uv_index / cfg.norm_uv_max);
-
-  const score =
-    tideScore  * (cfg.weight_tide  ?? 0.30) +
-    rainScore  * (cfg.weight_rain  ?? 0.25) +
-    windScore  * (cfg.weight_wind  ?? 0.20) +
-    crowdScore * (cfg.weight_crowd ?? 0.15) +
-    tempScore  * (cfg.weight_temp  ?? 0.05) +
-    uvScore    * (cfg.weight_uv    ?? 0.05);
-
-  return Math.round(score * 100);
+function timeToMinutes(time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + (m ?? 0);
 }
 
-// ─── Metric statuses ──────────────────────────────────────────────────────────
-
-function computeMetricStatuses(
-  weather: CurrentWeather,
-  tide: CurrentTide,
-  busynessCategory: string | null,
-  cfg: Record<string, number>,
-): Record<string, string | null> {
-  return {
-    tide:  tide.height !== null
-      ? (tide.height >= (cfg.caution_tide_height ?? 3.5) ? "caution" : "go")
-      : null,
-    wind:  weather.wind_speed >= (cfg.nogo_wind_speed ?? 25)    ? "no_go"
-         : weather.wind_speed >= (cfg.caution_wind_speed ?? 15) ? "caution" : "go",
-    rain:  weather.precip_chance >= (cfg.nogo_precip_chance ?? 70)    ? "no_go"
-         : weather.precip_chance >= (cfg.caution_precip_chance ?? 40) ? "caution" : "go",
-    crowd: busynessCategory === "too_crowded" ? "no_go"
-         : busynessCategory === "dog_party"   ? "caution"
-         : busynessCategory !== null          ? "go" : null,
-    temp:  weather.temp < (cfg.nogo_temp_min ?? 50) || weather.temp > (cfg.nogo_temp_max ?? 90) ? "no_go"
-         : weather.temp < (cfg.caution_temp_min ?? 63) || weather.temp > (cfg.caution_temp_max ?? 85) ? "caution"
-         : "go",
-    uv:    weather.uv_index >= (cfg.caution_uv_index ?? 8) ? "caution" : "go",
-  };
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function clamp(val: number): number {
-  return Math.max(0, Math.min(1, val));
-}
-
-function formatNoaaDate(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}${m}${d}`;
-}
-
-function wmoToSummaryWeather(code: number, windSpeed: number): string {
-  if (windSpeed >= 20) return "windy";
-  if (code === 0)      return "sunny";
-  if (code <= 2)       return "partly_cloudy";
-  if (code === 3)      return "cloudy";
-  if (code >= 45 && code <= 48) return "foggy";
-  if (code >= 51)      return "rainy";
-  return "partly_cloudy";
+function localToUtcIso(localDate: string, localHour: number, timezone: string): string {
+  const [year, month, day] = localDate.split("-").map(Number);
+  const utcGuess  = new Date(Date.UTC(year, month - 1, day, localHour, 0, 0));
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+  const parts     = Object.fromEntries(
+    formatter.formatToParts(utcGuess).map(p => [p.type, p.value])
+  );
+  const localFromUtc = new Date(Date.UTC(
+    Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+    Number(parts.hour), Number(parts.minute),
+  ));
+  const offsetMs = localFromUtc.getTime() - utcGuess.getTime();
+  return new Date(utcGuess.getTime() - offsetMs).toISOString();
 }

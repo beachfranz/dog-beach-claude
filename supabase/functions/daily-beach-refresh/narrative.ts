@@ -13,7 +13,7 @@
 
 import type { ScoredHour, BestWindow } from "./scoring.ts";
 // Types inlined — no external path imports in edge functions
-type DayStatus        = "go" | "caution" | "no_go";
+type DayStatus        = "go" | "advisory" | "caution" | "no_go";
 type BusynessCategory = "quiet" | "moderate" | "dog_party" | "too_crowded";
 type TideDirection    = "rising" | "falling" | "steady";
 type BacteriaRisk     = "none" | "low" | "moderate" | "high";

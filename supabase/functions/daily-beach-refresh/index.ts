@@ -24,9 +24,9 @@ import {
 
 // ─── Inlined types (replaces ../../src/lib/types.ts import) ──────────────────
 
-type HourStatus       = "go" | "caution" | "no_go";
+type HourStatus       = "go" | "advisory" | "caution" | "no_go";
 type BusynessCategory = "quiet" | "moderate" | "dog_party" | "too_crowded";
-type DayStatus        = "go" | "caution" | "no_go";
+type DayStatus        = "go" | "advisory" | "caution" | "no_go";
 type SummaryWeather   = "sunny" | "partly_cloudy" | "cloudy" | "foggy" | "rainy" | "windy";
 type BacteriaRisk     = "none" | "low" | "moderate" | "high";
 
@@ -55,13 +55,37 @@ interface ScoringConfig {
   effective_from: string;
   description: string | null;
   is_active: boolean;
+  // No-go thresholds
   nogo_precip_chance: number;
   nogo_wind_speed: number;
   nogo_wmo_codes: number[];
+  nogo_uv_index: number;
+  nogo_temp_hot_max: number;
+  // Caution thresholds
   caution_precip_chance: number;
   caution_wind_speed: number;
   caution_tide_height: number;
   caution_uv_index: number;
+  caution_wmo_codes: number[];
+  caution_temp_cold_min: number;
+  caution_temp_hot_max: number;
+  advisory_crowd_max: number;
+  // Advisory thresholds
+  advisory_precip_chance: number;
+  advisory_wind_speed: number;
+  advisory_tide_height: number;
+  advisory_uv_index: number;
+  advisory_temp_cold_min: number;
+  go_temp_cold_min: number;
+  advisory_temp_hot_max: number;
+  advisory_crowd_min: number;
+  // Surface temp thresholds
+  advisory_sand_temp: number;
+  caution_sand_temp: number;
+  nogo_sand_temp: number;
+  advisory_asphalt_temp: number;
+  caution_asphalt_temp: number;
+  // Positive signals
   positive_low_tide: number;
   positive_very_low_tide: number;
   positive_low_precip: number;
@@ -69,27 +93,29 @@ interface ScoringConfig {
   positive_temp_min: number;
   positive_temp_max: number;
   positive_low_uv: number;
+  // Busyness categories
   busy_quiet_max: number;
   busy_moderate_max: number;
   busy_dog_party_max: number;
+  // Weights
   weight_tide: number;
   weight_rain: number;
   weight_wind: number;
   weight_crowd: number;
   weight_temp: number;
   weight_uv: number;
+  // Normalisation
   norm_tide_max: number;
   norm_wind_max: number;
   norm_temp_target: number;
   norm_temp_range: number;
   norm_uv_max: number;
+  // Window selection
   window_min_hours: number;
   window_max_hours: number;
   window_caution_penalty: number;
-  caution_temp_min: number;
-  caution_temp_max: number;
-  nogo_temp_min: number;
-  nogo_temp_max: number;
+  window_score_threshold: number;
+  // Bacteria thresholds
   bacteria_caution_mm?: number;
   bacteria_nogo_mm?: number;
   created_at: string;
@@ -409,6 +435,7 @@ function buildRawHours(
       isDaylight:    wh.is_day === 1,
       weatherCode:   wh.weathercode,
       tempAir:       wh.temperature_2m,
+      feelsLike:     wh.apparent_temperature,
       windSpeed:     wh.windspeed_10m,
       precipChance:  wh.precipitation_probability,
       uvIndex:       wh.uv_index,
@@ -439,6 +466,7 @@ function buildHourlyRow(
     is_in_best_window:     h.isInBestWindow,
     weather_code:          h.weatherCode,
     temp_air:              h.tempAir,
+    feels_like:            h.feelsLike,
     wind_speed:            h.windSpeed,
     precip_chance:         h.precipChance,
     uv_index:              h.uvIndex,
@@ -458,12 +486,18 @@ function buildHourlyRow(
     rain_score:            h.explainability.rain_score  ?? null,
     temp_score:            h.explainability.temp_score  ?? null,
     uv_score:              h.explainability.uv_score    ?? null,
-    tide_status:           h.metricStatuses.tide_status  ?? null,
-    wind_status:           h.metricStatuses.wind_status  ?? null,
-    crowd_status:          h.metricStatuses.crowd_status ?? null,
-    rain_status:           h.metricStatuses.rain_status  ?? null,
-    temp_status:           h.metricStatuses.temp_status  ?? null,
-    uv_status:             h.metricStatuses.uv_status    ?? null,
+    tide_status:           h.metricStatuses.tide_status     ?? null,
+    wind_status:           h.metricStatuses.wind_status     ?? null,
+    crowd_status:          h.metricStatuses.crowd_status    ?? null,
+    rain_status:           h.metricStatuses.rain_status     ?? null,
+    temp_status:           h.metricStatuses.temp_status     ?? null,
+    temp_cold_status:      h.metricStatuses.temp_cold_status ?? null,
+    temp_hot_status:       h.metricStatuses.temp_hot_status  ?? null,
+    uv_status:             h.metricStatuses.uv_status       ?? null,
+    sand_temp:             h.sandTemp,
+    asphalt_temp:          h.asphaltTemp,
+    sand_status:           h.metricStatuses.sand_status     ?? null,
+    asphalt_status:        h.metricStatuses.asphalt_status  ?? null,
     hour_text:             hourText,
     timezone:              beach.timezone,
     scoring_version:       config.scoring_version,
@@ -482,22 +516,27 @@ function buildDailyRow(
   recentPrecip: { precip24hMm: number; precip72hMm: number },
   bacteriaRisk: BacteriaRisk,
 ) {
-  const goHours      = dayHours.filter((h) => h.hourStatus === "go");
-  const cautionHours = dayHours.filter((h) => h.hourStatus === "caution");
-  const noGoHours    = dayHours.filter((h) => h.hourStatus === "no_go");
+  const goHours       = dayHours.filter((h) => h.hourStatus === "go");
+  const advisoryHours = dayHours.filter((h) => h.hourStatus === "advisory");
+  const cautionHours  = dayHours.filter((h) => h.hourStatus === "caution");
+  const noGoHours     = dayHours.filter((h) => h.hourStatus === "no_go");
 
-  // Bacteria risk forces day_status to at least caution
+  // day_status = best achievable status (go > advisory > caution > no_go)
+  // Bacteria risk forces day_status up to at least caution
   const weatherStatus: DayStatus =
     goHours.length > 0        ? "go"
-    : cautionHours.length > 0 ? "caution"
+    : advisoryHours.length > 0 ? "advisory"
+    : cautionHours.length > 0  ? "caution"
     : "no_go";
   const dayStatus: DayStatus =
-    (bacteriaRisk === "moderate" || bacteriaRisk === "high") && weatherStatus === "go"
+    (bacteriaRisk === "moderate" || bacteriaRisk === "high") &&
+    (weatherStatus === "go" || weatherStatus === "advisory")
       ? "caution"
       : weatherStatus;
 
   const aggHours    = window?.hours ?? dayHours.filter((h) => h.isDaylight);
-  const avgTemp     = average(aggHours.map((h) => h.tempAir).filter(nonNull));
+  const avgTemp       = average(aggHours.map((h) => h.tempAir).filter(nonNull));
+  const avgFeelsLike  = average(aggHours.map((h) => h.feelsLike).filter(nonNull));
   const avgWind     = average(aggHours.map((h) => h.windSpeed).filter(nonNull));
   const avgUv       = average(aggHours.map((h) => h.uvIndex).filter(nonNull));
   const avgTide     = average(aggHours.map((h) => h.tideHeight).filter(nonNull));
@@ -549,8 +588,10 @@ function buildDailyRow(
     avg_busyness_score:    round1(avgBusyness),
     busyness_category:     deriveBusynessCategory(avgBusyness, config),
     go_hours_count:        goHours.length,
+    advisory_hours_count:  advisoryHours.length,
     caution_hours_count:   cautionHours.length,
     no_go_hours_count:     noGoHours.length,
+    avg_feels_like:        round1(avgFeelsLike),
     positive_reason_codes: [...positiveSet],
     risk_reason_codes:     [...riskSet],
     explainability:        {},
@@ -585,14 +626,16 @@ function buildNarrativeInput(
   const dayOfWeek = jsDate.toLocaleDateString("en-US", { weekday: "long" });
   const isWeekend = dayOfWeek === "Saturday" || dayOfWeek === "Sunday";
 
-  const goHours      = dayHours.filter((h) => h.hourStatus === "go");
-  const cautionHours = dayHours.filter((h) => h.hourStatus === "caution");
-  const noGoHours    = dayHours.filter((h) => h.hourStatus === "no_go");
+  const goHours       = dayHours.filter((h) => h.hourStatus === "go");
+  const advisoryHoursNar = dayHours.filter((h) => h.hourStatus === "advisory");
+  const cautionHours  = dayHours.filter((h) => h.hourStatus === "caution");
+  const noGoHours     = dayHours.filter((h) => h.hourStatus === "no_go");
 
   const aggHours  = window?.hours ?? dayHours.filter((h) => h.isDaylight);
   const dayStatus: DayStatus =
-    goHours.length > 0       ? "go"
-    : cautionHours.length > 0 ? "caution"
+    goHours.length > 0            ? "go"
+    : advisoryHoursNar.length > 0  ? "advisory"
+    : cautionHours.length > 0      ? "caution"
     : "no_go";
 
   // Tide direction: compare first vs last tide in best window (or agg hours)

@@ -50,28 +50,53 @@ Deno.serve(async (req: Request) => {
       return json({ error: daysErr.message }, 500);
     }
 
-    // Fetch best-window hourly scores for the next 7 days to compute composite scores
+    // Fetch best-window hourly scores for the next 7 days to compute composite scores + metric statuses
     const dates = (days ?? []).map(d => d.local_date);
     const { data: hours } = dates.length ? await supabase
       .from("beach_day_hourly_scores")
-      .select("local_date, hour_score")
+      .select("local_date, hour_score, tide_status, wind_status, rain_status, crowd_status, temp_status, uv_status")
       .eq("location_id", locationId)
       .in("local_date", dates)
       .eq("is_in_best_window", true) : { data: [] };
 
-    // Average hour_score per date → composite_score
-    const scoreByDate: Record<string, { sum: number; count: number }> = {};
+    // Status priority for worst-case computation
+    const statusRank: Record<string, number> = { go: 1, caution: 2, no_go: 3 };
+    const worstStatus = (a: string | null, b: string | null): string | null => {
+      if (!a) return b;
+      if (!b) return a;
+      return (statusRank[a] ?? 0) >= (statusRank[b] ?? 0) ? a : b;
+    };
+
+    // Average hour_score + worst metric status per date
+    type DateAgg = {
+      sum: number; count: number;
+      tide: string | null; wind: string | null; rain: string | null;
+      crowd: string | null; temp: string | null; uv: string | null;
+    };
+    const byDate: Record<string, DateAgg> = {};
     for (const h of hours ?? []) {
-      if (!scoreByDate[h.local_date]) scoreByDate[h.local_date] = { sum: 0, count: 0 };
-      scoreByDate[h.local_date].sum   += Number(h.hour_score ?? 0);
-      scoreByDate[h.local_date].count += 1;
+      if (!byDate[h.local_date]) byDate[h.local_date] = { sum: 0, count: 0, tide: null, wind: null, rain: null, crowd: null, temp: null, uv: null };
+      const agg = byDate[h.local_date];
+      agg.sum   += Number(h.hour_score ?? 0);
+      agg.count += 1;
+      agg.tide  = worstStatus(agg.tide,  h.tide_status);
+      agg.wind  = worstStatus(agg.wind,  h.wind_status);
+      agg.rain  = worstStatus(agg.rain,  h.rain_status);
+      agg.crowd = worstStatus(agg.crowd, h.crowd_status);
+      agg.temp  = worstStatus(agg.temp,  h.temp_status);
+      agg.uv    = worstStatus(agg.uv,    h.uv_status);
     }
-    const daysWithScore = (days ?? []).map(d => ({
-      ...d,
-      composite_score: scoreByDate[d.local_date]
-        ? Math.round(scoreByDate[d.local_date].sum / scoreByDate[d.local_date].count)
-        : null,
-    }));
+    const daysWithScore = (days ?? []).map(d => {
+      const agg = byDate[d.local_date];
+      return {
+        ...d,
+        composite_score: agg ? Math.round(agg.sum / agg.count) : null,
+        metric_statuses: agg ? {
+          tide: agg.tide, wind: agg.wind, rain: agg.rain,
+          crowd: agg.crowd, temp: agg.temp, uv: agg.uv,
+        } : null,
+      };
+    });
 
     // Fetch all active beaches for location switcher
     const { data: allBeaches } = await supabase

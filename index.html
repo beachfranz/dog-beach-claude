@@ -298,10 +298,9 @@
 
     .chip-sep { color: var(--text-dim); }
 
-    .chip.crowd-quiet      { color: #4ade80; }
-    .chip.crowd-moderate   { color: var(--text-muted); }
-    .chip.crowd-dog_party  { color: #f97316; }
-    .chip.crowd-too_crowded{ color: var(--red); }
+    .chip.chip-go      { color: var(--green); }
+    .chip.chip-caution { color: var(--amber); }
+    .chip.chip-no_go   { color: var(--red); }
 
     /* Chevron */
     .chevron {
@@ -491,16 +490,17 @@
         <span class="day-score-label">NOW</span>
       </div>`;
 
+    const ms    = d.metric_statuses ?? {};
     const chips = [];
     if (d.tide_height !== null) {
       const arrow = d.tide_direction === 'rising' ? '↑' : d.tide_direction === 'falling' ? '↓' : '';
-      chips.push(`<span class="chip">🌊 ${d.tide_height.toFixed(1)}ft${arrow}</span>`);
+      chips.push(`<span class="chip ${chipClass(ms.tide)}">🌊 ${d.tide_height.toFixed(1)}ft${arrow}</span>`);
     }
-    if (d.temp    !== null) chips.push(`<span class="chip">🌡 ${Math.round(d.temp)}°</span>`);
-    if (d.wind_speed !== null) chips.push(`<span class="chip">💨 ${Math.round(d.wind_speed)}mph</span>`);
+    if (d.temp       !== null) chips.push(`<span class="chip ${chipClass(ms.temp)}">🌡 ${Math.round(d.temp)}°</span>`);
+    if (d.wind_speed !== null) chips.push(`<span class="chip ${chipClass(ms.wind)}">💨 ${Math.round(d.wind_speed)}mph</span>`);
     if (d.busyness_category) {
       const crowdLabel = { quiet: '✌️ Quiet', moderate: '⚖️ Mod', dog_party: '🎉 Dog Party', too_crowded: '🚫 Too Crowded' }[d.busyness_category] ?? d.busyness_category;
-      chips.push(`<span class="chip crowd-${d.busyness_category}">${crowdLabel}</span>`);
+      chips.push(`<span class="chip ${chipClass(ms.crowd)}">${crowdLabel}</span>`);
     }
 
     const today = new Date().toISOString().slice(0, 10);
@@ -618,17 +618,25 @@
       </div>`;
   }
 
+  function chipClass(status) {
+    if (!status || status === 'go') return 'chip-go';
+    if (status === 'caution') return 'chip-caution';
+    if (status === 'no_go')   return 'chip-no_go';
+    return '';
+  }
+
   function buildChips(day) {
+    const ms    = day.metric_statuses ?? {};
     const parts = [];
 
     if (day.lowest_tide_height !== null) {
-      parts.push(`<span class="chip">🌊 ${day.lowest_tide_height}ft</span>`);
+      parts.push(`<span class="chip ${chipClass(ms.tide)}">🌊 ${day.lowest_tide_height}ft</span>`);
     }
     if (day.avg_temp !== null) {
-      parts.push(`<span class="chip">🌡 ${Math.round(day.avg_temp)}°</span>`);
+      parts.push(`<span class="chip ${chipClass(ms.temp)}">🌡 ${Math.round(day.avg_temp)}°</span>`);
     }
     if (day.avg_wind !== null) {
-      parts.push(`<span class="chip">💨 ${Math.round(day.avg_wind)}mph</span>`);
+      parts.push(`<span class="chip ${chipClass(ms.wind)}">💨 ${Math.round(day.avg_wind)}mph</span>`);
     }
     if (day.busyness_category) {
       const crowdLabel = {
@@ -637,8 +645,7 @@
         dog_party:   '🎉 Dog Party',
         too_crowded: '🚫 Too Crowded',
       }[day.busyness_category] ?? day.busyness_category;
-      const crowdClass = `crowd-${day.busyness_category}`;
-      parts.push(`<span class="chip ${crowdClass}">${crowdLabel}</span>`);
+      parts.push(`<span class="chip ${chipClass(ms.crowd)}">${crowdLabel}</span>`);
     }
     return parts.join(`<span class="chip-sep">·</span>`);
   }

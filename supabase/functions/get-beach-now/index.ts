@@ -74,8 +74,9 @@ Deno.serve(async (req: Request) => {
   const busynessScore    = hourRow.data?.busyness_score    ?? null;
   const busynessCategory = hourRow.data?.busyness_category ?? null;
 
-  // ── Compute full 6-metric score ───────────────────────────────────────────
-  const score = computeScore(weather, tide, busynessScore, cfg);
+  // ── Compute full 6-metric score + per-metric statuses ────────────────────
+  const score          = computeScore(weather, tide, busynessScore, cfg);
+  const metricStatuses = computeMetricStatuses(weather, tide, busynessCategory, cfg);
 
   return json({
     location_id:       beach.location_id,
@@ -92,6 +93,7 @@ Deno.serve(async (req: Request) => {
     tide_direction:    tide.direction,
     hour_score:        score,
     busyness_category: busynessCategory,
+    metric_statuses:   metricStatuses,
   });
 });
 
@@ -220,6 +222,32 @@ function computeScore(
     uvScore    * (cfg.weight_uv    ?? 0.05);
 
   return Math.round(score * 100);
+}
+
+// ─── Metric statuses ──────────────────────────────────────────────────────────
+
+function computeMetricStatuses(
+  weather: CurrentWeather,
+  tide: CurrentTide,
+  busynessCategory: string | null,
+  cfg: Record<string, number>,
+): Record<string, string | null> {
+  return {
+    tide:  tide.height !== null
+      ? (tide.height >= (cfg.caution_tide_height ?? 3.5) ? "caution" : "go")
+      : null,
+    wind:  weather.wind_speed >= (cfg.nogo_wind_speed ?? 25)    ? "no_go"
+         : weather.wind_speed >= (cfg.caution_wind_speed ?? 15) ? "caution" : "go",
+    rain:  weather.precip_chance >= (cfg.nogo_precip_chance ?? 70)    ? "no_go"
+         : weather.precip_chance >= (cfg.caution_precip_chance ?? 40) ? "caution" : "go",
+    crowd: busynessCategory === "too_crowded" ? "no_go"
+         : busynessCategory === "dog_party"   ? "caution"
+         : busynessCategory !== null          ? "go" : null,
+    temp:  weather.temp < (cfg.nogo_temp_min ?? 50) || weather.temp > (cfg.nogo_temp_max ?? 90) ? "no_go"
+         : weather.temp < (cfg.caution_temp_min ?? 63) || weather.temp > (cfg.caution_temp_max ?? 85) ? "caution"
+         : "go",
+    uv:    weather.uv_index >= (cfg.caution_uv_index ?? 8) ? "caution" : "go",
+  };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

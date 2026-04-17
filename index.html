@@ -22,6 +22,8 @@
       --text-dim:     #4b5268;
       --green:        #4ade80;
       --green-dim:    #1a3a27;
+      --advisory:     #38bdf8;
+      --advisory-dim: #0c2a3a;
       --amber:        #fbbf24;
       --amber-dim:    #3a2e10;
       --red:          #f87171;
@@ -185,9 +187,10 @@
     .day-card:hover  { background: var(--surface-hover); border-color: #303650; }
     .day-card:active { transform: scale(0.99); }
 
-    .day-card.status-go      { border-left: 3px solid var(--green); }
-    .day-card.status-caution { border-left: 3px solid var(--amber); }
-    .day-card.status-no_go   { border-left: 3px solid var(--red); opacity: 0.7; }
+    .day-card.status-go       { border-left: 3px solid var(--green); }
+    .day-card.status-advisory { border-left: 3px solid var(--advisory); }
+    .day-card.status-caution  { border-left: 3px solid var(--amber); }
+    .day-card.status-no_go    { border-left: 3px solid var(--red); opacity: 0.7; }
 
     /* Day label */
     .day-label {
@@ -229,10 +232,11 @@
       color: var(--text-dim);
       line-height: 1;
     }
-    .day-score.score-go      .day-score-value { color: var(--green); }
-    .day-score.score-caution .day-score-value { color: var(--amber); }
-    .day-score.score-no_go   .day-score-value { color: var(--red); opacity: 0.6; }
-    .day-score.score-none    .day-score-value { color: var(--text-dim); }
+    .day-score.score-go       .day-score-value { color: var(--green); }
+    .day-score.score-advisory .day-score-value { color: var(--advisory); }
+    .day-score.score-caution  .day-score-value { color: var(--amber); }
+    .day-score.score-no_go    .day-score-value { color: var(--red); opacity: 0.6; }
+    .day-score.score-none     .day-score-value { color: var(--text-dim); }
 
     /* Weather icon */
     .weather-icon { font-size: 22px; line-height: 1; text-align: center; }
@@ -248,9 +252,10 @@
       margin-bottom: 3px;
     }
 
-    .window-label.status-go      { color: var(--green); }
-    .window-label.status-caution { color: var(--amber); }
-    .window-label.status-no_go   { color: var(--red); }
+    .window-label.status-go       { color: var(--green); }
+    .window-label.status-advisory { color: var(--advisory); }
+    .window-label.status-caution  { color: var(--amber); }
+    .window-label.status-no_go    { color: var(--red); }
 
     .no-window-label {
       font-family: 'Outfit', sans-serif;
@@ -298,9 +303,10 @@
 
     .chip-sep { color: var(--text-dim); }
 
-    .chip.chip-go      { color: var(--green); }
-    .chip.chip-caution { color: var(--amber); }
-    .chip.chip-no_go   { color: var(--red); }
+    .chip.chip-go       { color: var(--green); }
+    .chip.chip-advisory { color: var(--advisory); }
+    .chip.chip-caution  { color: var(--amber); }
+    .chip.chip-no_go    { color: var(--red); }
 
     /* Chevron */
     .chevron {
@@ -473,51 +479,50 @@
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
-      container.innerHTML = buildNowCard(d, locationId);
+      if (!d.is_daylight) { container.innerHTML = ''; return; }
+      container.innerHTML = buildDayCard(nowToDay(d), -1);
     } catch {
       container.innerHTML = '';
     }
   }
 
-  function buildNowCard(d, locationId) {
-    if (!d.is_day) return '';
+  // Adapts get-beach-now response to the shape buildDayCard expects.
+  function nowToDay(d) {
+    return {
+      is_now:              true,
+      location_id:         d.location_id,
+      local_date:          d.local_date,
+      day_status:          d.hour_status,
+      best_window_label:   'Right now',
+      best_window_status:  d.hour_status,
+      bacteria_risk:       'none',
+      summary_weather:     wmoToSummaryWeather(d.weather_code, d.wind_speed),
+      weather_code:        d.weather_code,
+      composite_score:     d.hour_score,
+      metric_statuses: {
+        tide:  d.tide_status,
+        wind:  d.wind_status,
+        rain:  d.rain_status,
+        crowd: d.crowd_status,
+        temp:  d.temp_status,
+        uv:    d.uv_status,
+      },
+      lowest_tide_height:  d.tide_height,
+      tide_direction:      d.tide_direction,
+      avg_temp:            d.temp_air,
+      avg_wind:            d.wind_speed,
+      busyness_category:   d.busyness_category,
+    };
+  }
 
-    const weatherIcon = getWeatherIcon(d.summary_weather, d.weather_code);
-    const scoreVal    = d.hour_score;
-    const scoreClass  = scoreVal !== null ? `score-${scoreVal >= 70 ? 'go' : scoreVal >= 50 ? 'caution' : 'no_go'}` : 'score-none';
-    const scoreHtml   = `<div class="day-score ${scoreClass}">
-        <span class="day-score-value">${scoreVal !== null ? scoreVal : '—'}</span>
-        <span class="day-score-label">NOW</span>
-      </div>`;
-
-    const ms    = d.metric_statuses ?? {};
-    const chips = [];
-    if (d.tide_height !== null) {
-      const arrow = d.tide_direction === 'rising' ? '↑' : d.tide_direction === 'falling' ? '↓' : '';
-      chips.push(`<span class="chip ${chipClass(ms.tide)}">🌊 ${d.tide_height.toFixed(1)}ft${arrow}</span>`);
-    }
-    if (d.temp       !== null) chips.push(`<span class="chip ${chipClass(ms.temp)}">🌡 ${Math.round(d.temp)}°</span>`);
-    if (d.wind_speed !== null) chips.push(`<span class="chip ${chipClass(ms.wind)}">💨 ${Math.round(d.wind_speed)}mph</span>`);
-    if (d.busyness_category) {
-      const crowdLabel = { quiet: '✌️ Quiet', moderate: '⚖️ Mod', dog_party: '🎉 Dog Party', too_crowded: '🚫 Too Crowded' }[d.busyness_category] ?? d.busyness_category;
-      chips.push(`<span class="chip ${chipClass(ms.crowd)}">${crowdLabel}</span>`);
-    }
-
-    const today = new Date().toISOString().slice(0, 10);
-
-    return `
-      <div class="day-card" onclick="openDetail('${locationId}', '${today}')">
-        <div class="day-left">
-          <div class="day-label" style="font-size:11px;letter-spacing:0.05em;">NOW</div>
-          ${scoreHtml}
-          <div class="weather-icon">${weatherIcon}</div>
-        </div>
-        <div class="day-content">
-          <div class="window-label" style="color:var(--text-muted)">Right now</div>
-          <div class="chips">${chips.join('')}</div>
-        </div>
-        <div class="chevron">›</div>
-      </div>`;
+  function wmoToSummaryWeather(code, windSpeed) {
+    if (windSpeed >= 20)             return 'windy';
+    if (code === 0)                  return 'sunny';
+    if (code <= 2)                   return 'partly_cloudy';
+    if (code === 3)                  return 'cloudy';
+    if (code >= 45 && code <= 48)   return 'foggy';
+    if (code >= 51)                  return 'rainy';
+    return 'partly_cloudy';
   }
 
   // ── Data fetching ─────────────────────────────────────────────────
@@ -569,10 +574,11 @@
   }
 
   function buildDayCard(day, index) {
+    const isNow      = day.is_now ?? false;
     const isToday    = index === 0;
     const isTomorrow = index === 1;
     const date       = new Date(day.local_date + 'T12:00:00');
-    const dayShort   = isToday ? 'Tdy' : isTomorrow ? 'Tmw' : date.toLocaleDateString('en-US', { weekday: 'short' });
+    const dayShort   = isNow ? 'NOW' : isToday ? 'Tdy' : isTomorrow ? 'Tmw' : date.toLocaleDateString('en-US', { weekday: 'short' });
     const statusClass = `status-${day.day_status}`;
 
     // Window label
@@ -599,7 +605,7 @@
     const scoreClass = scoreVal !== null ? `score-${day.day_status}` : 'score-none';
     const scoreHtml  = `<div class="day-score ${scoreClass}">
         <span class="day-score-value">${scoreVal !== null ? scoreVal : '—'}</span>
-        <span class="day-score-label">SCORE</span>
+        <span class="day-score-label">${isNow ? 'NOW' : 'SCORE'}</span>
       </div>`;
 
     return `
@@ -620,8 +626,9 @@
 
   function chipClass(status) {
     if (!status || status === 'go') return 'chip-go';
-    if (status === 'caution') return 'chip-caution';
-    if (status === 'no_go')   return 'chip-no_go';
+    if (status === 'advisory')      return 'chip-advisory';
+    if (status === 'caution')       return 'chip-caution';
+    if (status === 'no_go')         return 'chip-no_go';
     return '';
   }
 
@@ -630,7 +637,8 @@
     const parts = [];
 
     if (day.lowest_tide_height !== null) {
-      parts.push(`<span class="chip ${chipClass(ms.tide)}">🌊 ${day.lowest_tide_height}ft</span>`);
+      const arrow = day.tide_direction === 'rising' ? '↑' : day.tide_direction === 'falling' ? '↓' : '';
+      parts.push(`<span class="chip ${chipClass(ms.tide)}">🌊 ${day.lowest_tide_height}ft${arrow}</span>`);
     }
     if (day.avg_temp !== null) {
       parts.push(`<span class="chip ${chipClass(ms.temp)}">🌡 ${Math.round(day.avg_temp)}°</span>`);

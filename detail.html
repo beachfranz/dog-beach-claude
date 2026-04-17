@@ -19,12 +19,15 @@
       --text-muted:   #6b7280;
       --text-dim:     #4b5268;
       --green:        #4ade80;
+      --advisory:     #38bdf8;
       --amber:        #fbbf24;
       --red:          #ef4444;
       --blue:         #60a5fa;
-      --bar-blue:     #38bdf8;
-      --bar-green:    #4ade80;
-      --bar-red:      #ef4444;
+      --bar-go:       #4ade80;
+      --bar-advisory: #38bdf8;
+      --bar-caution:  #f59e0b;
+      --bar-no_go:    #ef4444;
+      --bar-window:   #16a34a;
       --radius:       14px;
       --radius-sm:    8px;
     }
@@ -76,8 +79,9 @@
       color: var(--green);
     }
 
-    .window-label.caution { color: var(--amber); }
-    .window-label.no_go   { color: var(--red); }
+    .window-label.advisory { color: var(--advisory); }
+    .window-label.caution  { color: var(--amber); }
+    .window-label.no_go    { color: var(--red); }
 
     .close-btn {
       width: 32px;
@@ -253,9 +257,10 @@
       line-height: 1.5;
     }
 
-    .tooltip-status-go      { color: var(--green); }
-    .tooltip-status-caution { color: var(--amber); }
-    .tooltip-status-no_go   { color: var(--red); }
+    .tooltip-status-go       { color: var(--green); }
+    .tooltip-status-advisory { color: var(--advisory); }
+    .tooltip-status-caution  { color: var(--amber); }
+    .tooltip-status-no_go    { color: var(--red); }
 
     .bar-col:hover .tooltip { display: block; }
 
@@ -376,8 +381,9 @@
         max:      () => 100,
         parse:    v => v !== null ? Number(v) : null,
         reasonFn: h => h.is_in_best_window ? 'Best window of the day'
-          : h.hour_status === 'no_go'   ? 'Not recommended'
-          : h.hour_status === 'caution' ? 'Some concerns this hour'
+          : h.hour_status === 'no_go'    ? 'Not recommended'
+          : h.hour_status === 'caution'  ? 'Some concerns this hour'
+          : h.hour_status === 'advisory' ? 'Minor advisory'
           : 'Looks good',
       },
       {
@@ -387,8 +393,9 @@
         scoreKey:  'tide_score',
         fmt:       v => v !== null ? v.toFixed(1) : '',
         max:       h => Math.max(...hours.map(x => x.tide_height ?? 0), 0.1),
-        reasonFn:  h => h.tide_status === 'no_go'   ? 'Dangerously high tide'
-          : h.tide_status === 'caution' ? 'High tide — less beach'
+        reasonFn:  h => h.tide_status === 'no_go'    ? 'Dangerously high tide'
+          : h.tide_status === 'caution'  ? 'High tide — less beach'
+          : h.tide_status === 'advisory' ? 'Tide rising'
           : 'Good tide level',
       },
       {
@@ -398,8 +405,9 @@
         scoreKey:  'wind_score',
         fmt:       v => v !== null ? Math.round(v) : '',
         max:       h => Math.max(...hours.map(x => x.wind_speed ?? 0), 1),
-        reasonFn:  h => h.wind_status === 'no_go'   ? 'Dangerous wind speed'
-          : h.wind_status === 'caution' ? 'Strong wind'
+        reasonFn:  h => h.wind_status === 'no_go'    ? 'Dangerous wind speed'
+          : h.wind_status === 'caution'  ? 'Strong wind'
+          : h.wind_status === 'advisory' ? 'Breezy'
           : 'Calm wind',
       },
       {
@@ -410,8 +418,9 @@
         fmt:       v => v !== null ? Math.round(v) : '',
         max:       h => Math.max(...hours.map(x => x.temp_air ?? 0), 1),
         relative:  true,
-        reasonFn:  h => h.temp_status === 'no_go'   ? 'Extreme temperature'
-          : h.temp_status === 'caution' ? 'Temp outside comfort zone'
+        reasonFn:  h => h.temp_status === 'no_go'    ? 'Extreme temperature'
+          : h.temp_status === 'caution'  ? 'Temp outside comfort zone'
+          : h.temp_status === 'advisory' ? 'Slightly warm or cool'
           : 'Comfortable temperature',
       },
       {
@@ -421,8 +430,9 @@
         scoreKey:  'rain_score',
         fmt:       v => v !== null ? Math.round(v) : '',
         max:       h => 100,
-        reasonFn:  h => h.rain_status === 'no_go'   ? 'High rain risk'
-          : h.rain_status === 'caution' ? 'Rain possible'
+        reasonFn:  h => h.rain_status === 'no_go'    ? 'High rain risk'
+          : h.rain_status === 'caution'  ? 'Rain possible'
+          : h.rain_status === 'advisory' ? 'Small chance of rain'
           : 'Clear skies',
       },
       {
@@ -432,8 +442,9 @@
         scoreKey:  'crowd_score',
         fmt:       v => v !== null ? Math.round(v) : '',
         max:       h => 100,
-        reasonFn:  h => h.crowd_status === 'no_go'   ? 'Too crowded'
-          : h.crowd_status === 'caution' ? 'Getting busy'
+        reasonFn:  h => h.crowd_status === 'no_go'    ? 'Too crowded'
+          : h.crowd_status === 'caution'  ? 'Getting busy'
+          : h.crowd_status === 'advisory' ? 'Moderate crowds'
           : 'Good crowd level',
       },
     ];
@@ -468,21 +479,23 @@
       const val     = metric.parse ? metric.parse(raw) : raw;
       const metricStatus = metric.statusKey ? h[metric.statusKey] : null;
       const barColor = metric.statusKey
-        ? (metricStatus === 'no_go'   ? '#ef4444'
-         : metricStatus === 'caution' ? '#f59e0b'
-         :                              '#4ade80')
-        : (h.is_in_best_window        ? '#16a34a'
-         : h.hour_status === 'caution' ? '#f59e0b'
-         : h.hour_status === 'no_go'   ? '#ef4444'
-         :                               '#4ade80');
+        ? (metricStatus === 'no_go'    ? 'var(--bar-no_go)'
+         : metricStatus === 'caution'  ? 'var(--bar-caution)'
+         : metricStatus === 'advisory' ? 'var(--bar-advisory)'
+         :                               'var(--bar-go)')
+        : (h.is_in_best_window         ? 'var(--bar-window)'
+         : h.hour_status === 'no_go'   ? 'var(--bar-no_go)'
+         : h.hour_status === 'caution' ? 'var(--bar-caution)'
+         : h.hour_status === 'advisory'? 'var(--bar-advisory)'
+         :                               'var(--bar-go)');
       const pct     = val !== null ? Math.max((val - minVal) / range, 0.05) : 0.05;
       const height  = Math.round(pct * maxHeight);
       const display = metric.fmt(raw);
       const dog     = h.is_in_best_window ? '🐶' : '';
 
       const activeStatus = metric.statusKey ? h[metric.statusKey] : h.hour_status;
-      const statusIcon  = activeStatus === 'go' ? '✓' : activeStatus === 'caution' ? '⚠' : '✕';
-      const statusText  = activeStatus === 'go' ? 'Go' : activeStatus === 'caution' ? 'Caution' : 'No Go';
+      const statusIcon  = activeStatus === 'go' ? '✓' : activeStatus === 'no_go' ? '✕' : '⚠';
+      const statusText  = activeStatus === 'go' ? 'Go' : activeStatus === 'advisory' ? 'Advisory' : activeStatus === 'caution' ? 'Caution' : 'No Go';
       const statusClass = `tooltip-status-${activeStatus}`;
       const reason      = metric.reasonFn ? metric.reasonFn(h) : '';
       const scoreVal    = metric.scoreKey ? h[metric.scoreKey] : null;
@@ -506,7 +519,7 @@
                       : c.status === 'caution' ? 60
                       : 0;
           const pct   = c.status ? Math.max(raw, 8) : raw;
-          const color = c.status === 'no_go' ? '#ef4444' : c.status === 'caution' ? '#f59e0b' : '#4ade80';
+          const color = c.status === 'no_go' ? 'var(--bar-no_go)' : c.status === 'caution' ? 'var(--bar-caution)' : c.status === 'advisory' ? 'var(--bar-advisory)' : 'var(--bar-go)';
           return `<div class="tt-row">
             <div class="tt-label">${c.label}</div>
             <div class="tt-track"><div class="tt-fill" style="width:${pct}%;background:${color}"></div></div>

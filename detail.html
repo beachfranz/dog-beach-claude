@@ -458,10 +458,11 @@
     document.getElementById('main-content').innerHTML = `
       <div class="charts">${chartsHtml}</div>
       <div class="legend">
-        <div class="legend-item"><div class="legend-dot" style="background:#16a34a"></div> Best Time</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#4ade80"></div> Good</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> Caution</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div> No Go</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--bar-window)"></div> Best Time</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--bar-go)"></div> Go</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--bar-advisory)"></div> Advisory</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--bar-caution)"></div> Caution</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--bar-no_go)"></div> No Go</div>
       </div>
       ${narrativeHtml}
     `;

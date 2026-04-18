@@ -716,7 +716,7 @@
   // ── Render sorted list: #1 above blurb, rest in list ──────────────
   function renderSorted(sorted) {
     if (!sorted.length) {
-      document.getElementById('top-card').innerHTML  = '';
+      document.getElementById('top-card').innerHTML   = '';
       document.getElementById('beach-list').innerHTML = '<div class="no-data">No data available.</div>';
       return;
     }
@@ -724,14 +724,15 @@
     const [first, ...rest] = sorted;
     document.getElementById('top-card').innerHTML   = buildBeachCard(first, 1);
     document.getElementById('beach-list').innerHTML = rest.map((c, i) => buildBeachCard(c, i + 2)).join('');
-    loadScoutBlurb(first.beach, first.day);
+    loadScoutBlurb(sorted);
   }
 
   // ── Scout blurb ────────────────────────────────────────────────────
   const scoutCache = {};
 
-  async function loadScoutBlurb(beach, day) {
-    const cacheKey = `${beach.location_id}_${selectedDate}`;
+  async function loadScoutBlurb(sorted) {
+    const first    = sorted[0];
+    const cacheKey = `${first.beach.location_id}_${selectedDate}_${currentSort}`;
     const el       = document.getElementById('scout-blurb');
     el.classList.add('loading');
     el.textContent = '...';
@@ -742,14 +743,43 @@
       return;
     }
 
+    // Full context with scores + distances for all sort modes
+    const contextLines = sorted.slice(0, 5).map((c, i) => {
+      const score   = c.day?.composite_score ?? '—';
+      const status  = c.day?.day_status      ?? 'unknown';
+      const distStr = c.distance != null ? `${c.distance.toFixed(1)} mi away` : 'distance unknown';
+      return `${i + 1}. ${c.beach.display_name} (score: ${score}, status: ${status}, ${distStr})`;
+    }).join('; ');
+
     const dateLabel = selectedDate === 'now' ? 'right now' : `on ${selectedDate}`;
-    const question  = `In two sentences, what makes ${beach.display_name} the top-ranked beach ${dateLabel}? Focus on the specific conditions — score, tide, temperature, wind, crowd — that make it stand out.`;
+    let question;
+
+    if (currentSort === 'conditions') {
+      question = `Beach rankings by best conditions ${dateLabel}: ${contextLines}. In two sentences, explain why ${first.beach.display_name} is ranked #1 — what specific conditions (tide, temperature, wind, crowd, weather) make it the standout choice compared to the others?`;
+
+    } else if (currentSort === 'distance') {
+      // Check if a nearby beach has materially better conditions (15+ points higher score)
+      const topScore   = first.day?.composite_score ?? 0;
+      const betterNear = sorted.slice(1, 4).find(c =>
+        c.day?.composite_score != null && (c.day.composite_score - topScore) >= 15
+      );
+
+      if (betterNear) {
+        question = `Beaches sorted by distance from the user ${dateLabel}: ${contextLines}. The closest is ${first.beach.display_name} (${first.distance?.toFixed(1)} mi, score: ${topScore}). Note that ${betterNear.beach.display_name} is only ${betterNear.distance?.toFixed(1)} mi away but has a score of ${betterNear.day.composite_score}. In two sentences, acknowledge the closest beach but point out whether the short extra drive to ${betterNear.beach.display_name} is worth it given the conditions difference.`;
+      } else {
+        question = `Beaches sorted by distance from the user ${dateLabel}: ${contextLines}. The closest beach is ${first.beach.display_name} at ${first.distance?.toFixed(1)} mi with a score of ${topScore}. In two sentences, explain why ${first.beach.display_name} is a solid nearby choice — focus on its current conditions, not its ranking vs others.`;
+      }
+
+    } else {
+      // Blend sort (50/50 conditions + proximity)
+      question = `Beaches ranked by the best combination of conditions and proximity ${dateLabel}: ${contextLines}. In two sentences, explain why ${first.beach.display_name} hits the sweet spot — it's the best balance of being close and having good conditions compared to the other options.`;
+    }
 
     try {
       const res  = await fetch(`${SUPABASE_URL}/functions/v1/beach-chat`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON_KEY}` },
-        body:    JSON.stringify({ location_id: beach.location_id, question }),
+        body:    JSON.stringify({ location_id: first.beach.location_id, question }),
       });
       const data  = await res.json();
       const text  = data.answer ?? '';

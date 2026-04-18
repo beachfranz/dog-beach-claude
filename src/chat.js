@@ -68,15 +68,7 @@
     div.className = `chat-msg chat-msg-${role}`;
     div.textContent = text;
     if (role === 'assistant') {
-      const row = document.createElement('div');
-      row.className = 'chat-msg-row';
-      const img = document.createElement('img');
-      img.src = 'src/avatar.png';
-      img.className = 'chat-avatar';
-      img.alt = '';
-      row.appendChild(img);
-      row.appendChild(div);
-      msgs.appendChild(row);
+      msgs.appendChild(div);
     } else {
       msgs.appendChild(div);
     }
@@ -86,21 +78,13 @@
 
   function appendTyping() {
     const msgs = document.getElementById('chat-messages');
-    const row  = document.createElement('div');
-    row.className = 'chat-msg-row';
-    row.id = 'typing-' + Date.now();
-    const img = document.createElement('img');
-    img.src = 'src/avatar.png';
-    img.className = 'chat-avatar';
-    img.alt = '';
-    const div = document.createElement('div');
+    const div  = document.createElement('div');
+    div.id = 'typing-' + Date.now();
     div.className = 'chat-msg chat-msg-assistant chat-typing';
     div.textContent = '...';
-    row.appendChild(img);
-    row.appendChild(div);
-    msgs.appendChild(row);
+    msgs.appendChild(div);
     msgs.scrollTop = msgs.scrollHeight;
-    return row.id;
+    return div.id;
   }
 
   function removeTyping(id) {

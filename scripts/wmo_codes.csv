@@ -1,0 +1,29 @@
+code,meaning,score,status,notes
+0,Clear sky,1,go,
+1,Mainly clear,1,go,
+2,Partly cloudy,0.9,go,
+3,Overcast,0.75,go,
+45,Fog,0.5,caution,
+48,Rime fog,0.35,caution,
+51,Drizzle light,0.4,caution,
+53,Drizzle moderate,0.35,caution,
+55,Drizzle heavy,0.3,caution,
+56,Freezing drizzle light,0.15,caution,
+57,Freezing drizzle heavy,0.05,caution,
+61,Rain slight,0.3,caution,
+63,Rain moderate,0.2,no_go,
+65,Rain heavy,,no_go,excluded from candidate hours
+66,Freezing rain light,,no_go,excluded from candidate hours
+67,Freezing rain heavy,,no_go,excluded from candidate hours
+71,Snow slight,,no_go,excluded from candidate hours
+73,Snow moderate,,no_go,excluded from candidate hours
+75,Snow heavy,,no_go,excluded from candidate hours
+77,Snow grains,,no_go,excluded from candidate hours
+80,Rain showers slight,0.1,caution,
+81,Rain showers moderate,0.05,caution,
+82,Rain showers violent,,no_go,excluded from candidate hours
+85,Snow showers slight,,no_go,excluded from candidate hours
+86,Snow showers heavy,,no_go,excluded from candidate hours
+95,Thunderstorm,,no_go,excluded from candidate hours
+96,Thunderstorm with hail,,no_go,excluded from candidate hours
+99,Thunderstorm with heavy hail,,no_go,excluded from candidate hours

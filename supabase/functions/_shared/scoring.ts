@@ -88,30 +88,30 @@ interface ScoringConfig {
 
 // WMO codes that are immediate no-go (thunderstorm, heavy rain, snow, freezing rain, violent showers)
 const SEVERE_WMO_CODES = new Set([
-  63, 64, 65, 66, 67,
+  64, 65, 66, 67,
   71, 72, 73, 74, 75, 76, 77,
-  82,
+  82, 85, 86,
   95, 96, 97, 98, 99,
 ]);
 
 // WMO code → normalized weather score (0–1). Higher = better conditions.
-// Unlisted codes (shouldn't appear from Open-Meteo) default to 0.5.
+// Unlisted codes default to 0.5; no_go codes are excluded from candidate hours anyway.
 const WMO_SCORES: Record<number, number> = {
   0:  1.00,  // clear sky
   1:  1.00,  // mainly clear
   2:  0.90,  // partly cloudy
   3:  0.75,  // overcast
-  45: 0.40,  // fog
+  45: 0.50,  // fog
   48: 0.35,  // depositing rime fog
-  51: 0.35,  // light drizzle
-  53: 0.25,  // moderate drizzle
-  55: 0.15,  // heavy drizzle
+  51: 0.40,  // light drizzle
+  53: 0.35,  // moderate drizzle
+  55: 0.30,  // heavy drizzle
   56: 0.15,  // light freezing drizzle
   57: 0.05,  // heavy freezing drizzle
   61: 0.30,  // slight rain
-  80: 0.25,  // slight rain showers
-  81: 0.15,  // moderate rain showers
-  // no_go codes (63–99 severe) score 0 but are excluded from candidate hours anyway
+  63: 0.20,  // moderate rain (caution)
+  80: 0.10,  // slight rain showers
+  81: 0.05,  // moderate rain showers
 };
 
 function weatherCodeScore(code: number | null): number {

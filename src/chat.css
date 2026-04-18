@@ -15,8 +15,8 @@
   transform: translate(-50%, -50%);
   width: 78%;
   max-width: 408px;
-  height: 31vh;
-  max-height: 260px;
+  height: 43vh;
+  max-height: 364px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -30,7 +30,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px 7px;
+  padding: 5px 10px 5px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }

@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Outfit:wght@500;600&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="src/chat.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -20,8 +21,13 @@
       --text-muted:   #6b7280;
       --text-dim:     #4b5268;
       --green:        #4ade80;
+      --green-dim:    #1a3a27;
+      --advisory:     #38bdf8;
+      --advisory-dim: #0c2a3a;
       --amber:        #fbbf24;
+      --amber-dim:    #3a2e10;
       --red:          #f87171;
+      --red-dim:      #3a1a1a;
       --radius:       14px;
       --radius-sm:    8px;
     }
@@ -207,92 +213,231 @@
     }
     .zip-btn:hover { border-color: #3b5bdb; color: var(--text); }
 
-    /* ── Beach cards ──────────────────────────────────────────────── */
-    .beach-list { padding: 14px 16px 0; display: flex; flex-direction: column; gap: 10px; }
+    /* ── Beach cards (index.html style) ───────────────────────────── */
+    .beach-list {
+      padding: 12px 16px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
 
-    .beach-card {
+    .day-card {
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 14px 16px;
       cursor: pointer;
-      transition: border-color 0.15s;
+      transition: background 0.15s, border-color 0.15s, transform 0.1s;
+      display: grid;
+      grid-template-columns: auto 1fr 20px;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: inherit;
+      -webkit-tap-highlight-color: transparent;
     }
-    .beach-card:hover { border-color: #303650; }
+    .day-card:hover  { background: var(--surface-hover); border-color: #303650; }
+    .day-card:active { transform: scale(0.99); }
 
-    .beach-card.rank-1 { border-left: 3px solid var(--green); }
-    .beach-card.rank-2 { border-left: 3px solid #a3e635; }
-    .beach-card.rank-3 { border-left: 3px solid var(--amber); }
-    .beach-card.rank-4 { border-left: 3px solid #fb923c; }
-    .beach-card.rank-5 { border-left: 3px solid var(--red); opacity: 0.8; }
+    .day-card.status-go       { border-left: 3px solid var(--green); }
+    .day-card.status-advisory { border-left: 3px solid var(--advisory); }
+    .day-card.status-caution  { border-left: 3px solid var(--amber); }
+    .day-card.status-no_go    { border-left: 3px solid var(--red); opacity: 0.7; }
 
-    .beach-card-top {
+    .day-left {
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      margin-bottom: 6px;
+      gap: 14px;
     }
 
-    .beach-rank-name { display: flex; align-items: center; gap: 10px; }
-
-    .rank-badge {
+    .rank-label {
       font-family: 'DM Mono', monospace;
       font-size: 13px;
       font-weight: 500;
-      color: var(--text-dim);
-      width: 18px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      width: 20px;
       text-align: center;
     }
+
+    .day-score {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1px;
+    }
+    .day-score-value {
+      font-family: 'DM Mono', monospace;
+      font-size: 15px;
+      font-weight: 500;
+      line-height: 1;
+    }
+    .day-score-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 8px;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+      line-height: 1;
+    }
+    .day-score.score-go       .day-score-value { color: var(--green); }
+    .day-score.score-advisory .day-score-value { color: var(--advisory); }
+    .day-score.score-caution  .day-score-value { color: var(--amber); }
+    .day-score.score-no_go    .day-score-value { color: var(--red); opacity: 0.6; }
+    .day-score.score-none     .day-score-value { color: var(--text-dim); }
+
+    .weather-icon { font-size: 22px; line-height: 1; text-align: center; }
+
+    .day-content { min-width: 0; }
 
     .beach-name {
       font-family: 'Outfit', sans-serif;
       font-size: 15px;
       font-weight: 600;
       color: var(--text);
+      line-height: 1.2;
+      margin-bottom: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
-    .composite-score {
-      font-family: 'DM Mono', monospace;
-      font-size: 20px;
-      font-weight: 500;
-    }
-    .score-no_data { color: var(--text-dim); }
-    .score-go      { color: var(--green); }
-    .score-caution { color: var(--amber); }
-    .score-no_go   { color: var(--red); }
-
-    .beach-meta {
+    .window-sub {
       font-family: 'DM Sans', sans-serif;
       font-size: 12px;
-      color: var(--text-muted);
-      margin-bottom: 10px;
-      padding-left: 28px;
+      margin-bottom: 3px;
+    }
+    .window-sub.status-go       { color: var(--green); }
+    .window-sub.status-advisory { color: var(--advisory); }
+    .window-sub.status-caution  { color: var(--amber); }
+    .window-sub.status-no_go    { color: var(--red); }
+    .window-sub.status-none     { color: var(--text-dim); }
+    .dist-link { cursor: pointer; color: var(--text) !important; font-weight: 600; }
+    .dist-link:hover { opacity: 0.8; }
+
+    /* ── Directions modal ─────────────────────────────────────────── */
+    .dir-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      z-index: 299;
+    }
+    .dir-overlay.open { display: block; }
+
+    .dir-sheet {
+      position: fixed;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100%;
+      max-width: 480px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-bottom: none;
+      border-radius: 20px 20px 0 0;
+      padding: 16px 16px 36px;
+      z-index: 300;
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .dir-sheet.open { display: flex; }
+
+    #dir-map {
+      width: 100%;
+      height: 260px;
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      background: var(--bg);
     }
 
-    .distance-badge {
+    .dir-handle {
+      width: 36px;
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      margin: 0 auto -4px;
+    }
+
+    .dir-beach {
+      font-family: 'Outfit', sans-serif;
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--text);
+      text-align: center;
+    }
+
+    .dir-meta {
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
+    .dir-cancel {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 14px;
+      cursor: pointer;
+      text-align: center;
+      padding: 4px;
+    }
+    .dir-cancel:hover { color: var(--text); }
+
+    .bacteria-warning {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-bottom: 3px;
+    }
+    .bacteria-warning.risk-moderate { background: rgba(251,191,36,0.15); color: var(--amber); }
+    .bacteria-warning.risk-high     { background: rgba(239,68,68,0.15);  color: var(--red);   }
+
+    .chips {
+      display: flex;
+      flex-wrap: nowrap;
+      gap: 2px;
+      align-items: center;
+      overflow: hidden;
+    }
+
+    .chip {
       font-family: 'DM Mono', monospace;
       font-size: 11px;
-      color: var(--text-dim);
-      margin-right: 6px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
+    .chip-sep { color: var(--text-dim); }
+    .chip.chip-go       { color: var(--green); }
+    .chip.chip-advisory { color: var(--advisory); }
+    .chip.chip-caution  { color: var(--amber); }
+    .chip.chip-no_go    { color: var(--red); }
 
-    /* ── Component bars ───────────────────────────────────────────── */
-    .component-scores { display: flex; gap: 8px; padding-left: 28px; }
-
-    .comp-item { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; }
-    .comp-icon { font-size: 14px; line-height: 1; }
-    .comp-bar-track { width: 100%; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
-    .comp-bar-fill  { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
-    .bar-green { background: var(--green); }
-    .bar-amber { background: var(--amber); }
-    .bar-red   { background: var(--red); }
-    .comp-label { font-family: 'DM Mono', monospace; font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
+    .chevron {
+      color: var(--text-dim);
+      font-size: 16px;
+      line-height: 1;
+      flex-shrink: 0;
+    }
 
     /* ── States ───────────────────────────────────────────────────── */
     .no-data { padding: 40px 20px; text-align: center; font-size: 13px; color: var(--text-dim); }
 
     .skeleton {
-      height: 110px;
+      height: 88px;
       background: linear-gradient(90deg, var(--surface) 25%, var(--surface-hover) 50%, var(--surface) 75%);
       background-size: 200% 100%;
       animation: shimmer 1.4s infinite;
@@ -316,7 +461,6 @@
     <div class="day-pills" id="day-pills"></div>
   </header>
 
-  <!-- Search controls -->
   <div class="search-controls">
     <div class="sort-row">
       <span class="sort-label">Sort by</span>
@@ -346,12 +490,22 @@
 
 </div>
 
+<div class="dir-overlay" id="dir-overlay" onclick="closeDirections()"></div>
+<div class="dir-sheet" id="dir-sheet">
+  <div class="dir-handle"></div>
+  <div class="dir-beach" id="dir-beach"></div>
+  <div class="dir-meta" id="dir-meta"></div>
+  <div id="dir-map"></div>
+  <button class="dir-cancel" onclick="closeDirections()">Close</button>
+</div>
+
 <script>
   const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
   const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
 
   // ── State ──────────────────────────────────────────────────────────
-  let rawBeaches  = [];
+  let rawBeaches  = [];   // [{ beach, days }]
+  let nowBeaches  = null; // [{ beach, day }] — cached after first NOW fetch
   let userLat     = null;
   let userLng     = null;
   let currentSort = 'conditions';
@@ -368,9 +522,22 @@
     days.push({ iso, label });
   }
 
-  let selectedDate = days[0].iso;
+  let selectedDate = 'now';
 
   const pillsEl = document.getElementById('day-pills');
+
+  // NOW pill first
+  const nowBtn = document.createElement('button');
+  nowBtn.className = 'day-pill active';
+  nowBtn.textContent = 'NOW';
+  nowBtn.onclick = () => {
+    document.querySelectorAll('.day-pill').forEach(p => p.classList.remove('active'));
+    nowBtn.classList.add('active');
+    selectedDate = 'now';
+    sortAndRender();
+  };
+  pillsEl.appendChild(nowBtn);
+
   days.forEach(({ iso, label }) => {
     const btn = document.createElement('button');
     btn.className = 'day-pill' + (iso === selectedDate ? ' active' : '');
@@ -379,56 +546,279 @@
       document.querySelectorAll('.day-pill').forEach(p => p.classList.remove('active'));
       btn.classList.add('active');
       selectedDate = iso;
-      loadBeaches(iso);
+      sortAndRender();
     };
+
     pillsEl.appendChild(btn);
   });
 
-  // ── Load beach data ────────────────────────────────────────────────
-  async function loadBeaches(date) {
-    document.getElementById('beach-list').innerHTML =
-      Array(5).fill('<div class="skeleton"></div>').join('');
-    try {
-      const res  = await fetch(`${SUPABASE_URL}/functions/v1/get-beach-compare?date=${date}`,
-        { headers: { 'Authorization': `Bearer ${ANON_KEY}` } });
-      const data = await res.json();
-      if (!data.beaches?.length) {
-        document.getElementById('beach-list').innerHTML =
-          '<div class="no-data">No data available for this date.</div>';
-        return;
-      }
-      rawBeaches = data.beaches;
-      sortAndRender();
-    } catch {
+  // ── NOW mode ───────────────────────────────────────────────────────
+  async function sortAndRenderNow() {
+    if (!nowBeaches) {
       document.getElementById('beach-list').innerHTML =
-        '<div class="no-data">Failed to load data.</div>';
+        Array(5).fill('<div class="skeleton"></div>').join('');
+
+      // Need beach list — wait for rawBeaches or fetch it
+      const beachList = rawBeaches.length
+        ? rawBeaches.map(b => b.beach)
+        : await fetch(
+            `${SUPABASE_URL}/rest/v1/beaches?select=location_id,display_name,latitude,longitude&is_active=eq.true&order=display_name`,
+            { headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY } }
+          ).then(r => r.json()).catch(() => []);
+
+      const results = await Promise.all(
+        beachList.map(b =>
+          fetch(`${SUPABASE_URL}/functions/v1/get-beach-now?location_id=${b.location_id}`,
+            { headers: { 'Authorization': `Bearer ${ANON_KEY}` } })
+            .then(r => r.json())
+            .then(d => ({ beach: b, day: nowToDay(d) }))
+            .catch(() => ({ beach: b, day: null }))
+        )
+      );
+      nowBeaches = results;
     }
-  }
 
-  // ── Sort and render ────────────────────────────────────────────────
-  function sortAndRender() {
-    if (!rawBeaches.length) return;
-
-    // Attach distance to each beach
-    const withDist = rawBeaches.map(b => ({
-      ...b,
+    const cards = nowBeaches.map(({ beach, day }) => ({
+      beach,
+      day,
       distance: userLat !== null
-        ? haversine(userLat, userLng, parseFloat(b.latitude), parseFloat(b.longitude))
+        ? haversine(userLat, userLng, parseFloat(beach.latitude), parseFloat(beach.longitude))
         : null,
     }));
 
     let sorted;
     if (currentSort === 'distance') {
-      sorted = [...withDist].sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999));
+      sorted = [...cards].sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999));
     } else if (currentSort === 'blend') {
-      const maxDist = Math.max(...withDist.map(b => b.distance ?? 0), 1);
-      sorted = [...withDist].sort((a, b) => blendScore(b, maxDist) - blendScore(a, maxDist));
+      const maxDist = Math.max(...cards.map(c => c.distance ?? 0), 1);
+      sorted = [...cards].sort((a, b) => blendScore(b, maxDist) - blendScore(a, maxDist));
     } else {
-      sorted = [...withDist].sort((a, b) => b.composite_score - a.composite_score);
+      sorted = [...cards].sort((a, b) =>
+        (b.day?.composite_score ?? 0) - (a.day?.composite_score ?? 0)
+      );
     }
 
     document.getElementById('beach-list').innerHTML =
-      sorted.map((b, i) => renderCard(b, i + 1)).join('');
+      sorted.map((c, i) => buildBeachCard(c, i + 1)).join('');
+  }
+
+  function nowToDay(d) {
+    if (!d || d.error) return null;
+    return {
+      is_now:             true,
+      location_id:        d.location_id,
+      local_date:         d.local_date,
+      day_status:         d.hour_status,
+      best_window_label:  'Right now',
+      best_window_status: d.hour_status,
+      bacteria_risk:      'none',
+      summary_weather:    wmoToSummaryWeather(d.weather_code, d.wind_speed),
+      weather_code:       d.weather_code,
+      composite_score:    d.hour_score,
+      metric_statuses: {
+        tide:  d.tide_status,
+        wind:  d.wind_status,
+        rain:  d.rain_status,
+        crowd: d.crowd_status,
+        temp:  d.temp_status,
+        uv:    d.uv_status,
+      },
+      lowest_tide_height: d.tide_height,
+      tide_direction:     d.tide_direction,
+      avg_temp:           d.temp_air,
+      avg_wind:           d.wind_speed,
+      busyness_category:  d.busyness_category,
+    };
+  }
+
+  function wmoToSummaryWeather(code, windSpeed) {
+    if (windSpeed >= 20)           return 'windy';
+    if (code === 0)                return 'sunny';
+    if (code <= 2)                 return 'partly_cloudy';
+    if (code === 3)                return 'cloudy';
+    if (code >= 45 && code <= 48) return 'foggy';
+    if (code >= 51)                return 'rainy';
+    return 'partly_cloudy';
+  }
+
+  // ── Load all beaches then fetch summaries in parallel ──────────────
+  async function loadBeaches() {
+    document.getElementById('beach-list').innerHTML =
+      Array(5).fill('<div class="skeleton"></div>').join('');
+
+    try {
+      // Get all active beaches with lat/lng from REST API
+      const beachRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/beaches?select=location_id,display_name,latitude,longitude&is_active=eq.true&order=display_name`,
+        { headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY } }
+      );
+      const beachList = await beachRes.json();
+      if (!Array.isArray(beachList) || !beachList.length) throw new Error('No beaches');
+
+      // Fetch summary for each beach in parallel
+      const summaries = await Promise.all(
+        beachList.map(b =>
+          fetch(`${SUPABASE_URL}/functions/v1/get-beach-summary?location_id=${b.location_id}`,
+            { headers: { 'Authorization': `Bearer ${ANON_KEY}` } })
+            .then(r => r.json())
+            .then(data => ({ beach: b, days: data.days ?? [] }))
+            .catch(() => ({ beach: b, days: [] }))
+        )
+      );
+
+      rawBeaches = summaries;
+      sortAndRender();
+    } catch {
+      document.getElementById('beach-list').innerHTML =
+        '<div class="no-data">Failed to load beaches.</div>';
+    }
+  }
+
+  // ── Sort and render ────────────────────────────────────────────────
+  async function sortAndRender() {
+    if (selectedDate === 'now') {
+      await sortAndRenderNow();
+      return;
+    }
+    if (!rawBeaches.length) return;
+
+    // Build cards: find matching day for selectedDate, attach distance
+    const cards = rawBeaches.map(({ beach, days }) => {
+      const day = days.find(d => d.local_date === selectedDate) ?? null;
+      const distance = userLat !== null
+        ? haversine(userLat, userLng, parseFloat(beach.latitude), parseFloat(beach.longitude))
+        : null;
+      return { beach, day, distance };
+    });
+
+    // Sort
+    let sorted;
+    if (currentSort === 'distance') {
+      sorted = [...cards].sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999));
+    } else if (currentSort === 'blend') {
+      const maxDist = Math.max(...cards.map(c => c.distance ?? 0), 1);
+      sorted = [...cards].sort((a, b) => blendScore(b, maxDist) - blendScore(a, maxDist));
+    } else {
+      sorted = [...cards].sort((a, b) =>
+        (b.day?.composite_score ?? 0) - (a.day?.composite_score ?? 0)
+      );
+    }
+
+    document.getElementById('beach-list').innerHTML =
+      sorted.map((c, i) => buildBeachCard(c, i + 1)).join('');
+  }
+
+  // ── Build a beach card ─────────────────────────────────────────────
+  function buildBeachCard({ beach, day, distance }, rank) {
+    const status     = day?.day_status ?? 'no_go';
+    const score      = day?.composite_score ?? null;
+    const scoreClass = score !== null ? `score-${status}` : 'score-none';
+
+    const scoreHtml = `
+      <div class="day-score ${scoreClass}">
+        <span class="day-score-value">${score !== null ? score : '—'}</span>
+        <span class="day-score-label">${day?.is_now ? 'NOW' : 'SCORE'}</span>
+      </div>`;
+
+    const weatherIcon = getWeatherIcon(day?.summary_weather, day?.weather_code);
+
+    const windowStatus = day?.best_window_status ?? status;
+    let windowHtml;
+    if (day?.is_now && distance !== null) {
+      windowHtml = `<div class="window-sub status-none dist-link" onclick="event.stopPropagation();openDirections(${beach.latitude},${beach.longitude},'${beach.display_name.replace(/'/g,"\\'")}',${distance})">🚗 ${distance.toFixed(1)} mi</div>`;
+    } else if (day?.is_now) {
+      windowHtml = `<div class="window-sub status-${windowStatus}">Right now</div>`;
+    } else if (day?.best_window_label) {
+      windowHtml = `<div class="window-sub status-${windowStatus}">${day.best_window_label}</div>`;
+    } else {
+      windowHtml = `<div class="window-sub status-none">No good window</div>`;
+    }
+
+    const bacteriaRisk = day?.bacteria_risk ?? 'none';
+    const bacteriaHtml = bacteriaRisk === 'high'
+      ? `<div class="bacteria-warning risk-high">⚠ 72h rain advisory</div>`
+      : bacteriaRisk === 'moderate'
+      ? `<div class="bacteria-warning risk-moderate">⚠ 72h rain advisory</div>`
+      : '';
+
+    const chips = buildChips(day, distance);
+
+    return `
+      <div class="day-card status-${status}" onclick="window.location.href='detail.html?location=${beach.location_id}&date=${selectedDate}'">
+        <div class="day-left">
+          <div class="rank-label">#${rank}</div>
+          ${scoreHtml}
+          <div class="weather-icon">${weatherIcon}</div>
+        </div>
+        <div class="day-content">
+          <div class="beach-name">${beach.display_name}</div>
+          ${windowHtml}
+          ${bacteriaHtml}
+          <div class="chips">${chips}</div>
+        </div>
+        <div class="chevron">›</div>
+      </div>`;
+  }
+
+  // ── Chips ──────────────────────────────────────────────────────────
+  function chipClass(status) {
+    if (!status || status === 'go') return 'chip-go';
+    if (status === 'advisory')      return 'chip-advisory';
+    if (status === 'caution')       return 'chip-caution';
+    if (status === 'no_go')         return 'chip-no_go';
+    return '';
+  }
+
+  function buildChips(day, distance) {
+    const parts = [];
+    const ms    = day?.metric_statuses ?? {};
+
+    // Distance shown in window-sub on NOW cards; show in chips on forecast cards
+    if (distance !== null && !day?.is_now) {
+      parts.push(`<span class="chip">${distance.toFixed(1)} mi</span>`);
+    }
+    if (day?.lowest_tide_height != null) {
+      const arrow = day.tide_direction === 'rising' ? '↑' : day.tide_direction === 'falling' ? '↓' : '';
+      parts.push(`<span class="chip ${chipClass(ms.tide)}">🌊 ${parseFloat(day.lowest_tide_height).toFixed(1)}ft${arrow}</span>`);
+    }
+    if (day?.avg_temp != null) {
+      parts.push(`<span class="chip ${chipClass(ms.temp)}">🌡 ${Math.round(day.avg_temp)}°</span>`);
+    }
+    if (day?.avg_wind != null) {
+      parts.push(`<span class="chip ${chipClass(ms.wind)}">💨 ${Math.round(day.avg_wind)}mph</span>`);
+    }
+    if (day?.busyness_category) {
+      const crowdLabel = {
+        quiet:       '✌️ Quiet',
+        moderate:    '⚖️ Mod',
+        dog_party:   '🎉 Party',
+        too_crowded: '🚫 Crowded',
+      }[day.busyness_category] ?? day.busyness_category;
+      parts.push(`<span class="chip ${chipClass(ms.crowd)}">${crowdLabel}</span>`);
+    }
+
+    return parts.join(`<span class="chip-sep">·</span>`);
+  }
+
+  // ── Weather icon ───────────────────────────────────────────────────
+  function getWeatherIcon(summaryWeather, wmoCode) {
+    const map = {
+      sunny:         '☀️',
+      partly_cloudy: '⛅',
+      cloudy:        '☁️',
+      foggy:         '🌫️',
+      rainy:         '🌧️',
+      windy:         '💨',
+    };
+    if (summaryWeather && map[summaryWeather]) return map[summaryWeather];
+    if (wmoCode === 0)              return '☀️';
+    if (wmoCode <= 2)               return '⛅';
+    if (wmoCode === 3)              return '☁️';
+    if (wmoCode <= 48)              return '🌫️';
+    if (wmoCode <= 67)              return '🌧️';
+    if (wmoCode <= 77)              return '🌨️';
+    if (wmoCode <= 82)              return '🌧️';
+    return '⛈️';
   }
 
   // ── Haversine distance (miles) ─────────────────────────────────────
@@ -442,10 +832,10 @@
     return R * 2 * Math.asin(Math.sqrt(a));
   }
 
-  // ── 50/50 blend score (higher = better) ───────────────────────────
-  function blendScore(beach, maxDist) {
-    const normScore = beach.composite_score / 100;
-    const normDist  = beach.distance !== null ? 1 - (beach.distance / maxDist) : 0.5;
+  // ── Blend score (higher = better) ─────────────────────────────────
+  function blendScore({ day, distance }, maxDist) {
+    const normScore = (day?.composite_score ?? 0) / 100;
+    const normDist  = distance !== null ? 1 - (distance / maxDist) : 0.5;
     return (normScore + normDist) / 2;
   }
 
@@ -515,74 +905,96 @@
     document.getElementById('opt-blend').disabled    = false;
   }
 
-  // ── Sort change ────────────────────────────────────────────────────
   function onSortChange(val) {
     currentSort = val;
     sortAndRender();
   }
 
-  // ── ZIP enter key ──────────────────────────────────────────────────
   document.getElementById('zip-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') onZipGo();
   });
 
-  // ── Render a beach card ────────────────────────────────────────────
-  function renderCard(b, rank) {
-    const hasScore = b.composite_score > 0;
+  // ── Directions modal (Leaflet + OSRM) ────────────────────────────
+  let dirMap       = null;
+  let routeLayer   = null;
+  let markersLayer = null;
 
-    const scoreHtml = hasScore
-      ? `<span class="composite-score score-${b.day_status}">${b.composite_score}</span>`
-      : `<span class="composite-score score-no_data">—</span>`;
+  async function openDirections(lat, lng, beachName, distance) {
+    document.getElementById('dir-beach').textContent = beachName;
+    document.getElementById('dir-meta').textContent  = distance != null ? `${distance.toFixed(1)} mi away` : '';
+    document.getElementById('dir-overlay').classList.add('open');
+    document.getElementById('dir-sheet').classList.add('open');
 
-    const distHtml = b.distance !== null
-      ? `<span class="distance-badge">${b.distance.toFixed(1)} mi</span>`
-      : '';
+    // Init map once
+    if (!dirMap) {
+      dirMap = L.map('dir-map', { zoomControl: true, attributionControl: false });
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 18,
+      }).addTo(dirMap);
+    }
 
-    const windowText = b.best_window_label
-      ? `${b.best_window_label}${b.go_hours_count ? ` · ${b.go_hours_count}h go` : ''}`
-      : 'No good window';
-    const metaColor = b.best_window_label ? '' : 'style="color:var(--text-dim)"';
+    // Clear previous layers
+    if (routeLayer)   { dirMap.removeLayer(routeLayer);   routeLayer   = null; }
+    if (markersLayer) { dirMap.removeLayer(markersLayer); markersLayer = null; }
 
-    const components = [
-      { key: 'tide_score',  icon: '🌊', label: 'Tide'    },
-      { key: 'wind_score',  icon: '💨', label: 'Wind'    },
-      { key: 'crowd_score', icon: '🐾', label: 'Crowd'   },
-      { key: 'rain_score',  icon: '🌤',  label: 'Weather' },
-      { key: 'temp_score',  icon: '🌡',  label: 'Temp'   },
-    ];
+    markersLayer = L.layerGroup().addTo(dirMap);
 
-    const barsHtml = hasScore ? `
-      <div class="component-scores">
-        ${components.map(c => {
-          const val = b[c.key];
-          if (val === null) return '';
-          const pct   = Math.round(val * 100);
-          const color = val >= 0.7 ? 'bar-green' : val >= 0.4 ? 'bar-amber' : 'bar-red';
-          return `<div class="comp-item">
-            <span class="comp-icon">${c.icon}</span>
-            <div class="comp-bar-track"><div class="comp-bar-fill ${color}" style="width:${pct}%"></div></div>
-            <span class="comp-label">${c.label}</span>
-          </div>`;
-        }).join('')}
-      </div>` : '';
+    // Beach marker
+    const beachIcon = L.divIcon({
+      html: '🏖️',
+      className: '',
+      iconSize: [28, 28],
+      iconAnchor: [14, 14],
+    });
+    L.marker([lat, lng], { icon: beachIcon }).addTo(markersLayer);
 
-    return `
-      <div class="beach-card rank-${rank}" onclick="window.location.href='detail.html?location=${b.location_id}&date=${selectedDate}'">
-        <div class="beach-card-top">
-          <div class="beach-rank-name">
-            <span class="rank-badge">${rank}</span>
-            <span class="beach-name">${b.display_name}</span>
-          </div>
-          ${scoreHtml}
-        </div>
-        <div class="beach-meta" ${metaColor}>${distHtml}${windowText}</div>
-        ${barsHtml}
-      </div>`;
+    if (userLat !== null) {
+      // User marker
+      const userIcon = L.divIcon({
+        html: '📍',
+        className: '',
+        iconSize: [24, 24],
+        iconAnchor: [12, 24],
+      });
+      L.marker([userLat, userLng], { icon: userIcon }).addTo(markersLayer);
+
+      // Fetch route from OSRM
+      try {
+        const url = `https://router.project-osrm.org/route/v1/driving/${userLng},${userLat};${lng},${lat}?overview=full&geometries=geojson`;
+        const res  = await fetch(url);
+        const data = await res.json();
+        if (data.routes?.[0]) {
+          routeLayer = L.geoJSON(data.routes[0].geometry, {
+            style: { color: '#4c6ef5', weight: 4, opacity: 0.85 },
+          }).addTo(dirMap);
+          dirMap.fitBounds(routeLayer.getBounds(), { padding: [24, 24] });
+        } else {
+          dirMap.setView([lat, lng], 13);
+        }
+      } catch {
+        dirMap.setView([lat, lng], 13);
+      }
+    } else {
+      dirMap.setView([lat, lng], 13);
+    }
+
+    // Leaflet needs a size invalidation after the sheet animates in
+    setTimeout(() => dirMap.invalidateSize(), 50);
   }
+
+  function closeDirections() {
+    document.getElementById('dir-overlay').classList.remove('open');
+    document.getElementById('dir-sheet').classList.remove('open');
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeDirections();
+  });
 
   // ── Boot ───────────────────────────────────────────────────────────
   requestLocation();
-  loadBeaches(selectedDate);
+  loadBeaches();        // loads summaries for day pills in background
+  sortAndRenderNow();   // NOW is default — fetch immediately
 </script>
 <script>
   window.CHAT_CONFIG = {
@@ -590,6 +1002,7 @@
     placeholder: 'Which beach is best this weekend?',
   };
 </script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="src/chat.js"></script>
 </body>
 </html>

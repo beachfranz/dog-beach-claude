@@ -83,7 +83,11 @@ interface ScoringConfig {
   norm_uv_max:            number;
 
   // Best-window selection
-  window_score_threshold: number;
+  window_score_threshold:   number;  // score threshold for edge trimming (default 0.93)
+  window_peak_oversample_n: number;  // how many extra times peak is counted in avg (default 1)
+  window_consistency_weight:number;  // bonus weight for low-variance windows (default 0.10)
+  window_length_penalty:    number;  // score penalty per hour over soft cap (default 0.05)
+  window_soft_cap_hours:    number;  // soft cap length in hours (default 4)
 
   // Status multipliers applied to each metric's sub-score
   status_mult_advisory:        number;  // default 0.90
@@ -589,44 +593,75 @@ function scoreOneHour(raw: RawHourData, cfg: ScoringConfig): ScoredHour {
 
 // ─── Window selection ─────────────────────────────────────────────────────────
 
+// Scores a candidate run using peak oversampling, consistency bonus, and length penalty.
+function scoreRun(run: ScoredHour[], cfg: ScoringConfig): number {
+  const scores   = run.map((h) => h.hourScore ?? 0);
+  const peak     = Math.max(...scores);
+  const n        = cfg.window_peak_oversample_n ?? 1;
+  const weightedAvg = (scores.reduce((s, v) => s + v, 0) + peak * n) / (scores.length + n);
+
+  // Consistency bonus: 1 + weight × (1 - CV), where CV = stddev / mean
+  const mean   = scores.reduce((s, v) => s + v, 0) / scores.length;
+  const stddev = Math.sqrt(scores.reduce((s, v) => s + (v - mean) ** 2, 0) / scores.length);
+  const cv     = mean > 0 ? stddev / mean : 0;
+  const consistencyBonus = 1 + (cfg.window_consistency_weight ?? 0.10) * (1 - cv);
+
+  // Length penalty: kicks in above soft cap
+  const softCap       = cfg.window_soft_cap_hours ?? 4;
+  const lengthPenalty = cfg.window_length_penalty ?? 0.05;
+  const lengthFactor  = 1 - lengthPenalty * Math.max(0, run.length - softCap);
+
+  return weightedAvg * consistencyBonus * Math.max(0, lengthFactor);
+}
+
 function findBestWindow(
   hours: ScoredHour[],
   cfg: ScoringConfig,
 ): BestWindow | null {
-  const candidates = hours.filter((h) => h.isCandidateWindow);
-  if (candidates.length === 0) return null;
+  // Step 1: only consider non-no_go hours
+  const eligible = hours.filter((h) => h.isCandidateWindow);
+  if (eligible.length === 0) return null;
 
-  const peak      = candidates.reduce((best, h) =>
-    (h.hourScore ?? 0) > (best.hourScore ?? 0) ? h : best
+  // Step 2: find all contiguous runs of eligible hours
+  const runs: ScoredHour[][] = [];
+  let current: ScoredHour[]  = [];
+  for (const h of eligible) {
+    if (current.length === 0 || h.localHour === current[current.length - 1].localHour + 1) {
+      current.push(h);
+    } else {
+      runs.push(current);
+      current = [h];
+    }
+  }
+  if (current.length > 0) runs.push(current);
+
+  // Step 3: score each run and pick the best
+  const bestRun = runs.reduce((best, run) =>
+    scoreRun(run, cfg) > scoreRun(best, cfg) ? run : best
   );
+
+  // Step 4: trim edges using score threshold (peak-expansion within the best run)
+  const peak      = bestRun.reduce((b, h) => (h.hourScore ?? 0) > (b.hourScore ?? 0) ? h : b);
   const peakScore = peak.hourScore ?? 0;
-  const peakIndex = hours.indexOf(peak);
+  const peakIdx   = bestRun.indexOf(peak);
   const STEP      = 0.05;
   let threshold   = cfg.window_score_threshold ?? 0.93;
-
   let window: ScoredHour[] = [];
 
   while (true) {
     const minScore = peakScore * threshold;
     window = [peak];
 
-    // Expand forward
-    for (let i = peakIndex + 1; i < hours.length; i++) {
-      const h    = hours[i];
-      const prev = window[window.length - 1];
-      if (h.localHour !== prev.localHour + 1) break;
-      if (!h.isCandidateWindow)               break;
-      if ((h.hourScore ?? 0) < minScore)      break;
+    for (let i = peakIdx + 1; i < bestRun.length; i++) {
+      const h = bestRun[i], prev = window[window.length - 1];
+      if (h.localHour !== prev.localHour + 1)  break;
+      if ((h.hourScore ?? 0) < minScore)        break;
       window.push(h);
     }
-
-    // Expand backward
-    for (let i = peakIndex - 1; i >= 0; i--) {
-      const h    = hours[i];
-      const next = window[0];
-      if (next.localHour !== h.localHour + 1) break;
-      if (!h.isCandidateWindow)               break;
-      if ((h.hourScore ?? 0) < minScore)      break;
+    for (let i = peakIdx - 1; i >= 0; i--) {
+      const h = bestRun[i], next = window[0];
+      if (next.localHour !== h.localHour + 1)  break;
+      if ((h.hourScore ?? 0) < minScore)        break;
       window.unshift(h);
     }
 
@@ -635,11 +670,15 @@ function findBestWindow(
     threshold = Math.max(0, threshold - STEP);
   }
 
-  if (window.length < 2) return null;
+  // Fall back to single-hour only if no 2-hour window is possible anywhere
+  if (window.length < 2) {
+    if (eligible.length === 1) {
+      window = eligible;
+    } else {
+      return null;
+    }
+  }
 
-  const avgScore = average(window.map((h) => h.hourScore ?? 0));
-
-  // Window status = worst status of any hour in the window
   const windowStatus = window.reduce<HourStatus>(
     (worst, h) => STATUS_RANK[h.hourStatus] > STATUS_RANK[worst] ? h.hourStatus : worst,
     "go",
@@ -650,7 +689,7 @@ function findBestWindow(
     startTs:     window[0].forecastTs,
     endTs:       window[window.length - 1].forecastTs,
     label:       buildWindowLabel(window[0].localHour, window[window.length - 1].localHour),
-    windowScore: round2(avgScore),
+    windowScore: round2(scoreRun(window, cfg)),
     status:      windowStatus,
   };
 }

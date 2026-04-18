@@ -92,6 +92,20 @@ Deno.serve(async (req: Request) => {
         return json({ error: `Beach not found: ${location_id}` }, 404);
       }
 
+      // Get current local hour in the beach's timezone
+      const nowUtc = new Date();
+      const localHourParts = new Intl.DateTimeFormat("en-US", {
+        timeZone: beach.timezone as string,
+        hour: "2-digit", hour12: false,
+      }).formatToParts(nowUtc);
+      const currentLocalHour = parseInt(
+        localHourParts.find(p => p.type === "hour")?.value ?? "0"
+      ) % 24;
+      const currentTimeLabel = new Intl.DateTimeFormat("en-US", {
+        timeZone: beach.timezone as string,
+        hour: "numeric", minute: "2-digit", hour12: true,
+      }).format(nowUtc);
+
       const [{ data: days, error: daysErr }, { data: hours, error: hoursErr }] = await Promise.all([
         supabase
           .from("beach_day_recommendations")
@@ -112,7 +126,12 @@ Deno.serve(async (req: Request) => {
       if (daysErr) throw new Error(`Failed to load daily data: ${daysErr.message}`);
       if (hoursErr) throw new Error(`Failed to load hourly data: ${hoursErr.message}`);
 
-      systemPrompt = buildSystemPrompt(beach, days ?? [], hours ?? []);
+      // Filter out past hours for today — Scout should only see what's ahead
+      const remainingHours = (hours ?? []).filter(h =>
+        h.local_date !== today || Number(h.local_hour) >= currentLocalHour
+      );
+
+      systemPrompt = buildSystemPrompt(beach, days ?? [], remainingHours, currentTimeLabel);
     }
 
     const answer = await callAnthropic(systemPrompt, conversation_history, question);
@@ -137,6 +156,7 @@ function buildSystemPrompt(
   beach: Record<string, unknown>,
   days: Record<string, unknown>[],
   hours: Record<string, unknown>[],
+  currentTimeLabel?: string,
 ): string {
   const hoursByDate = new Map<string, Record<string, unknown>[]>();
   for (const h of hours) {
@@ -238,6 +258,7 @@ ${beach.description ? `About: ${beach.description}` : ""}
 ${beach.website ? `Website: ${beach.website}` : ""}
 Timezone: ${beach.timezone}
 
+${currentTimeLabel ? `Current local time: ${currentTimeLabel} — only today's remaining hours are shown in the hourly data below.` : ""}
 7-DAY FORECAST DATA:
 ${daysContext}
 

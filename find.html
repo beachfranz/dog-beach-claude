@@ -751,7 +751,11 @@
       return `${i + 1}. ${c.beach.display_name} (score: ${score}, status: ${status}, ${distStr})`;
     }).join('; ');
 
-    const dateLabel = selectedDate === 'now' ? 'right now' : `on ${selectedDate}`;
+    const now       = new Date();
+    const pacific   = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit', hour12: true });
+    const timeStr   = pacific.format(now);
+    const isToday   = selectedDate === 'now' || selectedDate === new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const dateLabel = isToday ? `right now (it is currently ${timeStr} Pacific — only consider remaining hours of today)` : `on ${selectedDate}`;
     let question;
 
     if (currentSort === 'conditions') {

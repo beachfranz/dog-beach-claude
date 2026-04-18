@@ -28,7 +28,10 @@ Deno.serve(async (req: Request) => {
       return json({ error: "date parameter required (YYYY-MM-DD)" }, 400);
     }
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+    const supabase   = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+    const nowUtc     = new Date();
+    const today      = nowUtc.toISOString().slice(0, 10);
+    const isToday    = date === today;
 
     // Beach metadata
     const { data: beach, error: beachErr } = await supabase
@@ -41,42 +44,147 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Beach not found" }, 404);
     }
 
-    // Daily recommendation (narrative + summary)
-    const { data: day, error: dayErr } = await supabase
-      .from("beach_day_recommendations")
-      .select("*")
-      .eq("location_id", locationId)
-      .eq("local_date", date)
-      .single();
-
-    if (dayErr || !day) {
-      return json({ error: "No recommendation found for this date" }, 404);
+    // Current local hour (needed for today's remaining-window logic)
+    let currentLocalHour = 0;
+    if (isToday) {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: beach.timezone, hour: "2-digit", hour12: false,
+      }).formatToParts(nowUtc);
+      currentLocalHour = parseInt(parts.find(p => p.type === "hour")?.value ?? "0") % 24;
     }
 
-    // Hourly scores for the day — only daylight hours, ordered by local_hour
-    const { data: hours, error: hoursErr } = await supabase
-      .from("beach_day_hourly_scores")
-      .select(
-        "local_hour, hour_label, hour_status, is_in_best_window, " +
-        "tide_height, wind_speed, temp_air, feels_like, precip_chance, busyness_score, " +
-        "uv_index, weather_code, hour_text, is_daylight, hour_score, " +
-        "tide_score, wind_score, crowd_score, rain_score, temp_score, uv_score, weather_score, " +
-        "tide_status, wind_status, crowd_status, rain_status, temp_status, uv_status, " +
-        "temp_cold_status, temp_hot_status, sand_temp, asphalt_temp, sand_status, asphalt_status"
-      )
-      .eq("location_id", locationId)
-      .eq("local_date", date)
-      .eq("is_daylight", true)
-      .order("local_hour", { ascending: true });
+    // Daily recommendation + hourly scores in parallel
+    const [{ data: day, error: dayErr }, { data: hours, error: hoursErr }] = await Promise.all([
+      supabase
+        .from("beach_day_recommendations")
+        .select("*")
+        .eq("location_id", locationId)
+        .eq("local_date", date)
+        .single(),
+      supabase
+        .from("beach_day_hourly_scores")
+        .select(
+          "local_hour, hour_label, hour_status, is_in_best_window, is_candidate_window, " +
+          "tide_height, wind_speed, temp_air, feels_like, precip_chance, busyness_score, " +
+          "uv_index, weather_code, hour_text, is_daylight, hour_score, " +
+          "tide_score, wind_score, crowd_score, rain_score, temp_score, uv_score, weather_score, " +
+          "tide_status, wind_status, crowd_status, rain_status, temp_status, uv_status, " +
+          "temp_cold_status, temp_hot_status, sand_temp, asphalt_temp, sand_status, asphalt_status"
+        )
+        .eq("location_id", locationId)
+        .eq("local_date", date)
+        .eq("is_daylight", true)
+        .order("local_hour", { ascending: true }),
+    ]);
 
-    if (hoursErr) {
-      return json({ error: hoursErr.message }, 500);
+    if (dayErr || !day) return json({ error: "No recommendation found for this date" }, 404);
+    if (hoursErr)        return json({ error: hoursErr.message }, 500);
+
+    // For today: find best remaining window and override is_in_best_window + day label
+    let finalDay   = day;
+    let finalHours = hours ?? [];
+
+    if (isToday) {
+      const remaining = finalHours.filter(
+        h => h.is_candidate_window && Number(h.local_hour) >= currentLocalHour
+      );
+      const win = findBestRemainingWindow(remaining);
+      const bestHours = new Set(win ? win.hours.map(h => h.local_hour) : []);
+
+      finalHours = finalHours.map(h => ({
+        ...h,
+        is_in_best_window: bestHours.has(Number(h.local_hour)),
+      }));
+
+      finalDay = {
+        ...day,
+        best_window_label:  win
+          ? buildWindowLabel(win.startHour, win.endHour)
+          : "No good window remaining",
+        best_window_status: win ? win.status : "no_go",
+      };
     }
 
-    return json({ beach, day, hours: hours ?? [] });
+    return json({ beach, day: finalDay, hours: finalHours });
 
   } catch (err) {
     return json({ error: String(err) }, 500);
   }
 });
+
+function formatHour(hour: number): string {
+  if (hour === 0 || hour === 24) return "12am";
+  if (hour === 12) return "12pm";
+  return hour < 12 ? `${hour}am` : `${hour - 12}pm`;
+}
+
+function buildWindowLabel(startHour: number, endHour: number): string {
+  return `${formatHour(startHour)}–${formatHour(endHour + 1)}`;
+}
+
+type CandidateHour = {
+  local_hour: number; hour_score: number;
+  tide_status: string | null; wind_status: string | null;
+  rain_status: string | null; crowd_status: string | null;
+  temp_status: string | null; uv_status: string | null;
+  [key: string]: unknown;
+};
+
+function findBestRemainingWindow(hours: CandidateHour[]): {
+  startHour: number; endHour: number; avgScore: number;
+  status: string; hours: CandidateHour[];
+} | null {
+  if (!hours.length) return null;
+
+  const sorted    = [...hours].sort((a, b) => a.local_hour - b.local_hour);
+  const peak      = sorted.reduce((b, h) => Number(h.hour_score) > Number(b.hour_score) ? h : b);
+  const peakScore = Number(peak.hour_score);
+  const peakIdx   = sorted.indexOf(peak);
+
+  const STEP = 0.05;
+  let threshold = 0.93;
+  let window: CandidateHour[] = [];
+
+  while (true) {
+    const minScore = peakScore * threshold;
+    window = [peak];
+
+    for (let i = peakIdx + 1; i < sorted.length; i++) {
+      const h = sorted[i], prev = window[window.length - 1];
+      if (h.local_hour !== prev.local_hour + 1) break;
+      if (Number(h.hour_score) < minScore)      break;
+      window.push(h);
+    }
+    for (let i = peakIdx - 1; i >= 0; i--) {
+      const h = sorted[i], next = window[0];
+      if (next.local_hour !== h.local_hour + 1) break;
+      if (Number(h.hour_score) < minScore)       break;
+      window.unshift(h);
+    }
+
+    if (window.length >= 2) break;
+    if (threshold <= 0)     break;
+    threshold = Math.max(0, threshold - STEP);
+  }
+
+  if (window.length < 2) return null;
+
+  const statusRank: Record<string, number> = { go: 1, advisory: 2, caution: 3, no_go: 4 };
+  const worst = (a: string | null, b: string | null) => {
+    if (!a) return b; if (!b) return a;
+    return (statusRank[a] ?? 0) >= (statusRank[b] ?? 0) ? a : b;
+  };
+  const overallStatus = window.reduce(
+    (s, h) => worst(s, worst(worst(worst(h.tide_status, h.wind_status), worst(h.rain_status, h.crowd_status)), worst(h.temp_status, h.uv_status))),
+    null as string | null
+  ) ?? "go";
+
+  return {
+    startHour: window[0].local_hour,
+    endHour:   window[window.length - 1].local_hour,
+    avgScore:  window.reduce((s, h) => s + Number(h.hour_score), 0) / window.length,
+    status:    overallStatus,
+    hours:     window,
+  };
+}
 

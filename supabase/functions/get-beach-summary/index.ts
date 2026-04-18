@@ -24,7 +24,8 @@ Deno.serve(async (req: Request) => {
     const locationId = url.searchParams.get("location_id") ?? "huntington-dog-beach";
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-    const today    = new Date().toISOString().slice(0, 10);
+    const nowUtc   = new Date();
+    const today    = nowUtc.toISOString().slice(0, 10);
 
     // Fetch beach metadata
     const { data: beach, error: beachErr } = await supabase
@@ -36,6 +37,15 @@ Deno.serve(async (req: Request) => {
     if (beachErr || !beach) {
       return json({ error: "Beach not found" }, 404);
     }
+
+    // Current local hour for this beach (for today's remaining-window logic)
+    const localHourParts = new Intl.DateTimeFormat("en-US", {
+      timeZone: beach.timezone,
+      hour: "2-digit", hour12: false,
+    }).formatToParts(nowUtc);
+    const currentLocalHour = parseInt(
+      localHourParts.find(p => p.type === "hour")?.value ?? "0"
+    ) % 24;
 
     // Fetch 7 days of recommendations starting today
     const { data: days, error: daysErr } = await supabase
@@ -50,32 +60,46 @@ Deno.serve(async (req: Request) => {
       return json({ error: daysErr.message }, 500);
     }
 
-    // Fetch best-window hourly scores for the next 7 days to compute composite scores + metric statuses
-    const dates = (days ?? []).map(d => d.local_date);
-    const { data: hours } = dates.length ? await supabase
+    const dates        = (days ?? []).map(d => d.local_date);
+    const futureDates  = dates.filter(d => d !== today);
+
+    // Query 1: best-window hours for future days
+    const { data: futureHours } = futureDates.length ? await supabase
       .from("beach_day_hourly_scores")
-      .select("local_date, hour_score, tide_status, wind_status, rain_status, crowd_status, temp_status, uv_status")
+      .select("local_date, local_hour, hour_score, tide_status, wind_status, rain_status, crowd_status, temp_status, uv_status")
       .eq("location_id", locationId)
-      .in("local_date", dates)
+      .in("local_date", futureDates)
       .eq("is_in_best_window", true) : { data: [] };
 
-    // Status priority for worst-case computation
-    const statusRank: Record<string, number> = { go: 1, caution: 2, no_go: 3 };
+    // Query 2: remaining candidate hours for today (the new best window search space)
+    const { data: todayHours } = await supabase
+      .from("beach_day_hourly_scores")
+      .select("local_hour, hour_score, tide_status, wind_status, rain_status, crowd_status, temp_status, uv_status")
+      .eq("location_id", locationId)
+      .eq("local_date", today)
+      .eq("is_candidate_window", true)
+      .gte("local_hour", currentLocalHour)
+      .order("local_hour", { ascending: true });
+
+    // Status priority
+    const statusRank: Record<string, number> = { go: 1, advisory: 2, caution: 3, no_go: 4 };
     const worstStatus = (a: string | null, b: string | null): string | null => {
       if (!a) return b;
       if (!b) return a;
       return (statusRank[a] ?? 0) >= (statusRank[b] ?? 0) ? a : b;
     };
 
-    // Average hour_score + worst metric status per date
+    // Aggregate future days from is_in_best_window hours
     type DateAgg = {
       sum: number; count: number;
       tide: string | null; wind: string | null; rain: string | null;
       crowd: string | null; temp: string | null; uv: string | null;
     };
     const byDate: Record<string, DateAgg> = {};
-    for (const h of hours ?? []) {
-      if (!byDate[h.local_date]) byDate[h.local_date] = { sum: 0, count: 0, tide: null, wind: null, rain: null, crowd: null, temp: null, uv: null };
+    for (const h of futureHours ?? []) {
+      if (!byDate[h.local_date]) byDate[h.local_date] = {
+        sum: 0, count: 0, tide: null, wind: null, rain: null, crowd: null, temp: null, uv: null,
+      };
       const agg = byDate[h.local_date];
       agg.sum   += Number(h.hour_score ?? 0);
       agg.count += 1;
@@ -86,7 +110,33 @@ Deno.serve(async (req: Request) => {
       agg.temp  = worstStatus(agg.temp,  h.temp_status);
       agg.uv    = worstStatus(agg.uv,    h.uv_status);
     }
+
+    // Find best remaining window for today from candidate hours
+    const todayWindow = findBestRemainingWindow(todayHours ?? []);
+
     const daysWithScore = (days ?? []).map(d => {
+      const isToday = d.local_date === today;
+
+      if (isToday) {
+        if (todayWindow) {
+          return {
+            ...d,
+            best_window_label:  buildWindowLabel(todayWindow.startHour, todayWindow.endHour),
+            best_window_status: todayWindow.status,
+            composite_score:    Math.round(todayWindow.avgScore),
+            metric_statuses:    todayWindow.metricStatuses,
+          };
+        } else {
+          return {
+            ...d,
+            best_window_label:  "No good window remaining",
+            best_window_status: "no_go",
+            composite_score:    null,
+            metric_statuses:    null,
+          };
+        }
+      }
+
       const agg = byDate[d.local_date];
       return {
         ...d,
@@ -111,3 +161,86 @@ Deno.serve(async (req: Request) => {
     return json({ error: String(err) }, 500);
   }
 });
+
+function formatHour(hour: number): string {
+  if (hour === 0 || hour === 24) return "12am";
+  if (hour === 12) return "12pm";
+  return hour < 12 ? `${hour}am` : `${hour - 12}pm`;
+}
+
+function buildWindowLabel(startHour: number, endHour: number): string {
+  return `${formatHour(startHour)}–${formatHour(endHour + 1)}`;
+}
+
+type HourRow = {
+  local_hour: number; hour_score: number;
+  tide_status: string | null; wind_status: string | null;
+  rain_status: string | null; crowd_status: string | null;
+  temp_status: string | null; uv_status: string | null;
+};
+
+function findBestRemainingWindow(hours: HourRow[]): {
+  startHour: number; endHour: number; avgScore: number; status: string;
+  metricStatuses: Record<string, string | null>;
+} | null {
+  if (!hours.length) return null;
+
+  const sorted    = [...hours].sort((a, b) => a.local_hour - b.local_hour);
+  const peak      = sorted.reduce((b, h) => Number(h.hour_score) > Number(b.hour_score) ? h : b);
+  const peakScore = Number(peak.hour_score);
+  const peakIdx   = sorted.indexOf(peak);
+
+  // Mirror scoring.ts findBestWindow: expand from peak using score threshold
+  const STEP = 0.05;
+  let threshold = 0.93;
+  let window: HourRow[] = [];
+
+  while (true) {
+    const minScore = peakScore * threshold;
+    window = [peak];
+
+    for (let i = peakIdx + 1; i < sorted.length; i++) {
+      const h = sorted[i], prev = window[window.length - 1];
+      if (h.local_hour !== prev.local_hour + 1) break;
+      if (Number(h.hour_score) < minScore)      break;
+      window.push(h);
+    }
+    for (let i = peakIdx - 1; i >= 0; i--) {
+      const h = sorted[i], next = window[0];
+      if (next.local_hour !== h.local_hour + 1) break;
+      if (Number(h.hour_score) < minScore)       break;
+      window.unshift(h);
+    }
+
+    if (window.length >= 2) break;
+    if (threshold <= 0)     break;
+    threshold = Math.max(0, threshold - STEP);
+  }
+
+  if (window.length < 2) return null;
+
+  const statusRank: Record<string, number> = { go: 1, advisory: 2, caution: 3, no_go: 4 };
+  const worst = (a: string | null, b: string | null) => {
+    if (!a) return b; if (!b) return a;
+    return (statusRank[a] ?? 0) >= (statusRank[b] ?? 0) ? a : b;
+  };
+  const ms = window.reduce((acc, h) => ({
+    tide:  worst(acc.tide,  h.tide_status),
+    wind:  worst(acc.wind,  h.wind_status),
+    rain:  worst(acc.rain,  h.rain_status),
+    crowd: worst(acc.crowd, h.crowd_status),
+    temp:  worst(acc.temp,  h.temp_status),
+    uv:    worst(acc.uv,    h.uv_status),
+  }), { tide: null, wind: null, rain: null, crowd: null, temp: null, uv: null } as Record<string, string | null>);
+
+  const avgScore      = window.reduce((s, h) => s + Number(h.hour_score), 0) / window.length;
+  const overallStatus = Object.values(ms).reduce(worst, null) ?? "go";
+
+  return {
+    startHour:      window[0].local_hour,
+    endHour:        window[window.length - 1].local_hour,
+    avgScore,
+    status:         overallStatus,
+    metricStatuses: ms,
+  };
+}

@@ -84,6 +84,19 @@ interface ScoringConfig {
 
   // Best-window selection
   window_score_threshold: number;
+
+  // Status multipliers applied to each metric's sub-score
+  status_mult_advisory:        number;  // default 0.90
+  status_mult_caution:         number;  // default 0.75
+  status_mult_nogo:            number;  // default 0.50
+
+  // Temp-dependent wind ideal (step function)
+  norm_wind_falloff:            number;  // mph from ideal → score 0 (default 20)
+  norm_wind_ideal_cold:         number;  // ideal mph when feels-like < cold_max (default 2)
+  norm_wind_ideal_comfortable:  number;  // ideal mph in comfortable zone (default 8)
+  norm_wind_ideal_hot:          number;  // ideal mph when feels-like > hot_min (default 15)
+  norm_wind_temp_cold_max:      number;  // cold/comfortable boundary °F (default 55)
+  norm_wind_temp_hot_min:       number;  // comfortable/hot boundary °F (default 80)
 }
 
 // WMO codes that are immediate no-go (thunderstorm, heavy rain, snow, freezing rain, violent showers)
@@ -220,6 +233,15 @@ export function applyBestWindowFlags(
   for (const h of scoredHours) {
     h.isInBestWindow = windowTsSet.has(h.forecastTs);
   }
+}
+
+// ─── Wind ideal speed (temp-dependent step function) ─────────────────────────
+
+function windIdealSpeed(feelsLike: number | null, cfg: ScoringConfig): number {
+  if (feelsLike === null)                                    return cfg.norm_wind_ideal_comfortable ?? 8;
+  if (feelsLike < (cfg.norm_wind_temp_cold_max ?? 55))      return cfg.norm_wind_ideal_cold        ?? 2;
+  if (feelsLike > (cfg.norm_wind_temp_hot_min  ?? 80))      return cfg.norm_wind_ideal_hot         ?? 15;
+  return cfg.norm_wind_ideal_comfortable ?? 8;
 }
 
 // ─── Surface temperature estimation ──────────────────────────────────────────
@@ -390,14 +412,61 @@ function scoreOneHour(raw: RawHourData, cfg: ScoringConfig): ScoredHour {
   };
 
   // ── Composite score (always computed — needed for no_go hours too) ────────
-  const tideScore    = raw.tideHeight    !== null ? clamp(1 - raw.tideHeight    / cfg.norm_tide_max)  : 0.5;
-  const rainScore    = raw.precipChance  !== null ? clamp(1 - raw.precipChance  / 100)                : 0.5;
-  const windScore    = raw.windSpeed     !== null ? clamp(1 - raw.windSpeed     / cfg.norm_wind_max)  : 0.5;
-  const crowdScore   = raw.busynessScore !== null ? clamp(1 - raw.busynessScore / 100)                : 0.5;
-  const tempScore    = feelsLike         !== null
-    ? clamp(1 - Math.abs(feelsLike - cfg.norm_temp_target) / cfg.norm_temp_range) : 0.5;
-  const uvScore      = raw.uvIndex       !== null ? clamp(1 - raw.uvIndex       / cfg.norm_uv_max)    : 0.5;
-  const weatherScore = weatherCodeScore(raw.weatherCode);
+
+  // Status multiplier: applied per-metric to its own sub-score
+  const smAdvisory = cfg.status_mult_advisory ?? 0.90;
+  const smCaution  = cfg.status_mult_caution  ?? 0.75;
+  const smNogo     = cfg.status_mult_nogo     ?? 0.50;
+  const statusMult = (s: HourStatus | null): number => {
+    if (s === "no_go")   return smNogo;
+    if (s === "caution") return smCaution;
+    if (s === "advisory") return smAdvisory;
+    return 1.0;
+  };
+
+  // Tide: linear, lower is better
+  const tideScore = (
+    raw.tideHeight !== null
+      ? clamp(1 - raw.tideHeight / cfg.norm_tide_max)
+      : 0.5
+  ) * statusMult(ms.tide);
+
+  // Rain: linear, lower is better
+  const rainScore = (
+    raw.precipChance !== null
+      ? clamp(1 - raw.precipChance / 100)
+      : 0.5
+  ) * statusMult(ms.rain);
+
+  // Wind: temp-dependent V-shape around ideal speed
+  const windIdeal = windIdealSpeed(feelsLike, cfg);
+  const windBase  = raw.windSpeed !== null
+    ? clamp(1 - Math.abs(raw.windSpeed - windIdeal) / (cfg.norm_wind_falloff ?? 20))
+    : 0.5;
+  const windScore = windBase * statusMult(ms.wind);
+
+  // Crowds: linear, lower is better
+  const crowdScore = (
+    raw.busynessScore !== null
+      ? clamp(1 - raw.busynessScore / 100)
+      : 0.5
+  ) * statusMult(ms.crowd);
+
+  // Temp: V-shape around target; cold and hot status multipliers applied separately
+  const tempBase  = feelsLike !== null
+    ? clamp(1 - Math.abs(feelsLike - cfg.norm_temp_target) / cfg.norm_temp_range)
+    : 0.5;
+  const tempScore = tempBase * statusMult(ms.temp_cold) * statusMult(ms.temp_hot);
+
+  // UV: linear, lower is better
+  const uvScore = (
+    raw.uvIndex !== null
+      ? clamp(1 - raw.uvIndex / cfg.norm_uv_max)
+      : 0.5
+  ) * statusMult(ms.uv);
+
+  // Weather code: lookup table
+  const weatherScore = weatherCodeScore(raw.weatherCode) * statusMult(ms.weather_code);
 
   const hourScore = Math.round((
     tideScore    * cfg.weight_tide          +

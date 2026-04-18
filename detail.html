@@ -279,8 +279,8 @@
       bottom: calc(100% + 6px);
       left: 50%;
       transform: translateX(-50%);
-      background: #1e2333;
-      border: 1px solid var(--border);
+      background: #111827;
+      border: 1px solid #3b4560;
       border-radius: 6px;
       padding: 6px 8px;
       white-space: nowrap;
@@ -291,7 +291,7 @@
     .tooltip-hour {
       font-family: 'DM Mono', monospace;
       font-size: 10px;
-      color: var(--text);
+      color: #ffffff;
       font-weight: 500;
       margin-bottom: 3px;
     }
@@ -299,7 +299,7 @@
     .tooltip-line {
       font-family: 'DM Mono', monospace;
       font-size: 10px;
-      color: var(--text-muted);
+      color: #c8d0e0;
       line-height: 1.5;
     }
 
@@ -313,7 +313,7 @@
     /* ── Score tooltip breakdown bars ───────────────────────────── */
     .tt-breakdown { margin-top: 5px; display: flex; flex-direction: column; gap: 3px; }
     .tt-row { display: flex; align-items: center; gap: 5px; }
-    .tt-label { font-family: 'DM Mono', monospace; font-size: 9px; color: var(--text-muted); width: 32px; text-align: right; flex-shrink: 0; }
+    .tt-label { font-family: 'DM Mono', monospace; font-size: 9px; color: #c8d0e0; width: 32px; text-align: right; flex-shrink: 0; }
     .tt-track { width: 64px; height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
     .tt-fill  { height: 100%; border-radius: 3px; }
 
@@ -363,6 +363,39 @@
   // ── Config ────────────────────────────────────────────────────────
   const SUPABASE_URL  = 'https://ehlzbwtrsxaaukurekau.supabase.co';
   const ANON_KEY      = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+  // ── WMO weather code helpers ──────────────────────────────────────
+  const SEVERE_WMO  = new Set([63,64,65,66,67,71,72,73,74,75,76,77,82,95,96,97,98,99]);
+  const CAUTION_WMO = new Set([45,48,51,53,55,56,57,61,80,81]);
+
+  const WMO_LABELS = {
+    0:'Clear', 1:'Clear', 2:'Partly Cloudy', 3:'Overcast',
+    45:'Fog', 48:'Fog',
+    51:'Light Drizzle', 53:'Drizzle', 55:'Heavy Drizzle',
+    56:'Freezing Drizzle', 57:'Freezing Drizzle',
+    61:'Light Rain', 63:'Rain', 65:'Heavy Rain',
+    66:'Freezing Rain', 67:'Freezing Rain',
+    80:'Light Showers', 81:'Showers', 82:'Violent Showers',
+    95:'Thunderstorm', 96:'Thunderstorm', 99:'Thunderstorm',
+  };
+
+  const WMO_ICONS = {
+    0:'☀️', 1:'🌤️', 2:'⛅', 3:'☁️',
+    45:'🌫️', 48:'🌫️',
+    51:'🌦️', 53:'🌦️', 55:'🌧️',
+    56:'🌧️', 57:'🌧️',
+    61:'🌦️', 63:'🌧️', 65:'🌧️',
+    66:'🌧️', 67:'🌧️',
+    80:'🌦️', 81:'🌧️', 82:'⛈️',
+    95:'⛈️', 96:'⛈️', 99:'⛈️',
+  };
+
+  function wmoStatus(code) {
+    if (code == null) return 'go';
+    if (SEVERE_WMO.has(code))  return 'no_go';
+    if (CAUTION_WMO.has(code)) return 'caution';
+    return 'go';
+  }
 
   // ── Params ────────────────────────────────────────────────────────
   const params     = new URLSearchParams(window.location.search);
@@ -444,6 +477,22 @@
         : h.temp_status === 'caution'  ? 'Temp outside comfort zone'
         : h.temp_status === 'advisory' ? 'Slightly warm or cool'
         : 'Comfortable temperature',
+    };
+
+    const weatherMetric = {
+      label:        'Weather',
+      key:          'weather_score',
+      fmt:          () => '',
+      max:          () => 1,
+      barMaxHeight: 32,
+      wrapStyle:    'height:56px',
+      barIconFn:    h => WMO_ICONS[h.weather_code] ?? '🌡️',
+      statusFn:     h => wmoStatus(h.weather_code),
+      colorFn:      h => {
+        const s = wmoStatus(h.weather_code);
+        return s === 'no_go' ? 'var(--bar-no_go)' : s === 'caution' ? 'var(--bar-caution)' : 'var(--bar-go)';
+      },
+      reasonFn:     h => WMO_LABELS[h.weather_code] ?? 'Unknown',
     };
 
     const candidateMetrics = [
@@ -542,7 +591,7 @@
       .filter(m => hours.some(h => { const s = h[m.statusKey]; return s && s !== 'go'; }))
       .sort((a, b) => (statusRank[worstStatus(b)] ?? 0) - (statusRank[worstStatus(a)] ?? 0));
 
-    const metrics = [scoreMetric, ...activeMiddle, tempMetric];
+    const metrics = [scoreMetric, weatherMetric, ...activeMiddle, tempMetric];
 
     const chartsHtml = metrics.map(m => buildMetricRow(m, hours, day)).join('');
 
@@ -712,28 +761,29 @@
     const maxVal  = metric.max ? metric.max(hours) : Math.max(...values.filter(v => v !== null), 1);
     const minVal  = metric.relative ? Math.min(...values.filter(v => v !== null)) : 0;
     const range   = Math.max(maxVal - minVal, 1);
-    const maxHeight = 32; // px
+    const maxHeight = metric.barMaxHeight ?? 32; // px
 
     const barsHtml = hours.map(h => {
       const raw     = h[metric.key];
       const val     = metric.parse ? metric.parse(raw) : raw;
-      const metricStatus = metric.statusKey ? h[metric.statusKey] : null;
-      const barColor = metric.statusKey
-        ? (metricStatus === 'no_go'    ? 'var(--bar-no_go)'
-         : metricStatus === 'caution'  ? 'var(--bar-caution)'
-         : metricStatus === 'advisory' ? 'var(--bar-advisory)'
-         :                               'var(--bar-go)')
-        : (h.is_in_best_window         ? 'var(--bar-window)'
-         : h.hour_status === 'no_go'   ? 'var(--bar-no_go)'
-         : h.hour_status === 'caution' ? 'var(--bar-caution)'
-         : h.hour_status === 'advisory'? 'var(--bar-advisory)'
-         :                               'var(--bar-go)');
+      const metricStatus = metric.statusFn ? metric.statusFn(h) : (metric.statusKey ? h[metric.statusKey] : null);
+      const barColor = metric.colorFn ? metric.colorFn(h)
+        : metric.statusKey
+          ? (metricStatus === 'no_go'    ? 'var(--bar-no_go)'
+           : metricStatus === 'caution'  ? 'var(--bar-caution)'
+           : metricStatus === 'advisory' ? 'var(--bar-advisory)'
+           :                               'var(--bar-go)')
+          : (h.is_in_best_window         ? 'var(--bar-window)'
+           : h.hour_status === 'no_go'   ? 'var(--bar-no_go)'
+           : h.hour_status === 'caution' ? 'var(--bar-caution)'
+           : h.hour_status === 'advisory'? 'var(--bar-advisory)'
+           :                               'var(--bar-go)');
       const pct     = val !== null ? Math.max((val - minVal) / range, 0.05) : 0.05;
       const height  = Math.round(pct * maxHeight);
-      const display = metric.fmt(raw);
-      const dog     = h.is_in_best_window ? '🐶' : '';
+      const display = metric.fmt(raw, h);
+      const dog     = metric.barIconFn ? metric.barIconFn(h) : (h.is_in_best_window ? '🐶' : '');
 
-      const activeStatus = metric.statusKey ? h[metric.statusKey] : h.hour_status;
+      const activeStatus = metric.statusFn ? metric.statusFn(h) : (metric.statusKey ? h[metric.statusKey] : h.hour_status);
       const statusIcon  = activeStatus === 'go' ? '✓' : activeStatus === 'no_go' ? '✕' : '⚠';
       const statusText  = activeStatus === 'go' ? 'Go' : activeStatus === 'advisory' ? 'Advisory' : activeStatus === 'caution' ? 'Caution' : 'No Go';
       const statusClass = `tooltip-status-${activeStatus}`;
@@ -746,12 +796,13 @@
       const isScoreBar = metric.key === 'hour_score';
       const breakdownHtml = isScoreBar ? (() => {
         const components = [
-          { label: 'Tide',  score: h.tide_score,  status: h.tide_status  },
-          { label: 'Wind',  score: h.wind_score,  status: h.wind_status  },
-          { label: 'Rain',  score: h.rain_score,  status: h.rain_status  },
-          { label: 'Crowd', score: h.crowd_score, status: h.crowd_status },
-          { label: 'Temp',  score: h.temp_score,  status: h.temp_status  },
-          { label: 'UV',    score: h.uv_score,    status: h.uv_status    },
+          { label: 'Tide',  score: h.tide_score,    status: h.tide_status           },
+          { label: 'Wind',  score: h.wind_score,    status: h.wind_status           },
+          { label: 'Rain',  score: h.rain_score,    status: h.rain_status           },
+          { label: 'Crowd', score: h.crowd_score,   status: h.crowd_status          },
+          { label: 'Wx',    score: h.weather_score, status: wmoStatus(h.weather_code) },
+          { label: 'Temp',  score: h.temp_score,    status: h.temp_status           },
+          { label: 'UV',    score: h.uv_score,      status: h.uv_status             },
         ];
         const rows = components.map(c => {
           const raw   = c.score !== null ? Math.round(c.score * 100)
@@ -791,7 +842,7 @@
     return `
       <div class="metric-row">
         <div class="metric-label">${metric.label}</div>
-        <div class="bars-wrap">${barsHtml}</div>
+        <div class="bars-wrap" style="${metric.wrapStyle ?? ''}">${barsHtml}</div>
         <div class="x-axis">${xAxisHtml}</div>
       </div>`;
   }

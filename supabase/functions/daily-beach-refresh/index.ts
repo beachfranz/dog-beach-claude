@@ -104,6 +104,7 @@ interface ScoringConfig {
   weight_crowd: number;
   weight_temp: number;
   weight_uv: number;
+  weight_weather_code: number;
   // Normalisation
   norm_tide_max: number;
   norm_wind_max: number;
@@ -480,12 +481,13 @@ function buildHourlyRow(
     positive_reason_codes: h.positiveReasonCodes,
     risk_reason_codes:     h.riskReasonCodes,
     explainability:        h.explainability,
-    tide_score:            h.explainability.tide_score  ?? null,
-    wind_score:            h.explainability.wind_score  ?? null,
-    crowd_score:           h.explainability.crowd_score ?? null,
-    rain_score:            h.explainability.rain_score  ?? null,
-    temp_score:            h.explainability.temp_score  ?? null,
-    uv_score:              h.explainability.uv_score    ?? null,
+    tide_score:            h.explainability.tide_score    ?? null,
+    wind_score:            h.explainability.wind_score    ?? null,
+    crowd_score:           h.explainability.crowd_score   ?? null,
+    rain_score:            h.explainability.rain_score    ?? null,
+    temp_score:            h.explainability.temp_score    ?? null,
+    uv_score:              h.explainability.uv_score      ?? null,
+    weather_score:         h.explainability.weather_score ?? null,
     tide_status:           h.metricStatuses.tide_status     ?? null,
     wind_status:           h.metricStatuses.wind_status     ?? null,
     crowd_status:          h.metricStatuses.crowd_status    ?? null,

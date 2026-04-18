@@ -146,6 +146,22 @@ IP + hour bucketed counter for Scout chat rate limiting. Max 20 requests/IP/hour
 
 ---
 
+## Supabase CLI
+
+Available via `supabase` (installed at `~/scoop/shims/supabase`, v2.90.0). The project is pre-linked to **dog-beach-AI** (ref: `ehlzbwtrsxaaukurekau`, East US).
+
+Run a migration against the live DB:
+```bash
+supabase db query --linked -f supabase/migrations/<file>.sql
+```
+
+Verify a value:
+```bash
+supabase db query --linked "SELECT col FROM table WHERE ..."
+```
+
+---
+
 ## Edge Functions
 
 Deploy command for all browser-facing functions:
@@ -287,8 +303,11 @@ The overall `hour_status` is the worst status across all metrics.
 - `go`: otherwise
 
 **WMO code classification:**
-- Severe (no_go): thunderstorm (95–99), heavy rain (63–67), snow/ice (71–77)
-- Caution: drizzle (51–57), slight rain (61), fog (45, 48)
+- Severe (no_go): thunderstorm (95–99), heavy rain (63–67), snow/ice (71–77), violent showers (82)
+- Caution: drizzle (51–57), slight rain (61), slight/moderate showers (80–81), fog (45, 48)
+- Go: everything else (clear 0–3, partly cloudy, overcast) via fallthrough — no explicit list
+
+Note: `SEVERE_WMO_CODES` is hardcoded in `_shared/scoring.ts`. `caution_wmo_codes` lives in the DB. `nogo_wmo_codes` DB column is not read by the engine (dead config).
 
 **Crowd** (`busyness_score` 0–100 from BestTime)
 - `no_go`: > `advisory_crowd_max` (default 84) — i.e., above the advisory ceiling
@@ -307,7 +326,7 @@ Busyness categories: `quiet` (0–`busy_quiet_max`), `moderate`, `dog_party`, `t
 **UV** (`uv_index`)
 - `no_go`: ≥ `nogo_uv_index` (default 11)
 - `caution`: ≥ `caution_uv_index` (default 8)
-- `advisory`: ≥ `advisory_uv_index` (default 3)
+- `advisory`: ≥ `advisory_uv_index` (6 — raised from 3 on 2026-04-17; UV 3 fired on every clear SoCal afternoon and became noise)
 - `go`: otherwise
 
 **Sand temp** (`sand_temp` in °F — estimated from `temp_air`)
@@ -324,12 +343,13 @@ Scored on `feels_like`, not raw `temp_air`. Weighted sum of six normalized compo
 
 | Component | Weight field | Normalization |
 |---|---|---|
-| Tide | `weight_tide` | 0 → 100, 0 = best, normalized against `norm_tide_max` |
-| Wind | `weight_wind` | 0 → 100, lower = better, `norm_wind_max` |
-| Rain | `weight_rain` | 0 → 100, lower precip% = better |
-| Crowd | `weight_crowd` | 0 → 100, lower busyness = better |
-| Temp | `weight_temp` | bell curve around `norm_temp_target` ± `norm_temp_range` |
-| UV | `weight_uv` | 0 → 100, lower UV = better, `norm_uv_max` |
+| Tide | `weight_tide` (22.5%) | 0 → 100, 0 = best, normalized against `norm_tide_max` |
+| Rain | `weight_rain` (17.5%) | 0 → 100, lower precip% = better |
+| Wind | `weight_wind` (20%) | 0 → 100, lower = better, `norm_wind_max` |
+| Crowd | `weight_crowd` (15%) | 0 → 100, lower busyness = better |
+| Weather code | `weight_weather_code` (15%) | WMO code → fixed score: clear=1.0, partly cloudy=0.9, overcast=0.75, fog=0.4, drizzle=0.15–0.35, rain=0.3, showers=0.15–0.25, severe=0.0 |
+| Temp | `weight_temp` (5%) | bell curve around `norm_temp_target` ± `norm_temp_range` |
+| UV | `weight_uv` (5%) | 0 → 100, lower UV = better, `norm_uv_max` |
 
 `hour_score` is null for hours where `is_daylight = false` or beach is closed.
 

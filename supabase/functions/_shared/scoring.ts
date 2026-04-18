@@ -73,6 +73,7 @@ interface ScoringConfig {
   weight_crowd:           number;
   weight_temp:            number;
   weight_uv:              number;
+  weight_weather_code:    number;
 
   // Normalisation ranges
   norm_tide_max:          number;
@@ -85,12 +86,38 @@ interface ScoringConfig {
   window_score_threshold: number;
 }
 
-// WMO codes that are immediate no-go (thunderstorm, heavy rain, snow, freezing rain)
+// WMO codes that are immediate no-go (thunderstorm, heavy rain, snow, freezing rain, violent showers)
 const SEVERE_WMO_CODES = new Set([
   63, 64, 65, 66, 67,
   71, 72, 73, 74, 75, 76, 77,
+  82,
   95, 96, 97, 98, 99,
 ]);
+
+// WMO code → normalized weather score (0–1). Higher = better conditions.
+// Unlisted codes (shouldn't appear from Open-Meteo) default to 0.5.
+const WMO_SCORES: Record<number, number> = {
+  0:  1.00,  // clear sky
+  1:  1.00,  // mainly clear
+  2:  0.90,  // partly cloudy
+  3:  0.75,  // overcast
+  45: 0.40,  // fog
+  48: 0.35,  // depositing rime fog
+  51: 0.35,  // light drizzle
+  53: 0.25,  // moderate drizzle
+  55: 0.15,  // heavy drizzle
+  56: 0.15,  // light freezing drizzle
+  57: 0.05,  // heavy freezing drizzle
+  61: 0.30,  // slight rain
+  80: 0.25,  // slight rain showers
+  81: 0.15,  // moderate rain showers
+  // no_go codes (63–99 severe) score 0 but are excluded from candidate hours anyway
+};
+
+function weatherCodeScore(code: number | null): number {
+  if (code === null) return 0.5;
+  return WMO_SCORES[code] ?? 0.5;
+}
 
 // ─── Input / output types ─────────────────────────────────────────────────────
 
@@ -363,31 +390,34 @@ function scoreOneHour(raw: RawHourData, cfg: ScoringConfig): ScoredHour {
   };
 
   // ── Composite score (always computed — needed for no_go hours too) ────────
-  const tideScore  = raw.tideHeight  !== null ? clamp(1 - raw.tideHeight  / cfg.norm_tide_max)  : 0.5;
-  const rainScore  = raw.precipChance !== null ? clamp(1 - raw.precipChance / 100)               : 0.5;
-  const windScore  = raw.windSpeed    !== null ? clamp(1 - raw.windSpeed    / cfg.norm_wind_max) : 0.5;
-  const crowdScore = raw.busynessScore !== null ? clamp(1 - raw.busynessScore / 100)             : 0.5;
-  const tempScore  = feelsLike        !== null
+  const tideScore    = raw.tideHeight    !== null ? clamp(1 - raw.tideHeight    / cfg.norm_tide_max)  : 0.5;
+  const rainScore    = raw.precipChance  !== null ? clamp(1 - raw.precipChance  / 100)                : 0.5;
+  const windScore    = raw.windSpeed     !== null ? clamp(1 - raw.windSpeed     / cfg.norm_wind_max)  : 0.5;
+  const crowdScore   = raw.busynessScore !== null ? clamp(1 - raw.busynessScore / 100)                : 0.5;
+  const tempScore    = feelsLike         !== null
     ? clamp(1 - Math.abs(feelsLike - cfg.norm_temp_target) / cfg.norm_temp_range) : 0.5;
-  const uvScore    = raw.uvIndex      !== null ? clamp(1 - raw.uvIndex      / cfg.norm_uv_max)   : 0.5;
+  const uvScore      = raw.uvIndex       !== null ? clamp(1 - raw.uvIndex       / cfg.norm_uv_max)    : 0.5;
+  const weatherScore = weatherCodeScore(raw.weatherCode);
 
   const hourScore = Math.round((
-    tideScore  * cfg.weight_tide  +
-    rainScore  * cfg.weight_rain  +
-    windScore  * cfg.weight_wind  +
-    crowdScore * cfg.weight_crowd +
-    tempScore  * cfg.weight_temp  +
-    uvScore    * cfg.weight_uv
+    tideScore    * cfg.weight_tide          +
+    rainScore    * cfg.weight_rain          +
+    windScore    * cfg.weight_wind          +
+    crowdScore   * cfg.weight_crowd         +
+    tempScore    * cfg.weight_temp          +
+    uvScore      * cfg.weight_uv            +
+    weatherScore * cfg.weight_weather_code
   ) * 100);
 
   const explainability: Record<string, number> = {
-    tide_score:  round2(tideScore),
-    rain_score:  round2(rainScore),
-    wind_score:  round2(windScore),
-    crowd_score: round2(crowdScore),
-    temp_score:  round2(tempScore),
-    uv_score:    round2(uvScore),
-    hour_score:  hourScore,
+    tide_score:    round2(tideScore),
+    rain_score:    round2(rainScore),
+    wind_score:    round2(windScore),
+    crowd_score:   round2(crowdScore),
+    temp_score:    round2(tempScore),
+    uv_score:      round2(uvScore),
+    weather_score: round2(weatherScore),
+    hour_score:    hourScore,
   };
 
   // ── 1. Availability gates (no score/candidate if not open/daylight) ───────

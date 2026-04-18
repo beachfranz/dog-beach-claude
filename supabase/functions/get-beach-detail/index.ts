@@ -60,7 +60,7 @@ Deno.serve(async (req: Request) => {
         "local_hour, hour_label, hour_status, is_in_best_window, " +
         "tide_height, wind_speed, temp_air, feels_like, precip_chance, busyness_score, " +
         "uv_index, weather_code, hour_text, is_daylight, hour_score, " +
-        "tide_score, wind_score, crowd_score, rain_score, temp_score, uv_score, " +
+        "tide_score, wind_score, crowd_score, rain_score, temp_score, uv_score, weather_score, " +
         "tide_status, wind_status, crowd_status, rain_status, temp_status, uv_status, " +
         "temp_cold_status, temp_hot_status, sand_temp, asphalt_temp, sand_status, asphalt_status"
       )

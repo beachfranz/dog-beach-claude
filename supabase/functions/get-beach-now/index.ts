@@ -205,8 +205,6 @@ function buildNowRow(
     busyness_category:     h.busynessCategory,
     hour_status:           h.hourStatus,
     hour_score:            h.hourScore,
-    passed_checks:         h.passedChecks,
-    failed_checks:         h.failedChecks,
     positive_reason_codes: h.positiveReasonCodes,
     risk_reason_codes:     h.riskReasonCodes,
     explainability:        h.explainability,

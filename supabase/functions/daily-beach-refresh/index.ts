@@ -445,8 +445,6 @@ function buildHourlyRow(
     busyness_category:     h.busynessCategory,
     hour_status:           h.hourStatus,
     hour_score:            h.hourScore,
-    passed_checks:         h.passedChecks,
-    failed_checks:         h.failedChecks,
     positive_reason_codes: h.positiveReasonCodes,
     risk_reason_codes:     h.riskReasonCodes,
     explainability:        h.explainability,
@@ -527,19 +525,6 @@ function buildDailyRow(
   if (bacteriaRisk === "none")                                  positiveSet.add("clean_water");
   if (bacteriaRisk === "moderate" || bacteriaRisk === "high")   riskSet.add("bacteria_risk");
 
-  const thresholdsUsed = {
-    scoring_version:       config.scoring_version,
-    nogo_precip_chance:    config.nogo_precip_chance,
-    nogo_wind_speed:       config.nogo_wind_speed,
-    caution_precip_chance: config.caution_precip_chance,
-    caution_wind_speed:    config.caution_wind_speed,
-    caution_tide_height:   config.caution_tide_height,
-    weight_tide:           config.weight_tide,
-    weight_rain:           config.weight_rain,
-    weight_wind:           config.weight_wind,
-    weight_crowd:          config.weight_crowd,
-  };
-
   return {
     location_id:           beach.location_id,
     local_date:            date,
@@ -564,14 +549,11 @@ function buildDailyRow(
     avg_feels_like:        round1(avgFeelsLike),
     positive_reason_codes: [...positiveSet],
     risk_reason_codes:     [...riskSet],
-    explainability:        {},
-    thresholds_used:       thresholdsUsed,
     day_text:              null,
     caution_text:          null,
     best_window_text:      null,
     no_go_text:            dayStatus === "no_go" ? buildNoGoText([...riskSet]) : null,
     hourly_source_max_ts:  maxTs(dayHours.map((h) => h.forecastTs)),
-    crowd_source_max_ts:   null,
     daily_source_date:     date,
     timezone:              beach.timezone,
     scoring_version:       config.scoring_version,

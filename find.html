@@ -517,14 +517,12 @@
   let currentSort = 'conditions';
 
   // ── Day pills ──────────────────────────────────────────────────────
-  const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
-  const days  = [];
+  const days = [];
   for (let i = 0; i < 7; i++) {
-    const d     = new Date(today);
-    d.setDate(today.getDate() + i);
-    const iso   = d.toISOString().slice(0, 10);
+    const d     = new Date(Date.now() + i * 86_400_000);
+    const iso   = d.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
     const label = i === 0 ? 'TDY' : i === 1 ? 'TMW'
-                : d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+                : d.toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short' }).toUpperCase();
     days.push({ iso, label });
   }
 

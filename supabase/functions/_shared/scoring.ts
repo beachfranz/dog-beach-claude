@@ -153,6 +153,7 @@ export interface RawHourData {
   tideHeight:    number | null;
   busynessScore: number | null;    // 0-100 from BestTime
   isBeachOpen:   boolean;
+  isProhibited:  boolean;          // true when dogs are banned during this specific hour
 }
 
 export interface ScoredHour {
@@ -507,6 +508,13 @@ function scoreOneHour(raw: RawHourData, cfg: ScoringConfig): ScoredHour {
       passedChecks, failedChecks, positiveReasonCodes, riskReasonCodes, {}, null, metricStatuses);
   }
   passedChecks.push("beach_open");
+
+  if (raw.isProhibited) {
+    failedChecks.push("beach_closed_dogs");
+    riskReasonCodes.push("beach_closed_dogs");
+    return buildResult(raw, "no_go", null, false, sandTemp, asphaltTemp,
+      passedChecks, failedChecks, positiveReasonCodes, riskReasonCodes, {}, null, metricStatuses);
+  }
 
   // ── 2. Derive overall status from all metric statuses ─────────────────────
   const overallStatus = worstOf(

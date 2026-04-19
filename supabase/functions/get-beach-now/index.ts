@@ -91,6 +91,8 @@ interface Beach {
   timezone: string;
   open_time: string | null;
   close_time: string | null;
+  dogs_prohibited_start: string | null;
+  dogs_prohibited_end:   string | null;
 }
 
 async function refreshNow(
@@ -126,6 +128,10 @@ async function refreshNow(
     const openMinutes  = timeToMinutes(beach.open_time  ?? "00:00");
     const closeMinutes = timeToMinutes(beach.close_time ?? "23:59");
     const isBeachOpen  = (localHour * 60) >= openMinutes && (localHour * 60) < closeMinutes;
+    const prohibStart  = beach.dogs_prohibited_start ? timeToMinutes(beach.dogs_prohibited_start) : null;
+    const prohibEnd    = beach.dogs_prohibited_end   ? timeToMinutes(beach.dogs_prohibited_end)   : null;
+    const isProhibited = prohibStart !== null && prohibEnd !== null &&
+                         (localHour * 60) >= prohibStart && (localHour * 60) < prohibEnd;
 
     const rawHour: RawHourData = {
       forecastTs:    localToUtcIso(localDate, localHour, beach.timezone),
@@ -142,6 +148,7 @@ async function refreshNow(
       tideHeight:    tide.height,
       busynessScore: crowdRow.data?.busyness_score ?? null,
       isBeachOpen,
+      isProhibited,
     };
 
     // ── Score through shared engine ─────────────────────────────────────────

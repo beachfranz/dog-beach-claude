@@ -35,6 +35,8 @@ interface Beach {
   timezone: string;
   open_time: string | null;
   close_time: string | null;
+  dogs_prohibited_start: string | null;
+  dogs_prohibited_end:   string | null;
   address: string | null;
   website: string | null;
   description: string | null;
@@ -381,6 +383,8 @@ function buildRawHours(
 ): RawHourData[] {
   const openMinutes  = timeToMinutes(beach.open_time  ?? "00:00");
   const closeMinutes = timeToMinutes(beach.close_time ?? "23:59");
+  const prohibStart  = beach.dogs_prohibited_start ? timeToMinutes(beach.dogs_prohibited_start) : null;
+  const prohibEnd    = beach.dogs_prohibited_end   ? timeToMinutes(beach.dogs_prohibited_end)   : null;
 
   return weather.hours.map((wh) => {
     const localDate = wh.time.slice(0, 10);
@@ -396,6 +400,8 @@ function buildRawHours(
 
     const hourMinutes = localHour * 60;
     const isBeachOpen = hourMinutes >= openMinutes && hourMinutes < closeMinutes;
+    const isProhibited = prohibStart !== null && prohibEnd !== null &&
+                         hourMinutes >= prohibStart && hourMinutes < prohibEnd;
 
     return {
       forecastTs:    toUtcIso(wh.time, beach.timezone),
@@ -412,6 +418,7 @@ function buildRawHours(
       tideHeight,
       busynessScore: busyness,
       isBeachOpen,
+      isProhibited,
     };
   });
 }

@@ -21,13 +21,13 @@ WHERE location_id = 'rosies-dog-beach';
 -- Huntington Dog Beach — Huntington Beach
 UPDATE public.beaches SET
   locality           = 'Huntington Beach',
-  off_leash_flag     = false,
-  leash_policy       = 'Leash required at all times',
-  access_rule        = 'on_leash',
+  off_leash_flag     = true,
+  leash_policy       = 'Off-leash on beach; leash required on approach',
+  access_rule        = 'off_leash',
   access_scope       = 'specific_beach',
   allowed_hours_text = NULL,
   parking_text       = 'Street and lot parking vary by access point; verify seasonally.',
-  dog_rules          = 'Dogs permitted at the designated Dog Beach section; leash required at all times.'
+  dog_rules          = 'Off-leash on the designated Dog Beach section; leash required on approach.'
 WHERE location_id = 'huntington-dog-beach';
 
 -- Ocean Beach Dog Beach — San Diego

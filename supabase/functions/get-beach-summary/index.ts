@@ -25,7 +25,6 @@ Deno.serve(async (req: Request) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
     const nowUtc   = new Date();
-    const today    = nowUtc.toISOString().slice(0, 10);
 
     // Fetch beach metadata
     const { data: beach, error: beachErr } = await supabase
@@ -38,14 +37,15 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Beach not found" }, 404);
     }
 
-    // Current local hour for this beach (for today's remaining-window logic)
-    const localHourParts = new Intl.DateTimeFormat("en-US", {
+    // Current local date + hour for this beach (must use beach timezone, not UTC)
+    const localParts = new Intl.DateTimeFormat("en-US", {
       timeZone: beach.timezone,
+      year: "numeric", month: "2-digit", day: "2-digit",
       hour: "2-digit", hour12: false,
     }).formatToParts(nowUtc);
-    const currentLocalHour = parseInt(
-      localHourParts.find(p => p.type === "hour")?.value ?? "0"
-    ) % 24;
+    const getPart = (t: string) => localParts.find(p => p.type === t)?.value ?? "";
+    const today         = `${getPart("year")}-${getPart("month")}-${getPart("day")}`;
+    const currentLocalHour = parseInt(getPart("hour")) % 24;
 
     // Fetch 7 days of recommendations starting today
     const { data: days, error: daysErr } = await supabase

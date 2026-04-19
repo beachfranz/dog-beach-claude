@@ -58,13 +58,14 @@ Deno.serve(async (req: Request) => {
   if (!location_id || !question) {
     return json({ error: "location_id and question are required" }, 400);
   }
-  const today = new Date().toISOString().slice(0, 10);
-
   try {
     let systemPrompt: string;
 
     if (isComparativeQuestion(question)) {
       // ── Cross-beach mode: summary data for all beaches ──────────────
+      // All beaches are in California — use Pacific time for "today"
+      const todayPacific = localDateForTimezone(new Date(), "America/Los_Angeles");
+
       const [{ data: beaches }, { data: allDays }] = await Promise.all([
         supabase
           .from("beaches")
@@ -72,7 +73,7 @@ Deno.serve(async (req: Request) => {
         supabase
           .from("beach_day_recommendations")
           .select("location_id, local_date, day_status, best_window_label, best_window_text, avg_temp, avg_wind, avg_uv, avg_tide_height, lowest_tide_height, busyness_category, go_hours_count, caution_hours_count, no_go_hours_count, caution_text, risk_reason_codes, positive_reason_codes, summary_weather, bacteria_risk, precip_72h_mm")
-          .gte("local_date", today)
+          .gte("local_date", todayPacific)
           .order("local_date", { ascending: true })
           .order("location_id", { ascending: true })
           .limit(50),
@@ -92,14 +93,15 @@ Deno.serve(async (req: Request) => {
         return json({ error: `Beach not found: ${location_id}` }, 404);
       }
 
-      // Get current local hour in the beach's timezone
+      // Get current local date + hour in the beach's timezone
       const nowUtc = new Date();
-      const localHourParts = new Intl.DateTimeFormat("en-US", {
+      const today  = localDateForTimezone(nowUtc, beach.timezone as string);
+      const localParts = new Intl.DateTimeFormat("en-US", {
         timeZone: beach.timezone as string,
         hour: "2-digit", hour12: false,
       }).formatToParts(nowUtc);
       const currentLocalHour = parseInt(
-        localHourParts.find(p => p.type === "hour")?.value ?? "0"
+        localParts.find(p => p.type === "hour")?.value ?? "0"
       ) % 24;
       const currentTimeLabel = new Intl.DateTimeFormat("en-US", {
         timeZone: beach.timezone as string,
@@ -367,5 +369,14 @@ function fmtNum(val: unknown, unit: string): string {
   if (val === null || val === undefined) return "n/a";
   const n = typeof val === "number" ? val : parseFloat(String(val));
   return isNaN(n) ? "n/a" : `${n}${unit}`;
+}
+
+function localDateForTimezone(date: Date, timezone: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(date);
+  const get = (t: string) => parts.find(p => p.type === t)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
 }
 

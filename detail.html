@@ -103,7 +103,7 @@
     .close-btn:hover { color: var(--text); background: #1e2333; }
 
     /* ── Charts ───────────────────────────────────────────────────── */
-    .charts { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+    .charts { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 
     .metric-row { display: flex; flex-direction: column; gap: 6px; }
 
@@ -113,13 +113,15 @@
       font-weight: 500;
       color: var(--text-muted);
       letter-spacing: 0.04em;
+      position: relative;
+      z-index: 1;
     }
 
     .bars-wrap {
       display: flex;
       align-items: flex-end;
       gap: 3px;
-      height: 44px;
+      height: 30px;
       position: relative;
     }
 
@@ -175,7 +177,7 @@
       display: flex;
       align-items: flex-start;
       gap: 10px;
-      padding: 12px 16px 0;
+      padding: 12px 20px 0;
     }
 
     .status-board {
@@ -484,8 +486,8 @@
       key:          'weather_score',
       fmt:          () => '',
       max:          () => 1,
-      barMaxHeight: 32,
-      wrapStyle:    'height:56px',
+      barMaxHeight: 22,
+      wrapStyle:    'height:40px',
       barIconFn:    h => WMO_ICONS[h.weather_code] ?? '🌡️',
       statusFn:     h => wmoStatus(h.weather_code),
       colorFn:      h => {
@@ -591,7 +593,7 @@
       .filter(m => hours.some(h => { const s = h[m.statusKey]; return s && s !== 'go'; }))
       .sort((a, b) => (statusRank[worstStatus(b)] ?? 0) - (statusRank[worstStatus(a)] ?? 0));
 
-    const metrics = [scoreMetric, weatherMetric, ...activeMiddle, tempMetric];
+    const metrics = [scoreMetric, ...activeMiddle, weatherMetric, tempMetric];
 
     const chartsHtml = metrics.map(m => buildMetricRow(m, hours, day)).join('');
 
@@ -601,7 +603,6 @@
 
     document.getElementById('main-content').innerHTML = `
       <div class="board-and-charts">
-        ${buildStatusBoard(hours)}
         <div class="charts">${chartsHtml}</div>
       </div>
       <div class="legend">
@@ -761,7 +762,7 @@
     const maxVal  = metric.max ? metric.max(hours) : Math.max(...values.filter(v => v !== null), 1);
     const minVal  = metric.relative ? Math.min(...values.filter(v => v !== null)) : 0;
     const range   = Math.max(maxVal - minVal, 1);
-    const maxHeight = metric.barMaxHeight ?? 32; // px
+    const maxHeight = metric.barMaxHeight ?? 22; // px
 
     const barsHtml = hours.map(h => {
       const raw     = h[metric.key];

@@ -518,7 +518,7 @@
   const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
 
   // ── State ──────────────────────────────────────────────────────────
-  let rawBeaches  = [];   // [{ beach, days }]
+  let beachCache  = {};   // { [date]: BeachFindRow[] } — one entry per date pill
   let nowBeaches  = null; // [{ beach, day }] — cached after first NOW fetch
   let userLat     = null;
   let userLng     = null;
@@ -572,9 +572,11 @@
       document.getElementById('beach-list').innerHTML =
         Array(4).fill('<div class="skeleton"></div>').join('');
 
-      // Need beach list — wait for rawBeaches or fetch it
-      const beachList = rawBeaches.length
-        ? rawBeaches.map(b => b.beach)
+      // Pull beach list from today's cache, or fall back to REST
+      const todayISO   = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+      const cachedToday = beachCache[todayISO];
+      const beachList  = cachedToday
+        ? cachedToday.map(b => ({ location_id: b.location_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule }))
         : await fetch(
             `${SUPABASE_URL}/rest/v1/beaches?select=location_id,display_name,latitude,longitude,access_rule&is_active=eq.true&order=display_name`,
             { headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY } }
@@ -656,37 +658,35 @@
     return 'partly_cloudy';
   }
 
-  // ── Load all beaches then fetch summaries in parallel ──────────────
-  async function loadBeaches() {
-    document.getElementById('beach-list').innerHTML =
-      Array(5).fill('<div class="skeleton"></div>').join('');
+  // ── Fetch beaches for a specific date (cached) ────────────────────
+  async function loadBeachesForDate(date) {
+    if (beachCache[date]) return beachCache[date];
+    const res  = await fetch(
+      `${SUPABASE_URL}/functions/v1/get-beaches-find?date=${date}`,
+      { headers: { 'Authorization': `Bearer ${ANON_KEY}` } }
+    );
+    const data = await res.json();
+    if (Array.isArray(data.beaches)) beachCache[date] = data.beaches;
+    return data.beaches ?? [];
+  }
 
-    try {
-      // Get all active beaches with lat/lng from REST API
-      const beachRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/beaches?select=location_id,display_name,latitude,longitude,access_rule&is_active=eq.true&order=display_name`,
-        { headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY } }
-      );
-      const beachList = await beachRes.json();
-      if (!Array.isArray(beachList) || !beachList.length) throw new Error('No beaches');
-
-      // Fetch summary for each beach in parallel
-      const summaries = await Promise.all(
-        beachList.map(b =>
-          fetch(`${SUPABASE_URL}/functions/v1/get-beach-summary?location_id=${b.location_id}`,
-            { headers: { 'Authorization': `Bearer ${ANON_KEY}` } })
-            .then(r => r.json())
-            .then(data => ({ beach: b, days: data.days ?? [] }))
-            .catch(() => ({ beach: b, days: [] }))
-        )
-      );
-
-      rawBeaches = summaries;
-      sortAndRender();
-    } catch {
-      document.getElementById('beach-list').innerHTML =
-        '<div class="no-data">Failed to load beaches.</div>';
-    }
+  // Convert flat get-beaches-find row into the day shape buildBeachCard expects
+  function beachToDay(b) {
+    if (!b.day_status || b.day_status === 'no_data') return null;
+    return {
+      day_status:         b.day_status,
+      composite_score:    b.composite_score,
+      best_window_label:  b.best_window_label,
+      best_window_status: b.best_window_status,
+      bacteria_risk:      b.bacteria_risk,
+      summary_weather:    b.summary_weather,
+      weather_code:       b.weather_code,
+      lowest_tide_height: b.lowest_tide_height,
+      avg_temp:           b.avg_temp,
+      avg_wind:           b.avg_wind,
+      busyness_category:  b.busyness_category,
+      go_hours_count:     b.go_hours_count,
+    };
   }
 
   // ── Sort and render ────────────────────────────────────────────────
@@ -695,16 +695,32 @@
       await sortAndRenderNow();
       return;
     }
-    if (!rawBeaches.length) return;
 
-    // Build cards: find matching day for selectedDate, attach distance
-    const cards = rawBeaches.filter(({ beach }) => matchesLeashFilter(beach)).map(({ beach, days }) => {
-      const day = days.find(d => d.local_date === selectedDate) ?? null;
-      const distance = userLat !== null
-        ? haversine(userLat, userLng, parseFloat(beach.latitude), parseFloat(beach.longitude))
-        : null;
-      return { beach, day, distance };
-    });
+    // Fetch if not yet cached
+    let beaches = beachCache[selectedDate];
+    if (!beaches) {
+      document.getElementById('top-card').innerHTML   = '<div class="skeleton"></div>';
+      document.getElementById('beach-list').innerHTML =
+        Array(4).fill('<div class="skeleton"></div>').join('');
+      try {
+        beaches = await loadBeachesForDate(selectedDate);
+      } catch {
+        document.getElementById('beach-list').innerHTML =
+          '<div class="no-data">Failed to load beaches.</div>';
+        return;
+      }
+    }
+
+    // Build cards with client-side distance and leash filter
+    const cards = beaches
+      .filter(b => matchesLeashFilter(b))
+      .map(b => ({
+        beach:    b,
+        day:      beachToDay(b),
+        distance: userLat !== null
+          ? haversine(userLat, userLng, parseFloat(b.latitude), parseFloat(b.longitude))
+          : null,
+      }));
 
     // Sort
     let sorted;
@@ -1131,7 +1147,9 @@
 
   // ── Boot ───────────────────────────────────────────────────────────
   requestGeolocation();
-  loadBeaches();        // loads summaries for day pills in background
+  // Pre-fetch today so TDY pill is instant; warms beach list for NOW mode
+  const _todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  loadBeachesForDate(_todayISO);
   sortAndRenderNow();   // NOW is default — fetch immediately
 </script>
 <script>

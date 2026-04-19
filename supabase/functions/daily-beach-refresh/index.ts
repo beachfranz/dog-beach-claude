@@ -15,12 +15,6 @@ import {
   type ScoredHour,
   type BestWindow,
 } from "./scoring.ts";
-import {
-  generateDayNarrative,
-  generateHourLabels,
-  type NarrativeInput,
-  type WindowHour,
-} from "./narrative.ts";
 
 // ─── Inlined types (replaces ../../src/lib/types.ts import) ──────────────────
 
@@ -129,7 +123,6 @@ const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const BESTTIME_KEY_PRIVATE = Deno.env.get("besttime_api_key_private")!;
 const BESTTIME_KEY_PUBLIC  = Deno.env.get("besttime_api_key_public")!;
-const ANTHROPIC_API_KEY    = Deno.env.get("anthropic_api_key")!;
 const SCORING_VERSION      = Deno.env.get("scoring_version") ?? "v1";
 
 console.log("ENV CHECK — all keys present:", [
@@ -290,34 +283,11 @@ async function processBeach(
   const windows = selectBestWindows(scoredHours, config);
   applyBestWindowFlags(scoredHours, windows);
 
-  // g. Generate narratives
+  // g. Upsert hourly rows
   const dates = [...new Set(scoredHours.map((h) => h.localDate))].sort();
-  const narrativesByDate = new Map<string, Awaited<ReturnType<typeof generateDayNarrative>>>();
-  const hourLabelsByTs   = new Map<string, string>();
-
-  // Process all days in parallel — safe since we're only parallelizing within one beach
-  await Promise.all(dates.map(async (date) => {
-    const dayHours = scoredHours.filter((h) => h.localDate === date);
-    const window   = windows.get(date) ?? null;
-    const narInput = buildNarrativeInput(beach, date, dayHours, window, recentPrecip, bacteriaRisk);
-    try {
-      const [narrative, hourLabels] = await Promise.all([
-        generateDayNarrative(narInput, ANTHROPIC_API_KEY),
-        generateHourLabels(dayHours, beach.display_name, ANTHROPIC_API_KEY),
-      ]);
-      narrativesByDate.set(date, narrative);
-      for (const [ts, label] of hourLabels) hourLabelsByTs.set(ts, label);
-      phases.narrative = "ok";
-    } catch (err) {
-      await logError(supabase, beach.location_id, "narrative", err);
-      phases.narrative = "error";
-    }
-  }));
-
-  // h. Upsert hourly rows
   try {
     const hourlyRows = scoredHours.map((h) =>
-      buildHourlyRow(h, beach, config, hourLabelsByTs.get(h.forecastTs) ?? h.hourText, runAt)
+      buildHourlyRow(h, beach, config, h.hourText, runAt)
     );
     for (let i = 0; i < hourlyRows.length; i += 100) {
       const { error } = await supabase
@@ -333,13 +303,12 @@ async function processBeach(
     return { locationId: beach.location_id, ok: false, error: String(err), phases };
   }
 
-  // i. Upsert daily rows
+  // h. Upsert daily rows
   try {
     const dailyRows = dates.map((date) => {
-      const dayHours  = scoredHours.filter((h) => h.localDate === date);
-      const window    = windows.get(date) ?? null;
-      const narrative = narrativesByDate.get(date);
-      return buildDailyRow(beach, date, dayHours, window, narrative, config, runAt, recentPrecip, bacteriaRisk);
+      const dayHours = scoredHours.filter((h) => h.localDate === date);
+      const window   = windows.get(date) ?? null;
+      return buildDailyRow(beach, date, dayHours, window, config, runAt, recentPrecip, bacteriaRisk);
     });
     const { error } = await supabase
       .from("beach_day_recommendations")
@@ -512,7 +481,6 @@ function buildDailyRow(
   date: string,
   dayHours: ScoredHour[],
   window: BestWindow | null,
-  narrative: Awaited<ReturnType<typeof generateDayNarrative>> | undefined,
   config: ScoringConfig,
   runAt: Date,
   recentPrecip: { precip24hMm: number; precip72hMm: number },
@@ -598,10 +566,10 @@ function buildDailyRow(
     risk_reason_codes:     [...riskSet],
     explainability:        {},
     thresholds_used:       thresholdsUsed,
-    day_text:              narrative?.dayText        ?? null,
-    caution_text:          narrative?.cautionText    ?? null,
-    no_go_text:            narrative?.noGoText       ?? null,
-    best_window_text:      narrative?.bestWindowText ?? null,
+    day_text:              null,
+    caution_text:          null,
+    best_window_text:      null,
+    no_go_text:            dayStatus === "no_go" ? buildNoGoText([...riskSet]) : null,
     hourly_source_max_ts:  maxTs(dayHours.map((h) => h.forecastTs)),
     crowd_source_max_ts:   null,
     daily_source_date:     date,
@@ -614,90 +582,16 @@ function buildDailyRow(
   };
 }
 
-// ─── Narrative input builder ──────────────────────────────────────────────────
+// ─── Rule-based no_go text ────────────────────────────────────────────────────
 
-function buildNarrativeInput(
-  beach: Beach,
-  date: string,
-  dayHours: ScoredHour[],
-  window: BestWindow | null,
-  recentPrecip: { precip24hMm: number; precip72hMm: number },
-  bacteriaRisk: BacteriaRisk,
-): NarrativeInput {
-  const jsDate    = new Date(`${date}T12:00:00`);
-  const dayOfWeek = jsDate.toLocaleDateString("en-US", { weekday: "long" });
-  const isWeekend = dayOfWeek === "Saturday" || dayOfWeek === "Sunday";
-
-  const goHours       = dayHours.filter((h) => h.hourStatus === "go");
-  const advisoryHoursNar = dayHours.filter((h) => h.hourStatus === "advisory");
-  const cautionHours  = dayHours.filter((h) => h.hourStatus === "caution");
-  const noGoHours     = dayHours.filter((h) => h.hourStatus === "no_go");
-
-  const aggHours  = window?.hours ?? dayHours.filter((h) => h.isDaylight);
-  const dayStatus: DayStatus =
-    goHours.length > 0            ? "go"
-    : advisoryHoursNar.length > 0  ? "advisory"
-    : cautionHours.length > 0      ? "caution"
-    : "no_go";
-
-  // Tide direction: compare first vs last tide in best window (or agg hours)
-  const tideSeries = aggHours.map((h) => h.tideHeight).filter(nonNull);
-  let tideDirection: "rising" | "falling" | "steady" = "steady";
-  if (tideSeries.length >= 2) {
-    const diff = tideSeries[tideSeries.length - 1] - tideSeries[0];
-    if (diff > 0.15)       tideDirection = "rising";
-    else if (diff < -0.15) tideDirection = "falling";
-  }
-
-  // Dominant weather code across agg hours
-  const weatherCode = mostCommon(aggHours.map((h) => h.weatherCode).filter(nonNull));
-
-  // Per-hour breakdown of best window
-  const windowHourBreakdown: WindowHour[] = (window?.hours ?? [])
-    .filter((h) => h.hourStatus === "go" || h.hourStatus === "caution")
-    .map((h) => ({
-      hour:   h.hourLabel,
-      tide:   h.tideHeight !== null ? round1(h.tideHeight) : null,
-      wind:   h.windSpeed  !== null ? Math.round(h.windSpeed) : null,
-      temp:   h.tempAir    !== null ? Math.round(h.tempAir)   : null,
-      rain:   h.precipChance !== null ? Math.round(h.precipChance) : null,
-      crowd:  h.busynessCategory,
-      status: h.hourStatus as "go" | "caution",
-    }));
-
-  const positiveSet = new Set<string>();
-  const riskSet     = new Set<string>();
-  for (const h of aggHours) {
-    h.positiveReasonCodes.forEach((c) => positiveSet.add(c));
-    h.riskReasonCodes.forEach((c) => riskSet.add(c));
-  }
-
-  return {
-    beachName:            beach.display_name,
-    localDate:            date,
-    dayOfWeek,
-    isWeekend,
-    dayStatus,
-    bestWindow:           window,
-    weatherCode,
-    tideDirection,
-    windowHourBreakdown,
-    avgTemp:              round1(average(aggHours.map((h) => h.tempAir).filter(nonNull))),
-    avgWind:              round1(average(aggHours.map((h) => h.windSpeed).filter(nonNull))),
-    avgPrecip:            round1(average(aggHours.map((h) => h.precipChance).filter(nonNull))),
-    avgTide:              round1(average(aggHours.map((h) => h.tideHeight).filter(nonNull))),
-    lowestTide:           round1(Math.min(...aggHours.map((h) => h.tideHeight ?? Infinity))),
-    avgUv:                round1(average(aggHours.map((h) => h.uvIndex).filter(nonNull))),
-    avgBusyness:          round1(average(aggHours.map((h) => h.busynessScore).filter(nonNull))),
-    busynessCategory:     window?.hours[0]?.busynessCategory ?? null,
-    positiveReasonCodes:  [...positiveSet],
-    riskReasonCodes:      [...riskSet],
-    goHoursCount:         goHours.length,
-    cautionHoursCount:    cautionHours.length,
-    noGoHoursCount:       noGoHours.length,
-    bacteriaRisk,
-    precip72hMm:          recentPrecip.precip72hMm,
-  };
+function buildNoGoText(riskCodes: string[]): string {
+  if (riskCodes.includes("severe_weather"))   return "Severe weather makes today unsafe for a beach visit.";
+  if (riskCodes.includes("dangerous_wind"))   return "Dangerous wind speeds make today a no-go.";
+  if (riskCodes.includes("bacteria_risk"))    return "Recent rainfall has elevated bacteria risk — not a good day to visit.";
+  if (riskCodes.includes("extreme_temp"))     return "Extreme temperatures make today unsafe for dogs.";
+  if (riskCodes.includes("extreme_uv"))       return "Extreme UV index makes today a no-go.";
+  if (riskCodes.includes("hot_sand"))         return "Sand temperatures are dangerously hot for paws today.";
+  return "Conditions today make for a poor beach experience — try another day.";
 }
 
 // ─── DB helpers ───────────────────────────────────────────────────────────────

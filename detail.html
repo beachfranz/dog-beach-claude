@@ -400,7 +400,7 @@
   // ── Params ────────────────────────────────────────────────────────
   const params     = new URLSearchParams(window.location.search);
   const locationId = params.get('location') ?? 'huntington-dog-beach';
-  const today      = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })).toISOString().slice(0, 10);
+  const today      = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const date       = params.get('date') ?? today;
 
   // Fix close button to preserve location

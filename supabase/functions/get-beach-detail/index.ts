@@ -28,10 +28,8 @@ Deno.serve(async (req: Request) => {
       return json({ error: "date parameter required (YYYY-MM-DD)" }, 400);
     }
 
-    const supabase   = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-    const nowUtc     = new Date();
-    const today      = nowUtc.toISOString().slice(0, 10);
-    const isToday    = date === today;
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+    const nowUtc   = new Date();
 
     // Beach metadata
     const { data: beach, error: beachErr } = await supabase
@@ -44,14 +42,16 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Beach not found" }, 404);
     }
 
-    // Current local hour (needed for today's remaining-window logic)
-    let currentLocalHour = 0;
-    if (isToday) {
-      const parts = new Intl.DateTimeFormat("en-US", {
-        timeZone: beach.timezone, hour: "2-digit", hour12: false,
-      }).formatToParts(nowUtc);
-      currentLocalHour = parseInt(parts.find(p => p.type === "hour")?.value ?? "0") % 24;
-    }
+    // Derive today's local date + hour from beach timezone (never use UTC date)
+    const localParts = new Intl.DateTimeFormat("en-US", {
+      timeZone: beach.timezone,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", hour12: false,
+    }).formatToParts(nowUtc);
+    const getPart = (t: string) => localParts.find(p => p.type === t)?.value ?? "";
+    const today          = `${getPart("year")}-${getPart("month")}-${getPart("day")}`;
+    const isToday        = date === today;
+    const currentLocalHour = isToday ? parseInt(getPart("hour")) % 24 : 0;
 
     // Daily recommendation + hourly scores in parallel
     const [{ data: day, error: dayErr }, { data: hours, error: hoursErr }] = await Promise.all([

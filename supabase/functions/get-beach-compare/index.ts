@@ -17,7 +17,10 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
   const url  = new URL(req.url);
-  const date = url.searchParams.get("date") ?? new Date().toISOString().slice(0, 10);
+  const date = url.searchParams.get("date") ?? new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 

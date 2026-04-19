@@ -150,6 +150,7 @@
     }
     .sort-select:focus { border-color: #3b5bdb; }
     .sort-select option:disabled { color: var(--text-dim); }
+    .sort-select.compact { flex: 0 0 auto; }
 
     .loc-row {
       display: flex;
@@ -476,6 +477,13 @@
         <option value="distance" id="opt-distance" disabled>Closest First</option>
         <option value="blend"    id="opt-blend"    disabled>Best Nearby (50/50)</option>
       </select>
+      <span class="sort-label">Leash</span>
+      <select class="sort-select compact" id="leash-select" onchange="onLeashFilterChange(this.value)">
+        <option value="any">Any</option>
+        <option value="off_leash">Off-leash</option>
+        <option value="mixed">Mixed</option>
+        <option value="on_leash">Required</option>
+      </select>
     </div>
     <div class="loc-row" id="loc-row">
       <span class="location-label" id="location-label">📍 Detecting location…</span>
@@ -515,6 +523,7 @@
   let userLat     = null;
   let userLng     = null;
   let currentSort = 'conditions';
+  let leashFilter = 'any';
 
   // ── Day pills ──────────────────────────────────────────────────────
   const days = [];
@@ -567,12 +576,14 @@
       const beachList = rawBeaches.length
         ? rawBeaches.map(b => b.beach)
         : await fetch(
-            `${SUPABASE_URL}/rest/v1/beaches?select=location_id,display_name,latitude,longitude&is_active=eq.true&order=display_name`,
+            `${SUPABASE_URL}/rest/v1/beaches?select=location_id,display_name,latitude,longitude,access_rule&is_active=eq.true&order=display_name`,
             { headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY } }
           ).then(r => r.json()).catch(() => []);
 
+      const filteredBeachList = beachList.filter(b => matchesLeashFilter(b));
+
       const results = await Promise.all(
-        beachList.map(b =>
+        filteredBeachList.map(b =>
           fetch(`${SUPABASE_URL}/functions/v1/get-beach-now?location_id=${b.location_id}`,
             { headers: { 'Authorization': `Bearer ${ANON_KEY}` } })
             .then(r => r.json())
@@ -653,7 +664,7 @@
     try {
       // Get all active beaches with lat/lng from REST API
       const beachRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/beaches?select=location_id,display_name,latitude,longitude&is_active=eq.true&order=display_name`,
+        `${SUPABASE_URL}/rest/v1/beaches?select=location_id,display_name,latitude,longitude,access_rule&is_active=eq.true&order=display_name`,
         { headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY } }
       );
       const beachList = await beachRes.json();
@@ -687,7 +698,7 @@
     if (!rawBeaches.length) return;
 
     // Build cards: find matching day for selectedDate, attach distance
-    const cards = rawBeaches.map(({ beach, days }) => {
+    const cards = rawBeaches.filter(({ beach }) => matchesLeashFilter(beach)).map(({ beach, days }) => {
       const day = days.find(d => d.local_date === selectedDate) ?? null;
       const distance = userLat !== null
         ? haversine(userLat, userLng, parseFloat(beach.latitude), parseFloat(beach.longitude))
@@ -1028,6 +1039,17 @@
   function onSortChange(val) {
     currentSort = val;
     sortAndRender();
+  }
+
+  function onLeashFilterChange(val) {
+    leashFilter = val;
+    nowBeaches  = null; // reset NOW cache so filter applies
+    sortAndRender();
+  }
+
+  function matchesLeashFilter(beach) {
+    if (leashFilter === 'any') return true;
+    return (beach.access_rule ?? 'off_leash') === leashFilter;
   }
 
   // ── Directions modal (Leaflet + OSRM) ────────────────────────────

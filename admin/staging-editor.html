@@ -91,16 +91,15 @@
   <select id="stateSelect" onchange="loadCounties()">
     <option value="">— state —</option>
   </select>
-  <select id="countySelect">
+  <select id="countySelect" onchange="load()">
     <option value="">— county —</option>
   </select>
-  <button class="btn-load" id="loadBtn" onclick="load()" disabled>Load</button>
   <span class="stats" id="stats"></span>
 </div>
 
 <div class="body">
   <div class="table-panel">
-    <div class="empty" id="empty">Select a state and county, then click Load.</div>
+    <div class="empty" id="empty">Select a state and county to load beaches.</div>
     <table class="tbl" id="tbl" style="display:none">
       <thead>
         <tr>
@@ -168,7 +167,6 @@ async function loadCounties() {
   const state = document.getElementById('stateSelect').value;
   const sel   = document.getElementById('countySelect');
   sel.innerHTML = '<option value="">— county —</option>';
-  document.getElementById('loadBtn').disabled = true;
   if (!state) return;
 
   const data = await restGet(`beaches_staging?select=county&state=eq.${encodeURIComponent(state)}&limit=5000`);
@@ -178,9 +176,6 @@ async function loadCounties() {
     o.value = o.textContent = c;
     sel.appendChild(o);
   });
-  sel.onchange = () => {
-    document.getElementById('loadBtn').disabled = !sel.value;
-  };
 }
 
 // ── Load ──────────────────────────────────────────────────────────────────────
@@ -190,7 +185,6 @@ async function load() {
   const county = document.getElementById('countySelect').value;
   if (!state || !county) return;
 
-  document.getElementById('loadBtn').disabled = true;
   document.getElementById('empty').textContent = 'Loading…';
   document.getElementById('tbl').style.display = 'none';
 
@@ -207,7 +201,6 @@ async function load() {
 
   renderTable();
   renderMap();
-  document.getElementById('loadBtn').disabled = false;
 
   const total   = beaches.length;
   const gold    = beaches.filter(b => b.quality_tier === 'gold').length;

@@ -75,6 +75,16 @@ Deno.serve(async (req: Request) => {
     affected = ids.length;
   }
 
+  else if (action === "remove_all") {
+    // Mark every record in the group as removed (e.g. not a real beach).
+    const { error: removeErr } = await supabase
+      .from("beaches_staging")
+      .update({ dedup_status: "removed", dedup_notes: "removed — not a beach" })
+      .in("id", ids);
+    if (removeErr) return json({ error: removeErr.message }, 500);
+    affected = ids.length;
+  }
+
   else if (action === "rename") {
     // Update display_name only — does not affect dedup_status.
     if (!new_name?.trim()) return json({ error: "new_name required for rename action" }, 400);

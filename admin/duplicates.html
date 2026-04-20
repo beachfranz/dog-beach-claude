@@ -405,6 +405,7 @@ function buildS2Card(pair) {
       <button class="btn btn-red" onclick="doDelete('${id}', [${r1.id},${r2.id}], ${r2.id})">Delete id=${r2.id}</button>
       <button class="btn btn-red" onclick="doDelete('${id}', [${r1.id},${r2.id}], ${r1.id})">Delete id=${r1.id}</button>
       <button class="btn btn-orange" onclick="toggleMerge('${mergeId}')">Merge…</button>
+      <button class="btn btn-red" onclick="doRemoveAll('${id}', [${r1.id},${r2.id}])">Delete All</button>
       <div class="merge-form" id="${mergeId}">
         <label>Keep:</label>
         <select id="${mergeId}-keep">
@@ -461,6 +462,7 @@ function buildS3Card(group) {
       <button class="btn btn-green" onclick="doKeepBoth('${id}', [${allIds.join(',')}])">Keep All</button>
       ${deleteBtns}
       <button class="btn btn-orange" onclick="toggleMerge('${mergeId}')">Merge…</button>
+      <button class="btn btn-red" onclick="doRemoveAll('${id}', [${allIds.join(',')}])">Delete All</button>
       <div class="merge-form" id="${mergeId}">
         <label>Keep:</label>
         <select id="${mergeId}-keep">${mergeOptions}</select>
@@ -568,6 +570,20 @@ async function doKeepBoth(cardId, ids) {
 
 function toggleMerge(mergeId) {
   document.getElementById(mergeId).classList.toggle('open');
+}
+
+async function doRemoveAll(cardId, ids) {
+  if (!confirm(`Remove all ${ids.length} record(s) from staging? This marks them as "not a beach".`)) return;
+  const card = document.getElementById(cardId);
+  card.classList.add('resolving');
+  try {
+    await apiFetch('resolve-staging-duplicates', { action: 'remove_all', ids });
+    resolveCard(cardId);
+    toast(`Removed all ${ids.length} records from staging`);
+  } catch(e) {
+    card.classList.remove('resolving');
+    toast(e.message, true);
+  }
 }
 
 async function doRemoveOne(cardId, allIds, removeId) {

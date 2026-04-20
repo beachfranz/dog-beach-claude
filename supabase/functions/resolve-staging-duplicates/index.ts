@@ -75,6 +75,18 @@ Deno.serve(async (req: Request) => {
     affected = ids.length;
   }
 
+  else if (action === "rename") {
+    // Update display_name only — does not affect dedup_status.
+    if (!new_name?.trim()) return json({ error: "new_name required for rename action" }, 400);
+    if (ids.length !== 1)  return json({ error: "rename requires exactly one id" }, 400);
+    const { error: renameErr } = await supabase
+      .from("beaches_staging")
+      .update({ display_name: new_name.trim() })
+      .eq("id", ids[0]);
+    if (renameErr) return json({ error: renameErr.message }, 500);
+    affected = 1;
+  }
+
   else if (action === "remove_one") {
     // Mark one record removed, mark the rest of the group as reviewed.
     if (remove_id == null) return json({ error: "remove_id required for remove_one action" }, 400);

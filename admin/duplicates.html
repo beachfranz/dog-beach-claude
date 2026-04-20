@@ -89,6 +89,14 @@
     .merge-form input { width: 220px; }
     .merge-form .merge-actions { display: flex; gap: 5px; }
 
+    /* ── Editable name (Section 3) ──────────────────────── */
+    .rec-name-wrap { display: flex; align-items: center; gap: 6px; }
+    .rec-name-input { font-size: 13px; font-weight: 600; color: #1e293b; border: 1px solid transparent; border-radius: 4px; padding: 2px 6px; width: 100%; background: transparent; transition: border-color .15s, background .15s; }
+    .rec-name-input:hover { border-color: #cbd5e1; background: white; }
+    .rec-name-input:focus { border-color: #3b82f6; background: white; outline: none; }
+    .name-saved { font-size: 11px; font-weight: 600; color: #16a34a; opacity: 0; transition: opacity .2s; white-space: nowrap; }
+    .name-saved.visible { opacity: 1; }
+
     /* ── Dog policy badges ───────────────────────────────── */
     .dog-badge { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 9999px; white-space: nowrap; vertical-align: middle; }
     .dog-yes     { background: #dcfce7; color: #15803d; }
@@ -284,6 +292,39 @@ function recHtml(r, highlight, showPolicy = false) {
     </div>`;
 }
 
+function recHtmlEditable(r) {
+  return `
+    <div class="rec" id="rec-${r.id}">
+      <div class="rec-name-wrap">
+        <input class="rec-name-input" id="name-${r.id}" value="${r.display_name.replace(/"/g, '&quot;')}"
+          onblur="doRename(${r.id}, this)"
+          onkeydown="if(event.key==='Enter'){this.blur();} if(event.key==='Escape'){this.value=this.dataset.original; this.blur();}"
+          data-original="${r.display_name.replace(/"/g, '&quot;')}" />
+        <span class="name-saved" id="saved-${r.id}">✓</span>
+      </div>
+      <div class="rec-meta">
+        id=${r.id} &nbsp;·&nbsp; ${r.latitude.toFixed(5)}, ${r.longitude.toFixed(5)}
+        ${r.city ? ` &nbsp;·&nbsp; ${r.city}` : ''}
+        ${r.county ? `, ${r.county}` : ''}
+      </div>
+    </div>`;
+}
+
+async function doRename(id, inputEl) {
+  const newName = inputEl.value.trim();
+  const original = inputEl.dataset.original;
+  if (!newName || newName === original) return;
+  try {
+    await apiFetch('resolve-staging-duplicates', { action: 'rename', ids: [id], new_name: newName });
+    inputEl.dataset.original = newName;
+    const saved = document.getElementById('saved-' + id);
+    if (saved) { saved.classList.add('visible'); setTimeout(() => saved.classList.remove('visible'), 1500); }
+  } catch(e) {
+    inputEl.value = original;
+    toast(e.message, true);
+  }
+}
+
 function resolveCard(cardId) {
   const card = document.getElementById(cardId);
   if (!card) return;
@@ -412,7 +453,7 @@ function buildS3Card(group) {
           <span class="city-tag">${records[0].city || records[0].county || ''}</span>
         </div>
         <div class="records-list">
-          ${records.map(r => recHtml(r, false)).join('')}
+          ${records.map(r => recHtmlEditable(r)).join('')}
         </div>
       </div>
     </div>

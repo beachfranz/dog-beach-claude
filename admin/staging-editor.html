@@ -37,12 +37,12 @@
     .tbl tr.dirty:hover td { background: #fef9c3 !important; }
 
     /* ── Editable cell ── */
-    .editable { cursor: text; border-radius: 4px; padding: 2px 4px; min-width: 60px; display: inline-block; }
-    .editable:hover { background: #f1f5f9; }
-    .editable:focus { outline: 2px solid #3b82f6; background: white; }
+    .editable { cursor: text; border-radius: 4px; padding: 3px 7px; display: inline-block; border: 1px solid #e2e8f0; background: #f8fafc; transition: border-color .15s, background .15s; }
+    .editable:hover { border-color: #94a3b8; background: white; }
+    .editable:focus { outline: none; border-color: #3b82f6; background: white; box-shadow: 0 0 0 2px #bfdbfe; }
     .cell-name { font-weight: 500; min-width: 150px; }
     .cell-city { min-width: 100px; }
-    .cell-gov  { min-width: 140px; color: #475569; }
+    .cell-gov  { min-width: 160px; color: #374151; }
 
     /* ── Pills ── */
     .pill { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px; white-space: nowrap; cursor: default; }

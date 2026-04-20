@@ -15,7 +15,8 @@ import { corsHeaders } from "../_shared/cors.ts";
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-const DEFAULT_THRESHOLD_M = 50;
+const DEFAULT_THRESHOLD_M  = 50;
+const POLICY_MATCH_RADIUS_M = 200;
 
 // ── Haversine distance ────────────────────────────────────────────────────────
 
@@ -59,6 +60,13 @@ interface BeachRow {
   source_fid:        number | null;
 }
 
+interface ProdPolicy {
+  display_name:    string;
+  access_rule:     string | null;
+  off_leash_flag:  boolean | null;
+  leash_policy:    string | null;
+}
+
 interface RecordSummary {
   id:           number;
   display_name: string;
@@ -68,6 +76,7 @@ interface RecordSummary {
   longitude:    number;
   quality_tier: string;
   source_fid:   number | null;
+  dog_policy:   ProdPolicy | null;
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -91,10 +100,12 @@ Deno.serve(async (req: Request) => {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+  // ── Fetch staging records ─────────────────────────────────────────────────
+
   let query = supabase
     .from("beaches_staging")
     .select("id, display_name, city, county, state, latitude, longitude, formatted_address, quality_tier, source_fid")
-    .is("dedup_status", null)   // skip already-reviewed and removed records
+    .is("dedup_status", null)
     .limit(10000);
 
   if (state)        query = query.eq("state", state);
@@ -105,16 +116,51 @@ Deno.serve(async (req: Request) => {
 
   const rows = (records ?? []) as BeachRow[];
 
+  // ── Fetch production beach policy data ───────────────────────────────────
+  // Pull the full production beaches table (small) and match by proximity.
+
+  const { data: prodBeaches } = await supabase
+    .from("beaches")
+    .select("display_name, latitude, longitude, access_rule, off_leash_flag, leash_policy");
+
+  const prodRows = (prodBeaches ?? []) as Array<{
+    display_name: string;
+    latitude: number | null;
+    longitude: number | null;
+    access_rule: string | null;
+    off_leash_flag: boolean | null;
+    leash_policy: string | null;
+  }>;
+
+  function nearestProdPolicy(lat: number, lon: number): ProdPolicy | null {
+    let best: ProdPolicy | null = null;
+    let bestDist = POLICY_MATCH_RADIUS_M;
+    for (const pb of prodRows) {
+      if (pb.latitude == null || pb.longitude == null) continue;
+      const d = distanceMeters(lat, lon, pb.latitude, pb.longitude);
+      if (d < bestDist) {
+        bestDist = d;
+        best = {
+          display_name:   pb.display_name,
+          access_rule:    pb.access_rule,
+          off_leash_flag: pb.off_leash_flag,
+          leash_policy:   pb.leash_policy,
+        };
+      }
+    }
+    return best;
+  }
+
   const toSummary = (r: BeachRow): RecordSummary => ({
     id: r.id, display_name: r.display_name, city: r.city, county: r.county,
     latitude: r.latitude, longitude: r.longitude,
     quality_tier: r.quality_tier, source_fid: r.source_fid,
+    dog_policy: nearestProdPolicy(r.latitude, r.longitude),
   });
 
   // ── 1. Proximity clustering ───────────────────────────────────────────────
 
   const uf = makeUnionFind(rows.length);
-  const edgeDistances: Map<string, number> = new Map();
 
   for (let i = 0; i < rows.length; i++) {
     for (let j = i + 1; j < rows.length; j++) {
@@ -122,15 +168,10 @@ Deno.serve(async (req: Request) => {
         rows[i].latitude, rows[i].longitude,
         rows[j].latitude, rows[j].longitude,
       );
-      if (d <= proximity_threshold_m) {
-        uf.union(i, j);
-        const key = `${Math.min(i,j)}-${Math.max(i,j)}`;
-        edgeDistances.set(key, d);
-      }
+      if (d <= proximity_threshold_m) uf.union(i, j);
     }
   }
 
-  // Group by cluster root, keep only clusters with 2+ members
   const clusterMap: Map<number, number[]> = new Map();
   for (let i = 0; i < rows.length; i++) {
     const root = uf.find(i);
@@ -141,7 +182,6 @@ Deno.serve(async (req: Request) => {
   const proximityClusters = [];
   for (const [, members] of clusterMap) {
     if (members.length < 2) continue;
-    // Find max pairwise distance within the cluster
     let maxDist = 0;
     for (let a = 0; a < members.length; a++) {
       for (let b = a + 1; b < members.length; b++) {
@@ -200,26 +240,20 @@ Deno.serve(async (req: Request) => {
 
   // ── Summary ───────────────────────────────────────────────────────────────
 
-  const proximityRecordIds = new Set(
-    proximityClusters.flatMap(c => c.records.map(r => r.id))
-  );
-  const nameCityRecordIds = new Set(
-    nameCityMatches.flatMap(c => c.records.map(r => r.id))
-  );
-  const addressRecordIds = new Set(
-    addressMatches.flatMap(c => c.records.map(r => r.id))
-  );
+  const proximityRecordIds = new Set(proximityClusters.flatMap(c => c.records.map(r => r.id)));
+  const nameCityRecordIds  = new Set(nameCityMatches.flatMap(c => c.records.map(r => r.id)));
+  const addressRecordIds   = new Set(addressMatches.flatMap(c => c.records.map(r => r.id)));
 
   return json({
     summary: {
-      total_records:             rows.length,
+      total_records:         rows.length,
       proximity_threshold_m,
-      proximity_clusters:        proximityClusters.length,
-      records_in_proximity:      proximityRecordIds.size,
-      name_city_clusters:        nameCityMatches.length,
-      records_in_name_city:      nameCityRecordIds.size,
-      address_clusters:          addressMatches.length,
-      records_in_address:        addressRecordIds.size,
+      proximity_clusters:    proximityClusters.length,
+      records_in_proximity:  proximityRecordIds.size,
+      name_city_clusters:    nameCityMatches.length,
+      records_in_name_city:  nameCityRecordIds.size,
+      address_clusters:      addressMatches.length,
+      records_in_address:    addressRecordIds.size,
     },
     proximity_clusters: proximityClusters,
     name_city_matches:  nameCityMatches,

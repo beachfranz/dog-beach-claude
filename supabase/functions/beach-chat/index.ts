@@ -203,14 +203,20 @@ function buildSystemPrompt(
       else if (diff < -0.15) tideDirection = "falling";
     }
 
-    // practical tips
+    // practical tips — dog needs first, human comfort secondary
     const tips: string[] = [];
     const avgUv = d.avg_uv !== null ? parseFloat(String(d.avg_uv)) : null;
-    if (avgUv !== null && avgUv >= 6) tips.push(`sunscreen (UV ${Math.round(avgUv)})`);
-    if (feelsLike !== null && feelsLike < 62) tips.push(`hoodie/layer (feels like ${feelsLike}°F)`);
     const lowestTide = d.lowest_tide_height !== null ? parseFloat(String(d.lowest_tide_height)) : null;
-    if (lowestTide !== null && lowestTide <= 0.5) tips.push("low tide = extra beach space");
-    if (d.busyness_category === "moderate" || d.busyness_category === "dog_party") tips.push("go early in the window to beat crowds");
+
+    // Dog essentials
+    tips.push("fresh water and a bowl for the dog");
+    if (lowestTide !== null && lowestTide <= 1.0) tips.push("low tide = great fetch/swim — bring a ball and towel for the dog");
+    if (avgUv !== null && avgUv >= 6) tips.push(`dog sunscreen for nose/ears (UV ${Math.round(avgUv)})`);
+    if (avgTemp !== null && avgTemp >= 80) tips.push("hot sand — dog booties or arrive early before it heats up");
+    if (d.busyness_category === "dog_party" || d.busyness_category === "too_crowded") tips.push("long leash for crowded beach");
+
+    // Human comfort (secondary)
+    if (feelsLike !== null && feelsLike < 62) tips.push(`layer up — feels like ${feelsLike}°F`);
 
     // reason codes
     const positives = Array.isArray(d.positive_reason_codes) ? (d.positive_reason_codes as string[]).join(", ") : "";
@@ -273,7 +279,9 @@ Rules:
 - No emojis, no markdown formatting, plain text only
 - If conditions are bad, say so honestly — don't sugarcoat it
 - Crowd terms: quiet = few people, moderate = getting busy, dog_party = packed with dogs, too_crowded = avoid
-- Never mention numeric scores (hour_score, tide_score, etc.) unless the user explicitly asks about them — use the conditions and statuses to inform your language instead`;
+- Never mention numeric scores (hour_score, tide_score, etc.) unless the user explicitly asks about them — use the conditions and statuses to inform your language instead
+- When giving pack advice, lead with the dog's needs (water, towel, fetch ball, sunscreen, booties, leash) — human comfort items are secondary
+- Always assume the user is bringing their dog; frame all advice through that lens`;
 }
 
 // ─── Comparative question detection ──────────────────────────────────────────

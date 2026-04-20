@@ -446,7 +446,7 @@
     blurbEl.onclick = toggleChat;
     blurbEl.textContent = 'Getting Scout\'s take…';
     document.getElementById('header-left').appendChild(blurbEl);
-    loadScoutBlurb(locationId, date, day);
+    loadScoutBlurb(locationId, date, day, hours);
 
     if (hours.length === 0) {
       showError('No hourly data available for this date.');
@@ -878,15 +878,33 @@
   }
 
   // ── Scout header blurb ───────────────────────────────────────────
-  async function loadScoutBlurb(locationId, date, day) {
+  async function loadScoutBlurb(locationId, date, day, hours) {
     const el = document.getElementById('scout-blurb');
     if (!el) return;
 
-    const windowLabel = day.best_window_label ?? 'the best window';
-    const question = `For ${date}, write 2-3 tight sentences about visiting during ${windowLabel}: ` +
-      `why it's the best window today (use descriptive words like 'super low tide', 'high tide', 'mild sun', 'blazing sun' — not numbers), ` +
-      `one quick practical tip (what to bring or do), ` +
-      `and any caution folded in at the end if relevant. Be concise — every word should earn its place.`;
+    const statusRank = { no_go: 3, caution: 2, advisory: 1 };
+    const worstSandStatus = (hours ?? []).reduce((worst, h) => {
+      return (statusRank[h.sand_status] ?? 0) > (statusRank[worst] ?? 0) ? h.sand_status : worst;
+    }, null);
+
+    const windowLabel  = day.best_window_label  ?? 'the best window';
+    const windowStatus = day.best_window_status ?? 'go';
+    const signals = [
+      day.lowest_tide_height != null ? `tide ${parseFloat(day.lowest_tide_height).toFixed(1)}ft` : null,
+      day.avg_wind  != null ? `wind ${Math.round(day.avg_wind)}mph`        : null,
+      day.avg_temp  != null ? `temp ${Math.round(day.avg_temp)}°F`         : null,
+      day.avg_uv    != null ? `UV index ${parseFloat(day.avg_uv).toFixed(1)}` : null,
+      day.busyness_category ? `crowds: ${day.busyness_category}`           : null,
+      worstSandStatus && worstSandStatus !== 'go' ? `sand: ${worstSandStatus}` : null,
+      day.bacteria_risk && day.bacteria_risk !== 'none' ? `bacteria risk: ${day.bacteria_risk}` : null,
+    ].filter(Boolean).join(', ');
+
+    const question =
+      `Best window: ${windowLabel} (${windowStatus}). Conditions: ${signals}. ` +
+      `Write exactly three sentences of flowing prose — no headers, no bullets, no lists: ` +
+      `Sentence 1: when the best window is and the main reason why, using vivid descriptive language not raw numbers. ` +
+      `Sentence 2: any cautions or advisories during that window; if conditions are clean, skip this sentence entirely. ` +
+      `Sentence 3: pack list for a dog owner and their dog — lead with the dog's needs first. Always mention fresh water for the dog. Add a towel and fetch ball if tide is low and good for swimming. Add dog sunscreen if UV is high. Suggest dog booties if sand is hot. Suggest a long leash if crowds are dog_party or too_crowded. Human comfort items (hoodie, windbreaker, sunscreen) are secondary and only worth mentioning if the conditions strongly call for it — the dog comes first. One sentence, natural prose.`;
 
     try {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/beach-chat`, {

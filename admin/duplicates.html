@@ -234,7 +234,7 @@ function initMap(cardId, records) {
       color: 'white', weight: 2,
       fillColor: COLORS[i % COLORS.length], fillOpacity: .9, radius: 7,
     }).addTo(m);
-    marker.bindTooltip(r.display_name, { permanent: false, direction: 'top' });
+    marker.bindTooltip(`${r.display_name} (id=${r.id})`, { permanent: false, direction: 'top' });
     return marker;
   });
 

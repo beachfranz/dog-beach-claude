@@ -126,7 +126,8 @@
   <select id="countySelect">
     <option value="">Loading…</option>
   </select>
-  <button class="start-btn" id="startBtn" onclick="startResearch()">Start Research</button>
+  <button class="start-btn" id="loadBtn" onclick="loadBeachesList()">Load</button>
+  <button class="start-btn" id="startBtn" onclick="startResearch()" disabled>Start Research</button>
   <button class="stop-btn" id="stopBtn" onclick="stopResearch()">Stop</button>
   <div class="stats" id="stats"></div>
 </div>
@@ -206,23 +207,37 @@ async function loadBeaches(state, county) {
   );
 }
 
-// ── Research loop ─────────────────────────────────────────────────────────────
+// ── Load beaches (pre-research) ───────────────────────────────────────────────
 
-async function startResearch() {
+async function loadBeachesList() {
   const state  = document.getElementById('stateSelect').value;
   const county = document.getElementById('countySelect').value;
-  if (!county) return;
+  if (!county) { toast('Select a county first', true); return; }
 
-  running  = true;
-  stopFlag = false;
-  document.getElementById('startBtn').disabled = true;
-  document.getElementById('stopBtn').classList.add('visible');
+  document.getElementById('loadBtn').disabled = true;
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('tableWrap').innerHTML = '<div class="empty-state">Loading…</div>';
 
   beaches = await loadBeaches(state, county);
   results = {};
   renderTable();
   renderMap();
   updateStats();
+
+  document.getElementById('loadBtn').disabled = false;
+  document.getElementById('startBtn').disabled = false;
+}
+
+// ── Research loop ─────────────────────────────────────────────────────────────
+
+async function startResearch() {
+  if (beaches.length === 0) { toast('Click Load first', true); return; }
+
+  running  = true;
+  stopFlag = false;
+  document.getElementById('loadBtn').disabled = true;
+  document.getElementById('startBtn').disabled = true;
+  document.getElementById('stopBtn').classList.add('visible');
 
   for (let i = 0; i < beaches.length; i++) {
     if (stopFlag) break;
@@ -244,9 +259,10 @@ async function startResearch() {
 
   running  = false;
   stopFlag = false;
+  document.getElementById('loadBtn').disabled = false;
   document.getElementById('startBtn').disabled = false;
   document.getElementById('stopBtn').classList.remove('visible');
-  toast(stopFlag ? 'Stopped.' : 'Research complete.');
+  toast('Research complete.');
 }
 
 function stopResearch() { stopFlag = true; toast('Stopping after current beach…'); }
@@ -458,12 +474,6 @@ function markerColor(status) {
 }
 
 function renderMap() {
-  if (!map) {
-    map = L.map('map');
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
-    }).addTo(map);
-  }
   Object.values(markers).forEach(m => map.removeLayer(m));
   markers = {};
 
@@ -555,6 +565,12 @@ function toast(msg, isErr = false) {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 loadCounties();
+
+// Initialize map immediately so the panel isn't blank
+map = L.map('map').setView([36.5, -119.5], 6);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap contributors',
+}).addTo(map);
 </script>
 </body>
 </html>

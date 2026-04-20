@@ -193,7 +193,7 @@ async function loadCounties() {
   sel.innerHTML = '<option>Loading…</option>';
   const data = await restGet(
     `beaches_staging?select=county&state=eq.${encodeURIComponent(state)}` +
-    `&quality_tier=eq.silver&dedup_status=is.null&limit=1000`
+    `&quality_tier=eq.silver&or=(dedup_status.is.null,dedup_status.eq.reviewed)&limit=1000`
   );
   const counties = [...new Set(data.map(r => r.county).filter(Boolean))].sort();
   sel.innerHTML = counties.map(c => `<option value="${c}">${c}</option>`).join('');
@@ -203,7 +203,7 @@ async function loadBeaches(state, county) {
   return restGet(
     `beaches_staging?select=id,display_name,governing_body,city,county,state,latitude,longitude` +
     `&state=eq.${encodeURIComponent(state)}&county=eq.${encodeURIComponent(county)}` +
-    `&quality_tier=eq.silver&dedup_status=is.null&order=display_name`
+    `&quality_tier=eq.silver&or=(dedup_status.is.null,dedup_status.eq.reviewed)&order=display_name`
   );
 }
 

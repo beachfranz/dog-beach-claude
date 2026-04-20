@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Staging Editor — Dog Beach Admin</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #1a1a1a; font-size: 13px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* ── Header ── */
+    .header { background: #1e293b; color: white; padding: 12px 20px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; box-shadow: 0 2px 8px rgba(0,0,0,.3); z-index: 200; }
+    .header h1 { font-size: 15px; font-weight: 600; margin-right: 8px; }
+    .header select { padding: 6px 10px; border-radius: 6px; border: none; background: #334155; color: white; font-size: 13px; cursor: pointer; }
+    .header button { padding: 6px 16px; border-radius: 6px; border: none; font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s; }
+    .btn-load  { background: #3b82f6; color: white; }
+    .btn-load:hover  { background: #2563eb; }
+    .btn-load:disabled { background: #475569; cursor: default; }
+    .header .stats { margin-left: auto; font-size: 12px; color: #94a3b8; }
+    .header .stats strong { color: #e2e8f0; }
+
+    /* ── Body split ── */
+    .body { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Table panel ── */
+    .table-panel { flex: 1; overflow-y: auto; padding: 16px; min-width: 0; }
+
+    .tbl { width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .tbl th { background: #f8fafc; padding: 9px 12px; text-align: left; font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: .4px; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+    .tbl td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+    .tbl tr:last-child td { border-bottom: none; }
+    .tbl tr.highlighted td { background: #eff6ff !important; }
+    .tbl tr.dirty td { background: #fffbeb !important; }
+    .tbl tr:hover td { background: #f8fafc; }
+    .tbl tr.dirty:hover td { background: #fef9c3 !important; }
+
+    /* ── Editable cell ── */
+    .editable { cursor: text; border-radius: 4px; padding: 2px 4px; min-width: 60px; display: inline-block; }
+    .editable:hover { background: #f1f5f9; }
+    .editable:focus { outline: 2px solid #3b82f6; background: white; }
+    .cell-name { font-weight: 500; min-width: 150px; }
+    .cell-city { min-width: 100px; }
+    .cell-gov  { min-width: 140px; color: #475569; }
+
+    /* ── Pills ── */
+    .pill { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px; white-space: nowrap; cursor: default; }
+    .pill-green  { background: #dcfce7; color: #15803d; }
+    .pill-red    { background: #fee2e2; color: #b91c1c; }
+    .pill-blue   { background: #dbeafe; color: #1d4ed8; }
+    .pill-yellow { background: #fef9c3; color: #92400e; }
+    .pill-gray   { background: #f1f5f9; color: #64748b; }
+    .pill-purple { background: #f3e8ff; color: #7e22ce; }
+    .pill-orange { background: #ffedd5; color: #c2410c; }
+    .pill-err    { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; cursor: help; }
+    .pill-err::before { content: '?'; font-weight: 800; margin-right: 2px; }
+
+    /* ── Action buttons ── */
+    .actions { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+    .btn-icon { width: 28px; height: 28px; border-radius: 6px; border: 1px solid #e2e8f0; background: white; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; transition: background .1s; }
+    .btn-icon:hover { background: #f1f5f9; }
+    .btn-icon.btn-delete:hover { background: #fee2e2; border-color: #fca5a5; }
+    .btn-icon.btn-pin:hover { background: #dbeafe; border-color: #93c5fd; }
+    .btn-save { padding: 4px 10px; border-radius: 6px; border: none; background: #3b82f6; color: white; font-size: 12px; font-weight: 500; cursor: pointer; display: none; }
+    .btn-save.visible { display: inline-block; }
+    .btn-save:hover { background: #2563eb; }
+
+    /* ── Map panel ── */
+    .map-panel { width: 400px; flex-shrink: 0; display: flex; flex-direction: column; border-left: 1px solid #e2e8f0; }
+    #map { flex: 1; }
+
+    /* ── Empty state ── */
+    .empty { padding: 64px; text-align: center; color: #9ca3af; }
+
+    /* ── Toast ── */
+    #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #1e293b; color: white; padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 500; z-index: 9999; display: none; box-shadow: 0 4px 12px rgba(0,0,0,.3); }
+    #toast.err { background: #dc2626; }
+
+    /* ── Leaflet marker colors ── */
+    .marker-allowed  { background: #22c55e; }
+    .marker-prohibited { background: #ef4444; }
+    .marker-unknown  { background: #94a3b8; }
+    .marker-review   { background: #f97316; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Staging Editor</h1>
+  <select id="stateSelect" onchange="loadCounties()">
+    <option value="">— state —</option>
+  </select>
+  <select id="countySelect">
+    <option value="">— county —</option>
+  </select>
+  <button class="btn-load" id="loadBtn" onclick="load()" disabled>Load</button>
+  <span class="stats" id="stats"></span>
+</div>
+
+<div class="body">
+  <div class="table-panel">
+    <div class="empty" id="empty">Select a state and county, then click Load.</div>
+    <table class="tbl" id="tbl" style="display:none">
+      <thead>
+        <tr>
+          <th>Beach Name</th>
+          <th>City</th>
+          <th>Governing Body</th>
+          <th>Dogs</th>
+          <th>Rule</th>
+          <th>Tier</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div class="map-panel">
+    <div id="map"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+let beaches  = [];
+let markers  = {};  // id → Leaflet marker
+let map, highlightedRow;
+
+// ── Supabase helpers ──────────────────────────────────────────────────────────
+
+async function restGet(path) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}` },
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+async function edgeFn(fn, body) {
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/${fn}`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return r.json();
+}
+
+// ── State / county selectors ──────────────────────────────────────────────────
+
+async function initStates() {
+  const data = await restGet('beaches_staging?select=state&limit=5000');
+  const states = [...new Set(data.map(r => r.state).filter(Boolean))].sort();
+  const sel = document.getElementById('stateSelect');
+  states.forEach(s => {
+    const o = document.createElement('option');
+    o.value = o.textContent = s;
+    sel.appendChild(o);
+  });
+}
+
+async function loadCounties() {
+  const state = document.getElementById('stateSelect').value;
+  const sel   = document.getElementById('countySelect');
+  sel.innerHTML = '<option value="">— county —</option>';
+  document.getElementById('loadBtn').disabled = true;
+  if (!state) return;
+
+  const data = await restGet(`beaches_staging?select=county&state=eq.${encodeURIComponent(state)}&limit=5000`);
+  const counties = [...new Set(data.map(r => r.county).filter(Boolean))].sort();
+  counties.forEach(c => {
+    const o = document.createElement('option');
+    o.value = o.textContent = c;
+    sel.appendChild(o);
+  });
+  sel.onchange = () => {
+    document.getElementById('loadBtn').disabled = !sel.value;
+  };
+}
+
+// ── Load ──────────────────────────────────────────────────────────────────────
+
+async function load() {
+  const state  = document.getElementById('stateSelect').value;
+  const county = document.getElementById('countySelect').value;
+  if (!state || !county) return;
+
+  document.getElementById('loadBtn').disabled = true;
+  document.getElementById('empty').textContent = 'Loading…';
+  document.getElementById('tbl').style.display = 'none';
+
+  const fields = 'id,display_name,city,county,state,governing_body,governing_jurisdiction,' +
+                 'dogs_allowed,access_rule,access_scope,zone_description,allowed_hours_text,' +
+                 'quality_tier,review_status,review_notes,policy_source_url,latitude,longitude,dedup_status';
+
+  beaches = await restGet(
+    `beaches_staging?select=${fields}` +
+    `&state=eq.${encodeURIComponent(state)}` +
+    `&county=eq.${encodeURIComponent(county)}` +
+    `&order=display_name`
+  );
+
+  renderTable();
+  renderMap();
+  document.getElementById('loadBtn').disabled = false;
+
+  const total   = beaches.length;
+  const gold    = beaches.filter(b => b.quality_tier === 'gold').length;
+  const noPolicy = beaches.filter(b => b.dogs_allowed === null).length;
+  document.getElementById('stats').innerHTML =
+    `<strong>${total}</strong> beaches · <strong>${gold}</strong> gold · <strong>${noPolicy}</strong> no policy`;
+}
+
+// ── Table rendering ───────────────────────────────────────────────────────────
+
+function renderTable() {
+  if (beaches.length === 0) {
+    document.getElementById('empty').textContent = 'No beaches found for this county.';
+    document.getElementById('tbl').style.display = 'none';
+    return;
+  }
+  document.getElementById('empty').style.display = 'none';
+  const tbl = document.getElementById('tbl');
+  tbl.style.display = 'table';
+  document.getElementById('tbody').innerHTML = beaches.map(rowHtml).join('');
+}
+
+function rowHtml(b) {
+  const removed = b.dedup_status === 'removed' ? 'style="opacity:.45"' : '';
+  return `<tr id="row-${b.id}" ${removed}>
+    <td><span class="editable cell-name" contenteditable="true" data-id="${b.id}" data-field="display_name" onblur="onEdit(this)" oninput="markDirty(${b.id})">${esc(b.display_name)}</span></td>
+    <td><span class="editable cell-city" contenteditable="true" data-id="${b.id}" data-field="city" onblur="onEdit(this)" oninput="markDirty(${b.id})">${esc(b.city || '')}</span></td>
+    <td><span class="editable cell-gov"  contenteditable="true" data-id="${b.id}" data-field="governing_body" onblur="onEdit(this)" oninput="markDirty(${b.id})">${esc(b.governing_body || '')}</span></td>
+    <td>${dogsPill(b)}</td>
+    <td>${rulePill(b)}</td>
+    <td>${tierPill(b)}</td>
+    <td>${statusPill(b)}</td>
+    <td class="actions">
+      <button class="btn-icon btn-pin" onclick="flyTo(${b.id})" title="Show on map">📍</button>
+      <button class="btn-save" id="save-${b.id}" onclick="save(${b.id})">Save</button>
+      <button class="btn-icon btn-delete" onclick="del(${b.id})" title="Delete">🗑</button>
+    </td>
+  </tr>`;
+}
+
+function esc(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Pills ─────────────────────────────────────────────────────────────────────
+
+function dogsPill(b) {
+  if (b.dogs_allowed === true)  return `<span class="pill pill-green">Allowed</span>`;
+  if (b.dogs_allowed === false) return `<span class="pill pill-red">Prohibited</span>`;
+  const tip = esc(b.review_notes || 'No policy data found');
+  return `<span class="pill pill-err" title="${tip}">No policy</span>`;
+}
+
+function rulePill(b) {
+  const map = {
+    off_leash:  ['Off-leash',  'pill-green'],
+    on_leash:   ['On-leash',   'pill-blue'],
+    mixed:      ['Mixed',      'pill-yellow'],
+    prohibited: ['Prohibited', 'pill-red'],
+  };
+  if (b.access_rule && map[b.access_rule]) {
+    const [label, cls] = map[b.access_rule];
+    return `<span class="pill ${cls}">${label}</span>`;
+  }
+  if (b.dogs_allowed === false) return `<span class="pill pill-gray">N/A</span>`;
+  if (b.dogs_allowed === null)  return '';
+  const tip = esc(b.review_notes || 'Access rule not determined');
+  return `<span class="pill pill-err" title="${tip}">Unknown</span>`;
+}
+
+function tierPill(b) {
+  const map = {
+    bronze:   ['Bronze',   'pill-orange'],
+    silver:   ['Silver',   'pill-gray'],
+    gold:     ['Gold',     'pill-yellow'],
+    platinum: ['Platinum', 'pill-purple'],
+  };
+  const [label, cls] = map[b.quality_tier] || [b.quality_tier || '—', 'pill-gray'];
+  return `<span class="pill ${cls}">${label}</span>`;
+}
+
+function statusPill(b) {
+  if (!b.review_status) return `<span class="pill pill-gray">—</span>`;
+  if (b.review_status === 'OK')           return `<span class="pill pill-green">OK</span>`;
+  if (b.review_status === 'Needs Review') {
+    const tip = esc(b.review_notes || '');
+    return `<span class="pill pill-err" title="${tip}">Needs Review</span>`;
+  }
+  return `<span class="pill pill-gray">${esc(b.review_status)}</span>`;
+}
+
+// ── Editing ───────────────────────────────────────────────────────────────────
+
+const dirty = {};  // id → { field: value }
+
+function markDirty(id) {
+  const row = document.getElementById(`row-${id}`);
+  if (row) row.classList.add('dirty');
+  document.getElementById(`save-${id}`)?.classList.add('visible');
+  if (!dirty[id]) dirty[id] = {};
+}
+
+function onEdit(el) {
+  const id    = +el.dataset.id;
+  const field = el.dataset.field;
+  const val   = el.textContent.trim();
+  if (!dirty[id]) dirty[id] = {};
+  dirty[id][field] = val;
+}
+
+async function save(id) {
+  const fields = dirty[id];
+  if (!fields || Object.keys(fields).length === 0) return;
+
+  const res = await edgeFn('staging-record-admin', { action: 'update', id, fields });
+  if (res.error) { showToast('Error: ' + res.error, true); return; }
+
+  // Update local beach record
+  const b = beaches.find(b => b.id === id);
+  if (b) Object.assign(b, fields);
+
+  const row = document.getElementById(`row-${id}`);
+  row?.classList.remove('dirty');
+  document.getElementById(`save-${id}`)?.classList.remove('visible');
+  delete dirty[id];
+
+  // Update marker popup if name changed
+  if (fields.display_name && markers[id]) {
+    markers[id].setTooltipContent(fields.display_name + ` (id=${id})`);
+  }
+
+  showToast('Saved');
+}
+
+// ── Delete ────────────────────────────────────────────────────────────────────
+
+async function del(id) {
+  const b = beaches.find(b => b.id === id);
+  if (!confirm(`Delete "${b?.display_name}"?\n\nThis cannot be undone.`)) return;
+
+  const res = await edgeFn('staging-record-admin', { action: 'delete', id });
+  if (res.error) { showToast('Error: ' + res.error, true); return; }
+
+  // Remove from table
+  document.getElementById(`row-${id}`)?.remove();
+  // Remove marker
+  if (markers[id]) { map.removeLayer(markers[id]); delete markers[id]; }
+  // Remove from array
+  beaches = beaches.filter(b => b.id !== id);
+  showToast('Deleted');
+}
+
+// ── Map ───────────────────────────────────────────────────────────────────────
+
+function markerColor(b) {
+  if (b.review_status === 'Needs Review' && b.dogs_allowed === null) return '#94a3b8'; // unknown
+  if (b.dogs_allowed === true)  return '#22c55e';
+  if (b.dogs_allowed === false) return '#ef4444';
+  return '#94a3b8';
+}
+
+function makeCircleMarker(b) {
+  return L.circleMarker([b.latitude, b.longitude], {
+    radius: 7,
+    fillColor: markerColor(b),
+    color: 'white',
+    weight: 1.5,
+    fillOpacity: 0.85,
+  });
+}
+
+function renderMap() {
+  if (!map) {
+    map = L.map('map');
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+    }).addTo(map);
+  }
+
+  // Clear existing markers
+  Object.values(markers).forEach(m => map.removeLayer(m));
+  markers = {};
+
+  const valid = beaches.filter(b => b.latitude && b.longitude);
+  if (valid.length === 0) return;
+
+  const bounds = [];
+  valid.forEach(b => {
+    const m = makeCircleMarker(b);
+    m.addTo(map);
+    m.bindTooltip(`${b.display_name} (id=${b.id})`);
+    m.on('click', () => highlightRow(b.id));
+    markers[b.id] = m;
+    bounds.push([b.latitude, b.longitude]);
+  });
+
+  map.fitBounds(bounds, { padding: [20, 20] });
+}
+
+function flyTo(id) {
+  const b = beaches.find(b => b.id === id);
+  if (!b?.latitude) return;
+  map.flyTo([b.latitude, b.longitude], 15, { duration: 0.8 });
+  highlightRow(id);
+  if (markers[id]) markers[id].openTooltip();
+}
+
+function highlightRow(id) {
+  if (highlightedRow) document.getElementById(`row-${highlightedRow}`)?.classList.remove('highlighted');
+  highlightedRow = id;
+  const row = document.getElementById(`row-${id}`);
+  if (row) {
+    row.classList.add('highlighted');
+    row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+
+function showToast(msg, isErr = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = isErr ? 'err' : '';
+  t.style.display = 'block';
+  setTimeout(() => t.style.display = 'none', 2500);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+initStates();
+</script>
+</body>
+</html>

@@ -4,82 +4,116 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Policy Research — Staging Admin</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #1a1a1a; font-size: 14px; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #1a1a1a; font-size: 14px; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 
-    /* ── Header ─────────────────────────────────────────── */
-    .header { background: #1e293b; color: white; padding: 14px 24px; display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
-    .header h1 { font-size: 16px; font-weight: 600; }
-    .header select { padding: 7px 10px; border-radius: 6px; border: none; background: #334155; color: white; font-size: 13px; cursor: pointer; }
-    .header .start-btn { padding: 7px 18px; border-radius: 6px; border: none; background: #3b82f6; color: white; font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s; }
-    .header .start-btn:hover:not(:disabled) { background: #2563eb; }
-    .header .start-btn:disabled { background: #475569; cursor: default; }
-    .header .stop-btn { padding: 7px 18px; border-radius: 6px; border: none; background: #dc2626; color: white; font-size: 13px; font-weight: 500; cursor: pointer; display: none; }
-    .header .stop-btn.visible { display: block; }
+    /* ── Header ── */
+    .header { background: #1e293b; color: white; padding: 12px 20px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; box-shadow: 0 2px 8px rgba(0,0,0,.3); z-index: 200; }
+    .header h1 { font-size: 15px; font-weight: 600; }
+    .header select { padding: 6px 10px; border-radius: 6px; border: none; background: #334155; color: white; font-size: 13px; cursor: pointer; }
+    .header button { padding: 6px 16px; border-radius: 6px; border: none; font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s; }
+    .start-btn  { background: #3b82f6; color: white; }
+    .start-btn:hover:not(:disabled) { background: #2563eb; }
+    .start-btn:disabled { background: #475569; cursor: default; }
+    .stop-btn { background: #dc2626; color: white; display: none; }
+    .stop-btn.visible { display: block; }
     .header .stats { margin-left: auto; font-size: 12px; color: #94a3b8; text-align: right; line-height: 1.6; }
     .header .stats strong { color: #e2e8f0; }
 
-    /* ── Progress bar ────────────────────────────────────── */
-    .progress-wrap { background: #1e293b; padding: 0 24px 12px; }
-    .progress-bar-bg { background: #334155; border-radius: 9999px; height: 6px; }
-    .progress-bar-fill { background: #3b82f6; border-radius: 9999px; height: 6px; width: 0%; transition: width .4s ease; }
+    /* ── Progress bar ── */
+    .progress-wrap { background: #1e293b; padding: 0 20px 10px; flex-shrink: 0; }
+    .progress-bar-bg   { background: #334155; border-radius: 9999px; height: 5px; }
+    .progress-bar-fill { background: #3b82f6; border-radius: 9999px; height: 5px; width: 0%; transition: width .4s ease; }
 
-    /* ── Main ────────────────────────────────────────────── */
-    .main { max-width: 1100px; margin: 24px auto; padding: 0 16px 64px; }
+    /* ── Body split ── */
+    .body { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Table panel ── */
+    .table-panel { flex: 1; overflow-y: auto; padding: 16px; min-width: 0; }
     .empty-state { text-align: center; padding: 64px; color: #9ca3af; }
 
-    /* ── Results table ───────────────────────────────────── */
+    /* ── Results table ── */
     .results-table { width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-    .results-table th { background: #f8fafc; padding: 10px 14px; text-align: left; font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: .4px; border-bottom: 1px solid #e2e8f0; }
-    .results-table td { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+    .results-table th { background: #f8fafc; padding: 9px 12px; text-align: left; font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: .4px; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+    .results-table td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
     .results-table tr:last-child td { border-bottom: none; }
+    .results-table tr.waiting td    { background: white; }
     .results-table tr.processing td { background: #fffbeb; }
-    .results-table tr.gold td { background: #f0fdf4; }
+    .results-table tr.gold td       { background: #f0fdf4; }
     .results-table tr.needs_review td { background: #fef2f2; }
-    .results-table tr.error td { background: #fff1f2; }
+    .results-table tr.error td      { background: #fff1f2; }
+    .results-table tr.dirty td      { background: #fefce8 !important; }
+    .results-table tr.removed td    { opacity: .4; }
+    .results-table tr.highlighted td { outline: 2px solid #3b82f6; outline-offset: -2px; }
 
-    /* ── Status dot ──────────────────────────────────────── */
-    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: middle; }
-    .dot-waiting   { background: #d1d5db; }
+    /* ── Status dot ── */
+    .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+    .dot-waiting    { background: #d1d5db; }
     .dot-processing { background: #f59e0b; animation: pulse .8s ease-in-out infinite; }
-    .dot-gold      { background: #22c55e; }
-    .dot-review    { background: #f97316; }
-    .dot-error     { background: #ef4444; }
-    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+    .dot-gold       { background: #22c55e; }
+    .dot-review     { background: #f97316; }
+    .dot-error      { background: #ef4444; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
 
-    /* ── Policy badge ────────────────────────────────────── */
+    /* ── Editable cells ── */
+    .editable { cursor: text; border-radius: 4px; padding: 2px 6px; display: inline-block; border: 1px solid #e2e8f0; background: #f8fafc; font-size: 13px; min-width: 80px; transition: border-color .15s; }
+    .editable:hover { border-color: #94a3b8; background: white; }
+    .editable:focus { outline: none; border-color: #3b82f6; background: white; box-shadow: 0 0 0 2px #bfdbfe; }
+    .editable-name { font-weight: 500; min-width: 130px; }
+    .editable-city { font-size: 11px; color: #6b7280; margin-top: 3px; min-width: 80px; }
+    .editable-gov  { min-width: 130px; color: #374151; }
+
+    /* ── Policy badge ── */
     .policy-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px; white-space: nowrap; }
-    .pb-yes      { background: #dcfce7; color: #15803d; }
-    .pb-no       { background: #fee2e2; color: #b91c1c; }
-    .pb-unknown  { background: #f1f5f9; color: #94a3b8; }
-    .pb-disagree { background: #fef9c3; color: #92400e; }
+    .pb-yes     { background: #dcfce7; color: #15803d; }
+    .pb-no      { background: #fee2e2; color: #b91c1c; }
+    .pb-unknown { background: #f1f5f9; color: #94a3b8; }
 
-    /* ── Source link ─────────────────────────────────────── */
-    .src-link { font-size: 11px; color: #3b82f6; text-decoration: none; display: block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* ── Action buttons ── */
+    .actions { display: flex; gap: 5px; align-items: center; }
+    .btn-sm { padding: 3px 9px; border-radius: 5px; border: 1px solid #e2e8f0; background: white; font-size: 11px; font-weight: 500; cursor: pointer; white-space: nowrap; transition: background .1s; }
+    .btn-sm:hover { background: #f1f5f9; }
+    .btn-detail { color: #3b82f6; border-color: #bfdbfe; }
+    .btn-detail:hover { background: #eff6ff; }
+    .btn-pin    { color: #059669; border-color: #a7f3d0; }
+    .btn-pin:hover { background: #ecfdf5; }
+    .btn-save   { color: #1d4ed8; border-color: #93c5fd; background: #eff6ff; display: none; }
+    .btn-save.visible { display: inline-block; }
+    .btn-save:hover { background: #dbeafe; }
+    .btn-del    { color: #dc2626; border-color: #fca5a5; }
+    .btn-del:hover { background: #fef2f2; }
+
+    /* ── Source link ── */
+    .src-link { font-size: 11px; color: #3b82f6; text-decoration: none; display: block; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .src-link:hover { text-decoration: underline; }
     .src-note { font-size: 11px; color: #f97316; margin-top: 2px; }
 
-    /* ── Detail panel ────────────────────────────────────── */
-    .detail-btn { font-size: 11px; color: #3b82f6; background: none; border: none; cursor: pointer; padding: 0; }
-    .detail-btn:hover { text-decoration: underline; }
-    .detail-panel { display: none; margin-top: 24px; background: white; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); overflow: hidden; }
-    .detail-panel.open { display: block; }
-    .detail-head { padding: 12px 16px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
-    .detail-head h3 { font-size: 14px; font-weight: 600; }
-    .detail-close { background: none; border: none; font-size: 18px; cursor: pointer; color: #6b7280; }
-    .detail-body { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
-    .detail-col { padding: 16px; border-right: 1px solid #f1f5f9; }
-    .detail-col:last-child { border-right: none; }
-    .detail-col h4 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: #64748b; margin-bottom: 10px; }
-    .field-row { display: flex; gap: 8px; margin-bottom: 6px; font-size: 12px; }
-    .field-label { color: #94a3b8; width: 120px; flex-shrink: 0; }
-    .field-value { color: #1e293b; font-weight: 500; }
-    .raw-text { font-size: 11px; color: #475569; background: #f8fafc; border-radius: 6px; padding: 10px; max-height: 200px; overflow-y: auto; white-space: pre-wrap; margin-top: 8px; line-height: 1.5; }
+    /* ── Map panel ── */
+    .map-panel { width: 380px; flex-shrink: 0; border-left: 1px solid #e2e8f0; display: flex; flex-direction: column; }
+    #map { flex: 1; }
 
-    /* ── Toast ───────────────────────────────────────────── */
+    /* ── Detail panel ── */
+    .detail-panel { display: none; margin-top: 16px; background: white; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); overflow: hidden; }
+    .detail-panel.open { display: block; }
+    .detail-head { padding: 10px 14px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+    .detail-head h3 { font-size: 13px; font-weight: 600; }
+    .detail-close { background: none; border: none; font-size: 18px; cursor: pointer; color: #6b7280; }
+    .detail-body { display: grid; grid-template-columns: 1fr 1fr; }
+    .detail-col { padding: 14px; border-right: 1px solid #f1f5f9; }
+    .detail-col:last-child { border-right: none; }
+    .detail-col h4 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: #64748b; margin-bottom: 8px; }
+    .field-row { display: flex; gap: 8px; margin-bottom: 5px; font-size: 12px; }
+    .field-label { color: #94a3b8; width: 110px; flex-shrink: 0; }
+    .field-value { color: #1e293b; font-weight: 500; }
+    .raw-text { font-size: 11px; color: #475569; background: #f8fafc; border-radius: 6px; padding: 8px; max-height: 180px; overflow-y: auto; white-space: pre-wrap; margin-top: 6px; line-height: 1.5; }
+
+    /* ── Toast ── */
     #toast { position: fixed; bottom: 20px; right: 20px; background: #1e293b; color: white; padding: 10px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transform: translateY(6px); transition: opacity .25s, transform .25s; pointer-events: none; z-index: 9999; }
     #toast.show { opacity: 1; transform: translateY(0); }
+    #toast.err  { background: #dc2626; }
   </style>
 </head>
 <body>
@@ -100,16 +134,21 @@
   <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressBar"></div></div>
 </div>
 
-<div class="main" id="main">
-  <div class="empty-state">Select a state and county, then click Start Research.</div>
-</div>
-
-<div class="detail-panel" id="detailPanel">
-  <div class="detail-head">
-    <h3 id="detailTitle">—</h3>
-    <button class="detail-close" onclick="closeDetail()">×</button>
+<div class="body">
+  <div class="table-panel" id="tablePanel">
+    <div class="empty-state" id="emptyState">Select a state and county, then click Start Research.</div>
+    <div id="tableWrap"></div>
+    <div class="detail-panel" id="detailPanel">
+      <div class="detail-head">
+        <h3 id="detailTitle">—</h3>
+        <button class="detail-close" onclick="closeDetail()">×</button>
+      </div>
+      <div class="detail-body" id="detailBody"></div>
+    </div>
   </div>
-  <div class="detail-body" id="detailBody"></div>
+  <div class="map-panel">
+    <div id="map"></div>
+  </div>
 </div>
 
 <div id="toast"></div>
@@ -118,10 +157,12 @@
 const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
 const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
 
-let beaches    = [];
-let results    = {};
-let running    = false;
-let stopFlag   = false;
+let beaches  = [];
+let results  = {};
+let running  = false;
+let stopFlag = false;
+let map, markers = {}, highlighted;
+const dirty  = {};   // id → { field: value }
 
 // ── API ───────────────────────────────────────────────────────────────────────
 
@@ -143,22 +184,23 @@ async function restGet(path) {
   return r.json();
 }
 
-// ── Load counties ─────────────────────────────────────────────────────────────
+// ── Counties ──────────────────────────────────────────────────────────────────
 
 async function loadCounties() {
   const state = document.getElementById('stateSelect').value;
   const sel   = document.getElementById('countySelect');
   sel.innerHTML = '<option>Loading…</option>';
-  const data = await restGet(`beaches_staging?select=county&state=eq.${encodeURIComponent(state)}&quality_tier=eq.silver&dedup_status=is.null&limit=1000`);
+  const data = await restGet(
+    `beaches_staging?select=county&state=eq.${encodeURIComponent(state)}` +
+    `&quality_tier=eq.silver&dedup_status=is.null&limit=1000`
+  );
   const counties = [...new Set(data.map(r => r.county).filter(Boolean))].sort();
   sel.innerHTML = counties.map(c => `<option value="${c}">${c}</option>`).join('');
 }
 
-// ── Load beaches for county ───────────────────────────────────────────────────
-
 async function loadBeaches(state, county) {
   return restGet(
-    `beaches_staging?select=id,display_name,governing_body,city,county,state` +
+    `beaches_staging?select=id,display_name,governing_body,city,county,state,latitude,longitude` +
     `&state=eq.${encodeURIComponent(state)}&county=eq.${encodeURIComponent(county)}` +
     `&quality_tier=eq.silver&dedup_status=is.null&order=display_name`
   );
@@ -179,6 +221,7 @@ async function startResearch() {
   beaches = await loadBeaches(state, county);
   results = {};
   renderTable();
+  renderMap();
   updateStats();
 
   for (let i = 0; i < beaches.length; i++) {
@@ -206,53 +249,76 @@ async function startResearch() {
   toast(stopFlag ? 'Stopped.' : 'Research complete.');
 }
 
-function stopResearch() {
-  stopFlag = true;
-  toast('Stopping after current beach…');
-}
+function stopResearch() { stopFlag = true; toast('Stopping after current beach…'); }
 
-// ── Table rendering ───────────────────────────────────────────────────────────
+// ── Table ─────────────────────────────────────────────────────────────────────
 
 function renderTable() {
-  const main = document.getElementById('main');
-  if (beaches.length === 0) { main.innerHTML = '<div class="empty-state">No silver beaches found for this county.</div>'; return; }
-
-  main.innerHTML = `
+  const wrap = document.getElementById('tableWrap');
+  document.getElementById('emptyState').style.display = 'none';
+  if (beaches.length === 0) {
+    wrap.innerHTML = '<div class="empty-state">No silver beaches found for this county.</div>';
+    return;
+  }
+  wrap.innerHTML = `
     <table class="results-table">
-      <thead>
-        <tr>
-          <th style="width:32px"></th>
-          <th>Beach</th>
-          <th>Governing Body</th>
-          <th>Website Source</th>
-          <th>Website Policy</th>
-          <th>Search Policy</th>
-          <th>Agreement</th>
-          <th></th>
-        </tr>
-      </thead>
+      <thead><tr>
+        <th style="width:24px"></th>
+        <th>Beach</th>
+        <th>Governing Body</th>
+        <th>Website Source</th>
+        <th>Website Policy</th>
+        <th>Search Policy</th>
+        <th>Agreement</th>
+        <th></th>
+      </tr></thead>
       <tbody id="tbody">
         ${beaches.map(b => `
           <tr id="row-${b.id}" class="waiting">
             <td><span class="dot dot-waiting" id="dot-${b.id}"></span></td>
-            <td>${b.display_name}</td>
-            <td style="font-size:12px;color:#6b7280">${b.governing_body || '—'}</td>
+            <td>
+              <div><span class="editable editable-name" contenteditable="true"
+                data-id="${b.id}" data-field="display_name"
+                oninput="markDirty(${b.id})" onblur="trackEdit(this)"
+              >${esc(b.display_name)}</span></div>
+              <div><span class="editable editable-city" contenteditable="true"
+                data-id="${b.id}" data-field="city"
+                oninput="markDirty(${b.id})" onblur="trackEdit(this)"
+              >${esc(b.city || '')}</span></div>
+            </td>
+            <td>
+              <span class="editable editable-gov" contenteditable="true"
+                data-id="${b.id}" data-field="governing_body"
+                oninput="markDirty(${b.id})" onblur="trackEdit(this)"
+              >${esc(b.governing_body || '')}</span>
+            </td>
             <td id="src-${b.id}">—</td>
             <td id="wpol-${b.id}">—</td>
             <td id="spol-${b.id}">—</td>
             <td id="agr-${b.id}">—</td>
-            <td id="act-${b.id}"></td>
+            <td class="actions" id="act-${b.id}">
+              <button class="btn-sm btn-save" id="save-${b.id}" onclick="saveRow(${b.id})">Save</button>
+              <button class="btn-sm btn-pin"  onclick="flyTo(${b.id})" title="Show on map">📍</button>
+              <button class="btn-sm btn-del"  onclick="softDelete(${b.id})">Delete</button>
+            </td>
           </tr>`).join('')}
       </tbody>
     </table>`;
+}
+
+function esc(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function setStatus(id, status) {
   const row = document.getElementById('row-' + id);
   const dot = document.getElementById('dot-' + id);
   if (!row || !dot) return;
-  row.className = status;
+  // Preserve dirty class
+  const isDirty = row.classList.contains('dirty');
+  row.className = status + (isDirty ? ' dirty' : '');
   dot.className = `dot dot-${status === 'needs_review' ? 'review' : status}`;
+  if (markers[id]) markers[id].setStyle({ fillColor: markerColor(status) });
 }
 
 function policyBadge(policy, fallback = '—') {
@@ -280,7 +346,6 @@ function updateRow(id, data) {
     return;
   }
 
-  // Source
   if (data.website_url) {
     src.innerHTML = `<a class="src-link" href="${data.website_url}" target="_blank">${data.website_url}</a>` +
       (data.website_note ? `<div class="src-note">${data.website_note}</div>` : '');
@@ -288,19 +353,23 @@ function updateRow(id, data) {
     src.innerHTML = '<span style="color:#9ca3af;font-size:12px">Not found</span>';
   }
 
-  // Policies
   wpol.innerHTML = policyBadge(data.website_policy, 'No data');
   spol.innerHTML = policyBadge(data.search_policy,  'No data');
 
-  // Agreement
   if (data.agreement === true) {
     agr.innerHTML = '<span style="color:#16a34a;font-weight:600;font-size:12px">✓ Agree</span>';
   } else if (data.agreement === false) {
     agr.innerHTML = '<span style="color:#f97316;font-weight:600;font-size:12px">⚠ Disagree</span>';
   }
 
-  // Detail button
-  act.innerHTML = `<button class="detail-btn" onclick="showDetail(${id})">Details</button>`;
+  // Preserve save/pin/delete buttons, add Details
+  const saveBtn = document.getElementById('save-' + id);
+  const saveClass = saveBtn?.classList.contains('visible') ? 'visible' : '';
+  act.innerHTML = `
+    <button class="btn-sm btn-detail" onclick="showDetail(${id})">Details</button>
+    <button class="btn-sm btn-save ${saveClass}" id="save-${id}" onclick="saveRow(${id})">Save</button>
+    <button class="btn-sm btn-pin"  onclick="flyTo(${id})" title="Show on map">📍</button>
+    <button class="btn-sm btn-del"  onclick="softDelete(${id})">Delete</button>`;
 }
 
 function updateProgress(done, total) {
@@ -308,16 +377,129 @@ function updateProgress(done, total) {
 }
 
 function updateStats() {
-  const total    = beaches.length;
-  const gold     = Object.values(results).filter((r) => r.status === 'gold').length;
-  const review   = Object.values(results).filter((r) => r.status === 'needs_review').length;
-  const errors   = Object.values(results).filter((r) => r.error).length;
-  const done     = gold + review + errors;
+  const total  = beaches.length;
+  const gold   = Object.values(results).filter(r => r.status === 'gold').length;
+  const review = Object.values(results).filter(r => r.status === 'needs_review').length;
+  const errors = Object.values(results).filter(r => r.error).length;
+  const done   = gold + review + errors;
   document.getElementById('stats').innerHTML =
-    `<strong>${done}</strong>/${total} researched &nbsp;·&nbsp; ` +
+    `<strong>${done}</strong>/${total} &nbsp;·&nbsp; ` +
     `<strong style="color:#86efac">${gold}</strong> gold &nbsp;·&nbsp; ` +
     `<strong style="color:#fdba74">${review}</strong> review &nbsp;·&nbsp; ` +
     `<strong style="color:#fca5a5">${errors}</strong> errors`;
+}
+
+// ── Inline editing ────────────────────────────────────────────────────────────
+
+function markDirty(id) {
+  if (!dirty[id]) dirty[id] = {};
+  const row = document.getElementById('row-' + id);
+  if (row && !row.classList.contains('dirty')) row.classList.add('dirty');
+  const btn = document.getElementById('save-' + id);
+  if (btn) btn.classList.add('visible');
+}
+
+function trackEdit(el) {
+  const id    = +el.dataset.id;
+  const field = el.dataset.field;
+  if (!dirty[id]) dirty[id] = {};
+  dirty[id][field] = el.textContent.trim();
+}
+
+async function saveRow(id) {
+  const fields = dirty[id];
+  if (!fields || Object.keys(fields).length === 0) return;
+  try {
+    await apiFetch('staging-record-admin', { action: 'update', id, fields });
+    const b = beaches.find(b => b.id === id);
+    if (b) Object.assign(b, fields);
+    const row = document.getElementById('row-' + id);
+    if (row) row.classList.remove('dirty');
+    const btn = document.getElementById('save-' + id);
+    if (btn) btn.classList.remove('visible');
+    delete dirty[id];
+    if (fields.display_name && markers[id]) {
+      markers[id].setTooltipContent(`${fields.display_name} (id=${id})`);
+    }
+    toast('Saved');
+  } catch(e) {
+    toast('Error: ' + e.message, true);
+  }
+}
+
+// ── Soft delete ───────────────────────────────────────────────────────────────
+
+async function softDelete(id) {
+  const b = beaches.find(b => b.id === id);
+  if (!confirm(`Mark "${b?.display_name}" as removed?\n\nIt will be hidden from future research runs.`)) return;
+  try {
+    await apiFetch('staging-record-admin', { action: 'delete', id });
+    const row = document.getElementById('row-' + id);
+    if (row) row.className = 'removed';
+    if (markers[id]) markers[id].setStyle({ fillColor: '#d1d5db', fillOpacity: 0.4 });
+    toast('Marked removed');
+  } catch(e) {
+    toast('Error: ' + e.message, true);
+  }
+}
+
+// ── Map ───────────────────────────────────────────────────────────────────────
+
+const MARKER_COLORS = {
+  waiting:     '#94a3b8',
+  processing:  '#f59e0b',
+  gold:        '#22c55e',
+  needs_review:'#f97316',
+  error:       '#ef4444',
+};
+
+function markerColor(status) {
+  return MARKER_COLORS[status] || '#94a3b8';
+}
+
+function renderMap() {
+  if (!map) {
+    map = L.map('map');
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+    }).addTo(map);
+  }
+  Object.values(markers).forEach(m => map.removeLayer(m));
+  markers = {};
+
+  const valid = beaches.filter(b => b.latitude && b.longitude);
+  if (valid.length === 0) return;
+
+  const bounds = [];
+  valid.forEach(b => {
+    const m = L.circleMarker([b.latitude, b.longitude], {
+      radius: 7, fillColor: markerColor('waiting'),
+      color: 'white', weight: 1.5, fillOpacity: 0.85,
+    }).addTo(map);
+    m.bindTooltip(`${b.display_name} (id=${b.id})`);
+    m.on('click', () => highlightRow(b.id));
+    markers[b.id] = m;
+    bounds.push([b.latitude, b.longitude]);
+  });
+  map.fitBounds(bounds, { padding: [20, 20] });
+}
+
+function flyTo(id) {
+  const b = beaches.find(b => b.id === id);
+  if (!b?.latitude) return;
+  map.flyTo([b.latitude, b.longitude], 15, { duration: 0.7 });
+  highlightRow(id);
+  markers[id]?.openTooltip();
+}
+
+function highlightRow(id) {
+  if (highlighted) document.getElementById('row-' + highlighted)?.classList.remove('highlighted');
+  highlighted = id;
+  const row = document.getElementById('row-' + id);
+  if (row) {
+    row.classList.add('highlighted');
+    row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 }
 
 // ── Detail panel ──────────────────────────────────────────────────────────────
@@ -326,69 +508,46 @@ function showDetail(id) {
   const data  = results[id];
   const beach = beaches.find(b => b.id === id);
   if (!data || !beach) return;
-
   document.getElementById('detailTitle').textContent = beach.display_name;
 
   const col = (title, policy, rawText, sourceLink) => {
     const fields = policy ? [
-      ['dogs_allowed',    policy.dogs_allowed  === null ? '—' : String(policy.dogs_allowed)],
-      ['access_rule',     policy.access_rule         || '—'],
-      ['access_scope',    policy.access_scope        || '—'],
+      ['dogs_allowed',    policy.dogs_allowed === null ? '—' : String(policy.dogs_allowed)],
+      ['access_rule',     policy.access_rule        || '—'],
+      ['access_scope',    policy.access_scope       || '—'],
       ['seasonal',        policy.seasonal_start ? `${policy.seasonal_start} – ${policy.seasonal_end}` : '—'],
       ['hours',           policy.dogs_prohibited_start ? `prohibited ${policy.dogs_prohibited_start}–${policy.dogs_prohibited_end}` : '—'],
-      ['allowed_hours',   policy.allowed_hours_text  || '—'],
-      ['zone',            policy.zone_description    || '—'],
-      ['day_restrictions',policy.day_restrictions    || '—'],
-      ['confidence',      policy.confidence          || '—'],
+      ['allowed_hours',   policy.allowed_hours_text || '—'],
+      ['zone',            policy.zone_description   || '—'],
+      ['day_restrictions',policy.day_restrictions   || '—'],
+      ['confidence',      policy.confidence         || '—'],
     ] : [];
-
-    const fieldHtml = fields.map(([l, v]) => `
-      <div class="field-row">
-        <span class="field-label">${l}</span>
-        <span class="field-value">${v}</span>
-      </div>`).join('');
-
-    const linkHtml = sourceLink
-      ? `<a class="src-link" href="${sourceLink}" target="_blank" style="margin-bottom:8px;display:block">${sourceLink}</a>`
-      : '';
-
-    const rawHtml = rawText
-      ? `<div class="raw-text">${rawText.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`
-      : '<div style="color:#9ca3af;font-size:12px">No text captured</div>';
-
-    return `
-      <div class="detail-col">
-        <h4>${title}</h4>
-        ${linkHtml}
-        ${policy ? fieldHtml : '<div style="color:#9ca3af;font-size:12px">No policy extracted</div>'}
-        ${rawHtml}
-      </div>`;
+    return `<div class="detail-col">
+      <h4>${title}</h4>
+      ${sourceLink ? `<a class="src-link" href="${sourceLink}" target="_blank" style="margin-bottom:8px;display:block">${sourceLink}</a>` : ''}
+      ${policy ? fields.map(([l,v]) => `<div class="field-row"><span class="field-label">${l}</span><span class="field-value">${v}</span></div>`).join('') : '<div style="color:#9ca3af;font-size:12px">No policy extracted</div>'}
+      ${rawText ? `<div class="raw-text">${rawText.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>` : '<div style="color:#9ca3af;font-size:12px">No text captured</div>'}
+    </div>`;
   };
 
-  // Build search raw text from snippets
-  const searchRaw = (data.search_results || [])
-    .map(r => `[${r.title}]\n${r.snippet}`)
-    .join('\n\n');
-
+  const searchRaw = (data.search_results || []).map(r => `[${r.title}]\n${r.snippet}`).join('\n\n');
   document.getElementById('detailBody').innerHTML =
-    col('Website Source',  data.website_policy, data.website_text ?? '', data.website_url) +
-    col('Web Search',      data.search_policy,  searchRaw,               data.search_results?.[0]?.link);
+    col('Website Source', data.website_policy, data.website_text ?? '', data.website_url) +
+    col('Web Search',     data.search_policy,  searchRaw, data.search_results?.[0]?.link);
 
   document.getElementById('detailPanel').classList.add('open');
   document.getElementById('detailPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function closeDetail() {
-  document.getElementById('detailPanel').classList.remove('open');
-}
+function closeDetail() { document.getElementById('detailPanel').classList.remove('open'); }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 
 let toastTimer;
-function toast(msg) {
+function toast(msg, isErr = false) {
   const el = document.getElementById('toast');
   el.textContent = msg;
-  el.className = 'show';
+  el.className   = 'show' + (isErr ? ' err' : '');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.className = '', 3000);
 }

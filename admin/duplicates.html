@@ -405,7 +405,7 @@ function buildS2Card(pair) {
       <button class="btn btn-red" onclick="doDelete('${id}', [${r1.id},${r2.id}], ${r2.id})">Delete id=${r2.id}</button>
       <button class="btn btn-red" onclick="doDelete('${id}', [${r1.id},${r2.id}], ${r1.id})">Delete id=${r1.id}</button>
       <button class="btn btn-orange" onclick="toggleMerge('${mergeId}')">Merge…</button>
-      <button class="btn btn-red" onclick="doRemoveAll('${id}', [${r1.id},${r2.id}])">Delete All</button>
+      <button class="btn btn-red" onclick="doRemoveAll('${id}', [${r1.id},${r2.id}])">Mark Invalid</button>
       <div class="merge-form" id="${mergeId}">
         <label>Keep:</label>
         <select id="${mergeId}-keep">
@@ -573,13 +573,13 @@ function toggleMerge(mergeId) {
 }
 
 async function doRemoveAll(cardId, ids) {
-  if (!confirm(`Remove all ${ids.length} record(s) from staging? This marks them as "not a beach".`)) return;
+  if (!confirm(`Mark all ${ids.length} record(s) as invalid? They will be excluded from processing but not deleted.`)) return;
   const card = document.getElementById(cardId);
   card.classList.add('resolving');
   try {
     await apiFetch('resolve-staging-duplicates', { action: 'remove_all', ids });
     resolveCard(cardId);
-    toast(`Removed all ${ids.length} records from staging`);
+    toast(`Marked ${ids.length} record(s) as invalid`);
   } catch(e) {
     card.classList.remove('resolving');
     toast(e.message, true);

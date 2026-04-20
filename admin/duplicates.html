@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Duplicate Review — Staging Admin</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #1a1a1a; font-size: 14px; }
+
+    /* ── Header ─────────────────────────────────────────── */
+    .header { background: #1e293b; color: white; padding: 14px 24px; display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 1000; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+    .header h1 { font-size: 16px; font-weight: 600; letter-spacing: -.2px; }
+    .header select { padding: 7px 10px; border-radius: 6px; border: none; background: #334155; color: white; font-size: 13px; cursor: pointer; }
+    .header .scan-btn { padding: 7px 16px; border-radius: 6px; border: none; background: #3b82f6; color: white; font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s; }
+    .header .scan-btn:hover { background: #2563eb; }
+    .header .scan-btn:disabled { background: #475569; cursor: default; }
+    .header .stats { margin-left: auto; font-size: 12px; color: #94a3b8; text-align: right; line-height: 1.5; }
+    .header .stats strong { color: #e2e8f0; }
+
+    /* ── Layout ─────────────────────────────────────────── */
+    .main { max-width: 940px; margin: 24px auto; padding: 0 16px 48px; }
+    .loading { text-align: center; padding: 64px 0; color: #6b7280; }
+    .spinner { width: 32px; height: 32px; border: 3px solid #e5e7eb; border-top-color: #3b82f6; border-radius: 50%; animation: spin .7s linear infinite; margin: 0 auto 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .empty-state { text-align: center; padding: 48px 0; color: #9ca3af; }
+    .empty-state svg { margin-bottom: 12px; }
+
+    /* ── Section ─────────────────────────────────────────── */
+    .section { margin-bottom: 36px; }
+    .section-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+    .section-head h2 { font-size: 14px; font-weight: 700; color: #111827; text-transform: uppercase; letter-spacing: .5px; }
+    .badge { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 9999px; }
+    .badge-red    { background: #fee2e2; color: #b91c1c; }
+    .badge-yellow { background: #fef9c3; color: #92400e; }
+    .badge-green  { background: #dcfce7; color: #15803d; }
+    .badge-gray   { background: #f1f5f9; color: #64748b; }
+    .section-desc { font-size: 12px; color: #6b7280; margin-bottom: 10px; }
+    .section-actions { display: flex; gap: 8px; margin-bottom: 12px; }
+    .bulk-btn { font-size: 12px; padding: 5px 12px; border-radius: 5px; border: 1px solid #d1d5db; background: white; cursor: pointer; color: #374151; transition: background .15s; }
+    .bulk-btn:hover { background: #f9fafb; }
+    .bulk-btn.danger { border-color: #fca5a5; color: #dc2626; }
+    .bulk-btn.danger:hover { background: #fef2f2; }
+    .section-empty { color: #9ca3af; font-size: 13px; padding: 8px 0; }
+
+    /* ── Card ─────────────────────────────────────────── */
+    .card { background: white; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 10px; overflow: hidden; transition: opacity .35s ease, max-height .4s ease; max-height: 600px; }
+    .card.resolving { opacity: .4; pointer-events: none; }
+    .card.resolved { opacity: 0; max-height: 0; margin: 0; padding: 0; border: none; }
+    .card-inner { display: grid; grid-template-columns: 220px 1fr; min-height: 140px; }
+    .card-map { position: relative; }
+    .card-map .lmap { height: 100%; min-height: 160px; }
+    .card-content { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+    .card-title { font-size: 13px; font-weight: 600; color: #111827; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .card-title .dist-tag { font-size: 11px; font-weight: 500; color: #6b7280; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
+    .card-title .city-tag { font-size: 11px; color: #9ca3af; }
+
+    /* ── Records within a card ─────────────────────────── */
+    .records-list { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+    .rec { padding: 6px 8px; border-radius: 6px; background: #f8fafc; border: 1px solid #e2e8f0; }
+    .rec.keep-rec { border-color: #bfdbfe; background: #eff6ff; }
+    .rec-name { font-weight: 600; font-size: 13px; color: #1e293b; }
+    .rec-meta { font-size: 11px; color: #64748b; margin-top: 1px; }
+    .rec-actions { display: flex; gap: 5px; margin-top: 5px; }
+
+    /* ── Action buttons ─────────────────────────────────── */
+    .btn { padding: 5px 11px; border-radius: 5px; font-size: 12px; border: none; cursor: pointer; font-weight: 500; transition: background .12s; white-space: nowrap; }
+    .btn-green  { background: #dcfce7; color: #15803d; }
+    .btn-green:hover  { background: #bbf7d0; }
+    .btn-red    { background: #fee2e2; color: #b91c1c; }
+    .btn-red:hover    { background: #fecaca; }
+    .btn-blue   { background: #dbeafe; color: #1d4ed8; }
+    .btn-blue:hover   { background: #bfdbfe; }
+    .btn-orange { background: #ffedd5; color: #c2410c; }
+    .btn-orange:hover { background: #fed7aa; }
+    .btn-gray   { background: #f1f5f9; color: #475569; }
+    .btn-gray:hover   { background: #e2e8f0; }
+
+    /* ── Card footer ─────────────────────────────────────── */
+    .card-footer { padding: 8px 14px; border-top: 1px solid #f1f5f9; display: flex; gap: 7px; align-items: center; flex-wrap: wrap; background: #fafafa; }
+
+    /* ── Merge form ──────────────────────────────────────── */
+    .merge-form { display: none; gap: 6px; width: 100%; margin-top: 4px; flex-wrap: wrap; align-items: center; padding-top: 6px; border-top: 1px solid #e2e8f0; }
+    .merge-form.open { display: flex; }
+    .merge-form label { font-size: 11px; color: #6b7280; font-weight: 500; }
+    .merge-form select, .merge-form input { padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; background: white; }
+    .merge-form input { width: 220px; }
+    .merge-form .merge-actions { display: flex; gap: 5px; }
+
+    /* ── Toast ───────────────────────────────────────────── */
+    #toast { position: fixed; bottom: 20px; right: 20px; background: #1e293b; color: white; padding: 10px 16px; border-radius: 8px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,.25); opacity: 0; transform: translateY(6px); transition: opacity .25s, transform .25s; pointer-events: none; z-index: 9999; }
+    #toast.show { opacity: 1; transform: translateY(0); }
+    #toast.error { background: #7f1d1d; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Duplicate Review</h1>
+  <select id="stateSelect">
+    <option>Alabama</option><option>Alaska</option><option>Arizona</option>
+    <option>Arkansas</option><option selected>California</option><option>Colorado</option>
+    <option>Connecticut</option><option>Delaware</option><option>Florida</option>
+    <option>Georgia</option><option>Hawaii</option><option>Idaho</option>
+    <option>Illinois</option><option>Indiana</option><option>Iowa</option>
+    <option>Kansas</option><option>Kentucky</option><option>Louisiana</option>
+    <option>Maine</option><option>Maryland</option><option>Massachusetts</option>
+    <option>Michigan</option><option>Minnesota</option><option>Mississippi</option>
+    <option>Missouri</option><option>Montana</option><option>Nebraska</option>
+    <option>Nevada</option><option>New Hampshire</option><option>New Jersey</option>
+    <option>New Mexico</option><option>New York</option><option>North Carolina</option>
+    <option>North Dakota</option><option>Ohio</option><option>Oklahoma</option>
+    <option>Oregon</option><option>Pennsylvania</option><option>Rhode Island</option>
+    <option>South Carolina</option><option>South Dakota</option><option>Tennessee</option>
+    <option>Texas</option><option>Utah</option><option>Vermont</option>
+    <option>Virginia</option><option>Washington</option><option>West Virginia</option>
+    <option>Wisconsin</option><option>Wyoming</option>
+  </select>
+  <button class="scan-btn" id="scanBtn" onclick="scan()">Scan</button>
+  <div class="stats" id="stats"></div>
+</div>
+
+<div class="main" id="main">
+  <div class="empty-state">
+    <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="#d1d5db" stroke-width="1.5">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803a7.5 7.5 0 0010.607 0z" />
+    </svg>
+    <p>Select a state and click Scan to find duplicates.</p>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+const maps = {};   // cardId → Leaflet map instance
+let   totalClusters = 0;
+let   resolved      = 0;
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+
+async function apiFetch(fn, body) {
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/${fn}`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await r.json();
+  if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
+  return data;
+}
+
+// ── Distance ──────────────────────────────────────────────────────────────────
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000, toR = Math.PI / 180;
+  const dLat = (lat2 - lat1) * toR, dLon = (lon2 - lon1) * toR;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*toR)*Math.cos(lat2*toR)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function pairDist(r1, r2) {
+  return haversine(r1.latitude, r1.longitude, r2.latitude, r2.longitude);
+}
+
+function maxDist(recs) {
+  let d = 0;
+  for (let i = 0; i < recs.length; i++)
+    for (let j = i+1; j < recs.length; j++)
+      d = Math.max(d, pairDist(recs[i], recs[j]));
+  return d;
+}
+
+// ── Categorise clusters into 4 sections ──────────────────────────────────────
+
+function categorise(data) {
+  const s1 = [], s2 = [], s3 = [], s4 = [];
+  const seenPairs = new Set();
+
+  for (const cluster of data.proximity_clusters) {
+    const recs = cluster.records;
+    for (let i = 0; i < recs.length; i++) {
+      for (let j = i+1; j < recs.length; j++) {
+        const r1 = recs[i], r2 = recs[j];
+        const key = [r1.id, r2.id].sort().join('-');
+        if (seenPairs.has(key)) continue;
+        seenPairs.add(key);
+
+        const d = pairDist(r1, r2);
+        const sameName = r1.display_name.toLowerCase().trim() === r2.display_name.toLowerCase().trim();
+
+        if (d <= 15  && sameName)  s1.push({ r1, r2, d, key });
+        else if (d <= 20 && !sameName) s2.push({ r1, r2, d, key });
+        else if (d <= 50 && !sameName) s4.push({ r1, r2, d, key });
+      }
+    }
+  }
+
+  // Section 3: same name, far apart (>100m) from name_city_matches
+  for (const group of data.name_city_matches) {
+    const d = maxDist(group.records);
+    if (d > 100) s3.push({ ...group, maxDist: d });
+  }
+
+  return { s1, s2, s3, s4 };
+}
+
+// ── Map helpers ───────────────────────────────────────────────────────────────
+
+const COLORS = ['#3b82f6', '#ef4444', '#f59e0b', '#10b981', '#8b5cf6'];
+
+function initMap(cardId, records) {
+  if (maps[cardId]) return;
+  const el = document.getElementById('map-' + cardId);
+  if (!el) return;
+
+  const m = L.map(el, { zoomControl: false, attributionControl: false });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(m);
+
+  const markers = records.map((r, i) => {
+    const marker = L.circleMarker([r.latitude, r.longitude], {
+      color: 'white', weight: 2,
+      fillColor: COLORS[i % COLORS.length], fillOpacity: .9, radius: 7,
+    }).addTo(m);
+    marker.bindTooltip(r.display_name, { permanent: false, direction: 'top' });
+    return marker;
+  });
+
+  if (records.length === 1 || maxDist(records) < 10) {
+    m.setView([records[0].latitude, records[0].longitude], 15);
+  } else {
+    const group = L.featureGroup(markers);
+    m.fitBounds(group.getBounds().pad(0.3));
+  }
+
+  maps[cardId] = m;
+}
+
+// ── Render helpers ────────────────────────────────────────────────────────────
+
+let cardSeq = 0;
+function newId() { return 'c' + (++cardSeq); }
+
+function fmtDist(d) {
+  return d < 1 ? '0m' : d < 1000 ? `${Math.round(d)}m` : `${(d/1000).toFixed(1)}km`;
+}
+
+function recHtml(r, highlight) {
+  const cls = highlight ? ' keep-rec' : '';
+  return `
+    <div class="rec${cls}" id="rec-${r.id}">
+      <div class="rec-name">${r.display_name}</div>
+      <div class="rec-meta">
+        id=${r.id} &nbsp;·&nbsp; ${r.latitude.toFixed(5)}, ${r.longitude.toFixed(5)}
+        ${r.city ? ` &nbsp;·&nbsp; ${r.city}` : ''}
+        ${r.county ? `, ${r.county}` : ''}
+      </div>
+    </div>`;
+}
+
+function resolveCard(cardId) {
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  card.classList.add('resolved');
+  resolved++;
+  updateStats();
+  // Clean up map instance
+  if (maps[cardId]) { maps[cardId].remove(); delete maps[cardId]; }
+}
+
+// ── Section 1: exact duplicates ───────────────────────────────────────────────
+
+function buildS1Card(pair) {
+  const id = newId();
+  const { r1, r2, d } = pair;
+  // keep lower id (first in source), delete higher id
+  const keepR = r1.id < r2.id ? r1 : r2;
+  const delR  = r1.id < r2.id ? r2 : r1;
+
+  const div = document.createElement('div');
+  div.className = 'card';
+  div.id = id;
+  div.innerHTML = `
+    <div class="card-inner">
+      <div class="card-map"><div class="lmap" id="map-${id}"></div></div>
+      <div class="card-content">
+        <div class="card-title">
+          ${keepR.display_name}
+          <span class="dist-tag">${fmtDist(d)} apart</span>
+          <span class="city-tag">${keepR.city || keepR.county || ''}</span>
+        </div>
+        <div class="records-list">
+          ${recHtml(keepR, true)}
+          ${recHtml(delR,  false)}
+        </div>
+      </div>
+    </div>
+    <div class="card-footer">
+      <button class="btn btn-red" onclick="doDelete('${id}', [${keepR.id},${delR.id}], ${keepR.id})">
+        Delete id=${delR.id}
+      </button>
+      <button class="btn btn-gray" onclick="doKeepBoth('${id}', [${keepR.id},${delR.id}])">
+        Keep Both
+      </button>
+    </div>`;
+
+  setTimeout(() => initMap(id, [keepR, delR]), 0);
+  return div;
+}
+
+// ── Section 2: different name, same location ──────────────────────────────────
+
+function buildS2Card(pair) {
+  const id = newId();
+  const { r1, r2, d } = pair;
+  const mergeId = 'merge-' + id;
+
+  const div = document.createElement('div');
+  div.className = 'card';
+  div.id = id;
+  div.innerHTML = `
+    <div class="card-inner">
+      <div class="card-map"><div class="lmap" id="map-${id}"></div></div>
+      <div class="card-content">
+        <div class="card-title">
+          Different names, same spot
+          <span class="dist-tag">${fmtDist(d)} apart</span>
+          <span class="city-tag">${r1.city || r1.county || ''}</span>
+        </div>
+        <div class="records-list">
+          ${recHtml(r1, false)}
+          ${recHtml(r2, false)}
+        </div>
+      </div>
+    </div>
+    <div class="card-footer">
+      <button class="btn btn-green" onclick="doKeepBoth('${id}', [${r1.id},${r2.id}])">Keep Both</button>
+      <button class="btn btn-red" onclick="doDelete('${id}', [${r1.id},${r2.id}], ${r2.id})">Delete id=${r2.id}</button>
+      <button class="btn btn-red" onclick="doDelete('${id}', [${r1.id},${r2.id}], ${r1.id})">Delete id=${r1.id}</button>
+      <button class="btn btn-orange" onclick="toggleMerge('${mergeId}')">Merge…</button>
+      <div class="merge-form" id="${mergeId}">
+        <label>Keep:</label>
+        <select id="${mergeId}-keep">
+          <option value="${r1.id}">${r1.display_name} (id=${r1.id})</option>
+          <option value="${r2.id}">${r2.display_name} (id=${r2.id})</option>
+        </select>
+        <label>Name:</label>
+        <input type="text" id="${mergeId}-name" placeholder="Final name (leave blank to keep existing)" />
+        <div class="merge-actions">
+          <button class="btn btn-blue" onclick="doMerge('${id}', '${mergeId}', [${r1.id},${r2.id}])">Confirm</button>
+          <button class="btn btn-gray" onclick="toggleMerge('${mergeId}')">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+
+  setTimeout(() => initMap(id, [r1, r2]), 0);
+  return div;
+}
+
+// ── Section 3: same name, far apart ───────────────────────────────────────────
+
+function buildS3Card(group) {
+  const id = newId();
+  const { records, maxDist: d } = group;
+
+  const div = document.createElement('div');
+  div.className = 'card';
+  div.id = id;
+  div.innerHTML = `
+    <div class="card-inner">
+      <div class="card-map"><div class="lmap" id="map-${id}"></div></div>
+      <div class="card-content">
+        <div class="card-title">
+          ${records[0].display_name}
+          <span class="dist-tag">up to ${fmtDist(d)} apart</span>
+          <span class="city-tag">${records[0].city || records[0].county || ''}</span>
+        </div>
+        <div class="records-list">
+          ${records.map(r => recHtml(r, false)).join('')}
+        </div>
+      </div>
+    </div>
+    <div class="card-footer">
+      <button class="btn btn-green" onclick="doKeepBoth('${id}', [${records.map(r=>r.id).join(',')}])">
+        Confirm — Keep All
+      </button>
+    </div>`;
+
+  setTimeout(() => initMap(id, records), 0);
+  return div;
+}
+
+// ── Section 4: adjacent, different names ──────────────────────────────────────
+
+function buildS4Card(pair) {
+  const id = newId();
+  const { r1, r2, d } = pair;
+
+  const div = document.createElement('div');
+  div.className = 'card';
+  div.id = id;
+  div.innerHTML = `
+    <div class="card-inner">
+      <div class="card-map"><div class="lmap" id="map-${id}"></div></div>
+      <div class="card-content">
+        <div class="card-title">
+          Adjacent beaches
+          <span class="dist-tag">${fmtDist(d)} apart</span>
+          <span class="city-tag">${r1.city || r1.county || ''}</span>
+        </div>
+        <div class="records-list">
+          ${recHtml(r1, false)}
+          ${recHtml(r2, false)}
+        </div>
+      </div>
+    </div>
+    <div class="card-footer">
+      <button class="btn btn-green" onclick="doKeepBoth('${id}', [${r1.id},${r2.id}])">Keep Both</button>
+      <button class="btn btn-red" onclick="doDelete('${id}', [${r1.id},${r2.id}], ${r2.id})">Delete id=${r2.id}</button>
+      <button class="btn btn-red" onclick="doDelete('${id}', [${r1.id},${r2.id}], ${r1.id})">Delete id=${r1.id}</button>
+    </div>`;
+
+  setTimeout(() => initMap(id, [r1, r2]), 0);
+  return div;
+}
+
+// ── Section builder ───────────────────────────────────────────────────────────
+
+function buildSection(container, { title, badge, badgeCls, desc, items, buildCard, bulkLabel, onBulk }) {
+  const sec = document.createElement('div');
+  sec.className = 'section';
+  sec.innerHTML = `
+    <div class="section-head">
+      <h2>${title}</h2>
+      <span class="badge ${badgeCls}">${items.length}</span>
+    </div>
+    <div class="section-desc">${desc}</div>
+    ${bulkLabel && items.length > 1 ? `<div class="section-actions"><button class="bulk-btn danger" id="bulk-${title.replace(/\s/g,'')}">${bulkLabel}</button></div>` : ''}
+    <div class="cards-wrap" id="wrap-${title.replace(/\s/g,'')}">
+      ${items.length === 0 ? '<div class="section-empty">No candidates found.</div>' : ''}
+    </div>`;
+  container.appendChild(sec);
+
+  const wrap = sec.querySelector('.cards-wrap');
+  for (const item of items) {
+    wrap.appendChild(buildCard(item));
+  }
+
+  if (bulkLabel && items.length > 1) {
+    sec.querySelector(`#bulk-${title.replace(/\s/g,'')}`).addEventListener('click', onBulk);
+  }
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+
+async function doDelete(cardId, ids, keepId) {
+  const card = document.getElementById(cardId);
+  card.classList.add('resolving');
+  try {
+    await apiFetch('resolve-staging-duplicates', { action: 'resolve', ids, keep_id: keepId });
+    resolveCard(cardId);
+    toast(`Deleted — kept id=${keepId}`);
+  } catch(e) {
+    card.classList.remove('resolving');
+    toast(e.message, true);
+  }
+}
+
+async function doKeepBoth(cardId, ids) {
+  const card = document.getElementById(cardId);
+  card.classList.add('resolving');
+  try {
+    await apiFetch('resolve-staging-duplicates', { action: 'keep_both', ids });
+    resolveCard(cardId);
+    toast('Marked as distinct — keeping both');
+  } catch(e) {
+    card.classList.remove('resolving');
+    toast(e.message, true);
+  }
+}
+
+function toggleMerge(mergeId) {
+  document.getElementById(mergeId).classList.toggle('open');
+}
+
+async function doMerge(cardId, mergeId, ids) {
+  const keepId  = parseInt(document.getElementById(mergeId + '-keep').value);
+  const newName = document.getElementById(mergeId + '-name').value.trim() || undefined;
+  const card = document.getElementById(cardId);
+  card.classList.add('resolving');
+  try {
+    await apiFetch('resolve-staging-duplicates', { action: 'resolve', ids, keep_id: keepId, new_name: newName });
+    resolveCard(cardId);
+    toast(`Merged — kept id=${keepId}${newName ? ` as "${newName}"` : ''}`);
+  } catch(e) {
+    card.classList.remove('resolving');
+    toast(e.message, true);
+  }
+}
+
+// ── Bulk actions ──────────────────────────────────────────────────────────────
+
+async function bulkDeleteS1(pairs) {
+  for (const pair of pairs) {
+    const keepId = pair.r1.id < pair.r2.id ? pair.r1.id : pair.r2.id;
+    const cardEl = document.querySelector(`[data-pair-key="${pair.key}"]`);
+    if (!cardEl || cardEl.classList.contains('resolved')) continue;
+    await doDelete(cardEl.id, [pair.r1.id, pair.r2.id], keepId);
+    await new Promise(r => setTimeout(r, 120));
+  }
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+
+function updateStats() {
+  const remaining = totalClusters - resolved;
+  document.getElementById('stats').innerHTML =
+    `<strong>${remaining}</strong> remaining &nbsp;·&nbsp; <strong>${resolved}</strong> resolved`;
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+
+let toastTimer;
+function toast(msg, isError = false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show' + (isError ? ' error' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.className = '', 3000);
+}
+
+// ── Main scan ─────────────────────────────────────────────────────────────────
+
+async function scan() {
+  const state = document.getElementById('stateSelect').value;
+  const btn   = document.getElementById('scanBtn');
+  const main  = document.getElementById('main');
+
+  btn.disabled = true;
+  btn.textContent = 'Scanning…';
+  main.innerHTML = '<div class="loading"><div class="spinner"></div>Scanning for duplicates…</div>';
+  resolved = 0;
+
+  // Clean up old maps
+  Object.values(maps).forEach(m => m.remove());
+  Object.keys(maps).forEach(k => delete maps[k]);
+
+  try {
+    const data = await apiFetch('find-staging-duplicates', { state });
+    const { s1, s2, s3, s4 } = categorise(data);
+    totalClusters = s1.length + s2.length + s3.length + s4.length;
+    updateStats();
+
+    main.innerHTML = '';
+
+    buildSection(main, {
+      title: 'Section 1 — Exact Duplicates',
+      badgeCls: 'badge-red',
+      desc: 'Same name, essentially same coordinates. Delete the higher-id duplicate.',
+      items: s1,
+      buildCard: pair => {
+        const el = buildS1Card(pair);
+        el.dataset.pairKey = pair.key;
+        return el;
+      },
+      bulkLabel: `Delete All ${s1.length} Clear Duplicates`,
+      onBulk: () => bulkDeleteS1(s1),
+    });
+
+    buildSection(main, {
+      title: 'Section 2 — Different Name, Same Location',
+      badgeCls: 'badge-yellow',
+      desc: 'Within 20m but different names. Could be aliases, name variants, or genuinely different access points.',
+      items: s2,
+      buildCard: buildS2Card,
+    });
+
+    buildSection(main, {
+      title: 'Section 3 — Same Name, Far Apart',
+      badgeCls: 'badge-green',
+      desc: 'Same name, 100m+ apart. Likely different sections of the same long beach — confirm to keep all.',
+      items: s3,
+      buildCard: buildS3Card,
+    });
+
+    buildSection(main, {
+      title: 'Section 4 — Adjacent, Different Names',
+      badgeCls: 'badge-gray',
+      desc: 'Within 50m but distinct named beaches. Almost always keep both.',
+      items: s4,
+      buildCard: buildS4Card,
+    });
+
+  } catch(e) {
+    main.innerHTML = `<div class="empty-state"><p style="color:#dc2626">${e.message}</p></div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Scan';
+  }
+}
+</script>
+</body>
+</html>

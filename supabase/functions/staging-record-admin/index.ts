@@ -65,7 +65,7 @@ Deno.serve(async (req: Request) => {
   if (action === "delete") {
     const { error } = await supabase
       .from("beaches_staging")
-      .delete()
+      .update({ dedup_status: "removed", dedup_notes: "removed via staging editor" })
       .eq("id", id);
 
     if (error) return json({ error: error.message }, 500);

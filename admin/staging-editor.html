@@ -351,13 +351,13 @@ async function del(id) {
   const res = await edgeFn('staging-record-admin', { action: 'delete', id });
   if (res.error) { showToast('Error: ' + res.error, true); return; }
 
-  // Remove from table
-  document.getElementById(`row-${id}`)?.remove();
-  // Remove marker
-  if (markers[id]) { map.removeLayer(markers[id]); delete markers[id]; }
-  // Remove from array
-  beaches = beaches.filter(b => b.id !== id);
-  showToast('Deleted');
+  // Soft delete — dim the row, grey the marker
+  const row = document.getElementById(`row-${id}`);
+  if (row) row.style.opacity = '0.4';
+  if (markers[id]) markers[id].setStyle({ fillColor: '#d1d5db' });
+  const b = beaches.find(b => b.id === id);
+  if (b) b.dedup_status = 'removed';
+  showToast('Marked removed');
 }
 
 // ── Map ───────────────────────────────────────────────────────────────────────

@@ -366,6 +366,16 @@ function buildS2Card(pair) {
 function buildS3Card(group) {
   const id = newId();
   const { records, maxDist: d } = group;
+  const allIds = records.map(r => r.id);
+  const mergeId = 'merge-' + id;
+
+  const deleteBtns = records.map(r =>
+    `<button class="btn btn-red" onclick="doRemoveOne('${id}', [${allIds.join(',')}], ${r.id})">Delete id=${r.id}</button>`
+  ).join('');
+
+  const mergeOptions = records.map(r =>
+    `<option value="${r.id}">${r.display_name} (id=${r.id})</option>`
+  ).join('');
 
   const div = document.createElement('div');
   div.className = 'card';
@@ -385,9 +395,19 @@ function buildS3Card(group) {
       </div>
     </div>
     <div class="card-footer">
-      <button class="btn btn-green" onclick="doKeepBoth('${id}', [${records.map(r=>r.id).join(',')}])">
-        Confirm — Keep All
-      </button>
+      <button class="btn btn-green" onclick="doKeepBoth('${id}', [${allIds.join(',')}])">Keep All</button>
+      ${deleteBtns}
+      <button class="btn btn-orange" onclick="toggleMerge('${mergeId}')">Merge…</button>
+      <div class="merge-form" id="${mergeId}">
+        <label>Keep:</label>
+        <select id="${mergeId}-keep">${mergeOptions}</select>
+        <label>Name:</label>
+        <input type="text" id="${mergeId}-name" placeholder="Final name (leave blank to keep existing)" />
+        <div class="merge-actions">
+          <button class="btn btn-blue" onclick="doMerge('${id}', '${mergeId}', [${allIds.join(',')}])">Confirm</button>
+          <button class="btn btn-gray" onclick="toggleMerge('${mergeId}')">Cancel</button>
+        </div>
+      </div>
     </div>`;
 
   setTimeout(() => initMap(id, records), 0);
@@ -485,6 +505,19 @@ async function doKeepBoth(cardId, ids) {
 
 function toggleMerge(mergeId) {
   document.getElementById(mergeId).classList.toggle('open');
+}
+
+async function doRemoveOne(cardId, allIds, removeId) {
+  const card = document.getElementById(cardId);
+  card.classList.add('resolving');
+  try {
+    await apiFetch('resolve-staging-duplicates', { action: 'remove_one', ids: allIds, remove_id: removeId });
+    resolveCard(cardId);
+    toast(`Removed id=${removeId} — rest marked distinct`);
+  } catch(e) {
+    card.classList.remove('resolving');
+    toast(e.message, true);
+  }
 }
 
 async function doMerge(cardId, mergeId, ids) {

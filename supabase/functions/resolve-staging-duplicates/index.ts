@@ -23,11 +23,11 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST")   return json({ error: "POST only" }, 405);
 
-  let body: { action?: string; ids?: number[]; keep_id?: number; new_name?: string };
+  let body: { action?: string; ids?: number[]; keep_id?: number; remove_id?: number; new_name?: string };
   try { body = await req.json(); }
   catch { return json({ error: "Invalid JSON" }, 400); }
 
-  const { action, ids, keep_id, new_name } = body;
+  const { action, ids, keep_id, remove_id, new_name } = body;
 
   if (!action || !Array.isArray(ids) || ids.length === 0)
     return json({ error: "action and ids required" }, 400);
@@ -70,6 +70,28 @@ Deno.serve(async (req: Request) => {
         })
         .in("id", removeIds);
       if (removeErr) return json({ error: removeErr.message }, 500);
+    }
+
+    affected = ids.length;
+  }
+
+  else if (action === "remove_one") {
+    // Mark one record removed, mark the rest of the group as reviewed.
+    if (remove_id == null) return json({ error: "remove_id required for remove_one action" }, 400);
+    const keepIds = ids.filter(id => id !== remove_id);
+
+    const { error: removeErr } = await supabase
+      .from("beaches_staging")
+      .update({ dedup_status: "removed", dedup_notes: `removed from group [${keepIds.join(",")}]` })
+      .eq("id", remove_id);
+    if (removeErr) return json({ error: removeErr.message }, 500);
+
+    if (keepIds.length > 0) {
+      const { error: keepErr } = await supabase
+        .from("beaches_staging")
+        .update({ dedup_status: "reviewed", dedup_notes: "confirmed distinct" })
+        .in("id", keepIds);
+      if (keepErr) return json({ error: keepErr.message }, 500);
     }
 
     affected = ids.length;

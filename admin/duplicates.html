@@ -484,6 +484,17 @@ function buildS3Card(group) {
 function buildS4Card(pair) {
   const id = newId();
   const { r1, r2, d } = pair;
+  const records = [r1, r2];
+  const allIds  = [r1.id, r2.id];
+  const mergeId = 'merge-' + id;
+
+  const deleteBtns = records.map(r =>
+    `<button class="btn btn-red" onclick="doRemoveOne('${id}', [${allIds.join(',')}], ${r.id})">Delete id=${r.id}</button>`
+  ).join('');
+
+  const mergeOptions = records.map(r =>
+    `<option value="${r.id}">${r.display_name} (id=${r.id})</option>`
+  ).join('');
 
   const div = document.createElement('div');
   div.className = 'card';
@@ -498,15 +509,25 @@ function buildS4Card(pair) {
           <span class="city-tag">${r1.city || r1.county || ''}</span>
         </div>
         <div class="records-list">
-          ${recHtml(r1, false)}
-          ${recHtml(r2, false)}
+          ${records.map(r => recHtmlEditable(r)).join('')}
         </div>
       </div>
     </div>
     <div class="card-footer">
-      <button class="btn btn-green" onclick="doKeepBoth('${id}', [${r1.id},${r2.id}])">Keep Both</button>
-      <button class="btn btn-red" onclick="doDelete('${id}', [${r1.id},${r2.id}], ${r2.id})">Delete id=${r2.id}</button>
-      <button class="btn btn-red" onclick="doDelete('${id}', [${r1.id},${r2.id}], ${r1.id})">Delete id=${r1.id}</button>
+      <button class="btn btn-green" onclick="doKeepBoth('${id}', [${allIds.join(',')}])">Keep Both</button>
+      ${deleteBtns}
+      <button class="btn btn-orange" onclick="toggleMerge('${mergeId}')">Merge…</button>
+      <button class="btn btn-red" onclick="doRemoveAll('${id}', [${allIds.join(',')}])">Mark Invalid</button>
+      <div class="merge-form" id="${mergeId}">
+        <label>Keep:</label>
+        <select id="${mergeId}-keep">${mergeOptions}</select>
+        <label>Name:</label>
+        <input type="text" id="${mergeId}-name" placeholder="Final name (leave blank to keep existing)" />
+        <div class="merge-actions">
+          <button class="btn btn-blue" onclick="doMerge('${id}', '${mergeId}', [${allIds.join(',')}])">Confirm</button>
+          <button class="btn btn-gray" onclick="toggleMerge('${mergeId}')">Cancel</button>
+        </div>
+      </div>
     </div>`;
 
   setTimeout(() => initMap(id, [r1, r2]), 0);

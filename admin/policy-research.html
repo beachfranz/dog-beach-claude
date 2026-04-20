@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Policy Research — Staging Admin</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #1a1a1a; font-size: 14px; }
+
+    /* ── Header ─────────────────────────────────────────── */
+    .header { background: #1e293b; color: white; padding: 14px 24px; display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+    .header h1 { font-size: 16px; font-weight: 600; }
+    .header select { padding: 7px 10px; border-radius: 6px; border: none; background: #334155; color: white; font-size: 13px; cursor: pointer; }
+    .header .start-btn { padding: 7px 18px; border-radius: 6px; border: none; background: #3b82f6; color: white; font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s; }
+    .header .start-btn:hover:not(:disabled) { background: #2563eb; }
+    .header .start-btn:disabled { background: #475569; cursor: default; }
+    .header .stop-btn { padding: 7px 18px; border-radius: 6px; border: none; background: #dc2626; color: white; font-size: 13px; font-weight: 500; cursor: pointer; display: none; }
+    .header .stop-btn.visible { display: block; }
+    .header .stats { margin-left: auto; font-size: 12px; color: #94a3b8; text-align: right; line-height: 1.6; }
+    .header .stats strong { color: #e2e8f0; }
+
+    /* ── Progress bar ────────────────────────────────────── */
+    .progress-wrap { background: #1e293b; padding: 0 24px 12px; }
+    .progress-bar-bg { background: #334155; border-radius: 9999px; height: 6px; }
+    .progress-bar-fill { background: #3b82f6; border-radius: 9999px; height: 6px; width: 0%; transition: width .4s ease; }
+
+    /* ── Main ────────────────────────────────────────────── */
+    .main { max-width: 1100px; margin: 24px auto; padding: 0 16px 64px; }
+    .empty-state { text-align: center; padding: 64px; color: #9ca3af; }
+
+    /* ── Results table ───────────────────────────────────── */
+    .results-table { width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .results-table th { background: #f8fafc; padding: 10px 14px; text-align: left; font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: .4px; border-bottom: 1px solid #e2e8f0; }
+    .results-table td { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+    .results-table tr:last-child td { border-bottom: none; }
+    .results-table tr.processing td { background: #fffbeb; }
+    .results-table tr.gold td { background: #f0fdf4; }
+    .results-table tr.needs_review td { background: #fef2f2; }
+    .results-table tr.error td { background: #fff1f2; }
+
+    /* ── Status dot ──────────────────────────────────────── */
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: middle; }
+    .dot-waiting   { background: #d1d5db; }
+    .dot-processing { background: #f59e0b; animation: pulse .8s ease-in-out infinite; }
+    .dot-gold      { background: #22c55e; }
+    .dot-review    { background: #f97316; }
+    .dot-error     { background: #ef4444; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+
+    /* ── Policy badge ────────────────────────────────────── */
+    .policy-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px; white-space: nowrap; }
+    .pb-yes      { background: #dcfce7; color: #15803d; }
+    .pb-no       { background: #fee2e2; color: #b91c1c; }
+    .pb-unknown  { background: #f1f5f9; color: #94a3b8; }
+    .pb-disagree { background: #fef9c3; color: #92400e; }
+
+    /* ── Source link ─────────────────────────────────────── */
+    .src-link { font-size: 11px; color: #3b82f6; text-decoration: none; display: block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .src-link:hover { text-decoration: underline; }
+    .src-note { font-size: 11px; color: #f97316; margin-top: 2px; }
+
+    /* ── Detail panel ────────────────────────────────────── */
+    .detail-btn { font-size: 11px; color: #3b82f6; background: none; border: none; cursor: pointer; padding: 0; }
+    .detail-btn:hover { text-decoration: underline; }
+    .detail-panel { display: none; margin-top: 24px; background: white; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); overflow: hidden; }
+    .detail-panel.open { display: block; }
+    .detail-head { padding: 12px 16px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+    .detail-head h3 { font-size: 14px; font-weight: 600; }
+    .detail-close { background: none; border: none; font-size: 18px; cursor: pointer; color: #6b7280; }
+    .detail-body { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+    .detail-col { padding: 16px; border-right: 1px solid #f1f5f9; }
+    .detail-col:last-child { border-right: none; }
+    .detail-col h4 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: #64748b; margin-bottom: 10px; }
+    .field-row { display: flex; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+    .field-label { color: #94a3b8; width: 120px; flex-shrink: 0; }
+    .field-value { color: #1e293b; font-weight: 500; }
+    .raw-text { font-size: 11px; color: #475569; background: #f8fafc; border-radius: 6px; padding: 10px; max-height: 200px; overflow-y: auto; white-space: pre-wrap; margin-top: 8px; line-height: 1.5; }
+
+    /* ── Toast ───────────────────────────────────────────── */
+    #toast { position: fixed; bottom: 20px; right: 20px; background: #1e293b; color: white; padding: 10px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transform: translateY(6px); transition: opacity .25s, transform .25s; pointer-events: none; z-index: 9999; }
+    #toast.show { opacity: 1; transform: translateY(0); }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Policy Research</h1>
+  <select id="stateSelect" onchange="loadCounties()">
+    <option value="California">California</option>
+  </select>
+  <select id="countySelect">
+    <option value="">Loading…</option>
+  </select>
+  <button class="start-btn" id="startBtn" onclick="startResearch()">Start Research</button>
+  <button class="stop-btn" id="stopBtn" onclick="stopResearch()">Stop</button>
+  <div class="stats" id="stats"></div>
+</div>
+<div class="progress-wrap">
+  <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressBar"></div></div>
+</div>
+
+<div class="main" id="main">
+  <div class="empty-state">Select a state and county, then click Start Research.</div>
+</div>
+
+<div class="detail-panel" id="detailPanel">
+  <div class="detail-head">
+    <h3 id="detailTitle">—</h3>
+    <button class="detail-close" onclick="closeDetail()">×</button>
+  </div>
+  <div class="detail-body" id="detailBody"></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+let beaches    = [];
+let results    = {};
+let running    = false;
+let stopFlag   = false;
+
+// ── API ───────────────────────────────────────────────────────────────────────
+
+async function apiFetch(fn, body) {
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/${fn}`, {
+    method:  'POST',
+    headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
+    body:    JSON.stringify(body),
+  });
+  const data = await r.json();
+  if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
+  return data;
+}
+
+async function restGet(path) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}` },
+  });
+  return r.json();
+}
+
+// ── Load counties ─────────────────────────────────────────────────────────────
+
+async function loadCounties() {
+  const state = document.getElementById('stateSelect').value;
+  const sel   = document.getElementById('countySelect');
+  sel.innerHTML = '<option>Loading…</option>';
+  const data = await restGet(`beaches_staging?select=county&state=eq.${encodeURIComponent(state)}&quality_tier=eq.silver&dedup_status=is.null&limit=1000`);
+  const counties = [...new Set(data.map(r => r.county).filter(Boolean))].sort();
+  sel.innerHTML = counties.map(c => `<option value="${c}">${c}</option>`).join('');
+}
+
+// ── Load beaches for county ───────────────────────────────────────────────────
+
+async function loadBeaches(state, county) {
+  return restGet(
+    `beaches_staging?select=id,display_name,governing_body,city,county,state` +
+    `&state=eq.${encodeURIComponent(state)}&county=eq.${encodeURIComponent(county)}` +
+    `&quality_tier=eq.silver&dedup_status=is.null&order=display_name`
+  );
+}
+
+// ── Research loop ─────────────────────────────────────────────────────────────
+
+async function startResearch() {
+  const state  = document.getElementById('stateSelect').value;
+  const county = document.getElementById('countySelect').value;
+  if (!county) return;
+
+  running  = true;
+  stopFlag = false;
+  document.getElementById('startBtn').disabled = true;
+  document.getElementById('stopBtn').classList.add('visible');
+
+  beaches = await loadBeaches(state, county);
+  results = {};
+  renderTable();
+  updateStats();
+
+  for (let i = 0; i < beaches.length; i++) {
+    if (stopFlag) break;
+    const beach = beaches[i];
+    setStatus(beach.id, 'processing');
+    try {
+      const data = await apiFetch('research-beach-policy', { staging_id: beach.id });
+      results[beach.id] = data;
+      setStatus(beach.id, data.status === 'gold' ? 'gold' : 'needs_review');
+      updateRow(beach.id, data);
+    } catch(e) {
+      results[beach.id] = { error: e.message };
+      setStatus(beach.id, 'error');
+      updateRow(beach.id, { error: e.message });
+    }
+    updateProgress(i + 1, beaches.length);
+    updateStats();
+  }
+
+  running  = false;
+  stopFlag = false;
+  document.getElementById('startBtn').disabled = false;
+  document.getElementById('stopBtn').classList.remove('visible');
+  toast(stopFlag ? 'Stopped.' : 'Research complete.');
+}
+
+function stopResearch() {
+  stopFlag = true;
+  toast('Stopping after current beach…');
+}
+
+// ── Table rendering ───────────────────────────────────────────────────────────
+
+function renderTable() {
+  const main = document.getElementById('main');
+  if (beaches.length === 0) { main.innerHTML = '<div class="empty-state">No silver beaches found for this county.</div>'; return; }
+
+  main.innerHTML = `
+    <table class="results-table">
+      <thead>
+        <tr>
+          <th style="width:32px"></th>
+          <th>Beach</th>
+          <th>Governing Body</th>
+          <th>Website Source</th>
+          <th>Website Policy</th>
+          <th>Search Policy</th>
+          <th>Agreement</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="tbody">
+        ${beaches.map(b => `
+          <tr id="row-${b.id}" class="waiting">
+            <td><span class="dot dot-waiting" id="dot-${b.id}"></span></td>
+            <td>${b.display_name}</td>
+            <td style="font-size:12px;color:#6b7280">${b.governing_body || '—'}</td>
+            <td id="src-${b.id}">—</td>
+            <td id="wpol-${b.id}">—</td>
+            <td id="spol-${b.id}">—</td>
+            <td id="agr-${b.id}">—</td>
+            <td id="act-${b.id}"></td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function setStatus(id, status) {
+  const row = document.getElementById('row-' + id);
+  const dot = document.getElementById('dot-' + id);
+  if (!row || !dot) return;
+  row.className = status;
+  dot.className = `dot dot-${status === 'needs_review' ? 'review' : status}`;
+}
+
+function policyBadge(policy, fallback = '—') {
+  if (!policy) return `<span style="color:#9ca3af;font-size:12px">${fallback}</span>`;
+  const da = policy.dogs_allowed;
+  const ar = policy.access_rule;
+  if (da === false) return `<span class="policy-badge pb-no">No dogs</span>`;
+  if (da === true) {
+    const label = ar === 'off_leash' ? 'Off-leash' : ar === 'on_leash' ? 'On-leash' : ar === 'mixed' ? 'Mixed' : 'Allowed';
+    return `<span class="policy-badge pb-yes">${label}</span>`;
+  }
+  return `<span class="policy-badge pb-unknown">Unknown</span>`;
+}
+
+function updateRow(id, data) {
+  const src  = document.getElementById('src-'  + id);
+  const wpol = document.getElementById('wpol-' + id);
+  const spol = document.getElementById('spol-' + id);
+  const agr  = document.getElementById('agr-'  + id);
+  const act  = document.getElementById('act-'  + id);
+  if (!src) return;
+
+  if (data.error) {
+    src.innerHTML = `<span style="color:#ef4444;font-size:12px">${data.error}</span>`;
+    return;
+  }
+
+  // Source
+  if (data.website_url) {
+    src.innerHTML = `<a class="src-link" href="${data.website_url}" target="_blank">${data.website_url}</a>` +
+      (data.website_note ? `<div class="src-note">${data.website_note}</div>` : '');
+  } else {
+    src.innerHTML = '<span style="color:#9ca3af;font-size:12px">Not found</span>';
+  }
+
+  // Policies
+  wpol.innerHTML = policyBadge(data.website_policy, 'No data');
+  spol.innerHTML = policyBadge(data.search_policy,  'No data');
+
+  // Agreement
+  if (data.agreement === true) {
+    agr.innerHTML = '<span style="color:#16a34a;font-weight:600;font-size:12px">✓ Agree</span>';
+  } else if (data.agreement === false) {
+    agr.innerHTML = '<span style="color:#f97316;font-weight:600;font-size:12px">⚠ Disagree</span>';
+  }
+
+  // Detail button
+  act.innerHTML = `<button class="detail-btn" onclick="showDetail(${id})">Details</button>`;
+}
+
+function updateProgress(done, total) {
+  document.getElementById('progressBar').style.width = `${(done / total * 100).toFixed(1)}%`;
+}
+
+function updateStats() {
+  const total    = beaches.length;
+  const gold     = Object.values(results).filter((r) => r.status === 'gold').length;
+  const review   = Object.values(results).filter((r) => r.status === 'needs_review').length;
+  const errors   = Object.values(results).filter((r) => r.error).length;
+  const done     = gold + review + errors;
+  document.getElementById('stats').innerHTML =
+    `<strong>${done}</strong>/${total} researched &nbsp;·&nbsp; ` +
+    `<strong style="color:#86efac">${gold}</strong> gold &nbsp;·&nbsp; ` +
+    `<strong style="color:#fdba74">${review}</strong> review &nbsp;·&nbsp; ` +
+    `<strong style="color:#fca5a5">${errors}</strong> errors`;
+}
+
+// ── Detail panel ──────────────────────────────────────────────────────────────
+
+function showDetail(id) {
+  const data  = results[id];
+  const beach = beaches.find(b => b.id === id);
+  if (!data || !beach) return;
+
+  document.getElementById('detailTitle').textContent = beach.display_name;
+
+  const col = (title, policy, rawText, sourceLink) => {
+    const fields = policy ? [
+      ['dogs_allowed',    policy.dogs_allowed  === null ? '—' : String(policy.dogs_allowed)],
+      ['access_rule',     policy.access_rule         || '—'],
+      ['access_scope',    policy.access_scope        || '—'],
+      ['seasonal',        policy.seasonal_start ? `${policy.seasonal_start} – ${policy.seasonal_end}` : '—'],
+      ['hours',           policy.dogs_prohibited_start ? `prohibited ${policy.dogs_prohibited_start}–${policy.dogs_prohibited_end}` : '—'],
+      ['allowed_hours',   policy.allowed_hours_text  || '—'],
+      ['zone',            policy.zone_description    || '—'],
+      ['day_restrictions',policy.day_restrictions    || '—'],
+      ['confidence',      policy.confidence          || '—'],
+    ] : [];
+
+    const fieldHtml = fields.map(([l, v]) => `
+      <div class="field-row">
+        <span class="field-label">${l}</span>
+        <span class="field-value">${v}</span>
+      </div>`).join('');
+
+    const linkHtml = sourceLink
+      ? `<a class="src-link" href="${sourceLink}" target="_blank" style="margin-bottom:8px;display:block">${sourceLink}</a>`
+      : '';
+
+    const rawHtml = rawText
+      ? `<div class="raw-text">${rawText.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`
+      : '<div style="color:#9ca3af;font-size:12px">No text captured</div>';
+
+    return `
+      <div class="detail-col">
+        <h4>${title}</h4>
+        ${linkHtml}
+        ${policy ? fieldHtml : '<div style="color:#9ca3af;font-size:12px">No policy extracted</div>'}
+        ${rawHtml}
+      </div>`;
+  };
+
+  // Build search raw text from snippets
+  const searchRaw = (data.search_results || [])
+    .map(r => `[${r.title}]\n${r.snippet}`)
+    .join('\n\n');
+
+  document.getElementById('detailBody').innerHTML =
+    col('Website Source',  data.website_policy, data.website_text ?? '', data.website_url) +
+    col('Web Search',      data.search_policy,  searchRaw,               data.search_results?.[0]?.link);
+
+  document.getElementById('detailPanel').classList.add('open');
+  document.getElementById('detailPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeDetail() {
+  document.getElementById('detailPanel').classList.remove('open');
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.className = '', 3000);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+loadCounties();
+</script>
+</body>
+</html>

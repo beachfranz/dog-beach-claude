@@ -1,0 +1,3087 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.109428,
+          33.740726
+        ]
+      },
+      "properties": {
+        "id": 1270,
+        "name": "Seal Beach",
+        "latitude": 33.740726,
+        "longitude": -118.109428,
+        "city": "Seal Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.106377,
+          33.739218
+        ]
+      },
+      "properties": {
+        "id": 1271,
+        "name": "Seal Beach Pier",
+        "latitude": 33.739218,
+        "longitude": -118.106377,
+        "city": "Seal Beach",
+        "county": "Orange",
+        "access_type": "Pier",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.079678,
+          33.723568
+        ]
+      },
+      "properties": {
+        "id": 1273,
+        "name": "Surfside Beach",
+        "latitude": 33.723568,
+        "longitude": -118.079678,
+        "city": "Surfside",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.082319,
+          33.728119
+        ]
+      },
+      "properties": {
+        "id": 1274,
+        "name": "Boardwalk and viewpoint (Huntington Harbour North)",
+        "latitude": 33.728119,
+        "longitude": -118.082319,
+        "city": "N. end of Huntington Harbour",
+        "county": "Orange",
+        "access_type": "Natural Resource",
+        "dogs_allowed": "No",
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.077265,
+          33.724983
+        ]
+      },
+      "properties": {
+        "id": 1275,
+        "name": "Waterfront Walkway (Peter's Landing)",
+        "latitude": 33.724983,
+        "longitude": -118.077265,
+        "city": "Huntington Harbour",
+        "county": "Orange",
+        "access_type": "Visual Access",
+        "dogs_allowed": "No",
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.073476,
+          33.717868
+        ]
+      },
+      "properties": {
+        "id": 1276,
+        "name": "Sunset Beach",
+        "latitude": 33.717868,
+        "longitude": -118.073476,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.063674,
+          33.72001
+        ]
+      },
+      "properties": {
+        "id": 1277,
+        "name": "Huntington Harbour",
+        "latitude": 33.72001,
+        "longitude": -118.063674,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Boat Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.055463,
+          33.712124
+        ]
+      },
+      "properties": {
+        "id": 1278,
+        "name": "Warner Avenue Access",
+        "latitude": 33.712124,
+        "longitude": -118.055463,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Boat Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.067752,
+          33.723633
+        ]
+      },
+      "properties": {
+        "id": 1279,
+        "name": "French Park",
+        "latitude": 33.723633,
+        "longitude": -118.067752,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.065777,
+          33.726517
+        ]
+      },
+      "properties": {
+        "id": 1280,
+        "name": "Trinidad Park",
+        "latitude": 33.726517,
+        "longitude": -118.065777,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.071837,
+          33.726678
+        ]
+      },
+      "properties": {
+        "id": 1281,
+        "name": "Seabridge Park",
+        "latitude": 33.726678,
+        "longitude": -118.071837,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.072491,
+          33.729638
+        ]
+      },
+      "properties": {
+        "id": 1282,
+        "name": "Sunset Aquatic Marina",
+        "latitude": 33.729638,
+        "longitude": -118.072491,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Boat Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.06149,
+          33.711348
+        ]
+      },
+      "properties": {
+        "id": 1283,
+        "name": "Bolsa Chica Interpretive Center",
+        "latitude": 33.711348,
+        "longitude": -118.06149,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Natural Resource",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.060734,
+          33.707662
+        ]
+      },
+      "properties": {
+        "id": 1284,
+        "name": "Bolsa Chica State Beach",
+        "latitude": 33.707662,
+        "longitude": -118.060734,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.046719,
+          33.695575
+        ]
+      },
+      "properties": {
+        "id": 1285,
+        "name": "Bolsa Chica Ecological Reserve",
+        "latitude": 33.695575,
+        "longitude": -118.046719,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Natural Resource",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.044305,
+          33.692133
+        ]
+      },
+      "properties": {
+        "id": 1286,
+        "name": "Bolsa Chica State Beach Campground",
+        "latitude": 33.692133,
+        "longitude": -118.044305,
+        "city": "S. of entrance to Bolsa Chica State Beach",
+        "county": "Orange",
+        "access_type": "Campground",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.028063,
+          33.675997
+        ]
+      },
+      "properties": {
+        "id": 1287,
+        "name": "Dog Beach (Huntington Beach)",
+        "latitude": 33.675997,
+        "longitude": -118.028063,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": "Yes",
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.001344,
+          33.661544
+        ]
+      },
+      "properties": {
+        "id": 1288,
+        "name": "Colonial Inn Hostel",
+        "latitude": 33.661544,
+        "longitude": -118.001344,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "LCOA",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.00409,
+          33.657853
+        ]
+      },
+      "properties": {
+        "id": 1289,
+        "name": "Huntington City Beach (6th Street)",
+        "latitude": 33.657853,
+        "longitude": -118.00409,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": "No",
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.000741,
+          33.659175
+        ]
+      },
+      "properties": {
+        "id": 1290,
+        "name": "Huntington Beach International Surfing Museum",
+        "latitude": 33.659175,
+        "longitude": -118.000741,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Historic/Cultural Site",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -118.002388,
+          33.656809
+        ]
+      },
+      "properties": {
+        "id": 1291,
+        "name": "Huntington Beach Pier",
+        "latitude": 33.656809,
+        "longitude": -118.002388,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Pier",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.992591,
+          33.649946
+        ]
+      },
+      "properties": {
+        "id": 1292,
+        "name": "Huntington City Beach",
+        "latitude": 33.649946,
+        "longitude": -117.992591,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.979774,
+          33.64376
+        ]
+      },
+      "properties": {
+        "id": 1293,
+        "name": "Wetlands and Wildlife Care Center",
+        "latitude": 33.64376,
+        "longitude": -117.979774,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Historic/Cultural Site",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.974084,
+          33.642267
+        ]
+      },
+      "properties": {
+        "id": 1294,
+        "name": "Huntington Beach Wetlands",
+        "latitude": 33.642267,
+        "longitude": -117.974084,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Natural Resource",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.962506,
+          33.636579
+        ]
+      },
+      "properties": {
+        "id": 1295,
+        "name": "Huntington Beach Wetlands / Talbert Marsh",
+        "latitude": 33.636579,
+        "longitude": -117.962506,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Natural Resource",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.974031,
+          33.639216
+        ]
+      },
+      "properties": {
+        "id": 1296,
+        "name": "Huntington State Beach",
+        "latitude": 33.639216,
+        "longitude": -117.974031,
+        "city": "Huntington Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.957308,
+          33.632934
+        ]
+      },
+      "properties": {
+        "id": 1297,
+        "name": "Santa Ana River Trail",
+        "latitude": 33.632934,
+        "longitude": -117.957308,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Natural Resource",
+        "dogs_allowed": "Yes",
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.956851,
+          33.628985
+        ]
+      },
+      "properties": {
+        "id": 1298,
+        "name": "Santa Ana River Mouth Beach",
+        "latitude": 33.628985,
+        "longitude": -117.956851,
+        "city": "seaward of Pacific Coast Hwy. Newport Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": "Yes",
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.939854,
+          33.619853
+        ]
+      },
+      "properties": {
+        "id": 1299,
+        "name": "West Newport Beach",
+        "latitude": 33.619853,
+        "longitude": -117.939854,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.936942,
+          33.621044
+        ]
+      },
+      "properties": {
+        "id": 1300,
+        "name": "Channel Place Park",
+        "latitude": 33.621044,
+        "longitude": -117.936942,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.934237,
+          33.618917
+        ]
+      },
+      "properties": {
+        "id": 1301,
+        "name": "Newport Island Park",
+        "latitude": 33.618917,
+        "longitude": -117.934237,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": null,
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.926474,
+          33.616505
+        ]
+      },
+      "properties": {
+        "id": 1302,
+        "name": "Lido Park",
+        "latitude": 33.616505,
+        "longitude": -117.926474,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": null,
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.935613,
+          33.616085
+        ]
+      },
+      "properties": {
+        "id": 1303,
+        "name": "Oceanfront Walk",
+        "latitude": 33.616085,
+        "longitude": -117.935613,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.928825,
+          33.607705
+        ]
+      },
+      "properties": {
+        "id": 1304,
+        "name": "Newport Pier",
+        "latitude": 33.607705,
+        "longitude": -117.928825,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Pier",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.915307,
+          33.603904
+        ]
+      },
+      "properties": {
+        "id": 1305,
+        "name": "Balboa Beach",
+        "latitude": 33.603904,
+        "longitude": -117.915307,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.900076,
+          33.600712
+        ]
+      },
+      "properties": {
+        "id": 1306,
+        "name": "Balboa Pier",
+        "latitude": 33.600712,
+        "longitude": -117.900076,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Pier",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.924821,
+          33.608704
+        ]
+      },
+      "properties": {
+        "id": 1307,
+        "name": "Las Arenas Beach",
+        "latitude": 33.608704,
+        "longitude": -117.924821,
+        "city": "Balboa Peninsula",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": null,
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.912996,
+          33.606266
+        ]
+      },
+      "properties": {
+        "id": 1308,
+        "name": "10th Street Beach",
+        "latitude": 33.606266,
+        "longitude": -117.912996,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": null,
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.904588,
+          33.605799
+        ]
+      },
+      "properties": {
+        "id": 1309,
+        "name": "Montero Beach",
+        "latitude": 33.605799,
+        "longitude": -117.904588,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": null,
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.921133,
+          33.609704
+        ]
+      },
+      "properties": {
+        "id": 1310,
+        "name": "Newport Harbor",
+        "latitude": 33.609704,
+        "longitude": -117.921133,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Boat Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.899456,
+          33.610068
+        ]
+      },
+      "properties": {
+        "id": 1311,
+        "name": "Beacon Bay Beach",
+        "latitude": 33.610068,
+        "longitude": -117.899456,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": "No",
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.88982,
+          33.606879
+        ]
+      },
+      "properties": {
+        "id": 1312,
+        "name": "Balboa Island",
+        "latitude": 33.606879,
+        "longitude": -117.88982,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.90052,
+          33.60307
+        ]
+      },
+      "properties": {
+        "id": 1313,
+        "name": "ExplorOcean",
+        "latitude": 33.60307,
+        "longitude": -117.90052,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Historic/Cultural Site",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.899047,
+          33.602577
+        ]
+      },
+      "properties": {
+        "id": 1314,
+        "name": "Balboa Pavilion",
+        "latitude": 33.602577,
+        "longitude": -117.899047,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Historic/Cultural Site",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.899483,
+          33.600823
+        ]
+      },
+      "properties": {
+        "id": 1315,
+        "name": "Peninsula Park (Newport Beach)",
+        "latitude": 33.600823,
+        "longitude": -117.899483,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.886896,
+          33.599767
+        ]
+      },
+      "properties": {
+        "id": 1316,
+        "name": "Bay Beaches",
+        "latitude": 33.599767,
+        "longitude": -117.886896,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.899322,
+          33.602842
+        ]
+      },
+      "properties": {
+        "id": 1317,
+        "name": "Bayfront Walkway",
+        "latitude": 33.602842,
+        "longitude": -117.899322,
+        "city": "Balboa Peninsula",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.882025,
+          33.595579
+        ]
+      },
+      "properties": {
+        "id": 1318,
+        "name": "West Jetty View Park",
+        "latitude": 33.595579,
+        "longitude": -117.882025,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.882999,
+          33.602561
+        ]
+      },
+      "properties": {
+        "id": 1319,
+        "name": "Bayside Drive County Beach",
+        "latitude": 33.602561,
+        "longitude": -117.882999,
+        "city": "Corona del Mar",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.879167,
+          33.596891
+        ]
+      },
+      "properties": {
+        "id": 1320,
+        "name": "China Cove Beach",
+        "latitude": 33.596891,
+        "longitude": -117.879167,
+        "city": "Corona del Mar",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.878073,
+          33.595166
+        ]
+      },
+      "properties": {
+        "id": 1321,
+        "name": "Pirates Cove",
+        "latitude": 33.595166,
+        "longitude": -117.878073,
+        "city": "Corona del Mar",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.876799,
+          33.594004
+        ]
+      },
+      "properties": {
+        "id": 1322,
+        "name": "Corona del Mar State Beach",
+        "latitude": 33.594004,
+        "longitude": -117.876799,
+        "city": "Corona del Mar",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.871383,
+          33.592329
+        ]
+      },
+      "properties": {
+        "id": 1323,
+        "name": "Inspiration Point",
+        "latitude": 33.592329,
+        "longitude": -117.871383,
+        "city": "Corona del Mar",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.869376,
+          33.590144
+        ]
+      },
+      "properties": {
+        "id": 1324,
+        "name": "Little Corona del Mar Beach",
+        "latitude": 33.590144,
+        "longitude": -117.869376,
+        "city": "Corona del Mar",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.905907,
+          33.619042
+        ]
+      },
+      "properties": {
+        "id": 1325,
+        "name": "Castaways Park",
+        "latitude": 33.619042,
+        "longitude": -117.905907,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Natural Resource",
+        "dogs_allowed": "Yes",
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.908213,
+          33.623089
+        ]
+      },
+      "properties": {
+        "id": 1326,
+        "name": "Environmental Nature Center",
+        "latitude": 33.623089,
+        "longitude": -117.908213,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Natural Resource",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.898741,
+          33.621942
+        ]
+      },
+      "properties": {
+        "id": 1327,
+        "name": "Westcliff Park",
+        "latitude": 33.621942,
+        "longitude": -117.898741,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Visual Access",
+        "dogs_allowed": "Yes",
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.893525,
+          33.625315
+        ]
+      },
+      "properties": {
+        "id": 1328,
+        "name": "Newport Aquatic Center at North Star Beach",
+        "latitude": 33.625315,
+        "longitude": -117.893525,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Boat Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.89073,
+          33.627776
+        ]
+      },
+      "properties": {
+        "id": 1329,
+        "name": "Galaxy Park",
+        "latitude": 33.627776,
+        "longitude": -117.89073,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Visual Access",
+        "dogs_allowed": "Yes",
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.887284,
+          33.642359
+        ]
+      },
+      "properties": {
+        "id": 1330,
+        "name": "Upper Newport Bay Ecological Reserve",
+        "latitude": 33.642359,
+        "longitude": -117.887284,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Natural Resource",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.885033,
+          33.653338
+        ]
+      },
+      "properties": {
+        "id": 1331,
+        "name": "Peter and Mary Muth Interpretive Center",
+        "latitude": 33.653338,
+        "longitude": -117.885033,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Natural Resource",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.870764,
+          33.645175
+        ]
+      },
+      "properties": {
+        "id": 1332,
+        "name": "Vista Point (Upper Newport Bay)",
+        "latitude": 33.645175,
+        "longitude": -117.870764,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Visual Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.892569,
+          33.615432
+        ]
+      },
+      "properties": {
+        "id": 1333,
+        "name": "Newport Dunes Waterfront Resort and Marina",
+        "latitude": 33.615432,
+        "longitude": -117.892569,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": "Yes",
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.891411,
+          33.613656
+        ]
+      },
+      "properties": {
+        "id": 1334,
+        "name": "Back Bay View Park",
+        "latitude": 33.613656,
+        "longitude": -117.891411,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Visual Access",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.891341,
+          33.620978
+        ]
+      },
+      "properties": {
+        "id": 1335,
+        "name": "Back Bay Science Center",
+        "latitude": 33.620978,
+        "longitude": -117.891341,
+        "city": "Newport Beach",
+        "county": "Orange",
+        "access_type": "Natural Resource",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.849215,
+          33.582703
+        ]
+      },
+      "properties": {
+        "id": 1336,
+        "name": "Crystal Cove State Park (Pelican Point)",
+        "latitude": 33.582703,
+        "longitude": -117.849215,
+        "city": null,
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.839919,
+          33.573673
+        ]
+      },
+      "properties": {
+        "id": 1337,
+        "name": "Crystal Cove State Park",
+        "latitude": 33.573673,
+        "longitude": -117.839919,
+        "city": "between Corona del Mar and Laguna Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.840356,
+          33.574948
+        ]
+      },
+      "properties": {
+        "id": 1338,
+        "name": "Crystal Cove Historic District",
+        "latitude": 33.574948,
+        "longitude": -117.840356,
+        "city": null,
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.830338,
+          33.566602
+        ]
+      },
+      "properties": {
+        "id": 1339,
+        "name": "Crystal Cove State Park (Reef Point)",
+        "latitude": 33.566602,
+        "longitude": -117.830338,
+        "city": null,
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.822281,
+          33.56647
+        ]
+      },
+      "properties": {
+        "id": 1340,
+        "name": "El Moro Visitor Center",
+        "latitude": 33.56647,
+        "longitude": -117.822281,
+        "city": "1 mi. S. of Los Trancos Canyon",
+        "county": "Orange",
+        "access_type": "Natural Resource",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.821762,
+          33.561231
+        ]
+      },
+      "properties": {
+        "id": 1341,
+        "name": "Moro Canyon",
+        "latitude": 33.561231,
+        "longitude": -117.821762,
+        "city": null,
+        "county": "Orange",
+        "access_type": "Campground",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.764854,
+          33.566501
+        ]
+      },
+      "properties": {
+        "id": 1342,
+        "name": "Laguna Coast Wilderness Park",
+        "latitude": 33.566501,
+        "longitude": -117.764854,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Natural Resource",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.803866,
+          33.54976
+        ]
+      },
+      "properties": {
+        "id": 1343,
+        "name": "Smithcliffs View Park",
+        "latitude": 33.54976,
+        "longitude": -117.803866,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Park",
+        "dogs_allowed": "No",
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.802013,
+          33.547255
+        ]
+      },
+      "properties": {
+        "id": 1344,
+        "name": "Crescent Bay (Laguna Beach)",
+        "latitude": 33.547255,
+        "longitude": -117.802013,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.803819,
+          33.546791
+        ]
+      },
+      "properties": {
+        "id": 1345,
+        "name": "Crescent Bay Point Park",
+        "latitude": 33.546791,
+        "longitude": -117.803819,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Visual Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.798236,
+          33.546491
+        ]
+      },
+      "properties": {
+        "id": 1346,
+        "name": "Shaw's Cove",
+        "latitude": 33.546491,
+        "longitude": -117.798236,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.794874,
+          33.545359
+        ]
+      },
+      "properties": {
+        "id": 1347,
+        "name": "Fisherman's Cove",
+        "latitude": 33.545359,
+        "longitude": -117.794874,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.79476,
+          33.545162
+        ]
+      },
+      "properties": {
+        "id": 1348,
+        "name": "Divers Cove",
+        "latitude": 33.545162,
+        "longitude": -117.79476,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.793419,
+          33.544608
+        ]
+      },
+      "properties": {
+        "id": 1349,
+        "name": "Picnic Beach",
+        "latitude": 33.544608,
+        "longitude": -117.793419,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.791029,
+          33.543819
+        ]
+      },
+      "properties": {
+        "id": 1350,
+        "name": "Heisler Park",
+        "latitude": 33.543819,
+        "longitude": -117.791029,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.790514,
+          33.543416
+        ]
+      },
+      "properties": {
+        "id": 1351,
+        "name": "Rockpile Beach",
+        "latitude": 33.543416,
+        "longitude": -117.790514,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.785489,
+          33.542156
+        ]
+      },
+      "properties": {
+        "id": 1352,
+        "name": "Main Beach (Laguna Beach)",
+        "latitude": 33.542156,
+        "longitude": -117.785489,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.76247,
+          33.57309
+        ]
+      },
+      "properties": {
+        "id": 1353,
+        "name": "Pacific Marine Mammal Center",
+        "latitude": 33.57309,
+        "longitude": -117.76247,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Natural Resource",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.780594,
+          33.537125
+        ]
+      },
+      "properties": {
+        "id": 1354,
+        "name": "Central Laguna Beaches (Sleepy Hollow Ln. to Thalia St.)",
+        "latitude": 33.537125,
+        "longitude": -117.780594,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.778499,
+          33.534528
+        ]
+      },
+      "properties": {
+        "id": 1355,
+        "name": "Central Laguna Beaches (Anita St. to Pearl St.)",
+        "latitude": 33.534528,
+        "longitude": -117.778499,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": "No",
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.770485,
+          33.526588
+        ]
+      },
+      "properties": {
+        "id": 1356,
+        "name": "Wood's Cove",
+        "latitude": 33.526588,
+        "longitude": -117.770485,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.769543,
+          33.52605
+        ]
+      },
+      "properties": {
+        "id": 1357,
+        "name": "Ruby Street Park",
+        "latitude": 33.52605,
+        "longitude": -117.769543,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Visual Access",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.768686,
+          33.525413
+        ]
+      },
+      "properties": {
+        "id": 1358,
+        "name": "Moss Point",
+        "latitude": 33.525413,
+        "longitude": -117.768686,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.78129,
+          33.539553
+        ]
+      },
+      "properties": {
+        "id": 1359,
+        "name": "Beach Access (Coast Hwy.)",
+        "latitude": 33.539553,
+        "longitude": -117.78129,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": "No",
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.763609,
+          33.52054
+        ]
+      },
+      "properties": {
+        "id": 1360,
+        "name": "Victoria Beach",
+        "latitude": 33.52054,
+        "longitude": -117.763609,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.755711,
+          33.51344
+        ]
+      },
+      "properties": {
+        "id": 1361,
+        "name": "Treasure Island Park",
+        "latitude": 33.51344,
+        "longitude": -117.755711,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": "Yes",
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.756834,
+          33.513577
+        ]
+      },
+      "properties": {
+        "id": 1362,
+        "name": "Treasure Island Beach",
+        "latitude": 33.513577,
+        "longitude": -117.756834,
+        "city": "Laguna Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.751923,
+          33.509368
+        ]
+      },
+      "properties": {
+        "id": 1363,
+        "name": "Aliso Beach Park",
+        "latitude": 33.509368,
+        "longitude": -117.751923,
+        "city": "South Laguna",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.750605,
+          33.507008
+        ]
+      },
+      "properties": {
+        "id": 1364,
+        "name": "Camel Point Beach",
+        "latitude": 33.507008,
+        "longitude": -117.750605,
+        "city": "South Laguna",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.749597,
+          33.507783
+        ]
+      },
+      "properties": {
+        "id": 1365,
+        "name": "Camel Point Beach Access #2",
+        "latitude": 33.507783,
+        "longitude": -117.749597,
+        "city": "South Laguna",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": "No",
+        "parking": "No",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.749052,
+          33.507397
+        ]
+      },
+      "properties": {
+        "id": 1366,
+        "name": "Camel Point Beach Access #3",
+        "latitude": 33.507397,
+        "longitude": -117.749052,
+        "city": "South Laguna",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": "No",
+        "parking": "No",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.747944,
+          33.504423
+        ]
+      },
+      "properties": {
+        "id": 1367,
+        "name": "West Street Beach",
+        "latitude": 33.504423,
+        "longitude": -117.747944,
+        "city": "South Laguna",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.74656,
+          33.502285
+        ]
+      },
+      "properties": {
+        "id": 1368,
+        "name": "Table Rock Beach",
+        "latitude": 33.502285,
+        "longitude": -117.74656,
+        "city": "South Laguna",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.74027,
+          33.498261
+        ]
+      },
+      "properties": {
+        "id": 1369,
+        "name": "Thousand Steps Beach",
+        "latitude": 33.498261,
+        "longitude": -117.74027,
+        "city": "South Laguna",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.718174,
+          33.552135
+        ]
+      },
+      "properties": {
+        "id": 1370,
+        "name": "Aliso and Wood Canyons Wilderness Park",
+        "latitude": 33.552135,
+        "longitude": -117.718174,
+        "city": "Laguna Niguel",
+        "county": "Orange",
+        "access_type": "Natural Resource",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.721919,
+          33.476079
+        ]
+      },
+      "properties": {
+        "id": 1371,
+        "name": "Salt Creek Beach Park",
+        "latitude": 33.476079,
+        "longitude": -117.721919,
+        "city": "Dana Point",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.718125,
+          33.475583
+        ]
+      },
+      "properties": {
+        "id": 1372,
+        "name": "Blufftop Path (Ritz-Carlton Hotel)",
+        "latitude": 33.475583,
+        "longitude": -117.718125,
+        "city": "Dana Point",
+        "county": "Orange",
+        "access_type": "Visual Access",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.734118,
+          33.48477
+        ]
+      },
+      "properties": {
+        "id": 1373,
+        "name": "Three Arch Cove Beach",
+        "latitude": 33.48477,
+        "longitude": -117.734118,
+        "city": "South Laguna",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.716273,
+          33.466384
+        ]
+      },
+      "properties": {
+        "id": 1374,
+        "name": "Strand Beach",
+        "latitude": 33.466384,
+        "longitude": -117.716273,
+        "city": "Dana Point",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.714647,
+          33.460868
+        ]
+      },
+      "properties": {
+        "id": 1375,
+        "name": "Dana Point Headlands",
+        "latitude": 33.460868,
+        "longitude": -117.714647,
+        "city": "Dana Point",
+        "county": "Orange",
+        "access_type": "Visual Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.711364,
+          33.461608
+        ]
+      },
+      "properties": {
+        "id": 1376,
+        "name": "Nature Interpretive Center",
+        "latitude": 33.461608,
+        "longitude": -117.711364,
+        "city": "Dana Point",
+        "county": "Orange",
+        "access_type": "Historic/Cultural Site",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.706587,
+          33.463719
+        ]
+      },
+      "properties": {
+        "id": 1377,
+        "name": "Ken Sampson Lookout",
+        "latitude": 33.463719,
+        "longitude": -117.706587,
+        "city": "Dana Point",
+        "county": "Orange",
+        "access_type": "Visual Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.70433,
+          33.46269
+        ]
+      },
+      "properties": {
+        "id": 1378,
+        "name": "Baby Beach",
+        "latitude": 33.46269,
+        "longitude": -117.70433,
+        "city": null,
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.697063,
+          33.462911
+        ]
+      },
+      "properties": {
+        "id": 1379,
+        "name": "Heritage Park",
+        "latitude": 33.462911,
+        "longitude": -117.697063,
+        "city": "Dana Point",
+        "county": "Orange",
+        "access_type": "Park",
+        "dogs_allowed": "Yes",
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.692986,
+          33.463198
+        ]
+      },
+      "properties": {
+        "id": 1380,
+        "name": "Lantern Bay Park",
+        "latitude": 33.463198,
+        "longitude": -117.692986,
+        "city": "Dana Point",
+        "county": "Orange",
+        "access_type": "Park",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.692512,
+          33.460714
+        ]
+      },
+      "properties": {
+        "id": 1381,
+        "name": "Dana Point Harbor",
+        "latitude": 33.460714,
+        "longitude": -117.692512,
+        "city": "Dana Point",
+        "county": "Orange",
+        "access_type": "Boat Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.692016,
+          33.460124
+        ]
+      },
+      "properties": {
+        "id": 1382,
+        "name": "Catalina Express Terminal",
+        "latitude": 33.460124,
+        "longitude": -117.692016,
+        "city": "Dana Point",
+        "county": "Orange",
+        "access_type": "Boat Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.700003,
+          33.458415
+        ]
+      },
+      "properties": {
+        "id": 1383,
+        "name": "Dana Point Harbor Linear Park",
+        "latitude": 33.458415,
+        "longitude": -117.700003,
+        "city": "Dana Point Harbor",
+        "county": "Orange",
+        "access_type": "Park",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.706747,
+          33.461342
+        ]
+      },
+      "properties": {
+        "id": 1384,
+        "name": "Ocean Institute",
+        "latitude": 33.461342,
+        "longitude": -117.706747,
+        "city": "Dana Point",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.686164,
+          33.462436
+        ]
+      },
+      "properties": {
+        "id": 1385,
+        "name": "Doheny State Beach",
+        "latitude": 33.462436,
+        "longitude": -117.686164,
+        "city": "Dana Point",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.677306,
+          33.462018
+        ]
+      },
+      "properties": {
+        "id": 1386,
+        "name": "Louise Leyden Park",
+        "latitude": 33.462018,
+        "longitude": -117.677306,
+        "city": "Capistrano Beach",
+        "county": "Orange",
+        "access_type": "Visual Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.668552,
+          33.455112
+        ]
+      },
+      "properties": {
+        "id": 1387,
+        "name": "Capistrano Beach Park",
+        "latitude": 33.455112,
+        "longitude": -117.668552,
+        "city": "Capistrano Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.64511,
+          33.440618
+        ]
+      },
+      "properties": {
+        "id": 1388,
+        "name": "Poche Beach",
+        "latitude": 33.440618,
+        "longitude": -117.64511,
+        "city": "Capistrano Beach",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.63127,
+          33.431793
+        ]
+      },
+      "properties": {
+        "id": 1389,
+        "name": "Ole Hanson Beach Club",
+        "latitude": 33.431793,
+        "longitude": -117.63127,
+        "city": "San Clemente",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.631455,
+          33.430503
+        ]
+      },
+      "properties": {
+        "id": 1390,
+        "name": "San Clemente City Beach",
+        "latitude": 33.430503,
+        "longitude": -117.631455,
+        "city": "San Clemente",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.628404,
+          33.429053
+        ]
+      },
+      "properties": {
+        "id": 1391,
+        "name": "San Clemente Beach Trail Access (Dije Ct.)",
+        "latitude": 33.429053,
+        "longitude": -117.628404,
+        "city": "S. of Dije Ct.",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": "No",
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.627339,
+          33.427381
+        ]
+      },
+      "properties": {
+        "id": 1392,
+        "name": "San Clemente City Beach (W. El Portal)",
+        "latitude": 33.427381,
+        "longitude": -117.627339,
+        "city": "aka Calle Oso",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": "No",
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.624508,
+          33.425143
+        ]
+      },
+      "properties": {
+        "id": 1393,
+        "name": "San Clemente Beach Trail Access (W. Mariposa)",
+        "latitude": 33.425143,
+        "longitude": -117.624508,
+        "city": null,
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": "No",
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.611668,
+          33.411689
+        ]
+      },
+      "properties": {
+        "id": 1394,
+        "name": "Leslie Park",
+        "latitude": 33.411689,
+        "longitude": -117.611668,
+        "city": "San Clemente",
+        "county": "Orange",
+        "access_type": "Park",
+        "dogs_allowed": null,
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.623371,
+          33.42306
+        ]
+      },
+      "properties": {
+        "id": 1395,
+        "name": "San Clemente Beach Trail",
+        "latitude": 33.42306,
+        "longitude": -117.623371,
+        "city": "San Clemente",
+        "county": "Orange",
+        "access_type": "Natural Resource",
+        "dogs_allowed": "Yes",
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.622536,
+          33.423262
+        ]
+      },
+      "properties": {
+        "id": 1396,
+        "name": "Linda Lane City Park",
+        "latitude": 33.423262,
+        "longitude": -117.622536,
+        "city": "San Clemente",
+        "county": "Orange",
+        "access_type": "Park",
+        "dogs_allowed": "Yes",
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.621717,
+          33.42358
+        ]
+      },
+      "properties": {
+        "id": 1397,
+        "name": "Linda Lane Blufftop View Area",
+        "latitude": 33.42358,
+        "longitude": -117.621717,
+        "city": "San Clemente",
+        "county": "Orange",
+        "access_type": "Visual Access",
+        "dogs_allowed": "No",
+        "parking": "No",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.620987,
+          33.422553
+        ]
+      },
+      "properties": {
+        "id": 1398,
+        "name": "San Clemente City Beach (Corto Ln.)",
+        "latitude": 33.422553,
+        "longitude": -117.620987,
+        "city": null,
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": "No",
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.620202,
+          33.419557
+        ]
+      },
+      "properties": {
+        "id": 1399,
+        "name": "San Clemente Municipal Pier",
+        "latitude": 33.419557,
+        "longitude": -117.620202,
+        "city": "San Clemente",
+        "county": "Orange",
+        "access_type": "Pier",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.61696,
+          33.416551
+        ]
+      },
+      "properties": {
+        "id": 1400,
+        "name": "San Clemente City Beach (Avenida Esplanade)",
+        "latitude": 33.416551,
+        "longitude": -117.61696,
+        "city": null,
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": "No",
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.6102,
+          33.411222
+        ]
+      },
+      "properties": {
+        "id": 1401,
+        "name": "San Clemente Beach Trail Access (Calle Los Alamos)",
+        "latitude": 33.411222,
+        "longitude": -117.6102,
+        "city": null,
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": "No",
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.608946,
+          33.408706
+        ]
+      },
+      "properties": {
+        "id": 1402,
+        "name": "San Clemente City Beach (Plaza a la Playa)",
+        "latitude": 33.408706,
+        "longitude": -117.608946,
+        "city": null,
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": "No",
+        "parking": "Yes",
+        "restrooms": "No",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.606237,
+          33.405504
+        ]
+      },
+      "properties": {
+        "id": 1403,
+        "name": "Calafia Beach Park",
+        "latitude": 33.405504,
+        "longitude": -117.606237,
+        "city": "San Clemente",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.602689,
+          33.402724
+        ]
+      },
+      "properties": {
+        "id": 1404,
+        "name": "San Clemente State Beach",
+        "latitude": 33.402724,
+        "longitude": -117.602689,
+        "city": "San Clemente",
+        "county": "Orange",
+        "access_type": "Beach Access",
+        "dogs_allowed": null,
+        "parking": "Yes",
+        "restrooms": "Yes",
+        "managing_agency": null
+      }
+    }
+  ]
+}

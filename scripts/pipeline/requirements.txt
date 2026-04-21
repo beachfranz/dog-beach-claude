@@ -1,0 +1,7 @@
+httpx[http2]
+beautifulsoup4
+lxml
+rapidfuzz
+tenacity
+tqdm
+python-dotenv

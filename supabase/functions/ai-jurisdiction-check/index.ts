@@ -38,8 +38,19 @@ async function assessJurisdiction(
   displayName: string,
   governingBody: string,
   state: string,
+  context?: { city?: string | null; county?: string | null; censusPlace?: string | null },
 ): Promise<AIResult> {
-  const prompt = `Who manages or governs "${displayName}" beach located near ${governingBody}, ${state}?
+  const contextLines: string[] = [];
+  if (context?.city)        contextLines.push(`City (from geocoding): ${context.city}`);
+  if (context?.censusPlace && context.censusPlace !== "UNINCORPORATED") {
+    contextLines.push(`Census incorporated place: ${context.censusPlace}`);
+  }
+  if (context?.county)      contextLines.push(`County: ${context.county}`);
+  const contextBlock = contextLines.length
+    ? `\n\nLocation context:\n${contextLines.join("\n")}`
+    : "";
+
+  const prompt = `Who manages or governs "${displayName}" beach located near ${governingBody}, ${state}?${contextBlock}
 
 Classify the managing/governing authority as exactly one of:
 - governing federal  (managed by a US federal agency — National Park Service, US military, Army Corps of Engineers, US Fish & Wildlife, etc.)
@@ -103,18 +114,23 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST")   return json({ error: "POST only" }, 405);
 
-  let body: { state?: string; county?: string; limit?: number } = {};
+  let body: { state?: string; county?: string; limit?: number; recheck_unresolved?: boolean } = {};
   try { body = await req.json(); } catch { /* empty body */ }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
   let query = supabase
     .from("beaches_staging_new")
-    .select("id, display_name, governing_body, governing_jurisdiction, state")
-    .is("governing_jurisdiction_ai", null)
+    .select("id, display_name, governing_body, governing_jurisdiction, state, city, county, governing_city, census_incorporated_place")
     .is("review_status", null)
     .not("governing_body", "is", null)
     .limit(body.limit ?? DEFAULT_LIMIT);
+
+  if (body.recheck_unresolved) {
+    query = query.eq("governing_body_agreement", "unresolved");
+  } else {
+    query = query.is("governing_jurisdiction_ai", null);
+  }
 
   if (body.state)  query = query.eq("state", body.state);
   if (body.county) query = query.eq("county", body.county);
@@ -130,6 +146,11 @@ Deno.serve(async (req: Request) => {
       row.display_name,
       row.governing_body,
       row.state ?? "California",
+      {
+        city:         row.city ?? row.governing_city,
+        county:       row.county,
+        censusPlace:  row.census_incorporated_place,
+      },
     );
 
     let agreement: string;

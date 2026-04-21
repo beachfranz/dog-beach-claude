@@ -30,6 +30,7 @@ const STAGES = [
   "v2-geocode-context",
   "v2-federal-classify",
   "v2-state-classify",
+  "v2-state-operator-override",
   "v2-ccc-crossref",
   "v2-city-classify",
   "v2-county-classify",

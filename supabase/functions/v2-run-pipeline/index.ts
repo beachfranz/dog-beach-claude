@@ -35,6 +35,9 @@ const STAGES = [
   "v2-city-classify",
   "v2-county-classify",
   "v2-default-county",
+  "v2-state-name-rescue",
+  "v2-private-land-filter",
+  "v2-blm-sma-rescue",
   "v2-ai-audit",
 ];
 

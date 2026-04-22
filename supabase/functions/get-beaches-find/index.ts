@@ -197,7 +197,11 @@ Deno.serve(async (req: Request) => {
         rain_score:         s?.rain  ?? null,
         temp_score:         s?.temp  ?? null,
       };
-    }).sort((a, b) => b.composite_score - a.composite_score);
+    });
+    // Preserve the RPC's order: distance-ordered when lat/lng present (GIST
+    // KNN), unspecified otherwise. Clients sort explicitly (find.html by
+    // dropdown mode, index.html always by distance) so server-side sort
+    // is both wasted work and wrong for the index.html switcher.
 
     return json({ date, is_today: isToday, beaches: ranked });
 

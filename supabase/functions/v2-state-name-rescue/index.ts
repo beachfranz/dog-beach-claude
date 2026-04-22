@@ -12,6 +12,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { stateCodeFromName } from "../_shared/config.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -40,22 +41,24 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST")   return json({ error: "POST only" }, 405);
 
-  let body: { dry_run?: boolean } = {};
+  let body: { state_code?: string; dry_run?: boolean } = {};
   try { body = await req.json(); } catch { /* empty */ }
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+  const stateCode = body.state_code ?? "CA";
+  const supabase  = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
   const { data: rows, error } = await supabase
     .from("beaches_staging_new")
-    .select("id, display_name, ccc_match_name, governing_body_source")
+    .select("id, display_name, ccc_match_name, governing_body_source, state")
     .eq("governing_body_source", "county_default");
   if (error) return json({ error: error.message }, 500);
-  if (!rows?.length) return json({ processed: 0, matched: 0 });
+  const filtered = (rows ?? []).filter(r => stateCodeFromName(r.state) === stateCode);
+  if (!filtered.length) return json({ state_code: stateCode, processed: 0, matched: 0 });
 
   const matches: Array<{
     id: number; display_name: string; ccc_name: string | null; source: string; reason: string;
   }> = [];
-  for (const r of rows) {
+  for (const r of filtered) {
     const displayMatch = matchState(r.display_name);
     if (displayMatch.match) {
       matches.push({
@@ -77,16 +80,21 @@ Deno.serve(async (req: Request) => {
 
   if (body.dry_run) {
     return json({
-      dry_run:   true,
-      processed: rows.length,
-      matched:   matches.length,
-      preview:   matches.map(m => ({
+      dry_run:    true,
+      state_code: stateCode,
+      processed:  filtered.length,
+      matched:    matches.length,
+      preview:    matches.map(m => ({
         display_name: m.display_name,
         ccc_name:     m.ccc_name,
         signal:       `${m.source}: ${m.reason}`,
       })),
     });
   }
+
+  const stateBody = stateCode === "CA" ? "California (State Parks)"
+                  : stateCode === "OR" ? "Oregon Parks and Recreation Department"
+                  : `${stateCode} State Parks`;
 
   let updated = 0;
   const writeErrors: string[] = [];
@@ -98,7 +106,7 @@ Deno.serve(async (req: Request) => {
       .from("beaches_staging_new")
       .update({
         governing_jurisdiction: "governing state",
-        governing_body:         "California (State Parks)",
+        governing_body:         stateBody,
         governing_body_source:  "state_name_rescue",
         governing_body_notes:   note,
         review_notes:           "Rescued to state via explicit state-park name signal.",
@@ -109,9 +117,10 @@ Deno.serve(async (req: Request) => {
   }
 
   return json({
-    processed: rows.length,
-    matched:   matches.length,
+    state_code: stateCode,
+    processed:  filtered.length,
+    matched:    matches.length,
     updated,
-    errors:    writeErrors,
+    errors:     writeErrors,
   });
 });

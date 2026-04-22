@@ -31,6 +31,8 @@ import os
 import re
 import sys
 import time
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Optional
@@ -124,8 +126,15 @@ TRUSTED_PARKS_DOMAINS = {
     "ebparks.org", "sdparks.org", "mprb.org",
 }
 
+# .gov domains that are document/legal repositories, not beach policy sources
+BLOCKED_GOV_DOMAINS = {
+    "ceqanet.lci.ca.gov",  # CA environmental review docs — matches "restricted" on construction language
+}
+
 def classify_domain(url: str) -> str:
     host = urlparse(url).netloc.lower()
+    if host in BLOCKED_GOV_DOMAINS:
+        return "other"
     if any(x in host for x in [".gov", ".us", ".mil"]):
         return "official"
     # parks_authority: whitelist known official parks orgs; also .org/.edu with parks keywords

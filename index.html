@@ -371,7 +371,7 @@
       <a href="find.html" style="font-size:13px;color:var(--accent);text-decoration:none;margin-left:auto;">Find a Beach</a>
     </div>
     <div class="location-name" id="location-name" onclick="toggleLocationMenu()" style="cursor:pointer">Loading... <span style="font-size:12px;color:var(--text-dim)">▾</span></div>
-    <div id="location-menu" style="display:none;position:absolute;background:#1e2333;border:1px solid var(--border);border-radius:var(--radius-sm);min-width:240px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,0.4);overflow:hidden"></div>
+    <div id="location-menu" style="display:none;position:absolute;background:#1e2333;border:1px solid var(--border);border-radius:var(--radius-sm);min-width:240px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,0.4);overflow:hidden"><div style="padding:10px 14px;font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-muted);">Finding beaches nearby…</div></div>
   </header>
 
   <!-- NOW card -->
@@ -397,10 +397,34 @@
   // ── Config ────────────────────────────────────────────────────────
   const SUPABASE_URL  = 'https://ehlzbwtrsxaaukurekau.supabase.co';
   const ANON_KEY      = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+  // Ultimate fallback when the user won't share geolocation: centre the
+  // "nearest" query on Huntington Dog Beach so a new user still gets a
+  // meaningful list.
   const DEFAULT_LOCATION = 'huntington-dog-beach';
+  const DEFAULT_LAT      = 33.665;
+  const DEFAULT_LNG      = -118.015;
+
+  // Persisted last-picked beach. Takes precedence over DEFAULT_LOCATION so
+  // returning visitors land on the beach they were last looking at.
+  const LAST_PICK_KEY = 'dbs_last_beach';
+
+  // Server returns NEAREST_LIMIT; switcher shows VISIBLE_NEARBY with a
+  // "show more" toggle for the remainder (already in memory, no extra fetch).
+  const NEAREST_LIMIT  = 10;
+  const VISIBLE_NEARBY = 5;
 
   // ── State ─────────────────────────────────────────────────────────
-  let currentLocation = new URLSearchParams(window.location.search).get('location') ?? DEFAULT_LOCATION;
+  const urlLocation  = new URLSearchParams(window.location.search).get('location');
+  const savedLocation = (() => { try { return localStorage.getItem(LAST_PICK_KEY); } catch { return null; } })();
+  let currentLocation = urlLocation ?? savedLocation ?? DEFAULT_LOCATION;
+
+  // Resolved user coords; may be updated asynchronously by geolocation.
+  let userLat = DEFAULT_LAT;
+  let userLng = DEFAULT_LNG;
+
+  // Cached nearby beaches; null until loadNearbyBeaches resolves.
+  let nearbyBeaches = null;
 
   // ── Scout blurb cache (session, per beach) ───────────────────────
   const scoutCache = {};
@@ -442,9 +466,87 @@
   }
 
   // ── Boot ──────────────────────────────────────────────────────────
+  // Forecast + NOW + blurb load immediately against the resolved
+  // currentLocation (URL > localStorage > Huntington). In parallel, we
+  // request geolocation; whichever coords resolve (real or default) drive
+  // the nearest-N switcher.
   loadSummary(currentLocation);
   loadNowCard(currentLocation);
   loadScoutBlurb(currentLocation);
+  resolveGeolocation();
+
+  function resolveGeolocation() {
+    if (!navigator.geolocation) { loadNearbyBeaches(); return; }
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        userLat = pos.coords.latitude;
+        userLng = pos.coords.longitude;
+        loadNearbyBeaches();
+      },
+      () => loadNearbyBeaches(),  // user denied or failed → fall through with Huntington defaults
+      { timeout: 8000 }
+    );
+  }
+
+  // Fetches the nearest NEAREST_LIMIT beaches for today via get-beaches-find
+  // (GIST-indexed KNN). Populates the location switcher.
+  async function loadNearbyBeaches() {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const params = new URLSearchParams({
+      date:  today,
+      lat:   String(userLat),
+      lng:   String(userLng),
+      limit: String(NEAREST_LIMIT),
+    });
+    try {
+      const res  = await fetch(
+        `${SUPABASE_URL}/functions/v1/get-beaches-find?${params}`,
+        { headers: { 'Authorization': `Bearer ${ANON_KEY}` } }
+      );
+      const data = await res.json();
+      nearbyBeaches = Array.isArray(data.beaches) ? data.beaches : [];
+    } catch {
+      nearbyBeaches = [];
+    }
+    rebuildLocationMenu();
+  }
+
+  // Builds the switcher dropdown from the nearest-N result. Shows top
+  // VISIBLE_NEARBY; the remainder sits behind a "show more" toggle.
+  function rebuildLocationMenu() {
+    const menu = document.getElementById('location-menu');
+    if (!nearbyBeaches || nearbyBeaches.length === 0) {
+      menu.innerHTML = '<div style="padding:10px 14px;color:var(--text-muted);font-size:13px;">No nearby beaches.</div>';
+      return;
+    }
+    const visible = nearbyBeaches.slice(0, VISIBLE_NEARBY);
+    const hidden  = nearbyBeaches.slice(VISIBLE_NEARBY);
+
+    let html = visible.map(b => renderMenuEntry(b)).join('');
+    if (hidden.length > 0) {
+      html += `<div id="nearby-more" style="display:none;">${hidden.map(b => renderMenuEntry(b)).join('')}</div>`;
+      html += `<div onclick="event.stopPropagation();toggleNearbyMore(event)" style="padding:10px 14px;font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-muted);cursor:pointer;border-top:1px solid var(--border);" onmouseover="this.style.background='#252a3a'" onmouseout="this.style.background=''"><span id="nearby-more-label">Show ${hidden.length} more nearby ▾</span></div>`;
+    }
+    menu.innerHTML = html;
+  }
+
+  function renderMenuEntry(b) {
+    const miles   = b.distance_m != null ? (b.distance_m / 1609.34) : null;
+    const distStr = miles != null ? ` <span style="color:var(--text-muted);font-size:12px;">${miles.toFixed(1)} mi</span>` : '';
+    const color   = b.location_id === currentLocation ? 'var(--green)' : 'var(--text-muted)';
+    const safeName = b.display_name.replace(/'/g, "\\'");
+    return `<div onclick="selectLocation('${b.location_id}')" style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:10px;font-family:'DM Sans',sans-serif;font-size:14px;color:${color};cursor:pointer;" onmouseover="this.style.background='#252a3a'" onmouseout="this.style.background=''"><span>${safeName}</span>${distStr}</div>`;
+  }
+
+  function toggleNearbyMore(e) {
+    const more  = document.getElementById('nearby-more');
+    const label = document.getElementById('nearby-more-label');
+    const open  = more.style.display === 'block';
+    more.style.display = open ? 'none' : 'block';
+    if (label) label.textContent = open
+      ? `Show ${nearbyBeaches.length - VISIBLE_NEARBY} more nearby ▾`
+      : 'Show fewer ▴';
+  }
 
   function toggleLocationMenu() {
     const menu = document.getElementById('location-menu');
@@ -459,6 +561,7 @@
 
   function selectLocation(locationId) {
     currentLocation = locationId;
+    try { localStorage.setItem(LAST_PICK_KEY, locationId); } catch { /* storage may be blocked */ }
     const url = new URL(window.location);
     url.searchParams.set('location', currentLocation);
     window.history.pushState({}, '', url);
@@ -466,6 +569,8 @@
     loadSummary(currentLocation);
     loadNowCard(currentLocation);
     loadScoutBlurb(currentLocation);
+    // Re-highlight the now-current entry in the switcher without re-fetching.
+    if (nearbyBeaches) rebuildLocationMenu();
   }
 
   // ── NOW card ──────────────────────────────────────────────────────
@@ -542,16 +647,12 @@
   }
 
   // ── Render ────────────────────────────────────────────────────────
-  function render({ beach, days, allBeaches }) {
+  // allBeaches from get-beach-summary is ignored — the switcher is populated
+  // by loadNearbyBeaches (spatial nearest-N) instead.
+  function render({ beach, days }) {
     // Location name
     document.getElementById('location-name').textContent = beach.display_name;
     document.title = `${beach.display_name} — Dog Beach Scout`;
-
-    // Location menu
-    const menu = document.getElementById('location-menu');
-    menu.innerHTML = allBeaches.map(b =>
-      `<div onclick="selectLocation('${b.location_id}')" style="padding:10px 14px;font-family:'DM Sans',sans-serif;font-size:14px;color:${b.location_id === currentLocation ? 'var(--green)' : 'var(--text-muted)'};cursor:pointer;" onmouseover="this.style.background='#252a3a'" onmouseout="this.style.background=''">${b.display_name}</div>`
-    ).join('');
 
     // Day list
     const list = document.getElementById('day-list');

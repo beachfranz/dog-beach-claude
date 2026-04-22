@@ -143,8 +143,9 @@ Deno.serve(async (req: Request) => {
   }
 
   return json({
+    state_code:      stateCode,
     stations_loaded: stations.length,
-    processed:       rows.length,
+    processed:       filtered.length,
     matched:         matches.length,
     updated,
     skipped_inland:  skipped.length,

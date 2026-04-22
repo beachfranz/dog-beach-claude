@@ -323,6 +323,16 @@
     .window-sub.status-none     { color: var(--text-dim); }
     .dist-link { cursor: pointer; color: var(--text) !important; font-weight: 600; }
     .dist-link:hover { opacity: 0.8; }
+    /* Row wrapping the window label + distance link for non-NOW cards.
+       Window label and 🚗 X.X mi sit next to each other with a small gap,
+       matching the visual density of the chip row below. */
+    .window-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 3px;
+    }
+    .window-row .window-sub { margin-bottom: 0; }
 
     /* ── Directions modal ─────────────────────────────────────────── */
     .dir-overlay {
@@ -845,15 +855,25 @@
     const weatherIcon = getWeatherIcon(day?.summary_weather, day?.weather_code);
 
     const windowStatus = day?.best_window_status ?? status;
+    const safeName = beach.display_name.replace(/'/g, "\\'");
+    const distLink = distance !== null
+      ? `<div class="window-sub status-none dist-link" onclick="event.stopPropagation();openDirections(${beach.latitude},${beach.longitude},'${safeName}',${distance})">🚗 ${distance.toFixed(1)} mi</div>`
+      : '';
+
     let windowHtml;
-    if (day?.is_now && distance !== null) {
-      windowHtml = `<div class="window-sub status-none dist-link" onclick="event.stopPropagation();openDirections(${beach.latitude},${beach.longitude},'${beach.display_name.replace(/'/g,"\\'")}',${distance})">🚗 ${distance.toFixed(1)} mi</div>`;
+    if (day?.is_now && distLink) {
+      // NOW card with known location: distance replaces the "Right now" label.
+      windowHtml = distLink;
     } else if (day?.is_now) {
       windowHtml = `<div class="window-sub status-${windowStatus}">Right now</div>`;
-    } else if (day?.best_window_label) {
-      windowHtml = `<div class="window-sub status-${windowStatus}">${day.best_window_label}</div>`;
     } else {
-      windowHtml = `<div class="window-sub status-none">No good window</div>`;
+      // Non-NOW: window label on the left, distance on the right, same row.
+      const labelHtml = day?.best_window_label
+        ? `<div class="window-sub status-${windowStatus}">${day.best_window_label}</div>`
+        : `<div class="window-sub status-none">No good window</div>`;
+      windowHtml = distLink
+        ? `<div class="window-row">${labelHtml}${distLink}</div>`
+        : labelHtml;
     }
 
     const bacteriaRisk = day?.bacteria_risk ?? 'none';
@@ -891,14 +911,10 @@
     return '';
   }
 
-  function buildChips(day, distance) {
+  function buildChips(day /* distance no longer a chip — rendered in window-row */) {
     const parts = [];
     const ms    = day?.metric_statuses ?? {};
 
-    // Distance shown in window-sub on NOW cards; show in chips on forecast cards
-    if (distance !== null && !day?.is_now) {
-      parts.push(`<span class="chip">${distance.toFixed(1)} mi</span>`);
-    }
     if (day?.lowest_tide_height != null) {
       const arrow = day.tide_direction === 'rising' ? '↑' : day.tide_direction === 'falling' ? '↓' : '';
       parts.push(`<span class="chip ${chipClass(ms.tide)}">🌊 ${parseFloat(day.lowest_tide_height).toFixed(1)}ft${arrow}</span>`);

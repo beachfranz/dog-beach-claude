@@ -41,6 +41,7 @@ const STAGES = [
   "v2-private-land-filter",
   "v2-blm-sma-rescue",
   "v2-noaa-station-match",
+  "v2-parse-temporal-restrictions",
   "v2-ai-audit",
 ];
 

@@ -35,6 +35,16 @@ Deno.serve(async (req: Request) => {
     const lat   = latParam ? parseFloat(latParam) : null;
     const lng   = lngParam ? parseFloat(lngParam) : null;
 
+    // Bounded result set via spatial KNN. Only applied when lat/lng present;
+    // without coords the server still returns the full active set (ghost-user
+    // path). Capped at 50 to prevent oversized responses.
+    const MAX_LIMIT   = 50;
+    const limitParam  = url.searchParams.get("limit");
+    const limitParsed = limitParam ? parseInt(limitParam, 10) : NaN;
+    const limit       = Number.isFinite(limitParsed) && limitParsed > 0
+      ? Math.min(limitParsed, MAX_LIMIT)
+      : null;
+
     const isToday = date === pacificDate;
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
@@ -52,6 +62,7 @@ Deno.serve(async (req: Request) => {
       p_lat:   lat,
       p_lng:   lng,
       p_leash: leash,
+      p_limit: limit,
     });
 
     if (rpcErr || !beaches) return json({ error: rpcErr?.message ?? "RPC failed" }, 500);

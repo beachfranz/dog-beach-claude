@@ -8,7 +8,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
-import { buildArcgisQueryUrl, extractField, getSource, PipelineSource, stateCodeFromName } from "../_shared/config.ts";
+import { buildArcgisQueryUrl, extractField, getSource, getStateConfig, PipelineSource, stateCodeFromName } from "../_shared/config.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -57,6 +57,9 @@ Deno.serve(async (req: Request) => {
   const stateCode = body.state_code ?? "CA";
   const supabase  = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+  const stateCfg       = await getStateConfig(supabase, stateCode);
+  const beachBillState = stateCfg?.beach_bill_override === true;
+
   // Try state-specific BLM SMA source first (blm_sma), then fall back to
   // national (blm_sma_national).
   const source = (await getSource(supabase, "blm_sma", stateCode))
@@ -72,7 +75,7 @@ Deno.serve(async (req: Request) => {
   const { data: rows, error } = await supabase
     .from("beaches_staging_new")
     .select("id, display_name, latitude, longitude, state")
-    .eq("governing_body_source", "county_default")
+    .in("governing_body_source", ["county_default", "state_default"])
     .not("latitude", "is", null)
     .not("longitude", "is", null);
   if (error) return json({ error: error.message }, 500);
@@ -101,7 +104,9 @@ Deno.serve(async (req: Request) => {
     return json({
       dry_run: true, state_code: stateCode,
       source: { url: source.url, priority: source.priority, state_code: source.state_code },
+      beach_bill_override: beachBillState,
       processed: stateFiltered.length, federal: federal.length, private: privateLand.length, other: other.length,
+      private_action: beachBillState ? "skip (beach_bill_override=true)" : "invalidate",
     });
   }
 
@@ -125,21 +130,27 @@ Deno.serve(async (req: Request) => {
     else updated++;
   }
 
-  for (const r of privateLand) {
-    const { error } = await supabase
-      .from("beaches_staging_new")
-      .update({
-        review_status: "invalid",
-        review_notes:  "Private land per BLM SMA (SMA_ID=2388).",
-      }).eq("id", r.id);
-    if (error) writeErrors.push(`id ${r.id}: ${error.message}`);
-    else updated++;
+  let privateSkipped = 0;
+  if (beachBillState) {
+    privateSkipped = privateLand.length;
+  } else {
+    for (const r of privateLand) {
+      const { error } = await supabase
+        .from("beaches_staging_new")
+        .update({
+          review_status: "invalid",
+          review_notes:  "Private land per BLM SMA (SMA_ID=2388).",
+        }).eq("id", r.id);
+      if (error) writeErrors.push(`id ${r.id}: ${error.message}`);
+      else updated++;
+    }
   }
 
   return json({
     state_code: stateCode,
+    beach_bill_override: beachBillState,
     processed: stateFiltered.length,
     federal: federal.length, private: privateLand.length, other: other.length,
-    updated, errors: writeErrors,
+    updated, private_skipped: privateSkipped, errors: writeErrors,
   });
 });

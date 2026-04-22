@@ -72,7 +72,7 @@ Deno.serve(async (req: Request) => {
   const { data: rows, error } = await supabase
     .from("beaches_staging_new")
     .select("id, display_name, ccc_match_name, latitude, longitude, state")
-    .eq("governing_body_source", "county_default");
+    .in("governing_body_source", ["county_default", "state_default"]);
   if (error) return json({ error: error.message }, 500);
   const stateFiltered = (rows ?? []).filter(r => stateCodeFromName(r.state) === stateCode);
   if (!stateFiltered.length) return json({ state_code: stateCode, processed: 0, matched: 0 });

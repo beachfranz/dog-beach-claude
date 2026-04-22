@@ -27,6 +27,7 @@ export interface StateConfig {
   has_coastal_access_source: boolean;
   research_context_notes:    string | null;
   excluded_federal_units:    string[];
+  beach_bill_override:       boolean;
 }
 
 // Map full state name (as returned by Google geocoder / stored in
@@ -121,6 +122,7 @@ export async function getStateConfig(
     excluded_federal_units:    Array.isArray(cfg.excluded_federal_units)
                                  ? cfg.excluded_federal_units as string[]
                                  : [],
+    beach_bill_override:       Boolean(cfg.beach_bill_override),
   };
 }
 

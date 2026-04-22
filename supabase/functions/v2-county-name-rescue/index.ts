@@ -45,7 +45,7 @@ Deno.serve(async (req: Request) => {
   const { data: rows, error } = await supabase
     .from("beaches_staging_new")
     .select("id, display_name, ccc_match_name, county, state")
-    .eq("governing_body_source", "county_default");
+    .in("governing_body_source", ["county_default", "state_default"]);
   if (error) return json({ error: error.message }, 500);
   const filtered = (rows ?? []).filter(r => stateCodeFromName(r.state) === stateCode);
   if (!filtered.length) return json({ state_code: stateCode, processed: 0, matched: 0 });
@@ -81,14 +81,19 @@ Deno.serve(async (req: Request) => {
   const writeErrors: string[] = [];
   for (const m of matches) {
     const note = m.source === "ccc_match_name"
-      ? `CCC-matched name "${m.ccc_name}" ${m.reason}. Classification upgraded from county default.`
-      : `Display name ${m.reason}. Classification upgraded from county default.`;
+      ? `CCC-matched name "${m.ccc_name}" ${m.reason}. Classification rescued to county.`
+      : `Display name ${m.reason}. Classification rescued to county.`;
+    // Set jurisdiction + body explicitly so records promoted from state_default
+    // (Beach Bill states) are correctly re-routed to county. For county_default
+    // records this is a no-op — they already hold these values.
     const { error } = await supabase
       .from("beaches_staging_new")
       .update({
-        governing_body_source: "county_name_rescue",
-        governing_body_notes:  note,
-        review_notes:          "County classification corroborated by explicit name signal.",
+        governing_jurisdiction: "governing county",
+        governing_body:         m.county,
+        governing_body_source:  "county_name_rescue",
+        governing_body_notes:   note,
+        review_notes:           "County classification corroborated by explicit name signal.",
       })
       .eq("id", m.id);
     if (error) writeErrors.push(`id ${m.id}: ${error.message}`);

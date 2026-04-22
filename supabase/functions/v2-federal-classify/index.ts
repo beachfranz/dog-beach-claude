@@ -15,7 +15,7 @@ import { corsHeaders } from "../_shared/cors.ts";
 import {
   buildArcgisQueryUrl,
   extractField,
-  getSource,
+  requireSource,
   getStateConfig,
   PipelineSource,
   stateCodeFromName,
@@ -72,8 +72,9 @@ Deno.serve(async (req: Request) => {
   const stateCode = body.state_code ?? "CA";
   const supabase  = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-  const source = await getSource(supabase, "federal_polygon", stateCode);
-  if (!source) return json({ error: `No pipeline_sources row for federal_polygon (state=${stateCode})` }, 500);
+  let source: PipelineSource;
+  try { source = await requireSource(supabase, "federal_polygon", stateCode); }
+  catch (e) { return json({ error: (e as Error).message }, 500); }
 
   const stateCfg = await getStateConfig(supabase, stateCode);
   const excludedUnits = new Set(stateCfg?.excluded_federal_units ?? []);

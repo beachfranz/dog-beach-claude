@@ -8,7 +8,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
-import { buildArcgisQueryUrl, extractField, getSource, PipelineSource, stateCodeFromName } from "../_shared/config.ts";
+import { buildArcgisQueryUrl, extractField, requireSource, PipelineSource, stateCodeFromName } from "../_shared/config.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -63,8 +63,9 @@ Deno.serve(async (req: Request) => {
   const stateCode = body.state_code ?? "CA";
   const supabase  = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-  const source = await getSource(supabase, "cpad_polygon", stateCode);
-  if (!source) return json({ error: `No pipeline_sources row for cpad_polygon (state=${stateCode})` }, 500);
+  let source: PipelineSource;
+  try { source = await requireSource(supabase, "cpad_polygon", stateCode); }
+  catch (e) { return json({ error: (e as Error).message }, 500); }
 
   const { data: rows, error } = await supabase
     .from("beaches_staging_new")

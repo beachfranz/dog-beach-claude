@@ -77,6 +77,28 @@ export async function getSource(
   return (data as PipelineSource | null) ?? null;
 }
 
+/**
+ * Strict version of getSource: throws a descriptive error if no matching row
+ * exists. Use this at the top of an edge function where a source is required
+ * to run; use getSource() in contexts where a missing source should be
+ * gracefully skipped.
+ */
+export async function requireSource(
+  supabase: any,
+  source_key: string,
+  state_code?: string | null,
+): Promise<PipelineSource> {
+  const s = await getSource(supabase, source_key, state_code);
+  if (!s) {
+    throw new Error(
+      `Config error: no active pipeline_sources row for source_key='${source_key}'` +
+      (state_code ? ` and state_code='${state_code}' (or national fallback).` : '.') +
+      ' Check pipeline_sources table.'
+    );
+  }
+  return s;
+}
+
 export async function getStateConfig(
   supabase: any,
   state_code: string,
@@ -103,6 +125,23 @@ export async function getStateConfig(
 }
 
 /**
+ * Strict version of getStateConfig: throws if the state has no config row.
+ */
+export async function requireStateConfig(
+  supabase: any,
+  state_code: string,
+): Promise<StateConfig> {
+  const cfg = await getStateConfig(supabase, state_code);
+  if (!cfg) {
+    throw new Error(
+      `Config error: no state_config row for state_code='${state_code}'. ` +
+      `Insert a row before running the pipeline for this state.`
+    );
+  }
+  return cfg;
+}
+
+/**
  * Build an ArcGIS FeatureServer/MapServer query URL from a source's URL +
  * query_defaults + caller-provided params. The result is a complete URL
  * suitable for fetch().
@@ -123,10 +162,21 @@ export function buildArcgisQueryUrl(
   return u.toString();
 }
 
+// Track warnings per-request so we don't spam logs when extractField is
+// called repeatedly in a loop over many features. Each (source, logical_name)
+// pair warns once per edge-function invocation.
+const WARNED_MISSING_FIELDS = new Set<string>();
+
 /**
  * Extract a field from an ArcGIS feature's attributes using the source's
- * field_map. Returns null if the mapped key is missing or the attribute
- * itself is null/empty.
+ * field_map.
+ *
+ * Returns null in two cases, distinguished by log behaviour:
+ *   (a) field_map[logicalName] is undefined — CONFIG ERROR, a logical name
+ *       the caller expects isn't mapped at all. Logs a warning (once per
+ *       source+name per invocation) to surface typos in pipeline_sources.field_map.
+ *   (b) field_map[logicalName] is defined but the actual attribute on the
+ *       feature is null/empty — normal data variability, silent null.
  */
 export function extractField(
   source: PipelineSource,
@@ -134,7 +184,18 @@ export function extractField(
   logicalName: string,
 ): string | null {
   const physicalKey = source.field_map?.[logicalName];
-  if (!physicalKey) return null;
+  if (!physicalKey) {
+    const warnKey = `${source.source_key}:${source.state_code ?? "null"}:${logicalName}`;
+    if (!WARNED_MISSING_FIELDS.has(warnKey)) {
+      WARNED_MISSING_FIELDS.add(warnKey);
+      console.warn(
+        `[config] extractField: logical name '${logicalName}' not found in field_map for ` +
+        `source_key='${source.source_key}' state_code='${source.state_code ?? "null"}'. ` +
+        `Check pipeline_sources.field_map.`
+      );
+    }
+    return null;
+  }
   const v = attrs[physicalKey];
   if (v === null || v === undefined || v === "") return null;
   return String(v);

@@ -19,7 +19,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
-import { getSource, stateCodeFromName } from "../_shared/config.ts";
+import { requireSource, stateCodeFromName } from "../_shared/config.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -79,8 +79,9 @@ Deno.serve(async (req: Request) => {
   const maxDist   = body.max_distance_m ?? DEFAULT_MAX_DISTANCE_M;
   const supabase  = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-  const source = await getSource(supabase, "noaa_tide_stations");
-  if (!source) return json({ error: "No pipeline_sources row for noaa_tide_stations" }, 500);
+  let source;
+  try { source = await requireSource(supabase, "noaa_tide_stations"); }
+  catch (e) { return json({ error: (e as Error).message }, 500); }
 
   const stations = await loadStations(source.url, stateCode);
   if (stations.length === 0) return json({ state_code: stateCode, error: `no reference tide stations returned for ${stateCode}` }, 500);

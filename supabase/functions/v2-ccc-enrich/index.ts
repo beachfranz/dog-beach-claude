@@ -17,7 +17,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
-import { getSource, getStateConfig, stateCodeFromName } from "../_shared/config.ts";
+import { requireSource, getStateConfig, stateCodeFromName } from "../_shared/config.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -113,8 +113,9 @@ Deno.serve(async (req: Request) => {
     return json({ state_code: stateCode, skipped: true, reason: "state has no coastal_access_points source" });
   }
 
-  const source = await getSource(supabase, "coastal_access_points", stateCode);
-  if (!source) return json({ error: `No pipeline_sources row for coastal_access_points (state=${stateCode})` }, 500);
+  let source;
+  try { source = await requireSource(supabase, "coastal_access_points", stateCode); }
+  catch (e) { return json({ error: (e as Error).message }, 500); }
 
   const cccByName = await loadCcc(source.url);
   if (cccByName.size === 0) return json({ error: "CCC load returned no features" }, 500);

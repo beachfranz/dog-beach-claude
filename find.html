@@ -525,6 +525,12 @@
   let currentSort = 'conditions';
   let leashFilter = 'any';
 
+  // Server-bounded nearest-N set. Client filters/sorts within this set.
+  // GIST index on beaches.location makes the server query O(log N) at
+  // any catalog size. 10 is enough to show top 5–7 after any sort mode.
+  const NEAREST_LIMIT   = 10;
+  const DISPLAY_LIMIT   = 7;
+
   // ── Day pills ──────────────────────────────────────────────────────
   const days = [];
   for (let i = 0; i < 7; i++) {
@@ -572,15 +578,12 @@
       document.getElementById('beach-list').innerHTML =
         Array(4).fill('<div class="skeleton"></div>').join('');
 
-      // Pull beach list from today's cache, or fall back to REST
-      const todayISO   = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-      const cachedToday = beachCache[todayISO];
-      const beachList  = cachedToday
-        ? cachedToday.map(b => ({ location_id: b.location_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule }))
-        : await fetch(
-            `${SUPABASE_URL}/rest/v1/beaches?select=location_id,display_name,latitude,longitude,access_rule&is_active=eq.true&order=display_name`,
-            { headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY } }
-          ).then(r => r.json()).catch(() => []);
+      // Pull beach list via loadBeachesForDate so the spatial-bounded
+      // nearest-N path is used consistently (was: raw REST fetching all
+      // active beaches, which doesn't scale).
+      const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+      const beachList = (await loadBeachesForDate(todayISO))
+        .map(b => ({ location_id: b.location_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule }));
 
       const filteredBeachList = beachList.filter(b => matchesLeashFilter(b));
 
@@ -616,7 +619,7 @@
       );
     }
 
-    renderSorted(sorted);
+    renderSorted(sorted.slice(0, DISPLAY_LIMIT));
   }
 
   function nowToDay(d) {
@@ -659,10 +662,19 @@
   }
 
   // ── Fetch beaches for a specific date (cached) ────────────────────
+  // Passes lat/lng+limit when the user has a resolved location, so the
+  // server returns only the nearest NEAREST_LIMIT beaches (GIST-indexed
+  // KNN). Without coords, returns the full active set for score sorting.
   async function loadBeachesForDate(date) {
     if (beachCache[date]) return beachCache[date];
+    const params = new URLSearchParams({ date });
+    if (userLat !== null && userLng !== null) {
+      params.set('lat',   String(userLat));
+      params.set('lng',   String(userLng));
+      params.set('limit', String(NEAREST_LIMIT));
+    }
     const res  = await fetch(
-      `${SUPABASE_URL}/functions/v1/get-beaches-find?date=${date}`,
+      `${SUPABASE_URL}/functions/v1/get-beaches-find?${params}`,
       { headers: { 'Authorization': `Bearer ${ANON_KEY}` } }
     );
     const data = await res.json();
@@ -735,7 +747,7 @@
       );
     }
 
-    renderSorted(sorted);
+    renderSorted(sorted.slice(0, DISPLAY_LIMIT));
   }
 
   // ── Render sorted list: #1 above blurb, rest in list ──────────────
@@ -999,8 +1011,7 @@
     showLocationLabel('📍 Detecting…');
     navigator.geolocation.getCurrentPosition(
       async pos => {
-        userLat = pos.coords.latitude;
-        userLng = pos.coords.longitude;
+        setUserLocation(pos.coords.latitude, pos.coords.longitude);
         const name = await reverseGeocode(userLat, userLng);
         showLocationLabel('📍 ' + name);
         enableDistanceSorts();
@@ -1020,14 +1031,24 @@
       );
       const data = await res.json();
       if (!data[0]) { showZipInput(); return; }
-      userLat = parseFloat(data[0].lat);
-      userLng = parseFloat(data[0].lon);
+      setUserLocation(parseFloat(data[0].lat), parseFloat(data[0].lon));
       showLocationLabel(`📍 ZIP ${zip}`);
       enableDistanceSorts();
       sortAndRender();
     } catch {
       showZipInput();
     }
+  }
+
+  // Updates the resolved user location and invalidates caches so the next
+  // sortAndRender fetches a spatially-bounded result set instead of
+  // reusing any location-less response already in the cache.
+  function setUserLocation(lat, lng) {
+    userLat = lat;
+    userLng = lng;
+    beachCache = {};
+    nowBeaches = null;
+    Object.keys(scoutCache).forEach(k => delete scoutCache[k]);
   }
 
   // ── Reverse geocode ────────────────────────────────────────────────

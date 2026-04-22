@@ -110,17 +110,35 @@ Deno.serve(async (req: Request) => {
   // ── consistency checks ────────────────────────────────────────────────
   const issues: string[] = [];
 
+  // Some source_keys are gated by a state_config flag (e.g. coastal_access_points
+  // is only required when that state has has_coastal_access_source=true) or
+  // have an alternate source_key as fallback (blm_sma → blm_sma_national).
+  const GATED_BY_FLAG: Record<string, keyof typeof states[number] | ""> = {
+    coastal_access_points: "has_coastal_access_source",
+  };
+  const FALLBACK_KEY: Record<string, string> = {
+    blm_sma: "blm_sma_national",
+  };
+
   // Required source_keys: which are missing?
   for (const { key, scope } of REQUIRED_SOURCE_KEYS) {
     const rows = sourcesByKey[key] ?? [];
-    if (rows.length === 0) {
+    if (rows.length === 0 && !FALLBACK_KEY[key]) {
       issues.push(`MISSING pipeline_sources row for source_key='${key}' (scope: ${scope})`);
     } else if (scope === "per_state") {
-      for (const state of enabledStates) {
+      for (const stateRow of states ?? []) {
+        if (!stateRow.enabled) continue;
+        // Skip this check if the state has the gating flag set to false
+        const gateFlag = GATED_BY_FLAG[key];
+        if (gateFlag && !(stateRow as any)[gateFlag]) continue;
+
+        const state = stateRow.state_code;
         const hasState = rows.some(r => r.state_code === state);
         const hasNational = rows.some(r => r.state_code === null);
-        if (!hasState && !hasNational) {
-          issues.push(`source_key='${key}' has no row for enabled state '${state}' and no national fallback`);
+        const fallbackKey = FALLBACK_KEY[key];
+        const hasFallback = fallbackKey && (sourcesByKey[fallbackKey] ?? []).some(r => r.state_code === null || r.state_code === state);
+        if (!hasState && !hasNational && !hasFallback) {
+          issues.push(`source_key='${key}' has no row for enabled state '${state}' and no national fallback` + (fallbackKey ? ` or '${fallbackKey}'` : ""));
         }
       }
     }

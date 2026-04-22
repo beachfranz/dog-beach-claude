@@ -33,8 +33,14 @@ async function loadCaStations(): Promise<Station[]> {
   if (!resp.ok) throw new Error(`NOAA station list HTTP ${resp.status}`);
   const data = await resp.json();
   const all = data?.stations ?? [];
+  // Filter to CA reference stations only. Subordinate stations (those with a
+  // non-empty reference_id pointing to a parent harmonic station) don't serve
+  // direct tide predictions — daily-beach-refresh's NOAA call fails on them
+  // ("No Predictions data was found"). Using only reference stations gives
+  // ~64 CA stations with reasonable coastal coverage.
   return all
-    .filter((s: { state?: string }) => s.state === "CA")
+    .filter((s: { state?: string; reference_id?: string }) =>
+      s.state === "CA" && !s.reference_id)
     .map((s: { id: string; name: string; lat: number; lng: number }) => ({
       id:   String(s.id),
       name: String(s.name),

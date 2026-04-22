@@ -17,12 +17,10 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { getSource, getStateConfig, stateCodeFromName } from "../_shared/config.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-const CCC_URL =
-  "https://services9.arcgis.com/wwVnNW92ZHUIr0V0/arcgis/rest/services/AccessPoints/FeatureServer/0/query";
 
 // CCC attribute → our column mapping
 const AMENITY_FIELDS = [
@@ -62,7 +60,7 @@ function dogYN(v: string | null): "yes" | "no" | "unknown" {
   return "unknown";
 }
 
-async function loadCcc(): Promise<Map<string, CccPoint>> {
+async function loadCcc(url: string): Promise<Map<string, CccPoint>> {
   const params = new URLSearchParams({
     where:             "1=1",
     outFields:         `Name,LATITUDE,LONGITUDE,${AMENITY_FIELDS.join(",")}`,
@@ -70,7 +68,7 @@ async function loadCcc(): Promise<Map<string, CccPoint>> {
     f:                 "json",
     resultRecordCount: "5000",
   });
-  const resp = await fetch(`${CCC_URL}?${params}`);
+  const resp = await fetch(`${url}?${params}`);
   const data = await resp.json();
   const features = data?.features ?? [];
   const byName = new Map<string, CccPoint>();
@@ -104,21 +102,31 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST")   return json({ error: "POST only" }, 405);
 
-  let body: { dry_run?: boolean } = {};
+  let body: { state_code?: string; dry_run?: boolean } = {};
   try { body = await req.json(); } catch { /* empty */ }
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+  const stateCode = body.state_code ?? "CA";
+  const supabase  = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-  const cccByName = await loadCcc();
+  const cfg = await getStateConfig(supabase, stateCode);
+  if (!cfg?.has_coastal_access_source) {
+    return json({ state_code: stateCode, skipped: true, reason: "state has no coastal_access_points source" });
+  }
+
+  const source = await getSource(supabase, "coastal_access_points", stateCode);
+  if (!source) return json({ error: `No pipeline_sources row for coastal_access_points (state=${stateCode})` }, 500);
+
+  const cccByName = await loadCcc(source.url);
   if (cccByName.size === 0) return json({ error: "CCC load returned no features" }, 500);
 
   // Only records that already have a CCC match (from v2-ccc-crossref)
   const { data: rows, error } = await supabase
     .from("beaches_staging_new")
-    .select("id, display_name, ccc_match_name")
+    .select("id, display_name, ccc_match_name, state")
     .not("ccc_match_name", "is", null);
   if (error) return json({ error: error.message }, 500);
-  if (!rows?.length) return json({ processed: 0, updated: 0 });
+  const filtered = (rows ?? []).filter(r => stateCodeFromName(r.state) === stateCode);
+  if (!filtered.length) return json({ state_code: stateCode, processed: 0, updated: 0 });
 
   const updates: Array<{
     id: number;
@@ -127,7 +135,7 @@ Deno.serve(async (req: Request) => {
 
   const now = new Date().toISOString();
 
-  for (const r of rows) {
+  for (const r of filtered) {
     const ccc = cccByName.get(r.ccc_match_name);
     if (!ccc) continue;
 
@@ -164,8 +172,9 @@ Deno.serve(async (req: Request) => {
   if (body.dry_run) {
     return json({
       dry_run:     true,
+      state_code:  stateCode,
       ccc_loaded:  cccByName.size,
-      eligible:    rows.length,
+      eligible:    filtered.length,
       would_write: updates.length,
       preview:     updates.slice(0, 5),
     });
@@ -183,8 +192,9 @@ Deno.serve(async (req: Request) => {
   }
 
   return json({
+    state_code: stateCode,
     ccc_loaded: cccByName.size,
-    eligible:   rows.length,
+    eligible:   filtered.length,
     updated,
     errors:     writeErrors,
   });

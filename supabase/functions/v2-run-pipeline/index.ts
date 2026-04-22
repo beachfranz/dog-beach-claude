@@ -66,11 +66,13 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST")   return json({ error: "POST only" }, 405);
 
-  let body: { skip?: string[]; dry_run?: boolean } = {};
+  let body: { state_code?: string; skip?: string[]; dry_run?: boolean } = {};
   try { body = await req.json(); } catch { /* empty */ }
 
+  const stateCode = body.state_code ?? "CA";
   const skip = new Set(body.skip ?? []);
-  const stageBody = body.dry_run ? { dry_run: true } : {};
+  const stageBody: Record<string, unknown> = { state_code: stateCode };
+  if (body.dry_run) stageBody.dry_run = true;
   const results: Array<{ stage: string; skipped?: boolean; result?: unknown; duration_ms?: number }> = [];
 
   const totalStart = performance.now();
@@ -85,5 +87,5 @@ Deno.serve(async (req: Request) => {
   }
   const totalMs = Math.round(performance.now() - totalStart);
 
-  return json({ stages: results, total_ms: totalMs });
+  return json({ state_code: stateCode, stages: results, total_ms: totalMs });
 });

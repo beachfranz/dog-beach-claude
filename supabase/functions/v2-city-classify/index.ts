@@ -1,64 +1,51 @@
 // v2-city-classify/index.ts
-// Pipeline stage 8 — city classifier via Census TIGER/Line Places polygons.
-//
-// Incorporated places only (LSADC = 25). If a beach's lat/lon is inside a
-// Census incorporated place, it's governing city.
-//
-// Also attempts a short buffer (100m) for beaches that sit just outside the
-// polygon — common for coastal beaches on state tidelands adjacent to a
-// city that operationally manages them. Buffer is done by querying the
-// same point with a small geometry ring expansion.
-//
-// Runs AFTER federal and state classifiers (those take priority).
+// Pipeline stage 8 — city classifier. Config-driven: reads source_key='city_polygon'
+// (Census TIGER/Line Places, national). Filters to incorporated places via
+// LSADC=25 check.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { buildArcgisQueryUrl, extractField, getSource, PipelineSource, stateCodeFromName } from "../_shared/config.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-const TIGER_URL =
-  "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Places_CouSub_ConCity_SubMCD/MapServer/4/query";
 const CONCURRENCY = 10;
-const BUFFER_DEG  = 0.001;   // ~100m at California latitude, for envelope expansion
+const BUFFER_DEG  = 0.001;   // ~100m
 
-// Build a small envelope around the point for the buffered lookup. ArcGIS
-// supports envelope geometry and esriSpatialRelIntersects returns any polygon
-// the envelope touches — effectively matching with a ~100m buffer.
 function envelopeAround(lat: number, lon: number, delta: number): string {
-  const xmin = lon - delta, ymin = lat - delta;
-  const xmax = lon + delta, ymax = lat + delta;
-  return JSON.stringify({ xmin, ymin, xmax, ymax, spatialReference: { wkid: 4326 } });
+  return JSON.stringify({
+    xmin: lon - delta, ymin: lat - delta,
+    xmax: lon + delta, ymax: lat + delta,
+    spatialReference: { wkid: 4326 },
+  });
 }
 
-async function findCity(lat: number, lon: number, buffer: boolean): Promise<{ name: string; geoid: string } | null> {
-  const params = new URLSearchParams({
-    outFields:      "BASENAME,NAME,LSADC,GEOID",
-    returnGeometry: "false",
-    f:              "json",
+async function findCity(lat: number, lon: number, buffer: boolean, source: PipelineSource): Promise<{ name: string; geoid: string } | null> {
+  const extra: Record<string, string> = buffer
+    ? { geometry: envelopeAround(lat, lon, BUFFER_DEG), geometryType: "esriGeometryEnvelope" }
+    : { geometry: `${lon},${lat}`, geometryType: "esriGeometryPoint" };
+  const url = buildArcgisQueryUrl(source, {
+    ...extra,
     spatialRel:     "esriSpatialRelIntersects",
     inSR:           "4326",
+    returnGeometry: "false",
   });
-  if (buffer) {
-    params.set("geometry", envelopeAround(lat, lon, BUFFER_DEG));
-    params.set("geometryType", "esriGeometryEnvelope");
-  } else {
-    params.set("geometry", `${lon},${lat}`);
-    params.set("geometryType", "esriGeometryPoint");
-  }
   try {
-    const resp = await fetch(`${TIGER_URL}?${params}`);
+    const resp = await fetch(url);
     if (!resp.ok) return null;
     const data = await resp.json();
     const features = data?.features ?? [];
-    // Filter to incorporated places only (LSADC = 25)
+    // Filter to incorporated places (LSADC=25). The lsadc field-map entry tells us
+    // which attribute to inspect.
+    const lsadcKey = source.field_map?.lsadc ?? "LSADC";
     const hit = features.find((f: { attributes: Record<string, unknown> }) =>
-      String(f.attributes.LSADC ?? "") === "25"
+      String(f.attributes[lsadcKey] ?? "") === "25",
     );
     if (!hit) return null;
+    const attrs = hit.attributes;
     return {
-      name:  String(hit.attributes.BASENAME ?? ""),
-      geoid: String(hit.attributes.GEOID ?? ""),
+      name:  extractField(source, attrs, "name")  ?? "",
+      geoid: extractField(source, attrs, "geoid") ?? "",
     };
   } catch { return null; }
 }
@@ -78,28 +65,32 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST")   return json({ error: "POST only" }, 405);
 
-  let body: { limit?: number; dry_run?: boolean; use_buffer?: boolean } = {};
+  let body: { state_code?: string; limit?: number; dry_run?: boolean; use_buffer?: boolean } = {};
   try { body = await req.json(); } catch { /* empty */ }
 
-  const useBuffer = body.use_buffer !== false;  // default: true
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+  const stateCode = body.state_code ?? "CA";
+  const useBuffer = body.use_buffer !== false;
+  const supabase  = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+  const source = await getSource(supabase, "city_polygon", stateCode);
+  if (!source) return json({ error: `No pipeline_sources row for city_polygon (state=${stateCode})` }, 500);
 
   const { data: rows, error } = await supabase
     .from("beaches_staging_new")
-    .select("id, display_name, latitude, longitude")
+    .select("id, display_name, latitude, longitude, state")
     .is("review_status", null)
     .not("latitude", "is", null)
     .not("longitude", "is", null)
     .limit(body.limit ?? 5000);
   if (error) return json({ error: error.message }, 500);
-  if (!rows?.length) return json({ processed: 0, matched: 0, updated: 0 });
+  const filtered = (rows ?? []).filter(r => stateCodeFromName(r.state) === stateCode);
+  if (!filtered.length) return json({ state_code: stateCode, processed: 0, matched: 0, updated: 0 });
 
-  // Two-pass: exact first, then buffered for the misses.
-  const tasks = rows.map(r => async () => {
-    let hit = await findCity(r.latitude, r.longitude, false);
+  const tasks = filtered.map(r => async () => {
+    let hit = await findCity(r.latitude, r.longitude, false, source);
     let matchedVia: "exact" | "buffer" | null = hit ? "exact" : null;
     if (!hit && useBuffer) {
-      hit = await findCity(r.latitude, r.longitude, true);
+      hit = await findCity(r.latitude, r.longitude, true, source);
       if (hit) matchedVia = "buffer";
     }
     return { id: r.id, display_name: r.display_name, hit, matchedVia };
@@ -109,12 +100,12 @@ Deno.serve(async (req: Request) => {
 
   if (body.dry_run) {
     return json({
-      dry_run:   true,
-      processed: rows.length,
-      matched:   matches.length,
-      exact:     matches.filter(m => m.matchedVia === "exact").length,
-      buffered:  matches.filter(m => m.matchedVia === "buffer").length,
-      preview:   matches.slice(0, 50).map(m => ({
+      dry_run: true, state_code: stateCode,
+      processed: filtered.length,
+      matched:  matches.length,
+      exact:    matches.filter(m => m.matchedVia === "exact").length,
+      buffered: matches.filter(m => m.matchedVia === "buffer").length,
+      preview:  matches.slice(0, 50).map(m => ({
         display_name: m.display_name,
         city:         m.hit!.name,
         geoid:        m.hit!.geoid,
@@ -144,10 +135,5 @@ Deno.serve(async (req: Request) => {
     else updated++;
   }
 
-  return json({
-    processed: rows.length,
-    matched:   matches.length,
-    updated,
-    errors: writeErrors,
-  });
+  return json({ state_code: stateCode, processed: filtered.length, matched: matches.length, updated, errors: writeErrors });
 });

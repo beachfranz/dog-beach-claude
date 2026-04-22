@@ -423,6 +423,11 @@
   let userLat = DEFAULT_LAT;
   let userLng = DEFAULT_LNG;
 
+  // How the current coords were resolved: 'geo' (browser), 'zip' (user
+  // typed a ZIP), or 'default' (fallback to Huntington). Drives whether
+  // the dropdown shows a ZIP prompt at the top.
+  let locationSource = 'default';
+
   // Cached nearby beaches; null until loadNearbyBeaches resolves.
   let nearbyBeaches = null;
 
@@ -481,11 +486,41 @@
       pos => {
         userLat = pos.coords.latitude;
         userLng = pos.coords.longitude;
+        locationSource = 'geo';
         loadNearbyBeaches();
       },
-      () => loadNearbyBeaches(),  // user denied or failed → fall through with Huntington defaults
+      () => loadNearbyBeaches(),  // user denied or failed → fall through with Huntington defaults + ZIP prompt
       { timeout: 8000 }
     );
+  }
+
+  // Geocodes a 5-digit US ZIP via Nominatim and re-runs the nearby fetch.
+  // Mirrors find.html's pattern.
+  async function geocodeZip(zip) {
+    if (!/^\d{5}$/.test(zip)) return;
+    const status = document.getElementById('zip-status');
+    if (status) status.textContent = 'Looking up…';
+    try {
+      const res  = await fetch(
+        `https://nominatim.openstreetmap.org/search?postalcode=${zip}&countrycodes=us&format=json&limit=1`,
+        { headers: { 'User-Agent': 'DogBeachScout/1.0' } }
+      );
+      const data = await res.json();
+      if (!data[0]) { if (status) status.textContent = 'Not found'; return; }
+      userLat = parseFloat(data[0].lat);
+      userLng = parseFloat(data[0].lon);
+      locationSource = 'zip';
+      loadNearbyBeaches();
+    } catch {
+      if (status) status.textContent = 'Lookup failed';
+    }
+  }
+
+  function handleZipSubmit(e) {
+    e.stopPropagation();
+    if (e.type === 'keydown' && e.key !== 'Enter') return;
+    const input = document.getElementById('zip-input');
+    if (input) geocodeZip(input.value.trim());
   }
 
   // Fetches the nearest NEAREST_LIMIT beaches for today via get-beaches-find
@@ -512,22 +547,45 @@
   }
 
   // Builds the switcher dropdown from the nearest-N result. Shows top
-  // VISIBLE_NEARBY; the remainder sits behind a "show more" toggle.
+  // VISIBLE_NEARBY (distance-ordered); the remainder sits behind a
+  // "show more" toggle. When coords were never resolved (locationSource
+  // === 'default'), prepends a ZIP input so the user can refine.
   function rebuildLocationMenu() {
     const menu = document.getElementById('location-menu');
     if (!nearbyBeaches || nearbyBeaches.length === 0) {
-      menu.innerHTML = '<div style="padding:10px 14px;color:var(--text-muted);font-size:13px;">No nearby beaches.</div>';
+      menu.innerHTML = zipPromptHtml() + '<div style="padding:10px 14px;color:var(--text-muted);font-size:13px;">No nearby beaches.</div>';
       return;
     }
-    const visible = nearbyBeaches.slice(0, VISIBLE_NEARBY);
-    const hidden  = nearbyBeaches.slice(VISIBLE_NEARBY);
+    // Defensive sort by distance — independent of server order so the
+    // switcher always reflects proximity regardless of endpoint behavior.
+    const sorted  = [...nearbyBeaches].sort((a, b) => (a.distance_m ?? Infinity) - (b.distance_m ?? Infinity));
+    const visible = sorted.slice(0, VISIBLE_NEARBY);
+    const hidden  = sorted.slice(VISIBLE_NEARBY);
 
-    let html = visible.map(b => renderMenuEntry(b)).join('');
+    let html = zipPromptHtml();
+    html += visible.map(b => renderMenuEntry(b)).join('');
     if (hidden.length > 0) {
       html += `<div id="nearby-more" style="display:none;">${hidden.map(b => renderMenuEntry(b)).join('')}</div>`;
       html += `<div onclick="event.stopPropagation();toggleNearbyMore(event)" style="padding:10px 14px;font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-muted);cursor:pointer;border-top:1px solid var(--border);" onmouseover="this.style.background='#252a3a'" onmouseout="this.style.background=''"><span id="nearby-more-label">Show ${hidden.length} more nearby ▾</span></div>`;
     }
     menu.innerHTML = html;
+  }
+
+  // Inline ZIP input shown at the top of the dropdown when we never
+  // resolved real coords (browser denied geolocation). Empty string
+  // otherwise so the dropdown stays clean once coords are known.
+  function zipPromptHtml() {
+    if (locationSource !== 'default') return '';
+    return `
+      <div style="padding:10px 14px;border-bottom:1px solid var(--border);font-family:'DM Sans',sans-serif;font-size:12px;color:var(--text-muted);" onclick="event.stopPropagation()">
+        <div style="margin-bottom:6px;">Showing beaches near Huntington. Enter your ZIP for closer:</div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input id="zip-input" type="text" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" placeholder="ZIP" onkeydown="handleZipSubmit(event)" style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;padding:5px 8px;outline:none;" />
+          <button onclick="handleZipSubmit(event)" style="background:var(--green);border:none;border-radius:4px;color:#0a0e1a;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:600;padding:5px 10px;cursor:pointer;">Go</button>
+        </div>
+        <div id="zip-status" style="margin-top:4px;font-size:11px;color:var(--text-muted);min-height:14px;"></div>
+      </div>
+    `;
   }
 
   function renderMenuEntry(b) {

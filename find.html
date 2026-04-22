@@ -580,10 +580,12 @@
 
       // Pull beach list via loadBeachesForDate so the spatial-bounded
       // nearest-N path is used consistently (was: raw REST fetching all
-      // active beaches, which doesn't scale).
+      // active beaches, which doesn't scale). distance_m is preserved
+      // so NOW cards can render the car icon without waiting on the
+      // client-side haversine path.
       const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
       const beachList = (await loadBeachesForDate(todayISO))
-        .map(b => ({ location_id: b.location_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule }));
+        .map(b => ({ location_id: b.location_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule, distance_m: b.distance_m }));
 
       const filteredBeachList = beachList.filter(b => matchesLeashFilter(b));
 
@@ -602,9 +604,7 @@
     const cards = nowBeaches.map(({ beach, day }) => ({
       beach,
       day,
-      distance: userLat !== null
-        ? haversine(userLat, userLng, parseFloat(beach.latitude), parseFloat(beach.longitude))
-        : null,
+      distance: resolveDistanceMiles(beach),
     }));
 
     let sorted;
@@ -723,15 +723,13 @@
       }
     }
 
-    // Build cards with client-side distance and leash filter
+    // Build cards with server-or-client distance and leash filter
     const cards = beaches
       .filter(b => matchesLeashFilter(b))
       .map(b => ({
         beach:    b,
         day:      beachToDay(b),
-        distance: userLat !== null
-          ? haversine(userLat, userLng, parseFloat(b.latitude), parseFloat(b.longitude))
-          : null,
+        distance: resolveDistanceMiles(b),
       }));
 
     // Sort
@@ -954,6 +952,18 @@
                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
                  Math.sin(dLon / 2) ** 2;
     return R * 2 * Math.asin(Math.sqrt(a));
+  }
+
+  // Prefer the server-provided distance_m (set by the find_beaches RPC
+  // when lat/lng were passed). Falls back to client haversine using
+  // userLat/userLng if the server didn't compute it. Returns miles or
+  // null when neither source can produce a value.
+  function resolveDistanceMiles(beach) {
+    if (beach?.distance_m != null) return beach.distance_m / 1609.34;
+    if (userLat !== null && userLng !== null && beach?.latitude != null && beach?.longitude != null) {
+      return haversine(userLat, userLng, parseFloat(beach.latitude), parseFloat(beach.longitude));
+    }
+    return null;
   }
 
   // ── Blend score (higher = better) ─────────────────────────────────

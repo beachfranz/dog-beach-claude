@@ -10,6 +10,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { stateCodeFromName } from "../_shared/config.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -35,22 +36,24 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST")   return json({ error: "POST only" }, 405);
 
-  let body: { dry_run?: boolean } = {};
+  let body: { state_code?: string; dry_run?: boolean } = {};
   try { body = await req.json(); } catch { /* empty */ }
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+  const stateCode = body.state_code ?? "CA";
+  const supabase  = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
   const { data: rows, error } = await supabase
     .from("beaches_staging_new")
-    .select("id, display_name, ccc_match_name, county")
+    .select("id, display_name, ccc_match_name, county, state")
     .eq("governing_body_source", "county_default");
   if (error) return json({ error: error.message }, 500);
-  if (!rows?.length) return json({ processed: 0, matched: 0 });
+  const filtered = (rows ?? []).filter(r => stateCodeFromName(r.state) === stateCode);
+  if (!filtered.length) return json({ state_code: stateCode, processed: 0, matched: 0 });
 
   const matches: Array<{
     id: number; display_name: string; ccc_name: string | null; source: string; reason: string; county: string;
   }> = [];
-  for (const r of rows) {
+  for (const r of filtered) {
     const displayMatch = matchCounty(r.display_name);
     if (displayMatch.match) {
       matches.push({
@@ -71,7 +74,7 @@ Deno.serve(async (req: Request) => {
   }
 
   if (body.dry_run) {
-    return json({ dry_run: true, processed: rows.length, matched: matches.length, preview: matches });
+    return json({ dry_run: true, state_code: stateCode, processed: filtered.length, matched: matches.length, preview: matches });
   }
 
   let updated = 0;
@@ -92,5 +95,5 @@ Deno.serve(async (req: Request) => {
     else updated++;
   }
 
-  return json({ processed: rows.length, matched: matches.length, updated, errors: writeErrors });
+  return json({ state_code: stateCode, processed: filtered.length, matched: matches.length, updated, errors: writeErrors });
 });

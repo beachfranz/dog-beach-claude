@@ -20,6 +20,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Anthropic from "https://esm.sh/@anthropic-ai/sdk@0.39.0";
 import { corsHeaders } from "../_shared/cors.ts";
+import { stateCodeFromName } from "../_shared/config.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -79,22 +80,19 @@ async function tavilySearch(query: string): Promise<TavilyResult[]> {
   } catch { return []; }
 }
 
-function tierContext(tier: Tier): string {
-  switch (tier) {
-    case "state":
-      return "California state parks — typically leashed-only in developed areas, varies per beach. Some state beaches (e.g. Corona del Mar SB, Santa Monica SB, Leucadia SB) are operationally run by the adjacent city/county. State Coastal Conservancy, UC reserves, and CDFW lands also use this tier.";
-    case "city":
-      return "Municipal California coastal city — typically has a designated 'dog beach' section plus prohibition at other city beaches. City parks departments publish specific rules.";
-    case "county":
-      return "California county parks & beaches department — varies widely. LA County Beaches & Harbors operates ~20 beaches with formal rules; inland counties may have lake/reservoir beach rules.";
-    case "federal":
-      return "Federal land unit — NPS (leashed in developed areas, per-beach rules), USFS (generally more permissive, leash required), BLM (varies), military base (restricted public access → unknown), National Wildlife Refuge (typically prohibited).";
-  }
+async function fetchTierContext(supabase: any, stateCode: string, tier: Tier): Promise<string> {
+  const { data } = await supabase
+    .from("research_prompts")
+    .select("system_context")
+    .eq("state_code", stateCode)
+    .eq("tier", tier)
+    .eq("active", true)
+    .maybeSingle();
+  return (data?.system_context as string) ?? `${tier} tier for ${stateCode}.`;
 }
 
-async function extractEnrichment(body: string, tier: Tier, sources: TavilyResult[]): Promise<Enrichment> {
+async function extractEnrichment(body: string, tier: Tier, sources: TavilyResult[], context: string): Promise<Enrichment> {
   const block = sources.map((s, i) => `[${i + 1}] ${s.url}\n${s.title}\n${s.content}`).join("\n\n");
-  const context = tierContext(tier);
 
   const prompt = `You are extracting operational beach data for a California governing body.
 
@@ -225,41 +223,46 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST")   return json({ error: "POST only" }, 405);
 
-  let body: { tier?: Tier; dry_run?: boolean; body_filter?: string; limit?: number } = {};
+  let body: { state_code?: string; tier?: Tier; dry_run?: boolean; body_filter?: string; limit?: number } = {};
   try { body = await req.json(); } catch { /* empty */ }
 
+  const stateCode = body.state_code ?? "CA";
   const tier = body.tier;
   if (!tier || !["state","city","county","federal"].includes(tier))
     return json({ error: "tier must be one of state|city|county|federal" }, 400);
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+  // Load state-specific research prompt for this tier
+  const tierContext = await fetchTierContext(supabase, stateCode, tier);
+
   const { data: rows, error } = await supabase
     .from("beaches_staging_new")
-    .select("governing_body")
+    .select("governing_body, state")
     .eq("governing_jurisdiction", `governing ${tier}`)
     .eq("review_status", "ready")
     .not("governing_body", "is", null);
   if (error) return json({ error: error.message }, 500);
 
+  const stateFiltered = (rows ?? []).filter(r => stateCodeFromName(r.state) === stateCode);
   const bodySet = new Set<string>();
-  for (const r of rows ?? []) bodySet.add(r.governing_body);
+  for (const r of stateFiltered) bodySet.add(r.governing_body);
   let bodies = [...bodySet];
   if (body.body_filter) bodies = bodies.filter(b => b.toLowerCase().includes(body.body_filter!.toLowerCase()));
   if (body.limit)       bodies = bodies.slice(0, body.limit);
 
-  if (bodies.length === 0) return json({ tier, bodies: 0 });
+  if (bodies.length === 0) return json({ state_code: stateCode, tier, bodies: 0 });
 
   const tasks = bodies.map(b => async () => {
-    const query   = `${b} California beach dog policy parking hours amenities`;
+    const query   = `${b} beach dog policy parking hours amenities`;
     const sources = await tavilySearch(query);
-    const enrich  = sources.length === 0 ? defaultEnrichment() : await extractEnrichment(b, tier, sources);
+    const enrich  = sources.length === 0 ? defaultEnrichment() : await extractEnrichment(b, tier, sources, tierContext);
     return { body: b, sources_count: sources.length, enrich };
   });
   const researched = await pLimit(tasks, CONCURRENCY);
 
   if (body.dry_run) {
-    return json({ dry_run: true, tier, bodies: bodies.length, preview: researched.slice(0, 5) });
+    return json({ dry_run: true, state_code: stateCode, tier, bodies: bodies.length, preview: researched.slice(0, 5) });
   }
 
   const now = new Date().toISOString();

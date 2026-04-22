@@ -16,12 +16,10 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { getSource, getStateConfig, stateCodeFromName } from "../_shared/config.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-const CCC_URL =
-  "https://services9.arcgis.com/wwVnNW92ZHUIr0V0/arcgis/rest/services/AccessPoints/FeatureServer/0/query";
 
 const PROXIMITY_NAME_M  = 200;
 const PROXIMITY_STRONG  = 50;
@@ -29,15 +27,15 @@ const NAME_MIN_SIM      = 0.4;
 
 interface CccPoint { name: string; lat: number; lon: number; dog: string | null; county: string | null; }
 
-async function loadCccPoints(): Promise<CccPoint[]> {
+async function loadCccPoints(url: string): Promise<CccPoint[]> {
   const params = new URLSearchParams({
-    where:          "1=1",
-    outFields:      "Name,LATITUDE,LONGITUDE,DOG_FRIEND,COUNTY",
-    returnGeometry: "false",
-    f:              "json",
+    where:             "1=1",
+    outFields:         "Name,LATITUDE,LONGITUDE,DOG_FRIEND,COUNTY",
+    returnGeometry:    "false",
+    f:                 "json",
     resultRecordCount: "5000",
   });
-  const resp = await fetch(`${CCC_URL}?${params}`);
+  const resp = await fetch(`${url}?${params}`);
   const data = await resp.json();
   const features = data?.features ?? [];
   return features
@@ -110,30 +108,40 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST")   return json({ error: "POST only" }, 405);
 
-  let body: { dry_run?: boolean; limit?: number } = {};
+  let body: { state_code?: string; dry_run?: boolean; limit?: number } = {};
   try { body = await req.json(); } catch { /* empty */ }
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+  const stateCode = body.state_code ?? "CA";
+  const supabase  = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-  const cccPoints = await loadCccPoints();
-  if (!cccPoints.length) return json({ error: "CCC load returned no features" }, 500);
+  const cfg = await getStateConfig(supabase, stateCode);
+  if (!cfg?.has_coastal_access_source) {
+    return json({ state_code: stateCode, skipped: true, reason: "state has no coastal_access_points source configured" });
+  }
+
+  const source = await getSource(supabase, "coastal_access_points", stateCode);
+  if (!source) return json({ error: `No pipeline_sources row for coastal_access_points (state=${stateCode})` }, 500);
+
+  const cccPoints = await loadCccPoints(source.url);
+  if (!cccPoints.length) return json({ error: "coastal access load returned no features" }, 500);
 
   const { data: rows, error } = await supabase
     .from("beaches_staging_new")
-    .select("id, display_name, latitude, longitude")
+    .select("id, display_name, latitude, longitude, state")
     .or("review_status.is.null,review_status.eq.ready")
     .not("latitude", "is", null)
     .not("longitude", "is", null)
     .limit(body.limit ?? 5000);
   if (error) return json({ error: error.message }, 500);
-  if (!rows?.length) return json({ processed: 0, matched: 0, updated: 0, ccc_loaded: cccPoints.length });
+  const filtered = (rows ?? []).filter(r => stateCodeFromName(r.state) === stateCode);
+  if (!filtered.length) return json({ state_code: stateCode, processed: 0, matched: 0, updated: 0, ccc_loaded: cccPoints.length });
 
   const matches: Array<{
     id: number; display_name: string; ccc_name: string; distance_m: number;
     sim: number; dog: string | null;
   }> = [];
 
-  for (const r of rows) {
+  for (const r of filtered) {
     const m = matchCcc(r.display_name, r.latitude, r.longitude, cccPoints);
     if (m) {
       matches.push({
@@ -155,8 +163,9 @@ Deno.serve(async (req: Request) => {
     };
     return json({
       dry_run:    true,
+      state_code: stateCode,
       ccc_loaded: cccPoints.length,
-      processed:  rows.length,
+      processed:  filtered.length,
       matched:    matches.length,
       dog_hint:   dogCount,
       preview:    matches.slice(0, 30),
@@ -179,8 +188,9 @@ Deno.serve(async (req: Request) => {
   }
 
   return json({
+    state_code: stateCode,
     ccc_loaded: cccPoints.length,
-    processed:  rows.length,
+    processed:  filtered.length,
     matched:    matches.length,
     updated,
     errors:     writeErrors,

@@ -19,28 +19,26 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { getSource, stateCodeFromName } from "../_shared/config.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-const NOAA_URL = "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=tidepredictions";
 const DEFAULT_MAX_DISTANCE_M = 50_000;  // 50km — beyond this is inland
 
 interface Station { id: string; name: string; lat: number; lon: number; }
 
-async function loadCaStations(): Promise<Station[]> {
-  const resp = await fetch(NOAA_URL);
+async function loadStations(url: string, stateCode: string): Promise<Station[]> {
+  const resp = await fetch(url);
   if (!resp.ok) throw new Error(`NOAA station list HTTP ${resp.status}`);
   const data = await resp.json();
   const all = data?.stations ?? [];
-  // Filter to CA reference stations only. Subordinate stations (those with a
-  // non-empty reference_id pointing to a parent harmonic station) don't serve
-  // direct tide predictions — daily-beach-refresh's NOAA call fails on them
-  // ("No Predictions data was found"). Using only reference stations gives
-  // ~64 CA stations with reasonable coastal coverage.
+  // Filter to reference stations only in the requested state. Subordinate
+  // stations (non-empty reference_id) don't serve direct tide predictions via
+  // daily-beach-refresh's NOAA call.
   return all
     .filter((s: { state?: string; reference_id?: string }) =>
-      s.state === "CA" && !s.reference_id)
+      s.state === stateCode && !s.reference_id)
     .map((s: { id: string; name: string; lat: number; lng: number }) => ({
       id:   String(s.id),
       name: String(s.name),
@@ -74,29 +72,34 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST")   return json({ error: "POST only" }, 405);
 
-  let body: { dry_run?: boolean; max_distance_m?: number; limit?: number } = {};
+  let body: { state_code?: string; dry_run?: boolean; max_distance_m?: number; limit?: number } = {};
   try { body = await req.json(); } catch { /* empty */ }
 
-  const maxDist = body.max_distance_m ?? DEFAULT_MAX_DISTANCE_M;
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+  const stateCode = body.state_code ?? "CA";
+  const maxDist   = body.max_distance_m ?? DEFAULT_MAX_DISTANCE_M;
+  const supabase  = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-  const stations = await loadCaStations();
-  if (stations.length === 0) return json({ error: "no CA stations returned from NOAA" }, 500);
+  const source = await getSource(supabase, "noaa_tide_stations");
+  if (!source) return json({ error: "No pipeline_sources row for noaa_tide_stations" }, 500);
+
+  const stations = await loadStations(source.url, stateCode);
+  if (stations.length === 0) return json({ state_code: stateCode, error: `no reference tide stations returned for ${stateCode}` }, 500);
 
   const { data: rows, error } = await supabase
     .from("beaches_staging_new")
-    .select("id, display_name, latitude, longitude")
+    .select("id, display_name, latitude, longitude, state")
     .eq("review_status", "ready")
     .not("latitude", "is", null)
     .not("longitude", "is", null)
     .limit(body.limit ?? 5000);
   if (error) return json({ error: error.message }, 500);
-  if (!rows?.length) return json({ stations_loaded: stations.length, processed: 0 });
+  const filtered = (rows ?? []).filter(r => stateCodeFromName(r.state) === stateCode);
+  if (!filtered.length) return json({ state_code: stateCode, stations_loaded: stations.length, processed: 0 });
 
   const matches: Array<{ id: number; display_name: string; station: Station; dist_m: number }> = [];
   const skipped: Array<{ id: number; display_name: string; dist_m: number }> = [];
 
-  for (const r of rows) {
+  for (const r of filtered) {
     const hit = findClosest(r.latitude, r.longitude, stations);
     if (!hit) continue;
     if (hit.dist_m > maxDist) {
@@ -110,7 +113,7 @@ Deno.serve(async (req: Request) => {
     return json({
       dry_run:         true,
       stations_loaded: stations.length,
-      processed:       rows.length,
+      processed:       filtered.length,
       matched:         matches.length,
       skipped_inland:  skipped.length,
       preview_match:   matches.slice(0, 10).map(m => ({

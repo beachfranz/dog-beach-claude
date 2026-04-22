@@ -15,6 +15,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Anthropic from "https://esm.sh/@anthropic-ai/sdk@0.39.0";
 import { corsHeaders } from "../_shared/cors.ts";
+import { stateCodeFromName } from "../_shared/config.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -167,23 +168,25 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST")   return json({ error: "POST only" }, 405);
 
-  let body: { dry_run?: boolean; body_filter?: string; limit?: number } = {};
+  let body: { state_code?: string; dry_run?: boolean; body_filter?: string; limit?: number } = {};
   try { body = await req.json(); } catch { /* empty */ }
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+  const stateCode = body.state_code ?? "CA";
+  const supabase  = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
   // Distinct (governing_body, text inputs). All beaches with the same
   // governing_body share text, so one parse call per body is enough.
   const { data: rows, error } = await supabase
     .from("beaches_staging_new")
-    .select("governing_body, dogs_time_restrictions, dogs_season_restrictions, dogs_policy_notes")
+    .select("governing_body, state, dogs_time_restrictions, dogs_season_restrictions, dogs_policy_notes")
     .eq("review_status", "ready")
     .not("governing_body", "is", null);
   if (error) return json({ error: error.message }, 500);
 
-  // Group by body; skip bodies with nothing to parse
+  // Group by body, filtering to the requested state; skip bodies with nothing to parse
+  const stateFiltered = (rows ?? []).filter(r => stateCodeFromName(r.state) === stateCode);
   const byBody = new Map<string, { t: string | null; s: string | null; n: string | null }>();
-  for (const r of rows ?? []) {
+  for (const r of stateFiltered) {
     if (byBody.has(r.governing_body)) continue;
     const any = (r.dogs_time_restrictions && r.dogs_time_restrictions.trim())
              || (r.dogs_season_restrictions && r.dogs_season_restrictions.trim())

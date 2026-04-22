@@ -17,6 +17,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Anthropic from "https://esm.sh/@anthropic-ai/sdk@0.39.0";
 import { corsHeaders } from "../_shared/cors.ts";
+import { stateCodeFromName } from "../_shared/config.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -91,10 +92,11 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST")   return json({ error: "POST only" }, 405);
 
-  let body: { limit?: number; state?: string; county?: string } = {};
+  let body: { state_code?: string; limit?: number; county?: string } = {};
   try { body = await req.json(); } catch { /* empty */ }
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+  const stateCode = body.state_code ?? "CA";
+  const supabase  = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
   let query = supabase
     .from("beaches_staging_new")
@@ -103,10 +105,10 @@ Deno.serve(async (req: Request) => {
     .is("governing_jurisdiction_ai", null)
     .not("governing_body", "is", null)
     .limit(body.limit ?? DEFAULT_LIMIT);
-  if (body.state)  query = query.eq("state", body.state);
   if (body.county) query = query.eq("county", body.county);
 
-  const { data: rows, error } = await query;
+  const { data: allRows, error } = await query;
+  const rows = (allRows ?? []).filter(r => stateCodeFromName(r.state) === stateCode);
   if (error) return json({ error: error.message }, 500);
   if (!rows?.length) return json({ processed: 0, agree: 0, disagree: 0, unresolved: 0 });
 

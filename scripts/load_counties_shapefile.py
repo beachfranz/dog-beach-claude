@@ -65,6 +65,9 @@ def chunk(seq, n):
 
 def main():
     shp_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_SHP
+    # Optional state filter: pass FIPS code as second arg (e.g. "06" for CA).
+    # Default: no filter → load all ~3,235 US counties.
+    state_filter = sys.argv[2] if len(sys.argv) > 2 else None
     SQL_DIR.mkdir(parents=True, exist_ok=True)
     for old in SQL_DIR.glob("*.sql"):
         old.unlink()
@@ -77,18 +80,19 @@ def main():
 
     transformer = Transformer.from_crs("EPSG:4269", "EPSG:4326", always_xy=True)
 
-    print("Filtering to CA (STATEFP='06') + building features...")
+    filter_desc = f"to STATEFP='{state_filter}'" if state_filter else "no filter (national)"
+    print(f"Building features ({filter_desc})...")
     t0 = time.time()
     features = []
     for sr in reader.iterShapeRecords():
-        if sr.record[idx["STATEFP"]] != "06":
+        if state_filter and sr.record[idx["STATEFP"]] != state_filter:
             continue
         geom = shape_to_polygon_geojson(sr.shape, transformer)
         if geom is None:
             continue
         props = {name: sr.record[idx[name]] for name in FIELDS}
         features.append({"type": "Feature", "properties": props, "geometry": geom})
-    print(f"  built {len(features)} CA features in {time.time()-t0:.0f}s")
+    print(f"  built {len(features)} features in {time.time()-t0:.0f}s")
 
     # Write SQL files
     print(f"Writing SQL files (batches of {BATCH_SIZE})...")

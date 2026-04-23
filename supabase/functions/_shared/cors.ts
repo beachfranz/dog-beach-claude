@@ -21,7 +21,7 @@ export function corsHeaders(
 
   return {
     'Access-Control-Allow-Origin':  allowedOrigin,
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-admin-secret',
     'Access-Control-Allow-Methods': methods,
     'Vary': 'Origin',
   };

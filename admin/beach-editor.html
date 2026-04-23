@@ -859,6 +859,27 @@ let map         = null;         // Leaflet map
 let marker      = null;         // Leaflet marker
 
 // ── API helpers ───────────────────────────────────────────────────────────
+// Admin secret: stored in localStorage, prompted on page load + on 401.
+// Repo is public and URLs are discoverable, so this is the only thing
+// standing between strangers and write access — loops until we have a
+// non-empty value, because sending "" is always rejected anyway.
+const ADMIN_SECRET_KEY = 'db_admin_secret';
+function promptForAdminSecret(reason) {
+  const msg = reason
+    ? `${reason}\n\nAdmin secret (ADMIN_SECRET in Supabase):`
+    : 'Admin secret (ADMIN_SECRET in Supabase):';
+  // Loop until we get something, so a stray Cancel doesn't silently
+  // degrade to unauth. User can close the tab to truly abort.
+  while (true) {
+    const s = (prompt(msg) || '').trim();
+    if (s) { localStorage.setItem(ADMIN_SECRET_KEY, s); return s; }
+  }
+}
+function getAdminSecret() {
+  return localStorage.getItem(ADMIN_SECRET_KEY) || promptForAdminSecret();
+}
+function clearAdminSecret() { localStorage.removeItem(ADMIN_SECRET_KEY); }
+
 async function restGet(path) {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
@@ -868,16 +889,42 @@ async function restGet(path) {
 }
 
 async function edgeFn(fn, body) {
-  const r = await fetch(`${SUPABASE_URL}/functions/v1/${fn}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return r.json();
+  // Try up to twice: if the stored secret is wrong we get 401, re-prompt,
+  // and retry once transparently so the user can fix a typo in place.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const secret = getAdminSecret();
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/${fn}`, {
+      method: 'POST',
+      headers: {
+        Authorization:     `Bearer ${ANON_KEY}`,
+        'Content-Type':    'application/json',
+        'x-admin-secret':  secret,
+      },
+      body: JSON.stringify(body),
+    });
+    if (r.status === 401) {
+      clearAdminSecret();
+      if (attempt === 0) {
+        promptForAdminSecret('Admin secret rejected — try again:');
+        continue;
+      }
+      showToast('Admin secret rejected.', true);
+      return { error: 'Unauthorized (admin secret rejected)' };
+    }
+    if (r.status === 429) {
+      return { error: 'Admin rate limit exceeded — try again next hour.' };
+    }
+    return r.json();
+  }
+  return { error: 'Unauthorized' };
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────
 async function boot() {
+  // Prompt for the admin secret upfront so admin actions don't fail
+  // mid-flow. Stored in localStorage; only asked once per browser.
+  getAdminSecret();
+
   try {
     allBeaches = await restGet('beaches?select=*&order=display_name');
   } catch (err) {

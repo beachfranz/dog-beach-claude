@@ -15,7 +15,8 @@
 // On error: { error }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders }  from "../_shared/cors.ts";
+import { requireAdmin } from "../_shared/admin-auth.ts";
 import { requireSource } from "../_shared/config.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
@@ -69,6 +70,9 @@ Deno.serve(async (req: Request) => {
 
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST")   return json({ error: "POST only" }, 405);
+
+  const authFail = await requireAdmin(req, cors);
+  if (authFail) return authFail;
 
   let body: { latitude?: number; longitude?: number; state_code?: string; max_distance_m?: number };
   try { body = await req.json(); } catch { return json({ error: "Invalid JSON" }, 400); }

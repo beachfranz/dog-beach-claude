@@ -12,7 +12,8 @@
 // GOOGLE_MAPS_API_KEY — same key already used by geocode-beaches-staging
 // and v2-geocode-context in the pipeline.
 
-import { corsHeaders } from "../_shared/cors.ts";
+import { corsHeaders }  from "../_shared/cors.ts";
+import { requireAdmin } from "../_shared/admin-auth.ts";
 
 const GOOGLE_KEY  = Deno.env.get("GOOGLE_MAPS_API_KEY")!;
 const GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json";
@@ -23,6 +24,9 @@ Deno.serve(async (req: Request) => {
 
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST")   return json({ error: "POST only" }, 405);
+
+  const authFail = await requireAdmin(req, cors);
+  if (authFail) return authFail;
 
   if (!GOOGLE_KEY) return json({ error: "GOOGLE_MAPS_API_KEY not configured" }, 500);
 

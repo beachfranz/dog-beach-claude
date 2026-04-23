@@ -141,6 +141,15 @@ Deno.serve(async (req: Request) => {
     return new Response("Method not allowed", { status: 405 });
   }
 
+  // Auth gate. Deployed with --no-verify-jwt so the admin editor can
+  // proxy a call through admin-refresh-beach (the gateway JWT check
+  // rejects our sb_secret_-format service-role key). requireAdmin()
+  // recreates that gate at the function level.
+  const jsonHeaders = { "Content-Type": "application/json" };
+  const { requireAdmin } = await import("../_shared/admin-auth.ts");
+  const authFail = await requireAdmin(req, jsonHeaders);
+  if (authFail) return authFail;
+
   let targetLocationIds: string[] | null = null;
   try {
     const body = await req.json().catch(() => ({}));

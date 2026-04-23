@@ -1,0 +1,1049 @@
+<!DOCTYPE html>
+<!--
+  admin/beach-editor.html — Edit metadata for a single live `beaches` row.
+
+  Security model (matches the dedup-era admin tooling):
+    - This page lives at an obscure path and isn't linked from anywhere
+      user-facing.
+    - Writes go through admin-update-beach / admin-delete-beach edge
+      functions. Those use the service role key server-side only.
+    - The browser calls them with the standard anon key. No JWT auth,
+      no email allowlist. Security by obscurity + recoverability.
+
+  If this becomes public (and it shouldn't), a password gate or
+  Supabase auth can be bolted on without changing the page shape.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Beach Editor — Dog Beach Admin</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:         #f8fafc;
+      --panel:      #ffffff;
+      --border:     #e2e8f0;
+      --border-hov: #cbd5e1;
+      --text:       #0f172a;
+      --text-muted: #475569;
+      --text-dim:   #94a3b8;
+      --accent:     #3b82f6;
+      --accent-hov: #2563eb;
+      --green:      #15803d;
+      --green-bg:   #dcfce7;
+      --red:        #b91c1c;
+      --red-bg:     #fee2e2;
+      --amber:      #b45309;
+      --amber-bg:   #fef3c7;
+      --dirty-bg:   #fffbeb;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    /* ── Header ────────────────────────────────────────────────────── */
+    header {
+      background: #1e293b;
+      color: #f1f5f9;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    }
+    header h1 { font-size: 16px; font-weight: 600; }
+    header a { color: #94a3b8; text-decoration: none; font-size: 13px; margin-left: auto; }
+    header a:hover { color: #f1f5f9; }
+
+    /* ── Search ────────────────────────────────────────────────────── */
+    .search-bar {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      position: sticky;
+      top: 48px;
+      z-index: 40;
+    }
+    .search-bar-inner { max-width: 860px; margin: 0 auto; position: relative; }
+    .search-input {
+      width: 100%;
+      padding: 10px 14px;
+      font-size: 14px;
+      font-family: inherit;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      outline: none;
+    }
+    .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #dbeafe; }
+    .search-results {
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      margin-top: 4px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      max-height: 320px;
+      overflow-y: auto;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      z-index: 60;
+    }
+    .search-results.open { display: block; }
+    .search-result {
+      padding: 10px 14px;
+      cursor: pointer;
+      border-bottom: 1px solid #f1f5f9;
+      font-size: 13px;
+    }
+    .search-result:last-child { border: none; }
+    .search-result:hover, .search-result.active { background: #eff6ff; }
+    .search-result-name { font-weight: 500; }
+    .search-result-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+    /* ── Main ──────────────────────────────────────────────────────── */
+    main {
+      max-width: 860px;
+      margin: 24px auto;
+      padding: 0 24px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 80px 20px;
+      color: var(--text-muted);
+    }
+    .empty-state-icon { font-size: 48px; margin-bottom: 12px; }
+
+    /* ── Beach header (when loaded) ────────────────────────────────── */
+    .beach-header {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .beach-header-name {
+      font-size: 20px;
+      font-weight: 600;
+    }
+    .beach-header-id {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+      background: #f1f5f9;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .beach-header-active {
+      margin-left: auto;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 999px;
+    }
+    .beach-header-active.yes { background: var(--green-bg); color: var(--green); }
+    .beach-header-active.no  { background: #f1f5f9; color: var(--text-muted); }
+
+    /* ── Section ───────────────────────────────────────────────────── */
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+    .section-header {
+      padding: 12px 20px;
+      background: #f8fafc;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .section-caret { transition: transform 0.15s; color: var(--text-dim); }
+    .section.collapsed .section-caret { transform: rotate(-90deg); }
+    .section-body { padding: 16px 20px; }
+    .section.collapsed .section-body { display: none; }
+
+    /* ── Form fields ──────────────────────────────────────────────── */
+    .field {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      gap: 16px;
+      align-items: start;
+      padding: 8px 0;
+    }
+    .field + .field { border-top: 1px solid #f1f5f9; }
+
+    .field-label {
+      font-size: 13px;
+      color: var(--text-muted);
+      padding-top: 7px;
+    }
+    .field-label code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      color: var(--text-dim);
+      display: block;
+      margin-top: 2px;
+    }
+    .field-input {
+      width: 100%;
+      padding: 6px 10px;
+      font-size: 13px;
+      font-family: inherit;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      outline: none;
+    }
+    .field-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px #dbeafe; }
+    .field-input.dirty { background: var(--dirty-bg); border-color: #fbbf24; }
+    textarea.field-input { min-height: 72px; resize: vertical; font-family: inherit; }
+    .field-hint {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+
+    .field-locked {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 13px;
+      color: var(--text-muted);
+      padding: 7px 10px;
+      background: #f1f5f9;
+      border-radius: 6px;
+    }
+
+    /* Tri-state checkbox (yes / no / unknown) */
+    .tri {
+      display: inline-flex;
+      gap: 4px;
+      background: #f1f5f9;
+      padding: 3px;
+      border-radius: 6px;
+    }
+    .tri button {
+      border: none;
+      background: transparent;
+      font-family: inherit;
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      color: var(--text-muted);
+    }
+    .tri button.active { background: white; color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+    .tri.dirty { box-shadow: 0 0 0 2px #fbbf24; }
+
+    /* Map */
+    #map {
+      height: 320px;
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-top: 6px;
+    }
+
+    /* JSONB table editor */
+    .json-table { width: 100%; margin-top: 6px; border-collapse: collapse; }
+    .json-table th {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-align: left;
+      padding: 4px 8px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .json-table td {
+      padding: 4px 8px;
+    }
+    .json-table input {
+      width: 100%;
+      padding: 5px 8px;
+      font-size: 12px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-family: inherit;
+    }
+    .json-table input:focus { border-color: var(--accent); outline: none; }
+    .json-row-remove {
+      background: transparent;
+      border: none;
+      color: var(--red);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0 6px;
+    }
+    .json-table-add {
+      background: #f1f5f9;
+      border: 1px dashed var(--border);
+      color: var(--text-muted);
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      margin-top: 6px;
+      width: 100%;
+    }
+    .json-table-add:hover { background: #e2e8f0; color: var(--text); }
+
+    /* Day-of-week pills */
+    .dow-pills { display: flex; gap: 4px; margin-top: 4px; }
+    .dow-pill {
+      flex: 1;
+      padding: 8px 0;
+      text-align: center;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      font-size: 11px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .dow-pill.on { background: #dbeafe; border-color: var(--accent); color: var(--accent-hov); font-weight: 600; }
+
+    /* ── Actions ───────────────────────────────────────────────────── */
+    .actions-bar {
+      position: sticky;
+      bottom: 0;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 20px;
+      margin: 16px 0 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 -2px 12px rgba(0,0,0,0.04);
+    }
+    .save-btn {
+      background: var(--accent);
+      color: white;
+      padding: 8px 18px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .save-btn:hover { background: var(--accent-hov); }
+    .save-btn:disabled { background: #cbd5e1; cursor: not-allowed; }
+    .dirty-count {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .dirty-count strong { color: var(--amber); }
+
+    .delete-btn {
+      margin-left: auto;
+      background: transparent;
+      color: var(--red);
+      padding: 8px 16px;
+      border: 1px solid var(--red);
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .delete-btn:hover { background: var(--red-bg); }
+
+    /* Toast */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      z-index: 100;
+      display: none;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+    #toast.show { display: block; }
+    #toast.ok  { background: #1e293b; color: white; }
+    #toast.err { background: var(--red); color: white; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Beach Editor</h1>
+  <a href="../index.html">← Site home</a>
+</header>
+
+<div class="search-bar">
+  <div class="search-bar-inner">
+    <input id="search-input" class="search-input" type="text"
+           placeholder="Search by name or location_id…"
+           autocomplete="off" />
+    <div id="search-results" class="search-results"></div>
+  </div>
+</div>
+
+<main id="main">
+  <div id="empty" class="empty-state">
+    <div class="empty-state-icon">🏖️</div>
+    <div>Search for a beach above to start editing.</div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+// ── State ─────────────────────────────────────────────────────────────────
+let allBeaches  = [];           // full list for search
+let current     = null;         // full row of the selected beach
+let dirty       = {};           // field → new value (pending save)
+let map         = null;         // Leaflet map
+let marker      = null;         // Leaflet marker
+
+// ── API helpers ───────────────────────────────────────────────────────────
+async function restGet(path) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
+  });
+  if (!r.ok) throw new Error(`REST ${r.status}: ${await r.text()}`);
+  return r.json();
+}
+
+async function edgeFn(fn, body) {
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/${fn}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return r.json();
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+async function boot() {
+  try {
+    allBeaches = await restGet('beaches?select=*&order=display_name');
+  } catch (err) {
+    showToast('Failed to load beaches: ' + err.message, true);
+    return;
+  }
+
+  // URL-driven preselect
+  const params = new URLSearchParams(location.search);
+  const preselect = params.get('edit');
+  if (preselect) {
+    const b = allBeaches.find(b => b.location_id === preselect);
+    if (b) selectBeach(b);
+    else   showToast(`No beach with location_id "${preselect}"`, true);
+  }
+
+  wireSearch();
+}
+
+// ── Search ────────────────────────────────────────────────────────────────
+function wireSearch() {
+  const input = document.getElementById('search-input');
+  const panel = document.getElementById('search-results');
+
+  const render = (filtered) => {
+    if (filtered.length === 0) { panel.classList.remove('open'); panel.innerHTML = ''; return; }
+    panel.innerHTML = filtered.slice(0, 20).map(b => `
+      <div class="search-result" data-id="${escAttr(b.location_id)}">
+        <div class="search-result-name">${escHtml(b.display_name)}</div>
+        <div class="search-result-meta">${escHtml(b.location_id)} · ${b.is_active ? 'active' : 'inactive'}${b.address ? ' · ' + escHtml(b.address) : ''}</div>
+      </div>
+    `).join('');
+    panel.classList.add('open');
+    panel.querySelectorAll('.search-result').forEach(el => {
+      el.addEventListener('click', () => {
+        const b = allBeaches.find(x => x.location_id === el.dataset.id);
+        if (b) { selectBeach(b); input.value = b.display_name; panel.classList.remove('open'); }
+      });
+    });
+  };
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    if (!q) { panel.classList.remove('open'); return; }
+    const filtered = allBeaches.filter(b =>
+      (b.display_name || '').toLowerCase().includes(q) ||
+      (b.location_id  || '').toLowerCase().includes(q) ||
+      (b.address      || '').toLowerCase().includes(q)
+    );
+    render(filtered);
+  });
+  input.addEventListener('focus', () => { if (input.value.trim()) input.dispatchEvent(new Event('input')); });
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.search-bar-inner')) panel.classList.remove('open');
+  });
+}
+
+// ── Select / render beach ─────────────────────────────────────────────────
+function selectBeach(b) {
+  current = JSON.parse(JSON.stringify(b)); // deep clone so edits don't alter list
+  dirty = {};
+  history.replaceState({}, '', `?edit=${encodeURIComponent(b.location_id)}`);
+  renderForm();
+}
+
+function renderForm() {
+  const main = document.getElementById('main');
+  const b = current;
+
+  main.innerHTML = `
+    <div class="beach-header">
+      <div class="beach-header-name" id="hdr-name">${escHtml(b.display_name)}</div>
+      <div class="beach-header-id">${escHtml(b.location_id)}</div>
+      <div class="beach-header-active ${b.is_active ? 'yes' : 'no'}" id="hdr-active">${b.is_active ? 'Active' : 'Inactive'}</div>
+    </div>
+
+    ${sectionHtml('Identity', false, [
+      lockedField('location_id', b.location_id, 'Primary key — not editable'),
+      textField('display_name', 'Display name', b.display_name),
+      boolField('is_active', 'Active'),
+      textField('timezone', 'Timezone', b.timezone, { placeholder: 'America/Los_Angeles' }),
+    ])}
+
+    ${sectionHtml('Location', false, [
+      `<div class="field">
+        <div class="field-label">Latitude / Longitude</div>
+        <div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <input class="field-input" id="in-latitude"  type="number" step="any" value="${b.latitude ?? ''}" />
+            <input class="field-input" id="in-longitude" type="number" step="any" value="${b.longitude ?? ''}" />
+          </div>
+          <div id="map"></div>
+          <div class="field-hint">Click the map to move the marker. Drag the marker or edit the numbers directly.</div>
+        </div>
+      </div>`,
+      textField('address', 'Address', b.address),
+    ])}
+
+    ${sectionHtml('Governance', false, [
+      textField('governing_body', 'Governing body', b.governing_body),
+      selectField('governing_jurisdiction', 'Jurisdiction', b.governing_jurisdiction, [
+        '', 'governing federal', 'governing state', 'governing county', 'governing city', 'governing private',
+      ]),
+    ])}
+
+    ${sectionHtml('Dogs', false, [
+      selectField('dogs_allowed', 'Dogs allowed', b.dogs_allowed, ['', 'yes', 'no', 'mixed', 'seasonal', 'unknown']),
+      selectField('dogs_leash_required', 'Leash required', b.dogs_leash_required, ['', 'yes', 'no', 'mixed']),
+      textareaField('dogs_policy_notes', 'Policy notes', b.dogs_policy_notes),
+      textField('dogs_allowed_areas',    'Allowed areas',    b.dogs_allowed_areas),
+      textField('dogs_off_leash_area',   'Off-leash area',   b.dogs_off_leash_area),
+      textField('dogs_prohibited_areas', 'Prohibited areas', b.dogs_prohibited_areas),
+      textField('dogs_prohibited_reason','Prohibited reason',b.dogs_prohibited_reason),
+      textareaField('dogs_season_restrictions', 'Seasonal restrictions (text)', b.dogs_season_restrictions),
+      seasonalClosuresField(b.dogs_seasonal_closures),
+      dailyWindowsField(b.dogs_daily_windows),
+      dayOfWeekField(b.dogs_day_of_week_mask),
+      textField('dogs_time_restrictions', 'Time restrictions (text)', b.dogs_time_restrictions),
+      textField('dogs_policy_source',     'Policy source key',     b.dogs_policy_source),
+      textField('dogs_policy_source_url', 'Policy source URL',     b.dogs_policy_source_url),
+      dateTimeField('dogs_policy_updated_at', 'Policy updated at', b.dogs_policy_updated_at),
+    ])}
+
+    ${sectionHtml('Practical', false, [
+      textField('hours_text',  'Hours',       b.hours_text),
+      textField('hours_notes', 'Hours notes', b.hours_notes),
+      triField('has_parking', 'Has parking'),
+      textField('parking_type',  'Parking type',  b.parking_type, { placeholder: 'lot / street / metered' }),
+      textareaField('parking_notes', 'Parking notes', b.parking_notes),
+      triField('has_restrooms',       'Restrooms'),
+      triField('has_showers',         'Showers'),
+      triField('has_drinking_water',  'Drinking water'),
+      triField('has_lifeguards',      'Lifeguards'),
+      triField('has_disabled_access', 'Disabled access'),
+      triField('has_food',            'Food'),
+      triField('has_fire_pits',       'Fire pits'),
+      triField('has_picnic_area',     'Picnic area'),
+    ])}
+
+    ${sectionHtml('Access & misc', false, [
+      selectField('access_rule', 'Access rule', b.access_rule, ['', 'off_leash', 'on_leash', 'mixed', 'prohibited']),
+      textareaField('description', 'Description', b.description),
+      textField('website', 'Website', b.website),
+    ])}
+
+    ${sectionHtml('NOAA', false, [
+      textField('noaa_station_id',   'Station ID',   b.noaa_station_id),
+      textField('noaa_station_name', 'Station name', b.noaa_station_name),
+    ])}
+
+    ${sectionHtml('Enrichment (pipeline-managed)', true, [
+      textField('enrichment_source', 'Source', b.enrichment_source),
+      selectField('enrichment_confidence', 'Confidence', b.enrichment_confidence, ['', 'high', 'medium', 'low']),
+      dateTimeField('enrichment_updated_at', 'Updated at', b.enrichment_updated_at),
+    ])}
+
+    ${sectionHtml('Legacy fields', true, [
+      textField('leash_policy',  'leash_policy',  b.leash_policy),
+      textField('dog_rules',     'dog_rules',     b.dog_rules),
+      textField('amenities',     'amenities',     b.amenities),
+      textField('restrooms',     'restrooms',     b.restrooms),
+      textField('parking_text',  'parking_text',  b.parking_text),
+      triField ('off_leash_flag','off_leash_flag'),
+      textField('locality',      'locality',      b.locality),
+      textField('access_scope',  'access_scope',  b.access_scope),
+      textField('allowed_hours_text',    'allowed_hours_text',    b.allowed_hours_text),
+      textField('dogs_prohibited_start', 'dogs_prohibited_start', b.dogs_prohibited_start),
+      textField('dogs_prohibited_end',   'dogs_prohibited_end',   b.dogs_prohibited_end),
+    ])}
+
+    <div class="actions-bar">
+      <button class="save-btn" id="save-btn" onclick="save()" disabled>Save</button>
+      <span class="dirty-count" id="dirty-count">No changes</span>
+      <button class="delete-btn" onclick="deletePermanent()">Delete permanently</button>
+    </div>
+  `;
+
+  wireFormInteractions();
+  wireSectionCollapse();
+  initMap();
+}
+
+// ── Field builders ────────────────────────────────────────────────────────
+function sectionHtml(title, collapsed, bodies) {
+  return `<section class="section ${collapsed ? 'collapsed' : ''}">
+    <div class="section-header"><span class="section-caret">▾</span>${escHtml(title)}</div>
+    <div class="section-body">${bodies.join('')}</div>
+  </section>`;
+}
+
+function textField(key, label, value, opts = {}) {
+  const v = value ?? '';
+  return `<div class="field">
+    <div class="field-label">${escHtml(label)}<code>${key}</code></div>
+    <input class="field-input" id="in-${key}" data-field="${key}" type="text" value="${escAttr(v)}"
+           placeholder="${escAttr(opts.placeholder || '')}" />
+  </div>`;
+}
+
+function textareaField(key, label, value) {
+  const v = value ?? '';
+  return `<div class="field">
+    <div class="field-label">${escHtml(label)}<code>${key}</code></div>
+    <textarea class="field-input" id="in-${key}" data-field="${key}">${escHtml(v)}</textarea>
+  </div>`;
+}
+
+function selectField(key, label, value, options) {
+  const opts = options.map(o =>
+    `<option value="${escAttr(o)}" ${o === value ? 'selected' : ''}>${o || '— unset —'}</option>`
+  ).join('');
+  return `<div class="field">
+    <div class="field-label">${escHtml(label)}<code>${key}</code></div>
+    <select class="field-input" id="in-${key}" data-field="${key}">${opts}</select>
+  </div>`;
+}
+
+function boolField(key, label) {
+  const v = current[key];
+  return `<div class="field">
+    <div class="field-label">${escHtml(label)}<code>${key}</code></div>
+    <div class="tri" id="in-${key}" data-field="${key}" data-type="bool-strict">
+      <button type="button" data-val="true"  class="${v === true  ? 'active' : ''}">Yes</button>
+      <button type="button" data-val="false" class="${v === false ? 'active' : ''}">No</button>
+    </div>
+  </div>`;
+}
+
+function triField(key, label) {
+  const v = current[key];
+  return `<div class="field">
+    <div class="field-label">${escHtml(label)}<code>${key}</code></div>
+    <div class="tri" id="in-${key}" data-field="${key}" data-type="tri">
+      <button type="button" data-val="true"  class="${v === true  ? 'active' : ''}">Yes</button>
+      <button type="button" data-val="false" class="${v === false ? 'active' : ''}">No</button>
+      <button type="button" data-val="null"  class="${v == null   ? 'active' : ''}">Unknown</button>
+    </div>
+  </div>`;
+}
+
+function lockedField(key, value, hint) {
+  return `<div class="field">
+    <div class="field-label">${escHtml(key)}<code>${key}</code></div>
+    <div>
+      <div class="field-locked">${escHtml(value ?? '')}</div>
+      ${hint ? `<div class="field-hint">${escHtml(hint)}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function dateTimeField(key, label, value) {
+  const v = value ? new Date(value).toISOString().slice(0, 16) : '';
+  return `<div class="field">
+    <div class="field-label">${escHtml(label)}<code>${key}</code></div>
+    <input class="field-input" id="in-${key}" data-field="${key}" data-type="datetime"
+           type="datetime-local" value="${escAttr(v)}" />
+  </div>`;
+}
+
+function seasonalClosuresField(value) {
+  const rows = Array.isArray(value) ? value : [];
+  return `<div class="field">
+    <div class="field-label">Seasonal closures<code>dogs_seasonal_closures</code>
+      <div class="field-hint" style="margin-top:6px;">jsonb — array of {start, end, reason}. start/end are MM-DD.</div>
+    </div>
+    <div>
+      <table class="json-table" id="tbl-dogs_seasonal_closures" data-field="dogs_seasonal_closures">
+        <thead><tr><th>Start (MM-DD)</th><th>End (MM-DD)</th><th>Reason</th><th></th></tr></thead>
+        <tbody>
+          ${rows.map((r, i) => closureRowHtml(r, i)).join('')}
+        </tbody>
+      </table>
+      <button type="button" class="json-table-add" onclick="addJsonRow('dogs_seasonal_closures', 'closure')">+ Add closure</button>
+    </div>
+  </div>`;
+}
+
+function closureRowHtml(r, i) {
+  return `<tr data-idx="${i}">
+    <td><input type="text" value="${escAttr(r.start || '')}" data-key="start" placeholder="MM-DD" /></td>
+    <td><input type="text" value="${escAttr(r.end   || '')}" data-key="end"   placeholder="MM-DD" /></td>
+    <td><input type="text" value="${escAttr(r.reason || '')}" data-key="reason" /></td>
+    <td><button class="json-row-remove" type="button" onclick="removeJsonRow(this)">×</button></td>
+  </tr>`;
+}
+
+function dailyWindowsField(value) {
+  const rows = Array.isArray(value) ? value : [];
+  return `<div class="field">
+    <div class="field-label">Daily windows<code>dogs_daily_windows</code>
+      <div class="field-hint" style="margin-top:6px;">jsonb — array of {start, end}. start/end are HH:MM (24h).</div>
+    </div>
+    <div>
+      <table class="json-table" id="tbl-dogs_daily_windows" data-field="dogs_daily_windows">
+        <thead><tr><th>Start (HH:MM)</th><th>End (HH:MM)</th><th></th></tr></thead>
+        <tbody>
+          ${rows.map((r, i) => windowRowHtml(r, i)).join('')}
+        </tbody>
+      </table>
+      <button type="button" class="json-table-add" onclick="addJsonRow('dogs_daily_windows', 'window')">+ Add window</button>
+    </div>
+  </div>`;
+}
+
+function windowRowHtml(r, i) {
+  return `<tr data-idx="${i}">
+    <td><input type="text" value="${escAttr(r.start || '')}" data-key="start" placeholder="HH:MM" /></td>
+    <td><input type="text" value="${escAttr(r.end   || '')}" data-key="end"   placeholder="HH:MM" /></td>
+    <td><button class="json-row-remove" type="button" onclick="removeJsonRow(this)">×</button></td>
+  </tr>`;
+}
+
+function dayOfWeekField(value) {
+  const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const mask  = toDowArray(value);   // always 7-long boolean
+  return `<div class="field">
+    <div class="field-label">Days allowed<code>dogs_day_of_week_mask</code>
+      <div class="field-hint" style="margin-top:6px;">Click to toggle. All-off is treated as null.</div>
+    </div>
+    <div id="dow-pills" data-field="dogs_day_of_week_mask">
+      <div class="dow-pills">
+        ${names.map((n, i) => `<div class="dow-pill ${mask[i] ? 'on' : ''}" data-idx="${i}">${n}</div>`).join('')}
+      </div>
+    </div>
+  </div>`;
+}
+
+function toDowArray(v) {
+  const out = [false, false, false, false, false, false, false];
+  if (Array.isArray(v) && v.length === 7) return v.map(Boolean);
+  if (v && typeof v === 'object') {
+    const keys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    keys.forEach((k, i) => { if (v[k] === true) out[i] = true; });
+  }
+  return out;
+}
+
+// ── Form interactions ─────────────────────────────────────────────────────
+function wireFormInteractions() {
+  // Text / textarea / select inputs
+  document.querySelectorAll('[data-field]').forEach(el => {
+    if (el.matches('input[type="text"], input[type="number"], textarea, select')) {
+      el.addEventListener('input', () => {
+        const field = el.dataset.field;
+        let v = el.value;
+        if (el.type === 'number') v = v === '' ? null : Number(v);
+        if (v === '') v = null;
+        markDirty(field, v, el);
+      });
+    }
+  });
+
+  // datetime-local inputs — convert to ISO on change
+  document.querySelectorAll('[data-type="datetime"]').forEach(el => {
+    el.addEventListener('input', () => {
+      const field = el.dataset.field;
+      const v = el.value ? new Date(el.value).toISOString() : null;
+      markDirty(field, v, el);
+    });
+  });
+
+  // Tri-state + strict-bool buttons
+  document.querySelectorAll('.tri').forEach(tri => {
+    tri.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        tri.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const raw = btn.dataset.val;
+        const v   = raw === 'true' ? true : raw === 'false' ? false : null;
+        const field = tri.dataset.field;
+        markDirty(field, v, tri);
+        if (field === 'is_active') updateActiveBadge(v);
+      });
+    });
+  });
+
+  // Day-of-week pills
+  document.querySelectorAll('#dow-pills .dow-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      pill.classList.toggle('on');
+      const container = document.getElementById('dow-pills');
+      const mask = Array.from(container.querySelectorAll('.dow-pill')).map(p => p.classList.contains('on'));
+      const allOff = mask.every(x => !x);
+      markDirty('dogs_day_of_week_mask', allOff ? null : mask, container);
+    });
+  });
+
+  // Lat/lng → map
+  document.getElementById('in-latitude')?.addEventListener('input',  () => syncInputsToMap());
+  document.getElementById('in-longitude')?.addEventListener('input', () => syncInputsToMap());
+
+  // Name change → update header
+  document.getElementById('in-display_name')?.addEventListener('input', e => {
+    document.getElementById('hdr-name').textContent = e.target.value;
+  });
+
+  // JSONB table inputs — bind in setupJsonTableWatchers
+  setupJsonTableWatchers();
+}
+
+function updateActiveBadge(v) {
+  const el = document.getElementById('hdr-active');
+  el.textContent = v ? 'Active' : 'Inactive';
+  el.className = `beach-header-active ${v ? 'yes' : 'no'}`;
+}
+
+function setupJsonTableWatchers() {
+  ['dogs_seasonal_closures', 'dogs_daily_windows'].forEach(field => {
+    const tbl = document.getElementById(`tbl-${field}`);
+    if (!tbl) return;
+    tbl.addEventListener('input', () => rebuildJsonTable(field));
+  });
+}
+
+function rebuildJsonTable(field) {
+  const tbl = document.getElementById(`tbl-${field}`);
+  if (!tbl) return;
+  const rows = Array.from(tbl.querySelectorAll('tbody tr')).map(tr => {
+    const obj = {};
+    tr.querySelectorAll('input[data-key]').forEach(inp => {
+      const v = inp.value.trim();
+      if (v) obj[inp.dataset.key] = v;
+    });
+    return Object.keys(obj).length ? obj : null;
+  }).filter(Boolean);
+  markDirty(field, rows.length ? rows : null, tbl);
+}
+
+window.addJsonRow = function (field, kind) {
+  const tbl = document.getElementById(`tbl-${field}`);
+  if (!tbl) return;
+  const tbody = tbl.querySelector('tbody');
+  const html = kind === 'closure'
+    ? closureRowHtml({}, tbody.children.length)
+    : windowRowHtml({}, tbody.children.length);
+  tbody.insertAdjacentHTML('beforeend', html);
+  rebuildJsonTable(field);
+};
+
+window.removeJsonRow = function (btn) {
+  const tr = btn.closest('tr');
+  const tbl = tr.closest('table');
+  const field = tbl.dataset.field;
+  tr.remove();
+  rebuildJsonTable(field);
+};
+
+// ── Dirty tracking ────────────────────────────────────────────────────────
+function markDirty(field, value, inputEl) {
+  dirty[field] = value;
+  if (inputEl) {
+    inputEl.classList.add('dirty');
+    if (inputEl.classList.contains('tri')) inputEl.classList.add('dirty');
+  }
+  updateDirtyBadge();
+}
+
+function updateDirtyBadge() {
+  const count = Object.keys(dirty).length;
+  const btn = document.getElementById('save-btn');
+  const bdg = document.getElementById('dirty-count');
+  if (count === 0) {
+    btn.disabled = true;
+    bdg.innerHTML = 'No changes';
+  } else {
+    btn.disabled = false;
+    bdg.innerHTML = `<strong>${count}</strong> unsaved change${count === 1 ? '' : 's'}`;
+  }
+}
+
+// ── Save / delete ─────────────────────────────────────────────────────────
+async function save() {
+  if (Object.keys(dirty).length === 0) return;
+
+  const btn = document.getElementById('save-btn');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  const res = await edgeFn('admin-update-beach', {
+    location_id: current.location_id,
+    fields: dirty,
+  });
+
+  btn.textContent = 'Save';
+
+  if (res.error) {
+    showToast('Error: ' + res.error, true);
+    btn.disabled = false;
+    return;
+  }
+
+  // Refresh current with new server state
+  current = res.beach;
+  const idx = allBeaches.findIndex(b => b.location_id === current.location_id);
+  if (idx >= 0) allBeaches[idx] = current;
+  dirty = {};
+
+  // Clear dirty classes
+  document.querySelectorAll('.dirty').forEach(el => el.classList.remove('dirty'));
+  updateDirtyBadge();
+
+  showToast(`Saved${res.rejected?.length ? ' (rejected: ' + res.rejected.join(', ') + ')' : ''}`);
+}
+
+async function deletePermanent() {
+  if (!current) return;
+  const ok = confirm(
+    `Permanently delete "${current.display_name}" (${current.location_id})?\n\n` +
+    `This will also cascade-delete its forecast rows (beach_day_recommendations, ` +
+    `beach_day_hourly_scores) and any subscriber links.\n\nThis cannot be undone.`
+  );
+  if (!ok) return;
+
+  const res = await edgeFn('admin-delete-beach', { location_id: current.location_id });
+  if (res.error) { showToast('Error: ' + res.error, true); return; }
+
+  allBeaches = allBeaches.filter(b => b.location_id !== current.location_id);
+  current = null;
+  dirty = {};
+  history.replaceState({}, '', location.pathname);
+  document.getElementById('main').innerHTML = `
+    <div class="empty-state">
+      <div class="empty-state-icon">🗑️</div>
+      <div>Deleted. Search for another beach above.</div>
+    </div>`;
+  document.getElementById('search-input').value = '';
+  showToast('Deleted');
+}
+
+// ── Section collapse ──────────────────────────────────────────────────────
+function wireSectionCollapse() {
+  document.querySelectorAll('.section-header').forEach(h => {
+    h.addEventListener('click', () => h.parentElement.classList.toggle('collapsed'));
+  });
+}
+
+// ── Map ───────────────────────────────────────────────────────────────────
+function initMap() {
+  if (map) { map.remove(); map = null; }
+  const lat = Number(document.getElementById('in-latitude').value);
+  const lng = Number(document.getElementById('in-longitude').value);
+  const valid = Number.isFinite(lat) && Number.isFinite(lng);
+  const center = valid ? [lat, lng] : [34.0, -118.5];  // SoCal fallback
+
+  map = L.map('map').setView(center, valid ? 14 : 7);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+  }).addTo(map);
+
+  marker = L.marker(center, { draggable: true }).addTo(map);
+  marker.on('dragend', () => {
+    const { lat, lng } = marker.getLatLng();
+    syncMapToInputs(lat, lng);
+  });
+  map.on('click', e => {
+    marker.setLatLng(e.latlng);
+    syncMapToInputs(e.latlng.lat, e.latlng.lng);
+  });
+}
+
+function syncMapToInputs(lat, lng) {
+  const latInput = document.getElementById('in-latitude');
+  const lngInput = document.getElementById('in-longitude');
+  latInput.value = lat.toFixed(6);
+  lngInput.value = lng.toFixed(6);
+  latInput.classList.add('dirty');
+  lngInput.classList.add('dirty');
+  markDirty('latitude',  Number(lat.toFixed(6)));
+  markDirty('longitude', Number(lng.toFixed(6)));
+}
+
+function syncInputsToMap() {
+  const lat = Number(document.getElementById('in-latitude').value);
+  const lng = Number(document.getElementById('in-longitude').value);
+  if (Number.isFinite(lat) && Number.isFinite(lng) && marker) {
+    marker.setLatLng([lat, lng]);
+  }
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────
+function showToast(msg, isErr = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show ' + (isErr ? 'err' : 'ok');
+  setTimeout(() => t.className = '', 2500);
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function escAttr(s) { return escHtml(s); }
+
+boot();
+</script>
+</body>
+</html>

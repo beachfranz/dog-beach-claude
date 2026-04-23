@@ -16,9 +16,10 @@
 // POST { location_id: string, fields: Record<string, unknown> }
 // Returns { ok: true, beach: <updated row>, rejected: string[] }
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders }  from "../_shared/cors.ts";
-import { requireAdmin } from "../_shared/admin-auth.ts";
+import { createClient }   from "https://esm.sh/@supabase/supabase-js@2";
+import { corsHeaders }    from "../_shared/cors.ts";
+import { requireAdmin }   from "../_shared/admin-auth.ts";
+import { logAdminWrite }  from "../_shared/admin-audit.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -89,6 +90,11 @@ Deno.serve(async (req: Request) => {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+  // Snapshot the row before the update so the audit entry can diff
+  // before/after and record which fields actually changed.
+  const { data: beforeRow } = await supabase
+    .from("beaches").select("*").eq("location_id", location_id).single();
+
   const { data, error } = await supabase
     .from("beaches")
     .update(safe)
@@ -96,8 +102,28 @@ Deno.serve(async (req: Request) => {
     .select("*")
     .single();
 
-  if (error) return json({ error: error.message }, 500);
-  if (!data)  return json({ error: "No row updated (bad location_id?)" }, 404);
+  if (error) {
+    await logAdminWrite(supabase, {
+      functionName: "admin-update-beach", action: "update", req,
+      locationId: location_id, before: beforeRow ?? null,
+      success: false, error: error.message,
+    });
+    return json({ error: error.message }, 500);
+  }
+  if (!data) {
+    await logAdminWrite(supabase, {
+      functionName: "admin-update-beach", action: "update", req,
+      locationId: location_id, before: beforeRow ?? null,
+      success: false, error: "No row updated (bad location_id?)",
+    });
+    return json({ error: "No row updated (bad location_id?)" }, 404);
+  }
+
+  await logAdminWrite(supabase, {
+    functionName: "admin-update-beach", action: "update", req,
+    locationId: location_id, before: beforeRow ?? null, after: data,
+    success: true,
+  });
 
   return json({ ok: true, beach: data, rejected });
 });

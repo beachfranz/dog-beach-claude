@@ -15,9 +15,10 @@
 // POST { location_id: string }
 // Returns { ok: true, deleted: location_id } or { error: string }
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders }  from "../_shared/cors.ts";
-import { requireAdmin } from "../_shared/admin-auth.ts";
+import { createClient }   from "https://esm.sh/@supabase/supabase-js@2";
+import { corsHeaders }    from "../_shared/cors.ts";
+import { requireAdmin }   from "../_shared/admin-auth.ts";
+import { logAdminWrite }  from "../_shared/admin-audit.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -41,13 +42,38 @@ Deno.serve(async (req: Request) => {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+  // Snapshot the row before delete so the audit entry preserves what
+  // was removed — the cascaded hourly/daily rows are gone too but the
+  // beach row itself is the one that matters for recovery.
+  const { data: beforeRow } = await supabase
+    .from("beaches").select("*").eq("location_id", location_id).single();
+
   const { error, count } = await supabase
     .from("beaches")
     .delete({ count: "exact" })
     .eq("location_id", location_id);
 
-  if (error)       return json({ error: error.message }, 500);
-  if (count === 0) return json({ error: "No row matched that location_id" }, 404);
+  if (error) {
+    await logAdminWrite(supabase, {
+      functionName: "admin-delete-beach", action: "delete", req,
+      locationId: location_id, before: beforeRow ?? null,
+      success: false, error: error.message,
+    });
+    return json({ error: error.message }, 500);
+  }
+  if (count === 0) {
+    await logAdminWrite(supabase, {
+      functionName: "admin-delete-beach", action: "delete", req,
+      locationId: location_id, before: null,
+      success: false, error: "No row matched that location_id",
+    });
+    return json({ error: "No row matched that location_id" }, 404);
+  }
+
+  await logAdminWrite(supabase, {
+    functionName: "admin-delete-beach", action: "delete", req,
+    locationId: location_id, before: beforeRow ?? null, success: true,
+  });
 
   return json({ ok: true, deleted: location_id });
 });

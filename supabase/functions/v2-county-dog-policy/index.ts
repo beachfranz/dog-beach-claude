@@ -27,7 +27,7 @@ const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
 interface DogPolicy {
   dogs_allowed:             "yes" | "no" | "mixed" | "seasonal" | "unknown";
-  dogs_leash_required:      boolean | null;
+  dogs_leash_required:      "yes" | "no" | "mixed" | null;
   dogs_allowed_areas:       string | null;
   dogs_prohibited_areas:    string | null;
   dogs_off_leash_area:      string | null;
@@ -88,7 +88,7 @@ Extract the dog policy as a JSON object with these fields:
 
 - dogs_allowed_areas: short description of specific beaches/areas where dogs ARE permitted. null if dogs_allowed = "no" or allowed county-wide.
 - dogs_prohibited_areas: short description of specific beaches where dogs are NOT permitted. null if prohibited county-wide or allowed county-wide.
-- dogs_leash_required: true, false, or null if unknown
+- dogs_leash_required: "yes", "no", "mixed", or null if unknown (mixed = rules vary by area or time)
 - dogs_off_leash_area: designated off-leash area if any; otherwise null
 - dogs_time_restrictions: description if hours limit access; otherwise null
 - dogs_season_restrictions: description if seasonal limits apply; otherwise null
@@ -114,7 +114,7 @@ Respond with a JSON object only, no other text.`;
     const validConf    = ["high","low"];
     return {
       dogs_allowed:             validAllowed.includes(parsed.dogs_allowed) ? parsed.dogs_allowed : "unknown",
-      dogs_leash_required:      typeof parsed.dogs_leash_required === "boolean" ? parsed.dogs_leash_required : null,
+      dogs_leash_required:      ["yes","no","mixed"].includes(parsed.dogs_leash_required) ? parsed.dogs_leash_required : null,
       dogs_allowed_areas:       parsed.dogs_allowed_areas || null,
       dogs_prohibited_areas:    parsed.dogs_prohibited_areas || null,
       dogs_off_leash_area:      parsed.dogs_off_leash_area || null,

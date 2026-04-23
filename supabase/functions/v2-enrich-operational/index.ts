@@ -37,7 +37,7 @@ type Tier = "state" | "city" | "county" | "federal";
 interface Enrichment {
   // Dog policy
   dogs_allowed:             "yes" | "no" | "mixed" | "seasonal" | "unknown";
-  dogs_leash_required:      boolean | null;
+  dogs_leash_required:      "yes" | "no" | "mixed" | null;
   dogs_allowed_areas:       string | null;
   dogs_prohibited_areas:    string | null;
   dogs_off_leash_area:      string | null;
@@ -108,7 +108,7 @@ Respond with a single FLAT JSON object (no nested sections) with exactly these k
 
 {
   "dogs_allowed": "yes" | "no" | "mixed" | "seasonal" | "unknown",
-  "dogs_leash_required": true | false | null,
+  "dogs_leash_required": "yes" | "no" | "mixed" | null,  // mixed = rules vary by area or time
   "dogs_allowed_areas": string or null (specific beaches where dogs permitted),
   "dogs_prohibited_areas": string or null (specific beaches where dogs prohibited),
   "dogs_off_leash_area": string or null (designated off-leash zone),
@@ -159,12 +159,13 @@ Prefer null over guessing. Output the JSON object only, no markdown fences, no s
 
     const allow  = ["yes","no","mixed","seasonal","unknown"];
     const conf   = ["high","low"];
-    const boolOrNull = (v: unknown) => typeof v === "boolean" ? v : null;
+    const boolOrNull  = (v: unknown) => typeof v === "boolean" ? v : null;
+    const leashOrNull = (v: unknown) => v === "yes" || v === "no" || v === "mixed" ? v : null;
     const strOrNull  = (v: unknown) => v == null || v === "" ? null : String(v);
 
     return {
       dogs_allowed:             allow.includes(p.dogs_allowed) ? p.dogs_allowed : "unknown",
-      dogs_leash_required:      boolOrNull(p.dogs_leash_required),
+      dogs_leash_required:      leashOrNull(p.dogs_leash_required),
       dogs_allowed_areas:       strOrNull(p.dogs_allowed_areas),
       dogs_prohibited_areas:    strOrNull(p.dogs_prohibited_areas),
       dogs_off_leash_area:      strOrNull(p.dogs_off_leash_area),

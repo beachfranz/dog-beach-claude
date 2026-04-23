@@ -33,7 +33,7 @@ const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
 interface DogPolicy {
   dogs_allowed:             "yes" | "no" | "mixed" | "seasonal" | "unknown";
-  dogs_leash_required:      boolean | null;
+  dogs_leash_required:      "yes" | "no" | "mixed" | null;
   dogs_allowed_areas:       string | null;
   dogs_prohibited_areas:    string | null;
   dogs_off_leash_area:      string | null;
@@ -92,7 +92,7 @@ Extract the dog policy as a JSON object with these fields:
 
 - dogs_allowed_areas: short description of where dogs ARE permitted (e.g. "Blind Beach, campgrounds, paved trails"). null if dogs allowed park-wide or if dogs_allowed = "no".
 - dogs_prohibited_areas: short description of where dogs are NOT permitted (e.g. "Bodega Dunes, Russian River SMCA, nature trails, main beach"). null if dogs_allowed = "no" (the whole park is prohibited) or if dogs allowed park-wide.
-- dogs_leash_required: true, false, or null if unknown
+- dogs_leash_required: "yes", "no", "mixed", or null if unknown (mixed = rules vary by area or time)
 - dogs_off_leash_area: description if there's a designated off-leash zone; otherwise null
 - dogs_time_restrictions: description if hours limit dog access (e.g. "before 9am and after 5pm"); otherwise null
 - dogs_season_restrictions: description if seasonal limits apply (e.g. "closed to dogs March-September for snowy plover nesting"); otherwise null
@@ -119,7 +119,7 @@ Respond with a JSON object only, no other text.`;
     const validConf    = ["high", "low"];
     return {
       dogs_allowed:             validAllowed.includes(parsed.dogs_allowed) ? parsed.dogs_allowed : "unknown",
-      dogs_leash_required:      typeof parsed.dogs_leash_required === "boolean" ? parsed.dogs_leash_required : null,
+      dogs_leash_required:      ["yes","no","mixed"].includes(parsed.dogs_leash_required) ? parsed.dogs_leash_required : null,
       dogs_allowed_areas:       parsed.dogs_allowed_areas || null,
       dogs_prohibited_areas:    parsed.dogs_prohibited_areas || null,
       dogs_off_leash_area:      parsed.dogs_off_leash_area || null,

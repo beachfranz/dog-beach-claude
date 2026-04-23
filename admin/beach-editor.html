@@ -533,44 +533,7 @@
       text-overflow: ellipsis;
     }
 
-    /* Source tab */
-    .reextract-suggestions { margin-bottom: 16px; }
-    .reextract-suggestion {
-      display: block;
-      padding: 10px 14px;
-      margin-bottom: 8px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--panel);
-      cursor: pointer;
-      text-align: left;
-      width: 100%;
-      font-family: inherit;
-    }
-    .reextract-suggestion:hover { border-color: var(--accent); background: #eff6ff; }
-    .reextract-suggestion.selected { border-color: var(--accent); background: #eff6ff; box-shadow: 0 0 0 2px #bfdbfe; }
-    .reextract-sugg-top {
-      display: flex; justify-content: space-between; align-items: baseline;
-      font-size: 13px; font-weight: 500; color: var(--text);
-    }
-    .reextract-sugg-score {
-      font-family: ui-monospace, monospace;
-      font-size: 11px; color: var(--text-muted);
-    }
-    .reextract-sugg-url {
-      font-family: ui-monospace, monospace;
-      font-size: 11px; color: var(--accent);
-      margin: 2px 0;
-      word-break: break-all;
-    }
-    .reextract-sugg-snippet {
-      font-size: 12px; color: var(--text-muted);
-      line-height: 1.4;
-      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-      overflow: hidden;
-    }
-
-    /* Source-type badge (used on suggestions + current-source chip + compare header) */
+    /* Source-type badge (used on current-source chip + compare header) */
     .source-badge {
       display: inline-block;
       font-size: 9px;
@@ -741,6 +704,43 @@
     #toast.show { display: block; }
     #toast.ok  { background: #1e293b; color: white; }
     #toast.err { background: var(--red); color: white; }
+
+    /* ── Confirm modal (Yes / No) ───────────────────────────────────── */
+    .confirm-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(15, 23, 42, 0.55);
+      z-index: 1000;
+    }
+    .confirm-overlay.open { display: block; }
+    .confirm-sheet {
+      display: none;
+      position: fixed;
+      top: 20vh; left: 50%;
+      transform: translateX(-50%);
+      width: calc(100% - 32px); max-width: 440px;
+      background: var(--panel);
+      border: 1px solid var(--border); border-radius: 10px;
+      z-index: 1001; overflow: hidden;
+    }
+    .confirm-sheet.open { display: block; }
+    .confirm-header { padding: 16px 20px 8px; font-size: 15px; font-weight: 600; }
+    .confirm-body   { padding: 0 20px 16px; font-size: 13px; color: var(--text-muted); line-height: 1.5; white-space: pre-line; }
+    .confirm-footer {
+      padding: 12px 20px;
+      border-top: 1px solid var(--border);
+      background: #f8fafc;
+      display: flex; gap: 8px; justify-content: flex-end;
+    }
+    .confirm-btn {
+      padding: 7px 18px;
+      border-radius: 6px; font-size: 13px; font-weight: 500;
+      font-family: inherit; cursor: pointer;
+    }
+    .confirm-btn.yes { background: var(--accent); color: white; border: 1px solid var(--accent); }
+    .confirm-btn.yes:hover { background: var(--accent-hov); }
+    .confirm-btn.no  { background: white; color: var(--text); border: 1px solid var(--border); }
+    .confirm-btn.no:hover { border-color: var(--border-hov); }
   </style>
 </head>
 <body>
@@ -757,6 +757,17 @@
            autocomplete="off" />
     <button class="create-btn" onclick="openCreateDialog()" title="Create a new beach from a URL">+ Create</button>
     <div id="search-results" class="search-results"></div>
+  </div>
+</div>
+
+<!-- Yes / No confirm modal (reused for any prompt that needs explicit Yes/No) -->
+<div class="confirm-overlay" id="confirm-overlay"></div>
+<div class="confirm-sheet" id="confirm-sheet" role="dialog" aria-labelledby="confirm-title" aria-modal="true">
+  <div class="confirm-header" id="confirm-title">Confirm</div>
+  <div class="confirm-body"   id="confirm-body"></div>
+  <div class="confirm-footer">
+    <button type="button" class="confirm-btn no"  id="confirm-no">No</button>
+    <button type="button" class="confirm-btn yes" id="confirm-yes">Yes</button>
   </div>
 </div>
 
@@ -815,10 +826,7 @@
           Pick a source
           <span class="compare-source-chip" id="reextract-source-chip"></span>
         </h3>
-        <div id="reextract-suggestions" class="reextract-suggestions">
-          <div class="reextract-placeholder">Loading suggestions…</div>
-        </div>
-        <label class="reextract-url-label">Or paste a URL:</label>
+        <label class="reextract-url-label">Paste a source URL to re-extract:</label>
         <div class="reextract-url-row">
           <input class="reextract-url-input" id="reextract-url" type="url"
                  placeholder="https://…"
@@ -1481,7 +1489,10 @@ async function save() {
   if (isNewBeach) {
     isNewBeach = false;
     allBeaches.push(res.beach);
-    history.replaceState({}, '', `?edit=${encodeURIComponent(res.beach.location_id)}`);
+    // replaceState is blocked on file:// (unique-origin sandbox) — ignore
+    // the security error so local-file testing doesn't throw in the console.
+    try { history.replaceState({}, '', `?edit=${encodeURIComponent(res.beach.location_id)}`); }
+    catch { /* file:// — harmless */ }
     showToast('Created — now editing');
   } else {
     const idx = allBeaches.findIndex(b => b.location_id === current.location_id);
@@ -1494,6 +1505,87 @@ async function save() {
   // Re-render so locked fields + action labels update, and dirty classes clear
   renderForm();
   updateDirtyBadge();
+
+  // After a successful save, check whether this beach has any scored days.
+  // A freshly-created beach (or a re-activated one) will have no rows in
+  // beach_day_recommendations — offer to run the pipeline so it shows up
+  // on the user-facing site right away instead of waiting for the daily cron.
+  maybeOfferRefresh(current.location_id, current.is_active);
+}
+
+async function maybeOfferRefresh(locationId, isActive) {
+  let hasScore = false;
+  try {
+    const rows = await restGet(
+      `beach_day_recommendations?location_id=eq.${encodeURIComponent(locationId)}&select=location_id&limit=1`
+    );
+    hasScore = rows.length > 0;
+  } catch (err) {
+    // Read failure is non-fatal — the save already succeeded, we just
+    // don't know whether to offer a refresh so we stay quiet.
+    console.warn('Score check failed:', err);
+    return;
+  }
+  if (hasScore) return;
+
+  if (!isActive) {
+    // daily-beach-refresh filters to is_active=true, so scoring would no-op.
+    // Tell the user what they need to do rather than firing a silent no-op.
+    showToast('Saved. No score yet — activate the beach first, then re-save to score.', true);
+    return;
+  }
+
+  const proceed = await confirmYesNo(
+    'Enrich and score this beach?',
+    `Your changes have been saved.\n\nThis beach has no score yet. ` +
+    `Running the pipeline now (weather + tides + crowds + scoring) takes ~10–30 seconds. ` +
+    `You can also wait for the next daily run.`
+  );
+  if (!proceed) return;
+
+  showToast('Scoring… (10–30s)');
+  const res = await edgeFn('admin-refresh-beach', { location_id: locationId });
+  if (!res.ok || res.error) {
+    showToast('Scoring failed: ' + (res.error || `HTTP ${res.status}`), true);
+    return;
+  }
+  showToast('Scored! Check the user-facing site to confirm.');
+}
+
+// Custom Yes/No modal. Returns Promise<boolean>. Backdrop click + No button
+// + Escape all resolve to false. Used instead of window.confirm() so we can
+// label the buttons "Yes" / "No" (browser-native dialogs always say OK/Cancel).
+function confirmYesNo(title, message) {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('confirm-overlay');
+    const sheet   = document.getElementById('confirm-sheet');
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-body').textContent  = message;
+
+    const yesBtn = document.getElementById('confirm-yes');
+    const noBtn  = document.getElementById('confirm-no');
+
+    function close(answer) {
+      overlay.classList.remove('open');
+      sheet.classList.remove('open');
+      yesBtn.onclick = null; noBtn.onclick = null; overlay.onclick = null;
+      document.removeEventListener('keydown', onKey);
+      resolve(answer);
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') close(false);
+      if (e.key === 'Enter')  close(true);
+    }
+
+    yesBtn.onclick  = () => close(true);
+    noBtn.onclick   = () => close(false);
+    overlay.onclick = () => close(false);
+    document.addEventListener('keydown', onKey);
+
+    overlay.classList.add('open');
+    sheet.classList.add('open');
+    yesBtn.focus();
+  });
 }
 
 // Abandon an in-progress create — just wipe state and return to empty.
@@ -1860,73 +1952,35 @@ function initComparePage() {
   // First-time setup for this beach (or if user loaded a different beach)
   if (reex.forLocation !== current.location_id) {
     reex.forLocation = current.location_id;
-    reex.suggestions = null;
     reex.extracted   = null;
     reex.sourceUrl   = null;
     reex.picks       = {};
     document.getElementById('reextract-url').value = '';
     document.getElementById('reextract-status').textContent = '';
     document.getElementById('reextract-status').classList.remove('err');
-    document.getElementById('reextract-source-chip').textContent = '';
     document.getElementById('reextract-footer').style.display = 'none';
     document.getElementById('reextract-compare').innerHTML =
-      '<div class="reextract-placeholder">Pick a source above and click Extract to see results here.</div>';
-    loadSuggestions();
+      '<div class="reextract-placeholder">Paste a URL above and click Extract to see results here.</div>';
+    renderSourceChip();
   }
 }
 
-async function loadSuggestions() {
-  const list = document.getElementById('reextract-suggestions');
-  list.innerHTML = '<div class="reextract-placeholder">Loading suggestions…</div>';
-  try {
-    const res = await edgeFn('admin-suggest-sources', { location_id: current.location_id });
-    reex.suggestions = res.suggestions || [];
-    renderReextractSuggestions();
-  } catch (err) {
-    list.innerHTML = `<div class="reextract-placeholder">Couldn't load suggestions: ${escHtml(err.message)}</div>`;
-  }
-}
-
-function renderReextractSuggestions() {
-  const list = document.getElementById('reextract-suggestions');
-  if (!reex.suggestions || reex.suggestions.length === 0) {
-    list.innerHTML = '<div class="reextract-placeholder">No suggestions found — paste a URL below.</div>';
-    return;
-  }
-  list.innerHTML = reex.suggestions.map((s, i) => `
-    <button type="button" class="reextract-suggestion" data-idx="${i}" onclick="pickSuggestion(${i})">
-      <div class="reextract-sugg-top">
-        <span>
-          ${escHtml(s.title || s.domain)}
-          ${sourceBadgeHtml(s.source_type)}
-        </span>
-        <span class="reextract-sugg-score">${escHtml(s.domain)} · ${s.score}</span>
-      </div>
-      <div class="reextract-sugg-url">${escHtml(s.url)}</div>
-      <div class="reextract-sugg-snippet">${escHtml(s.snippet || '')}</div>
-    </button>
-  `).join('');
-
-  // Surface the current source's badge in the section heading chip too, so
-  // the user sees what they're about to replace.
+// Show the current source's type badge + hostname above the URL input so
+// the admin can see what they'd be replacing before re-extracting.
+function renderSourceChip() {
   const chip = document.getElementById('reextract-source-chip');
-  if (chip && current.dogs_policy_source_url) {
+  if (!chip) return;
+  if (current?.dogs_policy_source_url) {
     chip.innerHTML = `Current source: ${sourceBadgeHtml(current.source_type)}
       <span style="margin-left:4px;">${escHtml(new URL(current.dogs_policy_source_url).hostname.replace(/^www\./, ''))}</span>`;
+  } else {
+    chip.textContent = '';
   }
 }
 
 function sourceBadgeHtml(t) {
   const type = t || 'unknown';
   return `<span class="source-badge ${type}">${type}</span>`;
-}
-
-function pickSuggestion(i) {
-  const s = reex.suggestions[i];
-  if (!s) return;
-  document.querySelectorAll('.reextract-suggestion').forEach((el, j) =>
-    el.classList.toggle('selected', j === i));
-  document.getElementById('reextract-url').value = s.url;
 }
 
 async function runExtract() {

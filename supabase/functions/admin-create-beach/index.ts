@@ -11,9 +11,10 @@
 //   or  { error, code } — where code='duplicate' for a UNIQUE violation
 //                         on location_id (so the UI can surface it nicely)
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders }  from "../_shared/cors.ts";
-import { requireAdmin } from "../_shared/admin-auth.ts";
+import { createClient }   from "https://esm.sh/@supabase/supabase-js@2";
+import { corsHeaders }    from "../_shared/cors.ts";
+import { requireAdmin }   from "../_shared/admin-auth.ts";
+import { logAdminWrite }  from "../_shared/admin-audit.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -92,6 +93,11 @@ Deno.serve(async (req: Request) => {
     .single();
 
   if (error) {
+    await logAdminWrite(supabase, {
+      functionName: "admin-create-beach", action: "create", req,
+      locationId: location_id, after: row as Record<string, unknown>,
+      success: false, error: error.message,
+    });
     // Postgres error code 23505 = UNIQUE violation. location_id is the PK,
     // so this always means "id already taken" — surface it as a typed code
     // the UI can handle without string-matching.
@@ -100,6 +106,11 @@ Deno.serve(async (req: Request) => {
     }
     return json({ error: error.message, code: error.code }, 500);
   }
+
+  await logAdminWrite(supabase, {
+    functionName: "admin-create-beach", action: "create", req,
+    locationId: location_id, after: data, success: true,
+  });
 
   return json({ ok: true, beach: data, rejected });
 });

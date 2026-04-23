@@ -375,6 +375,202 @@
     }
     .delete-btn:hover { background: var(--red-bg); }
 
+    /* ── Page tabs (Edit / Compare) ─────────────────────────────────── */
+    .page-tabs {
+      max-width: 860px;
+      margin: 16px auto 0;
+      padding: 0 24px;
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .page-tab {
+      background: none; border: none;
+      font-family: inherit; font-size: 14px; font-weight: 500;
+      padding: 10px 20px;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+    }
+    .page-tab:hover:not(:disabled) { color: var(--text); }
+    .page-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .page-tab:disabled { color: var(--text-dim); cursor: not-allowed; }
+    .page-panel { display: none; }
+    .page-panel.active { display: block; }
+
+    /* ── Re-extract (Compare page) ──────────────────────────────────── */
+    .compare-section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 12px;
+      padding: 18px 20px;
+    }
+    .compare-section h3 {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin-bottom: 14px;
+    }
+    .compare-source-chip {
+      float: right;
+      font-size: 11px;
+      font-weight: 400;
+      text-transform: none;
+      letter-spacing: 0;
+      color: var(--text-muted);
+      max-width: 380px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Source tab */
+    .reextract-suggestions { margin-bottom: 16px; }
+    .reextract-suggestion {
+      display: block;
+      padding: 10px 14px;
+      margin-bottom: 8px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      cursor: pointer;
+      text-align: left;
+      width: 100%;
+      font-family: inherit;
+    }
+    .reextract-suggestion:hover { border-color: var(--accent); background: #eff6ff; }
+    .reextract-suggestion.selected { border-color: var(--accent); background: #eff6ff; box-shadow: 0 0 0 2px #bfdbfe; }
+    .reextract-sugg-top {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-size: 13px; font-weight: 500; color: var(--text);
+    }
+    .reextract-sugg-score {
+      font-family: ui-monospace, monospace;
+      font-size: 11px; color: var(--text-muted);
+    }
+    .reextract-sugg-url {
+      font-family: ui-monospace, monospace;
+      font-size: 11px; color: var(--accent);
+      margin: 2px 0;
+      word-break: break-all;
+    }
+    .reextract-sugg-snippet {
+      font-size: 12px; color: var(--text-muted);
+      line-height: 1.4;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .reextract-url-label {
+      display: block;
+      font-size: 13px; color: var(--text-muted);
+      margin: 14px 0 6px;
+    }
+    .reextract-url-row { display: flex; gap: 8px; }
+    .reextract-url-input {
+      flex: 1;
+      padding: 8px 12px;
+      font-size: 13px; font-family: inherit;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    .reextract-url-input:focus { border-color: var(--accent); outline: none; }
+    .reextract-extract-btn {
+      background: var(--accent); color: white;
+      padding: 8px 16px;
+      border: none; border-radius: 6px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer; font-family: inherit;
+    }
+    .reextract-extract-btn:hover { background: var(--accent-hov); }
+    .reextract-extract-btn:disabled { background: #cbd5e1; cursor: not-allowed; }
+    .reextract-status {
+      margin-top: 10px;
+      font-size: 12px; color: var(--text-muted);
+      min-height: 18px;
+    }
+    .reextract-status.err { color: var(--red); }
+
+    /* Compare tab */
+    .reextract-placeholder {
+      text-align: center; padding: 40px 20px;
+      color: var(--text-muted); font-size: 13px;
+    }
+    .reextract-table {
+      width: 100%; border-collapse: collapse; font-size: 12px;
+    }
+    .reextract-table th {
+      text-align: left; padding: 6px 8px;
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+      color: var(--text-muted); font-weight: 600;
+      border-bottom: 1px solid var(--border);
+    }
+    .reextract-table td {
+      padding: 6px 8px; vertical-align: top;
+      border-bottom: 1px solid #f1f5f9;
+      font-size: 12px; line-height: 1.5;
+    }
+    .reextract-field-name {
+      font-family: ui-monospace, monospace;
+      color: var(--text-muted); white-space: nowrap;
+    }
+    .reextract-cell {
+      max-width: 240px; word-break: break-word; color: var(--text);
+      position: relative;
+    }
+    .reextract-cell.null { color: var(--text-dim); font-style: italic; }
+    .reextract-cell.changed { background: var(--dirty-bg); }
+    .copy-btn {
+      background: none; border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 0 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      font-family: inherit;
+    }
+    .copy-btn:hover { border-color: var(--accent); color: var(--accent); background: #eff6ff; }
+    .reextract-keep-input {
+      width: 100%;
+      padding: 4px 6px;
+      font-size: 12px; font-family: inherit;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--panel);
+    }
+    .reextract-keep-input:focus { border-color: var(--accent); outline: none; }
+
+    .reextract-footer {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 20px;
+      margin-bottom: 24px;
+      display: flex; gap: 10px; align-items: center;
+    }
+    .reextract-bulk {
+      background: none; border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px; font-family: inherit;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+    .reextract-bulk:hover { color: var(--text); border-color: var(--border-hov); }
+    .reextract-apply {
+      margin-left: auto;
+      background: var(--accent); color: white;
+      padding: 8px 18px;
+      border: none; border-radius: 6px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer; font-family: inherit;
+    }
+    .reextract-apply:hover { background: var(--accent-hov); }
+    .reextract-apply:disabled { background: #cbd5e1; cursor: not-allowed; }
+
     /* Toast */
     #toast {
       position: fixed;
@@ -410,10 +606,59 @@
   </div>
 </div>
 
+<div class="page-tabs">
+  <button class="page-tab active" id="tab-edit"    data-page="edit"    onclick="switchPage('edit')">Edit</button>
+  <button class="page-tab"        id="tab-compare" data-page="compare" onclick="switchPage('compare')">Compare</button>
+</div>
+
 <main id="main">
-  <div id="empty" class="empty-state">
-    <div class="empty-state-icon">🏖️</div>
-    <div>Search for a beach above to start editing.</div>
+  <!-- Edit page — main form -->
+  <div class="page-panel active" id="page-edit">
+    <div id="empty" class="empty-state">
+      <div class="empty-state-icon">🏖️</div>
+      <div>Search for a beach above to start editing.</div>
+    </div>
+  </div>
+
+  <!-- Compare page — source picker + 3-column diff -->
+  <div class="page-panel" id="page-compare">
+    <div id="compare-empty" class="empty-state">
+      <div class="empty-state-icon">🔁</div>
+      <div>Load a beach on the Edit tab first, then return here to pull fresh data from a specific source.</div>
+    </div>
+
+    <div id="compare-body" style="display:none;">
+      <section class="compare-section">
+        <h3>
+          Pick a source
+          <span class="compare-source-chip" id="reextract-source-chip"></span>
+        </h3>
+        <div id="reextract-suggestions" class="reextract-suggestions">
+          <div class="reextract-placeholder">Loading suggestions…</div>
+        </div>
+        <label class="reextract-url-label">Or paste a URL:</label>
+        <div class="reextract-url-row">
+          <input class="reextract-url-input" id="reextract-url" type="url"
+                 placeholder="https://…"
+                 onkeydown="if(event.key==='Enter')runExtract()" />
+          <button class="reextract-extract-btn" id="reextract-extract-btn" onclick="runExtract()">Extract</button>
+        </div>
+        <div class="reextract-status" id="reextract-status"></div>
+      </section>
+
+      <section class="compare-section" id="compare-results-section">
+        <h3>Compare results</h3>
+        <div id="reextract-compare">
+          <div class="reextract-placeholder">Pick a source above and click Extract to see results here.</div>
+        </div>
+      </section>
+
+      <div class="reextract-footer" id="reextract-footer" style="display:none;">
+        <button type="button" class="reextract-bulk"  onclick="reextractBulk('new')">Accept all new</button>
+        <button type="button" class="reextract-bulk"  onclick="reextractBulk('current')">Revert all</button>
+        <button type="button" class="reextract-apply" onclick="applyReextract()">Apply selections → Edit tab</button>
+      </div>
+    </div>
   </div>
 </main>
 
@@ -512,11 +757,18 @@ function selectBeach(b) {
   current = JSON.parse(JSON.stringify(b)); // deep clone so edits don't alter list
   dirty = {};
   history.replaceState({}, '', `?edit=${encodeURIComponent(b.location_id)}`);
+  // Switching beaches invalidates any cached re-extract state
+  reex.forLocation = null;
   renderForm();
+  // If the Compare tab is currently active, re-init so the user sees
+  // fresh suggestions for the new beach instead of stale state.
+  if (document.querySelector('.page-tab.active')?.dataset.page === 'compare') {
+    initComparePage();
+  }
 }
 
 function renderForm() {
-  const main = document.getElementById('main');
+  const main = document.getElementById('page-edit');
   const b = current;
 
   main.innerHTML = `
@@ -970,7 +1222,7 @@ async function deletePermanent() {
   current = null;
   dirty = {};
   history.replaceState({}, '', location.pathname);
-  document.getElementById('main').innerHTML = `
+  document.getElementById('page-edit').innerHTML = `
     <div class="empty-state">
       <div class="empty-state-icon">🗑️</div>
       <div>Deleted. Search for another beach above.</div>
@@ -1035,6 +1287,301 @@ function showToast(msg, isErr = false) {
   t.textContent = msg;
   t.className = 'show ' + (isErr ? 'err' : 'ok');
   setTimeout(() => t.className = '', 2500);
+}
+
+// ── Re-extract modal ──────────────────────────────────────────────────────
+const reex = {
+  forLocation: null,        // location_id suggestions were loaded for
+  suggestions: null,
+  extracted:   null,
+  sourceUrl:   null,
+  chosen:      {},          // field → chosen string value
+};
+
+// Fields the LLM re-extraction covers. Order matches how the admin editor
+// surfaces them (dogs → practical → amenities → confidence).
+const REEX_FIELDS = [
+  'dogs_allowed', 'dogs_leash_required',
+  'dogs_allowed_areas', 'dogs_off_leash_area', 'dogs_prohibited_areas',
+  'dogs_time_restrictions', 'dogs_season_restrictions',
+  'dogs_policy_notes',
+  'hours_text', 'hours_notes',
+  'has_parking', 'parking_type', 'parking_notes',
+  'has_restrooms', 'has_showers', 'has_drinking_water',
+  'has_lifeguards', 'has_disabled_access', 'has_food',
+  'has_fire_pits', 'has_picnic_area',
+  'confidence',   // informational only — not written to DB
+];
+
+// Switch between the Edit and Compare page panels. Lazily loads
+// suggestions the first time the Compare tab is entered for a beach.
+function switchPage(name) {
+  document.querySelectorAll('.page-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.page === name));
+  document.querySelectorAll('.page-panel').forEach(p =>
+    p.classList.toggle('active', p.id === `page-${name}`));
+
+  if (name === 'compare') initComparePage();
+}
+
+// Called on first entry to Compare with a beach loaded. Resets state,
+// kicks off the AI-suggestions fetch. Re-entry doesn't re-fetch (user
+// can manually re-extract with a different URL).
+function initComparePage() {
+  const empty = document.getElementById('compare-empty');
+  const body  = document.getElementById('compare-body');
+  if (!current) {
+    empty.style.display = '';
+    body.style.display  = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  body.style.display  = '';
+
+  // First-time setup for this beach (or if user loaded a different beach)
+  if (reex.forLocation !== current.location_id) {
+    reex.forLocation = current.location_id;
+    reex.suggestions = null;
+    reex.extracted   = null;
+    reex.sourceUrl   = null;
+    reex.chosen      = {};
+    document.getElementById('reextract-url').value = '';
+    document.getElementById('reextract-status').textContent = '';
+    document.getElementById('reextract-status').classList.remove('err');
+    document.getElementById('reextract-source-chip').textContent = '';
+    document.getElementById('reextract-footer').style.display = 'none';
+    document.getElementById('reextract-compare').innerHTML =
+      '<div class="reextract-placeholder">Pick a source above and click Extract to see results here.</div>';
+    loadSuggestions();
+  }
+}
+
+async function loadSuggestions() {
+  const list = document.getElementById('reextract-suggestions');
+  list.innerHTML = '<div class="reextract-placeholder">Loading suggestions…</div>';
+  try {
+    const res = await edgeFn('admin-suggest-sources', { location_id: current.location_id });
+    reex.suggestions = res.suggestions || [];
+    renderReextractSuggestions();
+  } catch (err) {
+    list.innerHTML = `<div class="reextract-placeholder">Couldn't load suggestions: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function renderReextractSuggestions() {
+  const list = document.getElementById('reextract-suggestions');
+  if (!reex.suggestions || reex.suggestions.length === 0) {
+    list.innerHTML = '<div class="reextract-placeholder">No suggestions found — paste a URL below.</div>';
+    return;
+  }
+  list.innerHTML = reex.suggestions.map((s, i) => `
+    <button type="button" class="reextract-suggestion" data-idx="${i}" onclick="pickSuggestion(${i})">
+      <div class="reextract-sugg-top">
+        <span>${escHtml(s.title || s.domain)}</span>
+        <span class="reextract-sugg-score">${escHtml(s.domain)} · ${s.score}</span>
+      </div>
+      <div class="reextract-sugg-url">${escHtml(s.url)}</div>
+      <div class="reextract-sugg-snippet">${escHtml(s.snippet || '')}</div>
+    </button>
+  `).join('');
+}
+
+function pickSuggestion(i) {
+  const s = reex.suggestions[i];
+  if (!s) return;
+  document.querySelectorAll('.reextract-suggestion').forEach((el, j) =>
+    el.classList.toggle('selected', j === i));
+  document.getElementById('reextract-url').value = s.url;
+}
+
+async function runExtract() {
+  const url = document.getElementById('reextract-url').value.trim();
+  if (!url) { setReextractStatus('Enter or pick a URL first', true); return; }
+  try { new URL(url); } catch { setReextractStatus('Not a valid URL', true); return; }
+
+  const btn = document.getElementById('reextract-extract-btn');
+  btn.disabled = true;
+  btn.textContent = 'Extracting…';
+  setReextractStatus('Fetching source + asking Claude (10–30s)…');
+
+  const res = await edgeFn('admin-re-extract-policy', {
+    location_id: current.location_id,
+    source_url:  url,
+  });
+
+  btn.disabled = false;
+  btn.textContent = 'Extract';
+
+  if (res.error) {
+    setReextractStatus('Error: ' + res.error, true);
+    return;
+  }
+
+  reex.extracted = res.extracted;
+  reex.sourceUrl = res.source_url;
+
+  // Seed chosen with the new values by default — user can flip to current per-field
+  reex.chosen = {};
+  for (const f of REEX_FIELDS) {
+    if (f === 'confidence') continue;  // not editable
+    reex.chosen[f] = displayValue(reex.extracted[f]);
+  }
+
+  document.getElementById('reextract-source-chip').textContent =
+    `Source: ${new URL(res.source_url).hostname.replace(/^www\./, '')}`;
+  document.getElementById('reextract-footer').style.display = 'flex';
+  renderReextractCompare();
+  setReextractStatus(`Extracted ${res.fetched_chars} chars of source text.`);
+  // Scroll the results section into view — Source and Compare are
+  // stacked on the same page now, so no tab switch needed.
+  document.getElementById('compare-results-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function setReextractStatus(msg, isErr = false) {
+  const el = document.getElementById('reextract-status');
+  el.textContent = msg;
+  el.classList.toggle('err', isErr);
+}
+
+// Render the 3-column compare table.
+// Keep column is a text input so users can edit freeform. Arrows copy
+// Current / New into Keep.
+function renderReextractCompare() {
+  const rows = REEX_FIELDS.map(f => {
+    const cur = displayValue(current[f]);
+    const neu = displayValue(reex.extracted[f]);
+    const changedClass = cur !== neu ? 'changed' : '';
+    const keepVal = reex.chosen[f] ?? '';
+    if (f === 'confidence') {
+      return `<tr>
+        <td class="reextract-field-name">${f}</td>
+        <td class="reextract-cell ${cur === 'null' ? 'null' : ''}">${escHtml(cur)}</td>
+        <td class="reextract-cell ${changedClass} ${neu === 'null' ? 'null' : ''}">${escHtml(neu)}</td>
+        <td class="reextract-cell" style="color:var(--text-dim);font-style:italic;">(informational)</td>
+      </tr>`;
+    }
+    return `<tr data-field="${f}">
+      <td class="reextract-field-name">${f}</td>
+      <td class="reextract-cell ${cur === 'null' ? 'null' : ''}">
+        ${escHtml(cur)}
+        <button class="copy-btn" onclick="reextractCopy('${f}','current')" title="Copy to Keep">→</button>
+      </td>
+      <td class="reextract-cell ${changedClass} ${neu === 'null' ? 'null' : ''}">
+        <button class="copy-btn" onclick="reextractCopy('${f}','new')" title="Copy to Keep">←</button>
+        ${escHtml(neu)}
+      </td>
+      <td class="reextract-cell">
+        <input class="reextract-keep-input" type="text" data-field="${f}"
+               value="${escAttr(keepVal)}" oninput="reex.chosen['${f}'] = this.value" />
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('reextract-compare').innerHTML = `
+    <table class="reextract-table">
+      <thead>
+        <tr>
+          <th style="width:30%;">Field</th>
+          <th style="width:25%;">Current</th>
+          <th style="width:25%;">New</th>
+          <th style="width:20%;">Keep</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+// Format a value for display / Keep input. Booleans → "true"/"false",
+// null/undefined → "null", everything else → String.
+function displayValue(v) {
+  if (v === null || v === undefined || v === '') return 'null';
+  if (v === true)  return 'true';
+  if (v === false) return 'false';
+  return String(v);
+}
+
+// Parse a Keep input back into the right JS value for applyToForm.
+function parseKeepValue(field, str) {
+  const s = (str ?? '').trim();
+  if (s === '' || s === 'null') return null;
+
+  // Boolean fields — accept true/false/yes/no
+  const boolFields = new Set([
+    'has_parking', 'has_restrooms', 'has_showers', 'has_drinking_water',
+    'has_lifeguards', 'has_disabled_access', 'has_food',
+    'has_fire_pits', 'has_picnic_area',
+  ]);
+  if (boolFields.has(field)) {
+    if (/^(true|yes)$/i.test(s)) return true;
+    if (/^(false|no)$/i.test(s)) return false;
+    return null;
+  }
+
+  // Enum / string fields — pass through as string
+  return s;
+}
+
+function reextractCopy(field, side) {
+  const value = side === 'current'
+    ? displayValue(current[field])
+    : displayValue(reex.extracted[field]);
+  reex.chosen[field] = value;
+  const input = document.querySelector(`.reextract-keep-input[data-field="${field}"]`);
+  if (input) input.value = value === 'null' ? '' : value;
+}
+
+function reextractBulk(side) {
+  for (const f of REEX_FIELDS) {
+    if (f === 'confidence') continue;
+    reextractCopy(f, side);
+  }
+}
+
+// Push chosen values into the main form as pending edits.
+// Uses the existing input event triggers so markDirty() fires naturally.
+function applyReextract() {
+  let applied = 0;
+  for (const [field, strVal] of Object.entries(reex.chosen)) {
+    const value = parseKeepValue(field, strVal);
+    // Skip fields where Keep matches Current (nothing to apply)
+    if (displayValue(current[field]) === displayValue(value)) continue;
+    applyValueToForm(field, value);
+    applied++;
+  }
+
+  // Bump the source URL + updated timestamp so provenance reflects the new source
+  if (applied > 0) {
+    applyValueToForm('dogs_policy_source_url', reex.sourceUrl);
+    applyValueToForm('dogs_policy_updated_at', new Date().toISOString());
+  }
+
+  switchPage('edit');
+  showToast(applied > 0 ? `${applied} field${applied === 1 ? '' : 's'} staged — review and hit Save` : 'No changes to apply');
+}
+
+// Apply one parsed value to the main form, triggering dirty-tracking.
+function applyValueToForm(field, value) {
+  const el = document.getElementById(`in-${field}`);
+  if (!el) { markDirty(field, value); return; }
+
+  // Tri-state booleans (the .tri container with buttons)
+  if (el.classList.contains('tri')) {
+    const target = value === true ? 'true' : value === false ? 'false' : 'null';
+    const btn = el.querySelector(`button[data-val="${target}"]`);
+    if (btn) btn.click();
+    return;
+  }
+
+  // Text / textarea / select — set value and dispatch input so interaction
+  // handler runs (which calls markDirty).
+  if (el.matches('input, textarea, select')) {
+    el.value = value ?? '';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    return;
+  }
+
+  // Fallback — mark dirty directly.
+  markDirty(field, value);
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────

@@ -7,9 +7,13 @@
 // Security model: same as other admin-* functions (obscure URL,
 // service-role server-side, no auth layer). See admin-update-beach.
 //
-// POST { location_id, source_url }
+// POST { location_id, source_url }                       — existing beach
+//  or  { display_name, source_url }                      — new beach (create-mode)
 // Returns { extracted: {...}, source_url, fetched_chars }
 // On fetch failure: { error, source_url }
+//
+// The LLM prompt uses beach_name as context — for existing beaches we look
+// it up via location_id; for create-mode callers pass display_name directly.
 
 import Anthropic from "https://esm.sh/@anthropic-ai/sdk@0.30.1";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -155,22 +159,31 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST")   return json({ error: "POST only" }, 405);
 
-  let body: { location_id?: string; source_url?: string };
+  let body: { location_id?: string; display_name?: string; source_url?: string };
   try { body = await req.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
 
   const { location_id, source_url } = body;
-  if (!location_id) return json({ error: "location_id required" }, 400);
-  if (!source_url)  return json({ error: "source_url required" }, 400);
+  if (!source_url) return json({ error: "source_url required" }, 400);
   try { new URL(source_url); } catch { return json({ error: "Invalid URL" }, 400); }
+  if (!location_id && !body.display_name) {
+    return json({ error: "location_id or display_name required" }, 400);
+  }
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-
-  const { data: beach, error } = await supabase
-    .from("beaches")
-    .select("display_name")
-    .eq("location_id", location_id)
-    .single();
-  if (error || !beach) return json({ error: "Beach not found" }, 404);
+  // Resolve the name used for LLM context. Existing beach → lookup by id.
+  // Create-mode caller → trust the passed display_name.
+  let beachName: string;
+  if (location_id) {
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+    const { data: beach, error } = await supabase
+      .from("beaches")
+      .select("display_name")
+      .eq("location_id", location_id)
+      .single();
+    if (error || !beach) return json({ error: "Beach not found" }, 404);
+    beachName = beach.display_name;
+  } else {
+    beachName = body.display_name!;
+  }
 
   let sourceText: string;
   try {
@@ -184,7 +197,7 @@ Deno.serve(async (req: Request) => {
 
   let extracted;
   try {
-    extracted = await extractPolicy(beach.display_name, source_url, sourceText);
+    extracted = await extractPolicy(beachName, source_url, sourceText);
   } catch (err) {
     return json({ error: `LLM extraction failed: ${(err as Error).message}`, source_url }, 500);
   }

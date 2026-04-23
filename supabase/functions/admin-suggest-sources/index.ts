@@ -46,6 +46,19 @@ function domainOf(url: string): string {
   try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; }
 }
 
+// Matches the SQL _classify_source_url() logic. Kept in sync by hand —
+// if the SQL taxonomy changes, update both.
+function classifyUrl(url: string | null): string | null {
+  if (!url) return null;
+  if (/:\/\/[^/]*\.(gov|mil)(\/|:|$)/i.test(url))       return "official";
+  if (/:\/\/[^/]*\.gov\.[a-z]{2,3}(\/|:|$)/i.test(url)) return "official";
+  if (/:\/\/[^/]*\.[a-z]{2}\.us(\/|:|$)/i.test(url))    return "official";
+  if (/:\/\/[^/]*(yelp|tripadvisor|facebook|reddit|wikipedia|wikimedia|instagram|twitter|x\.com|tiktok|pinterest|alltrails|wikiloc|quora|medium|bringfido|rover|huskymutty)\./i.test(url))
+    return "community";
+  if (/:\/\/[^/]*\.(org|edu)(\/|:|$)/i.test(url))       return "nonprofit";
+  return "commercial";
+}
+
 Deno.serve(async (req: Request) => {
   const cors = { ...corsHeaders(req, "POST, OPTIONS"), "Content-Type": "application/json" };
   const json = (body: unknown, status = 200) =>
@@ -92,11 +105,12 @@ Deno.serve(async (req: Request) => {
     .sort((a, b) => b.score - a.score)
     .slice(0, 3)
     .map(r => ({
-      url:     r.url,
-      title:   r.title,
-      snippet: (r.content || "").slice(0, 200),
-      domain:  domainOf(r.url),
-      score:   Number(r.score.toFixed(2)),
+      url:         r.url,
+      title:       r.title,
+      snippet:     (r.content || "").slice(0, 200),
+      domain:      domainOf(r.url),
+      score:       Number(r.score.toFixed(2)),
+      source_type: classifyUrl(r.url),
     }));
 
   return json({ query, suggestions });

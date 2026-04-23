@@ -77,9 +77,13 @@
       top: 48px;
       z-index: 40;
     }
-    .search-bar-inner { max-width: 860px; margin: 0 auto; position: relative; }
+    .search-bar-inner {
+      max-width: 860px; margin: 0 auto;
+      position: relative;
+      display: flex; gap: 8px; align-items: center;
+    }
     .search-input {
-      width: 100%;
+      flex: 1;
       padding: 10px 14px;
       font-size: 14px;
       font-family: inherit;
@@ -87,6 +91,15 @@
       border-radius: 8px;
       outline: none;
     }
+    .create-btn {
+      background: var(--accent); color: white;
+      padding: 10px 16px;
+      border: none; border-radius: 8px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer; font-family: inherit;
+      flex-shrink: 0;
+    }
+    .create-btn:hover { background: var(--accent-hov); }
     .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #dbeafe; }
     .search-results {
       display: none;
@@ -103,7 +116,99 @@
       box-shadow: 0 4px 12px rgba(0,0,0,0.1);
       z-index: 60;
     }
-    .search-results.open { display: block; }
+    .search-results.open { display: block; top: calc(100% + 4px); }
+
+    /* ── Create dialog ──────────────────────────────────────────────── */
+    .create-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(15, 23, 42, 0.55);
+      z-index: 998;
+    }
+    .create-overlay.open { display: block; }
+    .create-sheet {
+      display: none;
+      position: fixed;
+      top: 10vh; left: 50%;
+      transform: translateX(-50%);
+      width: calc(100% - 32px);
+      max-width: 520px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      z-index: 999;
+      overflow: hidden;
+    }
+    .create-sheet.open { display: block; }
+    .create-header {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      background: #f8fafc;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .create-header h3 { font-size: 15px; font-weight: 600; }
+    .create-header button.close {
+      margin-left: auto;
+      background: none; border: none;
+      font-size: 20px; color: var(--text-muted);
+      cursor: pointer; padding: 0 4px;
+    }
+    .create-body { padding: 18px 20px; }
+    .create-body label {
+      display: block;
+      font-size: 13px; color: var(--text-muted);
+      margin-bottom: 4px; margin-top: 10px;
+    }
+    .create-body label:first-child { margin-top: 0; }
+    .create-body input {
+      width: 100%;
+      padding: 8px 12px;
+      font-size: 14px; font-family: inherit;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    .create-body input:focus { border-color: var(--accent); outline: none; }
+    .create-hint {
+      margin-top: 6px;
+      font-size: 11px; color: var(--text-dim);
+      line-height: 1.5;
+    }
+    .create-footer {
+      padding: 12px 20px;
+      border-top: 1px solid var(--border);
+      background: #f8fafc;
+      display: flex; gap: 8px; align-items: center;
+    }
+    .create-status {
+      flex: 1;
+      font-size: 12px; color: var(--text-muted);
+    }
+    .create-status.err { color: var(--red); }
+    .create-cancel {
+      background: none; border: 1px solid var(--border);
+      padding: 7px 14px; border-radius: 6px;
+      font-size: 13px; font-family: inherit;
+      cursor: pointer; color: var(--text-muted);
+    }
+    .create-cancel:hover { color: var(--text); border-color: var(--border-hov); }
+    .create-submit {
+      background: var(--accent); color: white;
+      padding: 7px 16px; border: none; border-radius: 6px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer; font-family: inherit;
+    }
+    .create-submit:hover { background: var(--accent-hov); }
+    .create-submit:disabled { background: #cbd5e1; cursor: not-allowed; }
+
+    /* Create-mode banner at top of the edit form */
+    .create-banner {
+      background: var(--green-bg); color: var(--green);
+      border: 1px solid var(--green);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px; font-weight: 500;
+      margin-bottom: 14px;
+    }
     .search-result {
       padding: 10px 14px;
       cursor: pointer;
@@ -464,6 +569,23 @@
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
       overflow: hidden;
     }
+
+    /* Source-type badge (used on suggestions + current-source chip + compare header) */
+    .source-badge {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 2px 7px;
+      border-radius: 9999px;
+      vertical-align: middle;
+    }
+    .source-badge.official   { background: var(--green-bg); color: var(--green); }
+    .source-badge.nonprofit  { background: #e0e7ff;         color: #3730a3; }
+    .source-badge.community  { background: var(--amber-bg); color: var(--amber); }
+    .source-badge.commercial { background: #f3e8ff;         color: #6b21a8; }
+    .source-badge.unknown    { background: #f1f5f9;         color: var(--text-muted); }
     .reextract-url-label {
       display: block;
       font-size: 13px; color: var(--text-muted);
@@ -522,26 +644,36 @@
       position: relative;
     }
     .reextract-cell.null { color: var(--text-dim); font-style: italic; }
-    .reextract-cell.changed { background: var(--dirty-bg); }
-    .copy-btn {
-      background: none; border: 1px solid var(--border);
-      color: var(--text-muted);
-      padding: 0 6px;
-      border-radius: 4px;
+    /* Selectable cells (Current + New columns). Click to pick. */
+    .reextract-cell.selectable {
       cursor: pointer;
-      font-size: 11px;
-      font-family: inherit;
-    }
-    .copy-btn:hover { border-color: var(--accent); color: var(--accent); background: #eff6ff; }
-    .reextract-keep-input {
-      width: 100%;
-      padding: 4px 6px;
-      font-size: 12px; font-family: inherit;
-      border: 1px solid var(--border);
+      border: 1px solid transparent;
       border-radius: 4px;
-      background: var(--panel);
+      transition: background 0.12s, border-color 0.12s;
+      padding: 6px 22px 6px 8px;
     }
-    .reextract-keep-input:focus { border-color: var(--accent); outline: none; }
+    .reextract-cell.selectable:hover { background: #eff6ff; border-color: #bfdbfe; }
+    .reextract-cell.selectable.picked {
+      background: #dbeafe;
+      border-color: var(--accent);
+    }
+    .reextract-cell.selectable .check {
+      position: absolute;
+      top: 6px; right: 6px;
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 13px;
+    }
+    /* Keep column — read-only display, styled subtly */
+    .reextract-cell.keep-display {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--text);
+      font-size: 11px;
+      background: #f8fafc;
+      border-radius: 4px;
+      padding: 6px 8px;
+    }
+    .reextract-cell.keep-display.null { font-style: italic; color: var(--text-dim); }
 
     .reextract-footer {
       background: var(--panel);
@@ -602,7 +734,36 @@
     <input id="search-input" class="search-input" type="text"
            placeholder="Search by name or location_id…"
            autocomplete="off" />
+    <button class="create-btn" onclick="openCreateDialog()" title="Create a new beach from a URL">+ Create</button>
     <div id="search-results" class="search-results"></div>
+  </div>
+</div>
+
+<!-- Create dialog -->
+<div class="create-overlay" id="create-overlay" onclick="closeCreateDialog()"></div>
+<div class="create-sheet" id="create-sheet" role="dialog" aria-labelledby="create-title">
+  <div class="create-header">
+    <h3 id="create-title">Create a new beach</h3>
+    <button class="close" onclick="closeCreateDialog()" aria-label="Close">&#x2715;</button>
+  </div>
+  <div class="create-body">
+    <label for="create-name">Beach name</label>
+    <input id="create-name" type="text" placeholder="e.g. Point Reyes Dog Beach" autocomplete="off" />
+
+    <label for="create-url">Source URL</label>
+    <input id="create-url" type="url" placeholder="https://…" autocomplete="off"
+           onkeydown="if(event.key==='Enter')runCreate()" />
+
+    <div class="create-hint">
+      We'll fetch the URL, extract dog / practical / amenity fields, and open an
+      editable form pre-filled with what we found. You'll still set lat/lng on the
+      map before saving.
+    </div>
+  </div>
+  <div class="create-footer">
+    <div class="create-status" id="create-status"></div>
+    <button class="create-cancel" onclick="closeCreateDialog()">Cancel</button>
+    <button class="create-submit" id="create-submit" onclick="runCreate()">Extract &amp; open</button>
   </div>
 </div>
 
@@ -672,6 +833,7 @@ const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
 let allBeaches  = [];           // full list for search
 let current     = null;         // full row of the selected beach
 let dirty       = {};           // field → new value (pending save)
+let isNewBeach  = false;         // true while editing an unsaved, just-created beach
 let map         = null;         // Leaflet map
 let marker      = null;         // Leaflet marker
 
@@ -756,6 +918,7 @@ function wireSearch() {
 function selectBeach(b) {
   current = JSON.parse(JSON.stringify(b)); // deep clone so edits don't alter list
   dirty = {};
+  isNewBeach = false;
   history.replaceState({}, '', `?edit=${encodeURIComponent(b.location_id)}`);
   // Switching beaches invalidates any cached re-extract state
   reex.forLocation = null;
@@ -778,8 +941,14 @@ function renderForm() {
       <div class="beach-header-active ${b.is_active ? 'yes' : 'no'}" id="hdr-active">${b.is_active ? 'Active' : 'Inactive'}</div>
     </div>
 
+    ${isNewBeach ? `<div class="create-banner">
+      ✨ Creating a new beach — review the extracted fields, set lat/lng on the map, then Save.
+    </div>` : ''}
+
     ${sectionHtml('Identity', false, [
-      lockedField('location_id', b.location_id, 'Primary key — not editable'),
+      isNewBeach
+        ? textField('location_id', 'Location ID', b.location_id, { placeholder: 'alphanumeric + hyphens' })
+        : lockedField('location_id', b.location_id, 'Primary key — not editable'),
       textField('display_name', 'Display name', b.display_name),
       boolField('is_active', 'Active'),
       textField('timezone', 'Timezone', b.timezone, { placeholder: 'America/Los_Angeles' }),
@@ -873,9 +1042,11 @@ function renderForm() {
     ])}
 
     <div class="actions-bar">
-      <button class="save-btn" id="save-btn" onclick="save()" disabled>Save</button>
-      <span class="dirty-count" id="dirty-count">No changes</span>
-      <button class="delete-btn" onclick="deletePermanent()">Delete permanently</button>
+      <button class="save-btn" id="save-btn" onclick="save()" ${isNewBeach ? '' : 'disabled'}>${isNewBeach ? 'Create beach' : 'Save'}</button>
+      <span class="dirty-count" id="dirty-count">${isNewBeach ? 'New beach — review + save' : 'No changes'}</span>
+      ${isNewBeach
+        ? `<button class="delete-btn" onclick="discardCreate()">Discard</button>`
+        : `<button class="delete-btn" onclick="deletePermanent()">Delete permanently</button>`}
     </div>
   `;
 
@@ -1174,36 +1345,84 @@ function updateDirtyBadge() {
 
 // ── Save / delete ─────────────────────────────────────────────────────────
 async function save() {
-  if (Object.keys(dirty).length === 0) return;
+  if (!isNewBeach && Object.keys(dirty).length === 0) return;
 
   const btn = document.getElementById('save-btn');
   btn.disabled = true;
-  btn.textContent = 'Saving…';
+  btn.textContent = isNewBeach ? 'Creating…' : 'Saving…';
 
-  const res = await edgeFn('admin-update-beach', {
-    location_id: current.location_id,
-    fields: dirty,
-  });
+  let res;
+  if (isNewBeach) {
+    // location_id came from the slug (or a user edit to it). Pull the
+    // latest from the form in case the user tweaked it just before save.
+    const idInput = document.getElementById('in-location_id');
+    const locId = (idInput?.value || current.location_id || '').trim();
+    if (!locId) {
+      showToast('location_id is required', true);
+      btn.disabled = false;
+      btn.textContent = 'Create beach';
+      return;
+    }
+    // Strip location_id out of the fields blob (it's a top-level param
+    // on the create endpoint) and also omit null/undefined fields so the
+    // server uses its own defaults.
+    const fields = {};
+    for (const [k, v] of Object.entries(dirty)) {
+      if (k === 'location_id') continue;
+      if (v === null || v === undefined) continue;
+      fields[k] = v;
+    }
+    res = await edgeFn('admin-create-beach', { location_id: locId, fields });
+  } else {
+    res = await edgeFn('admin-update-beach', {
+      location_id: current.location_id,
+      fields: dirty,
+    });
+  }
 
-  btn.textContent = 'Save';
+  btn.textContent = isNewBeach ? 'Create beach' : 'Save';
 
   if (res.error) {
-    showToast('Error: ' + res.error, true);
+    if (res.code === 'duplicate') {
+      showToast(`That location_id is taken — pick another on the form and try again`, true);
+    } else {
+      showToast('Error: ' + res.error, true);
+    }
     btn.disabled = false;
     return;
   }
 
-  // Refresh current with new server state
+  // On create success, switch mode + navigate so refresh stays on this beach
+  if (isNewBeach) {
+    isNewBeach = false;
+    allBeaches.push(res.beach);
+    history.replaceState({}, '', `?edit=${encodeURIComponent(res.beach.location_id)}`);
+    showToast('Created — now editing');
+  } else {
+    const idx = allBeaches.findIndex(b => b.location_id === current.location_id);
+    if (idx >= 0) allBeaches[idx] = res.beach;
+    showToast(`Saved${res.rejected?.length ? ' (rejected: ' + res.rejected.join(', ') + ')' : ''}`);
+  }
+
   current = res.beach;
-  const idx = allBeaches.findIndex(b => b.location_id === current.location_id);
-  if (idx >= 0) allBeaches[idx] = current;
   dirty = {};
-
-  // Clear dirty classes
-  document.querySelectorAll('.dirty').forEach(el => el.classList.remove('dirty'));
+  // Re-render so locked fields + action labels update, and dirty classes clear
+  renderForm();
   updateDirtyBadge();
+}
 
-  showToast(`Saved${res.rejected?.length ? ' (rejected: ' + res.rejected.join(', ') + ')' : ''}`);
+// Abandon an in-progress create — just wipe state and return to empty.
+function discardCreate() {
+  if (!confirm('Discard this new beach? Any extracted / typed values will be lost.')) return;
+  current = null;
+  dirty = {};
+  isNewBeach = false;
+  document.getElementById('page-edit').innerHTML = `
+    <div class="empty-state">
+      <div class="empty-state-icon">🏖️</div>
+      <div>Search for a beach above to start editing.</div>
+    </div>`;
+  showToast('Discarded');
 }
 
 async function deletePermanent() {
@@ -1289,13 +1508,131 @@ function showToast(msg, isErr = false) {
   setTimeout(() => t.className = '', 2500);
 }
 
+// ── Create new beach ──────────────────────────────────────────────────────
+function openCreateDialog() {
+  document.getElementById('create-name').value = '';
+  document.getElementById('create-url').value  = '';
+  setCreateStatus('');
+  document.getElementById('create-overlay').classList.add('open');
+  document.getElementById('create-sheet').classList.add('open');
+  document.getElementById('create-name').focus();
+}
+function closeCreateDialog() {
+  document.getElementById('create-overlay').classList.remove('open');
+  document.getElementById('create-sheet').classList.remove('open');
+}
+function setCreateStatus(msg, isErr = false) {
+  const el = document.getElementById('create-status');
+  el.textContent = msg;
+  el.classList.toggle('err', isErr);
+}
+
+async function runCreate() {
+  const name = document.getElementById('create-name').value.trim();
+  const url  = document.getElementById('create-url').value.trim();
+  if (!name) { setCreateStatus('Name required', true); return; }
+  if (!url)  { setCreateStatus('URL required',  true); return; }
+  try { new URL(url); } catch { setCreateStatus('Not a valid URL', true); return; }
+
+  const btn = document.getElementById('create-submit');
+  btn.disabled = true;
+  btn.textContent = 'Extracting…';
+  setCreateStatus('Fetching source + asking Claude (10–30s)…');
+
+  const res = await edgeFn('admin-re-extract-policy', {
+    display_name: name,
+    source_url:   url,
+  });
+
+  btn.disabled = false;
+  btn.textContent = 'Extract & open';
+
+  if (res.error) { setCreateStatus('Error: ' + res.error, true); return; }
+
+  // Build a synthetic "current" beach seeded from the extraction. Every
+  // field is marked dirty so a save round-trips the full row.
+  const locId = slugify(name);
+  const ex = res.extracted;
+  current = {
+    location_id:              locId,
+    display_name:             name,
+    is_active:                true,
+    timezone:                 'America/Los_Angeles',
+    latitude:                 null,
+    longitude:                null,
+    address:                  null,
+    governing_body:           null,
+    governing_jurisdiction:   null,
+    dogs_allowed:             ex.dogs_allowed,
+    dogs_leash_required:      ex.dogs_leash_required,
+    dogs_policy_notes:        ex.dogs_policy_notes,
+    dogs_allowed_areas:       ex.dogs_allowed_areas,
+    dogs_off_leash_area:      ex.dogs_off_leash_area,
+    dogs_prohibited_areas:    ex.dogs_prohibited_areas,
+    dogs_prohibited_reason:   null,
+    dogs_season_restrictions: ex.dogs_season_restrictions,
+    dogs_seasonal_closures:   null,
+    dogs_daily_windows:       null,
+    dogs_day_of_week_mask:    null,
+    dogs_time_restrictions:   ex.dogs_time_restrictions,
+    dogs_policy_source:       'admin_create',
+    dogs_policy_source_url:   res.source_url,
+    dogs_policy_updated_at:   new Date().toISOString(),
+    hours_text:               ex.hours_text,
+    hours_notes:              ex.hours_notes,
+    has_parking:              ex.has_parking,
+    parking_type:             ex.parking_type,
+    parking_notes:            ex.parking_notes,
+    has_restrooms:            ex.has_restrooms,
+    has_showers:              ex.has_showers,
+    has_lifeguards:           ex.has_lifeguards,
+    has_drinking_water:       ex.has_drinking_water,
+    has_disabled_access:      ex.has_disabled_access,
+    has_food:                 ex.has_food,
+    has_fire_pits:            ex.has_fire_pits,
+    has_picnic_area:          ex.has_picnic_area,
+    access_rule:              null,
+    description:              null,
+    website:                  null,
+    noaa_station_id:          null,
+    noaa_station_name:        null,
+    enrichment_source:        null,
+    enrichment_confidence:    ex.confidence === 'high' ? 'high' : 'low',
+    enrichment_updated_at:    new Date().toISOString(),
+    source_type:              null,   // generated column; server will compute on insert
+  };
+  isNewBeach = true;
+  dirty = {};          // dirty starts empty; renderForm + user edits will populate it
+  // Stage every field as dirty so Save sends them all
+  for (const k of Object.keys(current)) {
+    if (current[k] != null) dirty[k] = current[k];
+  }
+
+  closeCreateDialog();
+  switchPage('edit');
+  history.replaceState({}, '', location.pathname);
+  renderForm();
+  showToast(`Extracted from ${new URL(url).hostname.replace(/^www\./, '')} — review and hit Save`);
+}
+
+// "huntington dog beach" → "huntington-dog-beach"
+function slugify(s) {
+  return String(s || '')
+    .toLowerCase()
+    .trim()
+    .replace(/['']/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 120);
+}
+
 // ── Re-extract modal ──────────────────────────────────────────────────────
 const reex = {
   forLocation: null,        // location_id suggestions were loaded for
   suggestions: null,
   extracted:   null,
   sourceUrl:   null,
-  chosen:      {},          // field → chosen string value
+  picks:       {},          // field → 'current' | 'new' (which side is selected)
 };
 
 // Fields the LLM re-extraction covers. Order matches how the admin editor
@@ -1344,7 +1681,7 @@ function initComparePage() {
     reex.suggestions = null;
     reex.extracted   = null;
     reex.sourceUrl   = null;
-    reex.chosen      = {};
+    reex.picks       = {};
     document.getElementById('reextract-url').value = '';
     document.getElementById('reextract-status').textContent = '';
     document.getElementById('reextract-status').classList.remove('err');
@@ -1377,13 +1714,29 @@ function renderReextractSuggestions() {
   list.innerHTML = reex.suggestions.map((s, i) => `
     <button type="button" class="reextract-suggestion" data-idx="${i}" onclick="pickSuggestion(${i})">
       <div class="reextract-sugg-top">
-        <span>${escHtml(s.title || s.domain)}</span>
+        <span>
+          ${escHtml(s.title || s.domain)}
+          ${sourceBadgeHtml(s.source_type)}
+        </span>
         <span class="reextract-sugg-score">${escHtml(s.domain)} · ${s.score}</span>
       </div>
       <div class="reextract-sugg-url">${escHtml(s.url)}</div>
       <div class="reextract-sugg-snippet">${escHtml(s.snippet || '')}</div>
     </button>
   `).join('');
+
+  // Surface the current source's badge in the section heading chip too, so
+  // the user sees what they're about to replace.
+  const chip = document.getElementById('reextract-source-chip');
+  if (chip && current.dogs_policy_source_url) {
+    chip.innerHTML = `Current source: ${sourceBadgeHtml(current.source_type)}
+      <span style="margin-left:4px;">${escHtml(new URL(current.dogs_policy_source_url).hostname.replace(/^www\./, ''))}</span>`;
+  }
+}
+
+function sourceBadgeHtml(t) {
+  const type = t || 'unknown';
+  return `<span class="source-badge ${type}">${type}</span>`;
 }
 
 function pickSuggestion(i) {
@@ -1420,15 +1773,17 @@ async function runExtract() {
   reex.extracted = res.extracted;
   reex.sourceUrl = res.source_url;
 
-  // Seed chosen with the new values by default — user can flip to current per-field
-  reex.chosen = {};
+  // Default every row's pick to 'current' — user opts in to changes
+  // per-field by clicking the New cell. Bulk buttons flip everything.
+  reex.picks = {};
   for (const f of REEX_FIELDS) {
     if (f === 'confidence') continue;  // not editable
-    reex.chosen[f] = displayValue(reex.extracted[f]);
+    reex.picks[f] = 'current';
   }
 
-  document.getElementById('reextract-source-chip').textContent =
-    `Source: ${new URL(res.source_url).hostname.replace(/^www\./, '')}`;
+  // Tag the top chip with the freshly-extracted source domain
+  document.getElementById('reextract-source-chip').innerHTML =
+    `Extracted from: <strong>${escHtml(new URL(res.source_url).hostname.replace(/^www\./, ''))}</strong>`;
   document.getElementById('reextract-footer').style.display = 'flex';
   renderReextractCompare();
   setReextractStatus(`Extracted ${res.fetched_chars} chars of source text.`);
@@ -1444,35 +1799,44 @@ function setReextractStatus(msg, isErr = false) {
 }
 
 // Render the 3-column compare table.
-// Keep column is a text input so users can edit freeform. Arrows copy
-// Current / New into Keep.
+// Current + New cells are clickable — click picks that side. Keep is a
+// read-only display of the picked value. Default pick for each row is
+// 'current'; user flips to 'new' per-field. Bulk buttons flip all.
 function renderReextractCompare() {
   const rows = REEX_FIELDS.map(f => {
     const cur = displayValue(current[f]);
     const neu = displayValue(reex.extracted[f]);
-    const changedClass = cur !== neu ? 'changed' : '';
-    const keepVal = reex.chosen[f] ?? '';
     if (f === 'confidence') {
       return `<tr>
         <td class="reextract-field-name">${f}</td>
         <td class="reextract-cell ${cur === 'null' ? 'null' : ''}">${escHtml(cur)}</td>
-        <td class="reextract-cell ${changedClass} ${neu === 'null' ? 'null' : ''}">${escHtml(neu)}</td>
+        <td class="reextract-cell ${neu === 'null' ? 'null' : ''}">${escHtml(neu)}</td>
         <td class="reextract-cell" style="color:var(--text-dim);font-style:italic;">(informational)</td>
       </tr>`;
     }
+
+    const pick = reex.picks[f] ?? 'current';
+    const keepStr = pick === 'new' ? neu : cur;
+
+    const currentCell = `
+      <td class="reextract-cell selectable ${pick === 'current' ? 'picked' : ''} ${cur === 'null' ? 'null' : ''}"
+          onclick="reextractPick('${f}', 'current')">
+        ${escHtml(cur)}
+        ${pick === 'current' ? '<span class="check">✓</span>' : ''}
+      </td>`;
+    const newCell = `
+      <td class="reextract-cell selectable ${pick === 'new' ? 'picked' : ''} ${neu === 'null' ? 'null' : ''}"
+          onclick="reextractPick('${f}', 'new')">
+        ${escHtml(neu)}
+        ${pick === 'new' ? '<span class="check">✓</span>' : ''}
+      </td>`;
+
     return `<tr data-field="${f}">
       <td class="reextract-field-name">${f}</td>
-      <td class="reextract-cell ${cur === 'null' ? 'null' : ''}">
-        ${escHtml(cur)}
-        <button class="copy-btn" onclick="reextractCopy('${f}','current')" title="Copy to Keep">→</button>
-      </td>
-      <td class="reextract-cell ${changedClass} ${neu === 'null' ? 'null' : ''}">
-        <button class="copy-btn" onclick="reextractCopy('${f}','new')" title="Copy to Keep">←</button>
-        ${escHtml(neu)}
-      </td>
-      <td class="reextract-cell">
-        <input class="reextract-keep-input" type="text" data-field="${f}"
-               value="${escAttr(keepVal)}" oninput="reex.chosen['${f}'] = this.value" />
+      ${currentCell}
+      ${newCell}
+      <td class="reextract-cell keep-display ${keepStr === 'null' ? 'null' : ''}">
+        ${escHtml(keepStr)}
       </td>
     </tr>`;
   }).join('');
@@ -1481,9 +1845,9 @@ function renderReextractCompare() {
     <table class="reextract-table">
       <thead>
         <tr>
-          <th style="width:30%;">Field</th>
-          <th style="width:25%;">Current</th>
-          <th style="width:25%;">New</th>
+          <th style="width:28%;">Field</th>
+          <th style="width:26%;">Current (click to keep)</th>
+          <th style="width:26%;">New (click to take)</th>
           <th style="width:20%;">Keep</th>
         </tr>
       </thead>
@@ -1500,50 +1864,29 @@ function displayValue(v) {
   return String(v);
 }
 
-// Parse a Keep input back into the right JS value for applyToForm.
-function parseKeepValue(field, str) {
-  const s = (str ?? '').trim();
-  if (s === '' || s === 'null') return null;
-
-  // Boolean fields — accept true/false/yes/no
-  const boolFields = new Set([
-    'has_parking', 'has_restrooms', 'has_showers', 'has_drinking_water',
-    'has_lifeguards', 'has_disabled_access', 'has_food',
-    'has_fire_pits', 'has_picnic_area',
-  ]);
-  if (boolFields.has(field)) {
-    if (/^(true|yes)$/i.test(s)) return true;
-    if (/^(false|no)$/i.test(s)) return false;
-    return null;
-  }
-
-  // Enum / string fields — pass through as string
-  return s;
-}
-
-function reextractCopy(field, side) {
-  const value = side === 'current'
-    ? displayValue(current[field])
-    : displayValue(reex.extracted[field]);
-  reex.chosen[field] = value;
-  const input = document.querySelector(`.reextract-keep-input[data-field="${field}"]`);
-  if (input) input.value = value === 'null' ? '' : value;
+// User clicked a Current or New cell — record which side is picked and
+// re-render the table so the check marks + Keep column update.
+function reextractPick(field, side) {
+  reex.picks[field] = side;   // 'current' | 'new'
+  renderReextractCompare();
 }
 
 function reextractBulk(side) {
   for (const f of REEX_FIELDS) {
     if (f === 'confidence') continue;
-    reextractCopy(f, side);
+    reex.picks[f] = side;
   }
+  renderReextractCompare();
 }
 
-// Push chosen values into the main form as pending edits.
-// Uses the existing input event triggers so markDirty() fires naturally.
+// Push 'new'-picked values into the main form as pending edits.
+// 'current'-picked fields are no-ops (nothing to change).
 function applyReextract() {
   let applied = 0;
-  for (const [field, strVal] of Object.entries(reex.chosen)) {
-    const value = parseKeepValue(field, strVal);
-    // Skip fields where Keep matches Current (nothing to apply)
+  for (const [field, side] of Object.entries(reex.picks)) {
+    if (side !== 'new') continue;
+    const value = reex.extracted[field];
+    // Defensive: skip if the "new" value happens to equal current
     if (displayValue(current[field]) === displayValue(value)) continue;
     applyValueToForm(field, value);
     applied++;

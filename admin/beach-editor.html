@@ -77,9 +77,13 @@
       top: 48px;
       z-index: 40;
     }
-    .search-bar-inner { max-width: 860px; margin: 0 auto; position: relative; }
+    .search-bar-inner {
+      max-width: 860px; margin: 0 auto;
+      position: relative;
+      display: flex; gap: 8px; align-items: center;
+    }
     .search-input {
-      width: 100%;
+      flex: 1;
       padding: 10px 14px;
       font-size: 14px;
       font-family: inherit;
@@ -87,6 +91,15 @@
       border-radius: 8px;
       outline: none;
     }
+    .create-btn {
+      background: var(--accent); color: white;
+      padding: 10px 16px;
+      border: none; border-radius: 8px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer; font-family: inherit;
+      flex-shrink: 0;
+    }
+    .create-btn:hover { background: var(--accent-hov); }
     .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #dbeafe; }
     .search-results {
       display: none;
@@ -103,7 +116,99 @@
       box-shadow: 0 4px 12px rgba(0,0,0,0.1);
       z-index: 60;
     }
-    .search-results.open { display: block; }
+    .search-results.open { display: block; top: calc(100% + 4px); }
+
+    /* ── Create dialog ──────────────────────────────────────────────── */
+    .create-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(15, 23, 42, 0.55);
+      z-index: 998;
+    }
+    .create-overlay.open { display: block; }
+    .create-sheet {
+      display: none;
+      position: fixed;
+      top: 10vh; left: 50%;
+      transform: translateX(-50%);
+      width: calc(100% - 32px);
+      max-width: 520px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      z-index: 999;
+      overflow: hidden;
+    }
+    .create-sheet.open { display: block; }
+    .create-header {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      background: #f8fafc;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .create-header h3 { font-size: 15px; font-weight: 600; }
+    .create-header button.close {
+      margin-left: auto;
+      background: none; border: none;
+      font-size: 20px; color: var(--text-muted);
+      cursor: pointer; padding: 0 4px;
+    }
+    .create-body { padding: 18px 20px; }
+    .create-body label {
+      display: block;
+      font-size: 13px; color: var(--text-muted);
+      margin-bottom: 4px; margin-top: 10px;
+    }
+    .create-body label:first-child { margin-top: 0; }
+    .create-body input {
+      width: 100%;
+      padding: 8px 12px;
+      font-size: 14px; font-family: inherit;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    .create-body input:focus { border-color: var(--accent); outline: none; }
+    .create-hint {
+      margin-top: 6px;
+      font-size: 11px; color: var(--text-dim);
+      line-height: 1.5;
+    }
+    .create-footer {
+      padding: 12px 20px;
+      border-top: 1px solid var(--border);
+      background: #f8fafc;
+      display: flex; gap: 8px; align-items: center;
+    }
+    .create-status {
+      flex: 1;
+      font-size: 12px; color: var(--text-muted);
+    }
+    .create-status.err { color: var(--red); }
+    .create-cancel {
+      background: none; border: 1px solid var(--border);
+      padding: 7px 14px; border-radius: 6px;
+      font-size: 13px; font-family: inherit;
+      cursor: pointer; color: var(--text-muted);
+    }
+    .create-cancel:hover { color: var(--text); border-color: var(--border-hov); }
+    .create-submit {
+      background: var(--accent); color: white;
+      padding: 7px 16px; border: none; border-radius: 6px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer; font-family: inherit;
+    }
+    .create-submit:hover { background: var(--accent-hov); }
+    .create-submit:disabled { background: #cbd5e1; cursor: not-allowed; }
+
+    /* Create-mode banner at top of the edit form */
+    .create-banner {
+      background: var(--green-bg); color: var(--green);
+      border: 1px solid var(--green);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px; font-weight: 500;
+      margin-bottom: 14px;
+    }
     .search-result {
       padding: 10px 14px;
       cursor: pointer;
@@ -375,6 +480,250 @@
     }
     .delete-btn:hover { background: var(--red-bg); }
 
+    /* ── Page tabs (Edit / Compare) ─────────────────────────────────── */
+    .page-tabs {
+      max-width: 860px;
+      margin: 16px auto 0;
+      padding: 0 24px;
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .page-tab {
+      background: none; border: none;
+      font-family: inherit; font-size: 14px; font-weight: 500;
+      padding: 10px 20px;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+    }
+    .page-tab:hover:not(:disabled) { color: var(--text); }
+    .page-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .page-tab:disabled { color: var(--text-dim); cursor: not-allowed; }
+    .page-panel { display: none; }
+    .page-panel.active { display: block; }
+
+    /* ── Re-extract (Compare page) ──────────────────────────────────── */
+    .compare-section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 12px;
+      padding: 18px 20px;
+    }
+    .compare-section h3 {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin-bottom: 14px;
+    }
+    .compare-source-chip {
+      float: right;
+      font-size: 11px;
+      font-weight: 400;
+      text-transform: none;
+      letter-spacing: 0;
+      color: var(--text-muted);
+      max-width: 380px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Source tab */
+    .reextract-suggestions { margin-bottom: 16px; }
+    .reextract-suggestion {
+      display: block;
+      padding: 10px 14px;
+      margin-bottom: 8px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      cursor: pointer;
+      text-align: left;
+      width: 100%;
+      font-family: inherit;
+    }
+    .reextract-suggestion:hover { border-color: var(--accent); background: #eff6ff; }
+    .reextract-suggestion.selected { border-color: var(--accent); background: #eff6ff; box-shadow: 0 0 0 2px #bfdbfe; }
+    .reextract-sugg-top {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-size: 13px; font-weight: 500; color: var(--text);
+    }
+    .reextract-sugg-score {
+      font-family: ui-monospace, monospace;
+      font-size: 11px; color: var(--text-muted);
+    }
+    .reextract-sugg-url {
+      font-family: ui-monospace, monospace;
+      font-size: 11px; color: var(--accent);
+      margin: 2px 0;
+      word-break: break-all;
+    }
+    .reextract-sugg-snippet {
+      font-size: 12px; color: var(--text-muted);
+      line-height: 1.4;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    /* Source-type badge (used on suggestions + current-source chip + compare header) */
+    .source-badge {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 2px 7px;
+      border-radius: 9999px;
+      vertical-align: middle;
+    }
+    .source-badge.official   { background: var(--green-bg); color: var(--green); }
+    .source-badge.nonprofit  { background: #e0e7ff;         color: #3730a3; }
+    .source-badge.community  { background: var(--amber-bg); color: var(--amber); }
+    .source-badge.commercial { background: #f3e8ff;         color: #6b21a8; }
+    .source-badge.unknown    { background: #f1f5f9;         color: var(--text-muted); }
+    .reextract-url-label {
+      display: block;
+      font-size: 13px; color: var(--text-muted);
+      margin: 14px 0 6px;
+    }
+    .reextract-url-row { display: flex; gap: 8px; }
+    .reextract-url-input {
+      flex: 1;
+      padding: 8px 12px;
+      font-size: 13px; font-family: inherit;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    .reextract-url-input:focus { border-color: var(--accent); outline: none; }
+    .reextract-extract-btn {
+      background: var(--accent); color: white;
+      padding: 8px 16px;
+      border: none; border-radius: 6px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer; font-family: inherit;
+    }
+    .reextract-extract-btn:hover { background: var(--accent-hov); }
+    .reextract-extract-btn:disabled { background: #cbd5e1; cursor: not-allowed; }
+
+    /* Inline lookup buttons (Geocode, Find NOAA station) */
+    .lookup-row { display: flex; gap: 8px; align-items: stretch; }
+    .lookup-row .field-input { flex: 1; }
+    .lookup-btn {
+      background: white; color: var(--text);
+      padding: 0 14px;
+      border: 1px solid var(--border); border-radius: 6px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer; font-family: inherit;
+      white-space: nowrap;
+    }
+    .lookup-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .lookup-btn:disabled { color: #94a3b8; cursor: not-allowed; border-color: var(--border); }
+    .lookup-status {
+      margin-top: 6px;
+      font-size: 12px; color: var(--text-muted);
+      min-height: 16px;
+    }
+    .lookup-status.err { color: var(--red); }
+    .lookup-status.ok  { color: #059669; }
+    .reextract-status {
+      margin-top: 10px;
+      font-size: 12px; color: var(--text-muted);
+      min-height: 18px;
+    }
+    .reextract-status.err { color: var(--red); }
+
+    /* Compare tab */
+    .reextract-placeholder {
+      text-align: center; padding: 40px 20px;
+      color: var(--text-muted); font-size: 13px;
+    }
+    .reextract-table {
+      width: 100%; border-collapse: collapse; font-size: 12px;
+    }
+    .reextract-table th {
+      text-align: left; padding: 6px 8px;
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+      color: var(--text-muted); font-weight: 600;
+      border-bottom: 1px solid var(--border);
+    }
+    .reextract-table td {
+      padding: 6px 8px; vertical-align: top;
+      border-bottom: 1px solid #f1f5f9;
+      font-size: 12px; line-height: 1.5;
+    }
+    .reextract-field-name {
+      font-family: ui-monospace, monospace;
+      color: var(--text-muted); white-space: nowrap;
+    }
+    .reextract-cell {
+      max-width: 240px; word-break: break-word; color: var(--text);
+      position: relative;
+    }
+    .reextract-cell.null { color: var(--text-dim); font-style: italic; }
+    /* Selectable cells (Current + New columns). Click to pick. */
+    .reextract-cell.selectable {
+      cursor: pointer;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      transition: background 0.12s, border-color 0.12s;
+      padding: 6px 22px 6px 8px;
+    }
+    .reextract-cell.selectable:hover { background: #eff6ff; border-color: #bfdbfe; }
+    .reextract-cell.selectable.picked {
+      background: #dbeafe;
+      border-color: var(--accent);
+    }
+    .reextract-cell.selectable .check {
+      position: absolute;
+      top: 6px; right: 6px;
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 13px;
+    }
+    /* Keep column — read-only display, styled subtly */
+    .reextract-cell.keep-display {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--text);
+      font-size: 11px;
+      background: #f8fafc;
+      border-radius: 4px;
+      padding: 6px 8px;
+    }
+    .reextract-cell.keep-display.null { font-style: italic; color: var(--text-dim); }
+
+    .reextract-footer {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 20px;
+      margin-bottom: 24px;
+      display: flex; gap: 10px; align-items: center;
+    }
+    .reextract-bulk {
+      background: none; border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px; font-family: inherit;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+    .reextract-bulk:hover { color: var(--text); border-color: var(--border-hov); }
+    .reextract-apply {
+      margin-left: auto;
+      background: var(--accent); color: white;
+      padding: 8px 18px;
+      border: none; border-radius: 6px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer; font-family: inherit;
+    }
+    .reextract-apply:hover { background: var(--accent-hov); }
+    .reextract-apply:disabled { background: #cbd5e1; cursor: not-allowed; }
+
     /* Toast */
     #toast {
       position: fixed;
@@ -406,14 +755,92 @@
     <input id="search-input" class="search-input" type="text"
            placeholder="Search by name or location_id…"
            autocomplete="off" />
+    <button class="create-btn" onclick="openCreateDialog()" title="Create a new beach from a URL">+ Create</button>
     <div id="search-results" class="search-results"></div>
   </div>
 </div>
 
+<!-- Create dialog -->
+<div class="create-overlay" id="create-overlay" onclick="closeCreateDialog()"></div>
+<div class="create-sheet" id="create-sheet" role="dialog" aria-labelledby="create-title">
+  <div class="create-header">
+    <h3 id="create-title">Create a new beach</h3>
+    <button class="close" onclick="closeCreateDialog()" aria-label="Close">&#x2715;</button>
+  </div>
+  <div class="create-body">
+    <label for="create-name">Beach name</label>
+    <input id="create-name" type="text" placeholder="e.g. Point Reyes Dog Beach" autocomplete="off" />
+
+    <label for="create-url">Source URL</label>
+    <input id="create-url" type="url" placeholder="https://…" autocomplete="off"
+           onkeydown="if(event.key==='Enter')runCreate()" />
+
+    <div class="create-hint">
+      We'll fetch the URL, extract dog / practical / amenity fields, and open an
+      editable form pre-filled with what we found. You'll still set lat/lng on the
+      map before saving.
+    </div>
+  </div>
+  <div class="create-footer">
+    <div class="create-status" id="create-status"></div>
+    <button class="create-cancel" onclick="closeCreateDialog()">Cancel</button>
+    <button class="create-submit" id="create-submit" onclick="runCreate()">Extract &amp; open</button>
+  </div>
+</div>
+
+<div class="page-tabs">
+  <button class="page-tab active" id="tab-edit"    data-page="edit"    onclick="switchPage('edit')">Edit</button>
+  <button class="page-tab"        id="tab-compare" data-page="compare" onclick="switchPage('compare')">Compare</button>
+</div>
+
 <main id="main">
-  <div id="empty" class="empty-state">
-    <div class="empty-state-icon">🏖️</div>
-    <div>Search for a beach above to start editing.</div>
+  <!-- Edit page — main form -->
+  <div class="page-panel active" id="page-edit">
+    <div id="empty" class="empty-state">
+      <div class="empty-state-icon">🏖️</div>
+      <div>Search for a beach above to start editing.</div>
+    </div>
+  </div>
+
+  <!-- Compare page — source picker + 3-column diff -->
+  <div class="page-panel" id="page-compare">
+    <div id="compare-empty" class="empty-state">
+      <div class="empty-state-icon">🔁</div>
+      <div>Load a beach on the Edit tab first, then return here to pull fresh data from a specific source.</div>
+    </div>
+
+    <div id="compare-body" style="display:none;">
+      <section class="compare-section">
+        <h3>
+          Pick a source
+          <span class="compare-source-chip" id="reextract-source-chip"></span>
+        </h3>
+        <div id="reextract-suggestions" class="reextract-suggestions">
+          <div class="reextract-placeholder">Loading suggestions…</div>
+        </div>
+        <label class="reextract-url-label">Or paste a URL:</label>
+        <div class="reextract-url-row">
+          <input class="reextract-url-input" id="reextract-url" type="url"
+                 placeholder="https://…"
+                 onkeydown="if(event.key==='Enter')runExtract()" />
+          <button class="reextract-extract-btn" id="reextract-extract-btn" onclick="runExtract()">Extract</button>
+        </div>
+        <div class="reextract-status" id="reextract-status"></div>
+      </section>
+
+      <section class="compare-section" id="compare-results-section">
+        <h3>Compare results</h3>
+        <div id="reextract-compare">
+          <div class="reextract-placeholder">Pick a source above and click Extract to see results here.</div>
+        </div>
+      </section>
+
+      <div class="reextract-footer" id="reextract-footer" style="display:none;">
+        <button type="button" class="reextract-bulk"  onclick="reextractBulk('new')">Accept all new</button>
+        <button type="button" class="reextract-bulk"  onclick="reextractBulk('current')">Revert all</button>
+        <button type="button" class="reextract-apply" onclick="applyReextract()">Apply selections → Edit tab</button>
+      </div>
+    </div>
   </div>
 </main>
 
@@ -427,6 +854,7 @@ const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
 let allBeaches  = [];           // full list for search
 let current     = null;         // full row of the selected beach
 let dirty       = {};           // field → new value (pending save)
+let isNewBeach  = false;         // true while editing an unsaved, just-created beach
 let map         = null;         // Leaflet map
 let marker      = null;         // Leaflet marker
 
@@ -511,12 +939,20 @@ function wireSearch() {
 function selectBeach(b) {
   current = JSON.parse(JSON.stringify(b)); // deep clone so edits don't alter list
   dirty = {};
+  isNewBeach = false;
   history.replaceState({}, '', `?edit=${encodeURIComponent(b.location_id)}`);
+  // Switching beaches invalidates any cached re-extract state
+  reex.forLocation = null;
   renderForm();
+  // If the Compare tab is currently active, re-init so the user sees
+  // fresh suggestions for the new beach instead of stale state.
+  if (document.querySelector('.page-tab.active')?.dataset.page === 'compare') {
+    initComparePage();
+  }
 }
 
 function renderForm() {
-  const main = document.getElementById('main');
+  const main = document.getElementById('page-edit');
   const b = current;
 
   main.innerHTML = `
@@ -526,14 +962,30 @@ function renderForm() {
       <div class="beach-header-active ${b.is_active ? 'yes' : 'no'}" id="hdr-active">${b.is_active ? 'Active' : 'Inactive'}</div>
     </div>
 
+    ${isNewBeach ? `<div class="create-banner">
+      ✨ Creating a new beach — review the extracted fields, set lat/lng on the map, then Save.
+    </div>` : ''}
+
     ${sectionHtml('Identity', false, [
-      lockedField('location_id', b.location_id, 'Primary key — not editable'),
+      isNewBeach
+        ? textField('location_id', 'Location ID', b.location_id, { placeholder: 'alphanumeric + hyphens' })
+        : lockedField('location_id', b.location_id, 'Primary key — not editable'),
       textField('display_name', 'Display name', b.display_name),
       boolField('is_active', 'Active'),
       textField('timezone', 'Timezone', b.timezone, { placeholder: 'America/Los_Angeles' }),
     ])}
 
     ${sectionHtml('Location', false, [
+      `<div class="field">
+        <div class="field-label">Address<code>address</code></div>
+        <div>
+          <div class="lookup-row">
+            <input class="field-input" id="in-address" data-field="address" type="text" value="${escAttr(b.address ?? '')}" placeholder="e.g., 101 Main St, Huntington Beach, CA" />
+            <button type="button" class="lookup-btn" id="geocode-btn" onclick="runGeocode()">Geocode → lat/lng</button>
+          </div>
+          <div class="lookup-status" id="geocode-status"></div>
+        </div>
+      </div>`,
       `<div class="field">
         <div class="field-label">Latitude / Longitude</div>
         <div>
@@ -545,7 +997,6 @@ function renderForm() {
           <div class="field-hint">Click the map to move the marker. Drag the marker or edit the numbers directly.</div>
         </div>
       </div>`,
-      textField('address', 'Address', b.address),
     ])}
 
     ${sectionHtml('Governance', false, [
@@ -596,6 +1047,14 @@ function renderForm() {
     ])}
 
     ${sectionHtml('NOAA', false, [
+      `<div class="field">
+        <div class="field-label">Nearest tide station</div>
+        <div>
+          <button type="button" class="lookup-btn" id="noaa-find-btn" onclick="runFindNoaaStation()">Find nearest station from lat/lng</button>
+          <div class="field-hint" style="margin-top:6px;">Requires valid lat/lng. Uses the same NOAA CO-OPS list as the pipeline (reference stations only, within 50 km).</div>
+          <div class="lookup-status" id="noaa-status"></div>
+        </div>
+      </div>`,
       textField('noaa_station_id',   'Station ID',   b.noaa_station_id),
       textField('noaa_station_name', 'Station name', b.noaa_station_name),
     ])}
@@ -621,9 +1080,11 @@ function renderForm() {
     ])}
 
     <div class="actions-bar">
-      <button class="save-btn" id="save-btn" onclick="save()" disabled>Save</button>
-      <span class="dirty-count" id="dirty-count">No changes</span>
-      <button class="delete-btn" onclick="deletePermanent()">Delete permanently</button>
+      <button class="save-btn" id="save-btn" onclick="save()" ${isNewBeach ? '' : 'disabled'}>${isNewBeach ? 'Create beach' : 'Save'}</button>
+      <span class="dirty-count" id="dirty-count">${isNewBeach ? 'New beach — review + save' : 'No changes'}</span>
+      ${isNewBeach
+        ? `<button class="delete-btn" onclick="discardCreate()">Discard</button>`
+        : `<button class="delete-btn" onclick="deletePermanent()">Delete permanently</button>`}
     </div>
   `;
 
@@ -922,36 +1383,84 @@ function updateDirtyBadge() {
 
 // ── Save / delete ─────────────────────────────────────────────────────────
 async function save() {
-  if (Object.keys(dirty).length === 0) return;
+  if (!isNewBeach && Object.keys(dirty).length === 0) return;
 
   const btn = document.getElementById('save-btn');
   btn.disabled = true;
-  btn.textContent = 'Saving…';
+  btn.textContent = isNewBeach ? 'Creating…' : 'Saving…';
 
-  const res = await edgeFn('admin-update-beach', {
-    location_id: current.location_id,
-    fields: dirty,
-  });
+  let res;
+  if (isNewBeach) {
+    // location_id came from the slug (or a user edit to it). Pull the
+    // latest from the form in case the user tweaked it just before save.
+    const idInput = document.getElementById('in-location_id');
+    const locId = (idInput?.value || current.location_id || '').trim();
+    if (!locId) {
+      showToast('location_id is required', true);
+      btn.disabled = false;
+      btn.textContent = 'Create beach';
+      return;
+    }
+    // Strip location_id out of the fields blob (it's a top-level param
+    // on the create endpoint) and also omit null/undefined fields so the
+    // server uses its own defaults.
+    const fields = {};
+    for (const [k, v] of Object.entries(dirty)) {
+      if (k === 'location_id') continue;
+      if (v === null || v === undefined) continue;
+      fields[k] = v;
+    }
+    res = await edgeFn('admin-create-beach', { location_id: locId, fields });
+  } else {
+    res = await edgeFn('admin-update-beach', {
+      location_id: current.location_id,
+      fields: dirty,
+    });
+  }
 
-  btn.textContent = 'Save';
+  btn.textContent = isNewBeach ? 'Create beach' : 'Save';
 
   if (res.error) {
-    showToast('Error: ' + res.error, true);
+    if (res.code === 'duplicate') {
+      showToast(`That location_id is taken — pick another on the form and try again`, true);
+    } else {
+      showToast('Error: ' + res.error, true);
+    }
     btn.disabled = false;
     return;
   }
 
-  // Refresh current with new server state
+  // On create success, switch mode + navigate so refresh stays on this beach
+  if (isNewBeach) {
+    isNewBeach = false;
+    allBeaches.push(res.beach);
+    history.replaceState({}, '', `?edit=${encodeURIComponent(res.beach.location_id)}`);
+    showToast('Created — now editing');
+  } else {
+    const idx = allBeaches.findIndex(b => b.location_id === current.location_id);
+    if (idx >= 0) allBeaches[idx] = res.beach;
+    showToast(`Saved${res.rejected?.length ? ' (rejected: ' + res.rejected.join(', ') + ')' : ''}`);
+  }
+
   current = res.beach;
-  const idx = allBeaches.findIndex(b => b.location_id === current.location_id);
-  if (idx >= 0) allBeaches[idx] = current;
   dirty = {};
-
-  // Clear dirty classes
-  document.querySelectorAll('.dirty').forEach(el => el.classList.remove('dirty'));
+  // Re-render so locked fields + action labels update, and dirty classes clear
+  renderForm();
   updateDirtyBadge();
+}
 
-  showToast(`Saved${res.rejected?.length ? ' (rejected: ' + res.rejected.join(', ') + ')' : ''}`);
+// Abandon an in-progress create — just wipe state and return to empty.
+function discardCreate() {
+  if (!confirm('Discard this new beach? Any extracted / typed values will be lost.')) return;
+  current = null;
+  dirty = {};
+  isNewBeach = false;
+  document.getElementById('page-edit').innerHTML = `
+    <div class="empty-state">
+      <div class="empty-state-icon">🏖️</div>
+      <div>Search for a beach above to start editing.</div>
+    </div>`;
+  showToast('Discarded');
 }
 
 async function deletePermanent() {
@@ -970,7 +1479,7 @@ async function deletePermanent() {
   current = null;
   dirty = {};
   history.replaceState({}, '', location.pathname);
-  document.getElementById('main').innerHTML = `
+  document.getElementById('page-edit').innerHTML = `
     <div class="empty-state">
       <div class="empty-state-icon">🗑️</div>
       <div>Deleted. Search for another beach above.</div>
@@ -1029,12 +1538,528 @@ function syncInputsToMap() {
   }
 }
 
+// ── Address geocoding ─────────────────────────────────────────────────────
+// Forward-geocodes the address input via admin-geocode-address and drops
+// the lat/lng into the coordinate inputs + map marker.
+async function runGeocode() {
+  const addrInput  = document.getElementById('in-address');
+  const btn        = document.getElementById('geocode-btn');
+  const statusEl   = document.getElementById('geocode-status');
+  const address    = (addrInput.value ?? '').trim();
+  statusEl.className = 'lookup-status';
+  statusEl.textContent = '';
+  if (!address) { statusEl.className = 'lookup-status err'; statusEl.textContent = 'Enter an address first.'; return; }
+
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = 'Geocoding…';
+  try {
+    const res = await edgeFn('admin-geocode-address', { address });
+    if (res.error) {
+      statusEl.className = 'lookup-status err';
+      statusEl.textContent = res.error;
+      return;
+    }
+    const lat = Number(res.latitude), lng = Number(res.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      statusEl.className = 'lookup-status err';
+      statusEl.textContent = 'Geocode returned invalid coordinates.';
+      return;
+    }
+    // syncMapToInputs marks dirty + updates inputs; move the marker too.
+    syncMapToInputs(lat, lng);
+    if (marker) marker.setLatLng([lat, lng]);
+    if (map)    map.setView([lat, lng], 15);
+    statusEl.className = 'lookup-status ok';
+    statusEl.textContent = `→ ${lat.toFixed(6)}, ${lng.toFixed(6)}${res.formatted_address ? ` · ${res.formatted_address}` : ''}`;
+  } catch (e) {
+    statusEl.className = 'lookup-status err';
+    statusEl.textContent = `Request failed: ${e.message || e}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+}
+
+// ── NOAA station lookup ───────────────────────────────────────────────────
+// Asks admin-find-noaa-station for the closest reference tide station to
+// the current lat/lng (same filters as v2-noaa-station-match), then writes
+// the id + name into the NOAA fields.
+async function runFindNoaaStation() {
+  const btn      = document.getElementById('noaa-find-btn');
+  const statusEl = document.getElementById('noaa-status');
+  statusEl.className = 'lookup-status';
+  statusEl.textContent = '';
+
+  const lat = Number(document.getElementById('in-latitude').value);
+  const lng = Number(document.getElementById('in-longitude').value);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    statusEl.className = 'lookup-status err';
+    statusEl.textContent = 'Set a valid latitude and longitude first (map pin or Geocode).';
+    return;
+  }
+
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = 'Searching…';
+  try {
+    const res = await edgeFn('admin-find-noaa-station', { latitude: lat, longitude: lng });
+    if (res.error) {
+      statusEl.className = 'lookup-status err';
+      statusEl.textContent = res.error;
+      return;
+    }
+    if (!res.station) {
+      const km = res.distance_m != null ? (res.distance_m / 1000).toFixed(1) : '?';
+      statusEl.className = 'lookup-status err';
+      statusEl.textContent = `No station within ${(res.max_distance_m/1000)|0} km. Closest was ${res.closest?.name ?? '(unknown)'} at ${km} km.`;
+      return;
+    }
+    const idInput   = document.getElementById('in-noaa_station_id');
+    const nameInput = document.getElementById('in-noaa_station_name');
+    idInput.value   = res.station.id;
+    nameInput.value = res.station.name;
+    idInput.classList.add('dirty');
+    nameInput.classList.add('dirty');
+    markDirty('noaa_station_id',   res.station.id,   idInput);
+    markDirty('noaa_station_name', res.station.name, nameInput);
+    const km = (res.distance_m / 1000).toFixed(1);
+    statusEl.className = 'lookup-status ok';
+    statusEl.textContent = `→ ${res.station.id} ${res.station.name}${res.station.state ? ` (${res.station.state})` : ''} · ${km} km away`;
+  } catch (e) {
+    statusEl.className = 'lookup-status err';
+    statusEl.textContent = `Request failed: ${e.message || e}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+}
+
 // ── Toast ─────────────────────────────────────────────────────────────────
 function showToast(msg, isErr = false) {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.className = 'show ' + (isErr ? 'err' : 'ok');
   setTimeout(() => t.className = '', 2500);
+}
+
+// ── Create new beach ──────────────────────────────────────────────────────
+function openCreateDialog() {
+  document.getElementById('create-name').value = '';
+  document.getElementById('create-url').value  = '';
+  setCreateStatus('');
+  document.getElementById('create-overlay').classList.add('open');
+  document.getElementById('create-sheet').classList.add('open');
+  document.getElementById('create-name').focus();
+}
+function closeCreateDialog() {
+  document.getElementById('create-overlay').classList.remove('open');
+  document.getElementById('create-sheet').classList.remove('open');
+}
+function setCreateStatus(msg, isErr = false) {
+  const el = document.getElementById('create-status');
+  el.textContent = msg;
+  el.classList.toggle('err', isErr);
+}
+
+async function runCreate() {
+  const name = document.getElementById('create-name').value.trim();
+  const url  = document.getElementById('create-url').value.trim();
+  if (!name) { setCreateStatus('Name required', true); return; }
+  if (!url)  { setCreateStatus('URL required',  true); return; }
+  try { new URL(url); } catch { setCreateStatus('Not a valid URL', true); return; }
+
+  const btn = document.getElementById('create-submit');
+  btn.disabled = true;
+  btn.textContent = 'Extracting…';
+  setCreateStatus('Fetching source + asking Claude (10–30s)…');
+
+  const res = await edgeFn('admin-re-extract-policy', {
+    display_name: name,
+    source_url:   url,
+  });
+
+  btn.disabled = false;
+  btn.textContent = 'Extract & open';
+
+  if (res.error) { setCreateStatus('Error: ' + res.error, true); return; }
+
+  // Build a synthetic "current" beach seeded from the extraction. Every
+  // field is marked dirty so a save round-trips the full row.
+  const locId = slugify(name);
+  const ex = res.extracted;
+  current = {
+    location_id:              locId,
+    display_name:             name,
+    is_active:                true,
+    timezone:                 'America/Los_Angeles',
+    latitude:                 null,
+    longitude:                null,
+    address:                  null,
+    governing_body:           null,
+    governing_jurisdiction:   null,
+    dogs_allowed:             ex.dogs_allowed,
+    dogs_leash_required:      ex.dogs_leash_required,
+    dogs_policy_notes:        ex.dogs_policy_notes,
+    dogs_allowed_areas:       ex.dogs_allowed_areas,
+    dogs_off_leash_area:      ex.dogs_off_leash_area,
+    dogs_prohibited_areas:    ex.dogs_prohibited_areas,
+    dogs_prohibited_reason:   null,
+    dogs_season_restrictions: ex.dogs_season_restrictions,
+    dogs_seasonal_closures:   null,
+    dogs_daily_windows:       null,
+    dogs_day_of_week_mask:    null,
+    dogs_time_restrictions:   ex.dogs_time_restrictions,
+    dogs_policy_source:       'admin_create',
+    dogs_policy_source_url:   res.source_url,
+    dogs_policy_updated_at:   new Date().toISOString(),
+    hours_text:               ex.hours_text,
+    hours_notes:              ex.hours_notes,
+    has_parking:              ex.has_parking,
+    parking_type:             ex.parking_type,
+    parking_notes:            ex.parking_notes,
+    has_restrooms:            ex.has_restrooms,
+    has_showers:              ex.has_showers,
+    has_lifeguards:           ex.has_lifeguards,
+    has_drinking_water:       ex.has_drinking_water,
+    has_disabled_access:      ex.has_disabled_access,
+    has_food:                 ex.has_food,
+    has_fire_pits:            ex.has_fire_pits,
+    has_picnic_area:          ex.has_picnic_area,
+    access_rule:              null,
+    description:              null,
+    website:                  null,
+    noaa_station_id:          null,
+    noaa_station_name:        null,
+    enrichment_source:        null,
+    enrichment_confidence:    ex.confidence === 'high' ? 'high' : 'low',
+    enrichment_updated_at:    new Date().toISOString(),
+    source_type:              null,   // generated column; server will compute on insert
+  };
+  isNewBeach = true;
+  dirty = {};          // dirty starts empty; renderForm + user edits will populate it
+  // Stage every field as dirty so Save sends them all
+  for (const k of Object.keys(current)) {
+    if (current[k] != null) dirty[k] = current[k];
+  }
+
+  closeCreateDialog();
+  switchPage('edit');
+  history.replaceState({}, '', location.pathname);
+  renderForm();
+  showToast(`Extracted from ${new URL(url).hostname.replace(/^www\./, '')} — review and hit Save`);
+}
+
+// "huntington dog beach" → "huntington-dog-beach"
+function slugify(s) {
+  return String(s || '')
+    .toLowerCase()
+    .trim()
+    .replace(/['']/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 120);
+}
+
+// ── Re-extract modal ──────────────────────────────────────────────────────
+const reex = {
+  forLocation: null,        // location_id suggestions were loaded for
+  suggestions: null,
+  extracted:   null,
+  sourceUrl:   null,
+  picks:       {},          // field → 'current' | 'new' (which side is selected)
+};
+
+// Fields the LLM re-extraction covers. Order matches how the admin editor
+// surfaces them (dogs → practical → amenities → confidence).
+const REEX_FIELDS = [
+  'dogs_allowed', 'dogs_leash_required',
+  'dogs_allowed_areas', 'dogs_off_leash_area', 'dogs_prohibited_areas',
+  'dogs_time_restrictions', 'dogs_season_restrictions',
+  'dogs_policy_notes',
+  'hours_text', 'hours_notes',
+  'has_parking', 'parking_type', 'parking_notes',
+  'has_restrooms', 'has_showers', 'has_drinking_water',
+  'has_lifeguards', 'has_disabled_access', 'has_food',
+  'has_fire_pits', 'has_picnic_area',
+  'confidence',   // informational only — not written to DB
+];
+
+// Switch between the Edit and Compare page panels. Lazily loads
+// suggestions the first time the Compare tab is entered for a beach.
+function switchPage(name) {
+  document.querySelectorAll('.page-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.page === name));
+  document.querySelectorAll('.page-panel').forEach(p =>
+    p.classList.toggle('active', p.id === `page-${name}`));
+
+  if (name === 'compare') initComparePage();
+}
+
+// Called on first entry to Compare with a beach loaded. Resets state,
+// kicks off the AI-suggestions fetch. Re-entry doesn't re-fetch (user
+// can manually re-extract with a different URL).
+function initComparePage() {
+  const empty = document.getElementById('compare-empty');
+  const body  = document.getElementById('compare-body');
+  if (!current) {
+    empty.style.display = '';
+    body.style.display  = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  body.style.display  = '';
+
+  // First-time setup for this beach (or if user loaded a different beach)
+  if (reex.forLocation !== current.location_id) {
+    reex.forLocation = current.location_id;
+    reex.suggestions = null;
+    reex.extracted   = null;
+    reex.sourceUrl   = null;
+    reex.picks       = {};
+    document.getElementById('reextract-url').value = '';
+    document.getElementById('reextract-status').textContent = '';
+    document.getElementById('reextract-status').classList.remove('err');
+    document.getElementById('reextract-source-chip').textContent = '';
+    document.getElementById('reextract-footer').style.display = 'none';
+    document.getElementById('reextract-compare').innerHTML =
+      '<div class="reextract-placeholder">Pick a source above and click Extract to see results here.</div>';
+    loadSuggestions();
+  }
+}
+
+async function loadSuggestions() {
+  const list = document.getElementById('reextract-suggestions');
+  list.innerHTML = '<div class="reextract-placeholder">Loading suggestions…</div>';
+  try {
+    const res = await edgeFn('admin-suggest-sources', { location_id: current.location_id });
+    reex.suggestions = res.suggestions || [];
+    renderReextractSuggestions();
+  } catch (err) {
+    list.innerHTML = `<div class="reextract-placeholder">Couldn't load suggestions: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function renderReextractSuggestions() {
+  const list = document.getElementById('reextract-suggestions');
+  if (!reex.suggestions || reex.suggestions.length === 0) {
+    list.innerHTML = '<div class="reextract-placeholder">No suggestions found — paste a URL below.</div>';
+    return;
+  }
+  list.innerHTML = reex.suggestions.map((s, i) => `
+    <button type="button" class="reextract-suggestion" data-idx="${i}" onclick="pickSuggestion(${i})">
+      <div class="reextract-sugg-top">
+        <span>
+          ${escHtml(s.title || s.domain)}
+          ${sourceBadgeHtml(s.source_type)}
+        </span>
+        <span class="reextract-sugg-score">${escHtml(s.domain)} · ${s.score}</span>
+      </div>
+      <div class="reextract-sugg-url">${escHtml(s.url)}</div>
+      <div class="reextract-sugg-snippet">${escHtml(s.snippet || '')}</div>
+    </button>
+  `).join('');
+
+  // Surface the current source's badge in the section heading chip too, so
+  // the user sees what they're about to replace.
+  const chip = document.getElementById('reextract-source-chip');
+  if (chip && current.dogs_policy_source_url) {
+    chip.innerHTML = `Current source: ${sourceBadgeHtml(current.source_type)}
+      <span style="margin-left:4px;">${escHtml(new URL(current.dogs_policy_source_url).hostname.replace(/^www\./, ''))}</span>`;
+  }
+}
+
+function sourceBadgeHtml(t) {
+  const type = t || 'unknown';
+  return `<span class="source-badge ${type}">${type}</span>`;
+}
+
+function pickSuggestion(i) {
+  const s = reex.suggestions[i];
+  if (!s) return;
+  document.querySelectorAll('.reextract-suggestion').forEach((el, j) =>
+    el.classList.toggle('selected', j === i));
+  document.getElementById('reextract-url').value = s.url;
+}
+
+async function runExtract() {
+  const url = document.getElementById('reextract-url').value.trim();
+  if (!url) { setReextractStatus('Enter or pick a URL first', true); return; }
+  try { new URL(url); } catch { setReextractStatus('Not a valid URL', true); return; }
+
+  const btn = document.getElementById('reextract-extract-btn');
+  btn.disabled = true;
+  btn.textContent = 'Extracting…';
+  setReextractStatus('Fetching source + asking Claude (10–30s)…');
+
+  const res = await edgeFn('admin-re-extract-policy', {
+    location_id: current.location_id,
+    source_url:  url,
+  });
+
+  btn.disabled = false;
+  btn.textContent = 'Extract';
+
+  if (res.error) {
+    setReextractStatus('Error: ' + res.error, true);
+    return;
+  }
+
+  reex.extracted = res.extracted;
+  reex.sourceUrl = res.source_url;
+
+  // Default every row's pick to 'current' — user opts in to changes
+  // per-field by clicking the New cell. Bulk buttons flip everything.
+  reex.picks = {};
+  for (const f of REEX_FIELDS) {
+    if (f === 'confidence') continue;  // not editable
+    reex.picks[f] = 'current';
+  }
+
+  // Tag the top chip with the freshly-extracted source domain
+  document.getElementById('reextract-source-chip').innerHTML =
+    `Extracted from: <strong>${escHtml(new URL(res.source_url).hostname.replace(/^www\./, ''))}</strong>`;
+  document.getElementById('reextract-footer').style.display = 'flex';
+  renderReextractCompare();
+  setReextractStatus(`Extracted ${res.fetched_chars} chars of source text.`);
+  // Scroll the results section into view — Source and Compare are
+  // stacked on the same page now, so no tab switch needed.
+  document.getElementById('compare-results-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function setReextractStatus(msg, isErr = false) {
+  const el = document.getElementById('reextract-status');
+  el.textContent = msg;
+  el.classList.toggle('err', isErr);
+}
+
+// Render the 3-column compare table.
+// Current + New cells are clickable — click picks that side. Keep is a
+// read-only display of the picked value. Default pick for each row is
+// 'current'; user flips to 'new' per-field. Bulk buttons flip all.
+function renderReextractCompare() {
+  const rows = REEX_FIELDS.map(f => {
+    const cur = displayValue(current[f]);
+    const neu = displayValue(reex.extracted[f]);
+    if (f === 'confidence') {
+      return `<tr>
+        <td class="reextract-field-name">${f}</td>
+        <td class="reextract-cell ${cur === 'null' ? 'null' : ''}">${escHtml(cur)}</td>
+        <td class="reextract-cell ${neu === 'null' ? 'null' : ''}">${escHtml(neu)}</td>
+        <td class="reextract-cell" style="color:var(--text-dim);font-style:italic;">(informational)</td>
+      </tr>`;
+    }
+
+    const pick = reex.picks[f] ?? 'current';
+    const keepStr = pick === 'new' ? neu : cur;
+
+    const currentCell = `
+      <td class="reextract-cell selectable ${pick === 'current' ? 'picked' : ''} ${cur === 'null' ? 'null' : ''}"
+          onclick="reextractPick('${f}', 'current')">
+        ${escHtml(cur)}
+        ${pick === 'current' ? '<span class="check">✓</span>' : ''}
+      </td>`;
+    const newCell = `
+      <td class="reextract-cell selectable ${pick === 'new' ? 'picked' : ''} ${neu === 'null' ? 'null' : ''}"
+          onclick="reextractPick('${f}', 'new')">
+        ${escHtml(neu)}
+        ${pick === 'new' ? '<span class="check">✓</span>' : ''}
+      </td>`;
+
+    return `<tr data-field="${f}">
+      <td class="reextract-field-name">${f}</td>
+      ${currentCell}
+      ${newCell}
+      <td class="reextract-cell keep-display ${keepStr === 'null' ? 'null' : ''}">
+        ${escHtml(keepStr)}
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('reextract-compare').innerHTML = `
+    <table class="reextract-table">
+      <thead>
+        <tr>
+          <th style="width:28%;">Field</th>
+          <th style="width:26%;">Current (click to keep)</th>
+          <th style="width:26%;">New (click to take)</th>
+          <th style="width:20%;">Keep</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+// Format a value for display / Keep input. Booleans → "true"/"false",
+// null/undefined → "null", everything else → String.
+function displayValue(v) {
+  if (v === null || v === undefined || v === '') return 'null';
+  if (v === true)  return 'true';
+  if (v === false) return 'false';
+  return String(v);
+}
+
+// User clicked a Current or New cell — record which side is picked and
+// re-render the table so the check marks + Keep column update.
+function reextractPick(field, side) {
+  reex.picks[field] = side;   // 'current' | 'new'
+  renderReextractCompare();
+}
+
+function reextractBulk(side) {
+  for (const f of REEX_FIELDS) {
+    if (f === 'confidence') continue;
+    reex.picks[f] = side;
+  }
+  renderReextractCompare();
+}
+
+// Push 'new'-picked values into the main form as pending edits.
+// 'current'-picked fields are no-ops (nothing to change).
+function applyReextract() {
+  let applied = 0;
+  for (const [field, side] of Object.entries(reex.picks)) {
+    if (side !== 'new') continue;
+    const value = reex.extracted[field];
+    // Defensive: skip if the "new" value happens to equal current
+    if (displayValue(current[field]) === displayValue(value)) continue;
+    applyValueToForm(field, value);
+    applied++;
+  }
+
+  // Bump the source URL + updated timestamp so provenance reflects the new source
+  if (applied > 0) {
+    applyValueToForm('dogs_policy_source_url', reex.sourceUrl);
+    applyValueToForm('dogs_policy_updated_at', new Date().toISOString());
+  }
+
+  switchPage('edit');
+  showToast(applied > 0 ? `${applied} field${applied === 1 ? '' : 's'} staged — review and hit Save` : 'No changes to apply');
+}
+
+// Apply one parsed value to the main form, triggering dirty-tracking.
+function applyValueToForm(field, value) {
+  const el = document.getElementById(`in-${field}`);
+  if (!el) { markDirty(field, value); return; }
+
+  // Tri-state booleans (the .tri container with buttons)
+  if (el.classList.contains('tri')) {
+    const target = value === true ? 'true' : value === false ? 'false' : 'null';
+    const btn = el.querySelector(`button[data-val="${target}"]`);
+    if (btn) btn.click();
+    return;
+  }
+
+  // Text / textarea / select — set value and dispatch input so interaction
+  // handler runs (which calls markDirty).
+  if (el.matches('input, textarea, select')) {
+    el.value = value ?? '';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    return;
+  }
+
+  // Fallback — mark dirty directly.
+  markDirty(field, value);
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────

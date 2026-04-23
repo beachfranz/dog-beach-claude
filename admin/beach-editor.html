@@ -609,6 +609,27 @@
     }
     .reextract-extract-btn:hover { background: var(--accent-hov); }
     .reextract-extract-btn:disabled { background: #cbd5e1; cursor: not-allowed; }
+
+    /* Inline lookup buttons (Geocode, Find NOAA station) */
+    .lookup-row { display: flex; gap: 8px; align-items: stretch; }
+    .lookup-row .field-input { flex: 1; }
+    .lookup-btn {
+      background: white; color: var(--text);
+      padding: 0 14px;
+      border: 1px solid var(--border); border-radius: 6px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer; font-family: inherit;
+      white-space: nowrap;
+    }
+    .lookup-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .lookup-btn:disabled { color: #94a3b8; cursor: not-allowed; border-color: var(--border); }
+    .lookup-status {
+      margin-top: 6px;
+      font-size: 12px; color: var(--text-muted);
+      min-height: 16px;
+    }
+    .lookup-status.err { color: var(--red); }
+    .lookup-status.ok  { color: #059669; }
     .reextract-status {
       margin-top: 10px;
       font-size: 12px; color: var(--text-muted);
@@ -956,6 +977,16 @@ function renderForm() {
 
     ${sectionHtml('Location', false, [
       `<div class="field">
+        <div class="field-label">Address<code>address</code></div>
+        <div>
+          <div class="lookup-row">
+            <input class="field-input" id="in-address" data-field="address" type="text" value="${escAttr(b.address ?? '')}" placeholder="e.g., 101 Main St, Huntington Beach, CA" />
+            <button type="button" class="lookup-btn" id="geocode-btn" onclick="runGeocode()">Geocode → lat/lng</button>
+          </div>
+          <div class="lookup-status" id="geocode-status"></div>
+        </div>
+      </div>`,
+      `<div class="field">
         <div class="field-label">Latitude / Longitude</div>
         <div>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
@@ -966,7 +997,6 @@ function renderForm() {
           <div class="field-hint">Click the map to move the marker. Drag the marker or edit the numbers directly.</div>
         </div>
       </div>`,
-      textField('address', 'Address', b.address),
     ])}
 
     ${sectionHtml('Governance', false, [
@@ -1017,6 +1047,14 @@ function renderForm() {
     ])}
 
     ${sectionHtml('NOAA', false, [
+      `<div class="field">
+        <div class="field-label">Nearest tide station</div>
+        <div>
+          <button type="button" class="lookup-btn" id="noaa-find-btn" onclick="runFindNoaaStation()">Find nearest station from lat/lng</button>
+          <div class="field-hint" style="margin-top:6px;">Requires valid lat/lng. Uses the same NOAA CO-OPS list as the pipeline (reference stations only, within 50 km).</div>
+          <div class="lookup-status" id="noaa-status"></div>
+        </div>
+      </div>`,
       textField('noaa_station_id',   'Station ID',   b.noaa_station_id),
       textField('noaa_station_name', 'Station name', b.noaa_station_name),
     ])}
@@ -1497,6 +1535,103 @@ function syncInputsToMap() {
   const lng = Number(document.getElementById('in-longitude').value);
   if (Number.isFinite(lat) && Number.isFinite(lng) && marker) {
     marker.setLatLng([lat, lng]);
+  }
+}
+
+// ── Address geocoding ─────────────────────────────────────────────────────
+// Forward-geocodes the address input via admin-geocode-address and drops
+// the lat/lng into the coordinate inputs + map marker.
+async function runGeocode() {
+  const addrInput  = document.getElementById('in-address');
+  const btn        = document.getElementById('geocode-btn');
+  const statusEl   = document.getElementById('geocode-status');
+  const address    = (addrInput.value ?? '').trim();
+  statusEl.className = 'lookup-status';
+  statusEl.textContent = '';
+  if (!address) { statusEl.className = 'lookup-status err'; statusEl.textContent = 'Enter an address first.'; return; }
+
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = 'Geocoding…';
+  try {
+    const res = await edgeFn('admin-geocode-address', { address });
+    if (res.error) {
+      statusEl.className = 'lookup-status err';
+      statusEl.textContent = res.error;
+      return;
+    }
+    const lat = Number(res.latitude), lng = Number(res.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      statusEl.className = 'lookup-status err';
+      statusEl.textContent = 'Geocode returned invalid coordinates.';
+      return;
+    }
+    // syncMapToInputs marks dirty + updates inputs; move the marker too.
+    syncMapToInputs(lat, lng);
+    if (marker) marker.setLatLng([lat, lng]);
+    if (map)    map.setView([lat, lng], 15);
+    statusEl.className = 'lookup-status ok';
+    statusEl.textContent = `→ ${lat.toFixed(6)}, ${lng.toFixed(6)}${res.formatted_address ? ` · ${res.formatted_address}` : ''}`;
+  } catch (e) {
+    statusEl.className = 'lookup-status err';
+    statusEl.textContent = `Request failed: ${e.message || e}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+}
+
+// ── NOAA station lookup ───────────────────────────────────────────────────
+// Asks admin-find-noaa-station for the closest reference tide station to
+// the current lat/lng (same filters as v2-noaa-station-match), then writes
+// the id + name into the NOAA fields.
+async function runFindNoaaStation() {
+  const btn      = document.getElementById('noaa-find-btn');
+  const statusEl = document.getElementById('noaa-status');
+  statusEl.className = 'lookup-status';
+  statusEl.textContent = '';
+
+  const lat = Number(document.getElementById('in-latitude').value);
+  const lng = Number(document.getElementById('in-longitude').value);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    statusEl.className = 'lookup-status err';
+    statusEl.textContent = 'Set a valid latitude and longitude first (map pin or Geocode).';
+    return;
+  }
+
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = 'Searching…';
+  try {
+    const res = await edgeFn('admin-find-noaa-station', { latitude: lat, longitude: lng });
+    if (res.error) {
+      statusEl.className = 'lookup-status err';
+      statusEl.textContent = res.error;
+      return;
+    }
+    if (!res.station) {
+      const km = res.distance_m != null ? (res.distance_m / 1000).toFixed(1) : '?';
+      statusEl.className = 'lookup-status err';
+      statusEl.textContent = `No station within ${(res.max_distance_m/1000)|0} km. Closest was ${res.closest?.name ?? '(unknown)'} at ${km} km.`;
+      return;
+    }
+    const idInput   = document.getElementById('in-noaa_station_id');
+    const nameInput = document.getElementById('in-noaa_station_name');
+    idInput.value   = res.station.id;
+    nameInput.value = res.station.name;
+    idInput.classList.add('dirty');
+    nameInput.classList.add('dirty');
+    markDirty('noaa_station_id',   res.station.id,   idInput);
+    markDirty('noaa_station_name', res.station.name, nameInput);
+    const km = (res.distance_m / 1000).toFixed(1);
+    statusEl.className = 'lookup-status ok';
+    statusEl.textContent = `→ ${res.station.id} ${res.station.name}${res.station.state ? ` (${res.station.state})` : ''} · ${km} km away`;
+  } catch (e) {
+    statusEl.className = 'lookup-status err';
+    statusEl.textContent = `Request failed: ${e.message || e}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
   }
 }
 

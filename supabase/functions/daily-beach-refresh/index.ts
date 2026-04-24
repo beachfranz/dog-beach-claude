@@ -269,14 +269,8 @@ async function processBeach(
   const rawHours = buildRawHours(beach, weatherResult, tideMap, crowdResult.busynessMap);
   console.log(`[${beach.location_id}] Built ${rawHours.length} raw hours`);
 
-  // d2. Bacteria risk from recent precipitation
-  const recentPrecip   = computeRecentPrecip(rawHours, weatherResult.hours, runAt);
-  const bacteriaRisk   = deriveBacteriaRisk(
-    recentPrecip.precip72hMm,
-    config.bacteria_caution_mm ?? 2.5,
-    config.bacteria_nogo_mm    ?? 25.0,
-  );
-  console.log(`[${beach.location_id}] Precip 72h=${recentPrecip.precip72hMm}mm → bacteria_risk=${bacteriaRisk}`);
+  const cautionMm = config.bacteria_caution_mm ?? 2.5;
+  const nogoMm    = config.bacteria_nogo_mm    ?? 25.0;
 
   // e. Score hours
   let scoredHours: ScoredHour[];
@@ -317,8 +311,11 @@ async function processBeach(
   // h. Upsert daily rows
   try {
     const dailyRows = dates.map((date) => {
-      const dayHours = scoredHours.filter((h) => h.localDate === date);
-      const window   = windows.get(date) ?? null;
+      const dayHours     = scoredHours.filter((h) => h.localDate === date);
+      const window       = windows.get(date) ?? null;
+      const recentPrecip = computePrecipForDay(rawHours, weatherResult.hours, date);
+      const bacteriaRisk = deriveBacteriaRisk(recentPrecip.precip72hMm, cautionMm, nogoMm);
+      console.log(`[${beach.location_id}] ${date}: 72h=${recentPrecip.precip72hMm}mm → ${bacteriaRisk}`);
       return buildDailyRow(beach, date, dayHours, window, config, runAt, recentPrecip, bacteriaRisk);
     });
     const { error } = await supabase
@@ -340,26 +337,34 @@ async function processBeach(
 // ─── Bacteria risk helpers ────────────────────────────────────────────────────
 
 /**
- * Sum actual precipitation (mm) from past 24h and 72h windows.
- * Uses the UTC forecastTs from rawHours matched to weatherResult hours by index.
- * Only counts hours that have already occurred (forecastTs < runAt).
+ * Sum precipitation (mm) in the 24h and 72h windows ending at the start of
+ * the given local day. For day 1 (today) the window is entirely observed
+ * past-rain; for day 7 it's entirely forecast. Open-Meteo past_days=3 +
+ * forecast_days=7 covers every window we ever need.
+ *
+ * Rationale: bacteria risk is a function of recent runoff accumulating at
+ * the beach. Anchoring at start-of-day gives a clean, per-day rolling
+ * total that matches how SoCal advisories are issued.
  */
-function computeRecentPrecip(
+function computePrecipForDay(
   rawHours: RawHourData[],
   weatherHours: Awaited<ReturnType<typeof fetchWeather>>["hours"],
-  runAt: Date,
+  localDate: string,
 ): { precip24hMm: number; precip72hMm: number } {
-  const nowMs  = runAt.getTime();
-  const ms24h  = 24 * 3_600_000;
-  const ms72h  = 72 * 3_600_000;
-  let precip24h = 0;
-  let precip72h = 0;
+  const firstIdx = rawHours.findIndex((h) => h.localDate === localDate);
+  if (firstIdx < 0) return { precip24hMm: 0, precip72hMm: 0 };
+
+  const anchorMs = new Date(rawHours[firstIdx].forecastTs).getTime();
+  const ms24h    = 24 * 3_600_000;
+  const ms72h    = 72 * 3_600_000;
+  let precip24h  = 0;
+  let precip72h  = 0;
 
   const len = Math.min(rawHours.length, weatherHours.length);
   for (let i = 0; i < len; i++) {
-    const tsMs  = new Date(rawHours[i].forecastTs).getTime();
-    if (tsMs >= nowMs) continue;           // future — skip
-    const ageMs = nowMs - tsMs;
+    const tsMs = new Date(rawHours[i].forecastTs).getTime();
+    if (tsMs >= anchorMs) continue;
+    const ageMs = anchorMs - tsMs;
     const mm    = weatherHours[i].precipitation ?? 0;
     if (ageMs <= ms72h) precip72h += mm;
     if (ageMs <= ms24h) precip24h += mm;

@@ -1,0 +1,25 @@
+# Secrets — never commit
+scripts/pipeline/.env
+**/.env
+**/.env.local
+
+# Pipeline scratch — regenerable from source
+scripts/pipeline/checkpoints/
+scripts/pipeline/*.csv
+
+# Local-only tooling state
+.claude/
+supabase/.temp/
+supabase.exe
+
+# Python
+__pycache__/
+*.pyc
+
+# One-off analysis artifacts at repo root
+/dup_report.txt
+/dup_report_raw.json
+/jurisdiction_disagree.csv
+
+# Shared screenshots / external data dumps (workspace only)
+share/

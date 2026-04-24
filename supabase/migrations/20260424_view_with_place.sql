@@ -169,18 +169,18 @@ select
   case
     when b.place_type is null       then null
     when b.place_type like 'C%'     then 'incorporated'
-    when b.place_type = 'U1'        then 'cdp'
+    when b.place_type like 'U%'     then 'cdp'
     else                                 'other'
   end as place_kind,
   case
     when b.place_type is null       then 'county'
     when b.place_type like 'C%'     then 'city'
-    when b.place_type = 'U1'        then 'county'
+    when b.place_type like 'U%'     then 'county'  -- CDP (U1/U2): county governs
     else                                 'city'
   end as governing_body_type,
   case
     when b.place_type is null       then b.county_name
-    when b.place_type = 'U1'        then b.county_name
+    when b.place_type like 'U%'     then b.county_name
     else                                 b.place_name
   end as governing_body_name
 

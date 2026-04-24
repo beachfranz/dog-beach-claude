@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Geocode Review — Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:         #f8fafc;
+      --panel:      #ffffff;
+      --border:     #e2e8f0;
+      --border-hov: #cbd5e1;
+      --text:       #0f172a;
+      --text-muted: #475569;
+      --text-dim:   #94a3b8;
+      --accent:     #3b82f6;
+      --accent-hov: #2563eb;
+      --accent-bg:  #dbeafe;
+      --green:      #15803d;
+      --green-bg:   #dcfce7;
+      --red:        #b91c1c;
+      --red-bg:     #fee2e2;
+      --amber:      #b45309;
+      --amber-bg:   #fef3c7;
+      --radius:     8px;
+      --radius-sm:  4px;
+    }
+    html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; }
+    .app { display: flex; flex-direction: column; height: 100vh; }
+
+    header.top {
+      display: flex; align-items: center; gap: 16px;
+      padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    header.top h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+    header.top .summary { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--text-muted); }
+    header.top .spacer { flex: 1; }
+    button, .btn {
+      font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500;
+      padding: 8px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+      background: var(--panel); color: var(--text); cursor: pointer; transition: all 0.1s;
+    }
+    button:hover { border-color: var(--border-hov); background: var(--bg); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+    button.primary:hover { background: var(--accent-hov); border-color: var(--accent-hov); }
+    button.success { background: var(--green); color: white; border-color: var(--green); }
+    button.success-outline { background: var(--panel); color: var(--green); border-color: var(--green); }
+    button.success-outline:hover { background: var(--green-bg); }
+    button.danger  { background: var(--panel); color: var(--red); border-color: var(--red); }
+    button.danger:hover { background: var(--red-bg); }
+
+    main.workspace { display: flex; flex: 1; min-height: 0; }
+    aside.flags { width: 340px; background: var(--panel); border-right: 1px solid var(--border); overflow-y: auto; flex-shrink: 0; }
+    .flag-group-label { font-family: 'DM Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); padding: 12px 16px 4px; }
+    .flag-item { padding: 10px 16px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; }
+    .flag-item:hover { background: var(--bg); }
+    .flag-item.active { background: var(--accent-bg); }
+    .flag-row1 { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+    .tier-badge { font-family: 'DM Mono', monospace; font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 600; }
+    .tier-badge.A { background: var(--amber-bg); color: var(--amber); }
+    .tier-badge.B { background: var(--red-bg); color: var(--red); }
+    .flag-fid { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--text-dim); }
+    .flag-name { font-size: 13px; font-weight: 500; line-height: 1.3; }
+    .flag-meta { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+    section.detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    .detail-empty { color: var(--text-dim); text-align: center; padding: 80px 20px; }
+    .detail-header { padding: 16px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
+    .detail-header h2 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+    .beach-search-link {
+      color: inherit;
+      text-decoration: none;
+      border-bottom: 1px dashed transparent;
+      transition: border-color 0.1s;
+    }
+    .beach-search-link:hover {
+      border-bottom-color: var(--accent);
+      color: var(--accent);
+    }
+    .beach-search-link::after {
+      content: ' ↗';
+      font-size: 0.75em;
+      color: var(--text-dim);
+      vertical-align: super;
+    }
+    .detail-header .sub { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--text-muted); }
+    .detail-body { flex: 1; display: flex; overflow: hidden; }
+    #map { flex: 1; min-height: 300px; }
+    .detail-side { width: 300px; border-left: 1px solid var(--border); background: var(--panel); padding: 16px; overflow-y: auto; flex-shrink: 0; }
+    .field { margin-bottom: 14px; }
+    .field-label { font-family: 'DM Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 4px; }
+    .field-value { font-size: 13px; line-height: 1.4; }
+    .field-value .mono { font-family: 'DM Mono', monospace; font-size: 12px; }
+    .muted { color: var(--text-muted); }
+
+    .actions-stack { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px; }
+    .actions-stack button { width: 100%; padding: 10px 12px; }
+    .edit-form { display: none; margin-top: 8px; padding: 10px; background: var(--bg); border-radius: var(--radius-sm); }
+    .edit-form.open { display: block; }
+    .edit-form label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
+    .edit-form input { width: 100%; padding: 6px 8px; font-family: 'DM Mono', monospace; font-size: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; }
+    .edit-form-row { display: flex; gap: 6px; }
+
+    .overlay { position: fixed; inset: 0; background: rgba(15,23,42,0.5); display: none; align-items: center; justify-content: center; z-index: 1100; }
+    .overlay.open { display: flex; }
+    .modal { background: var(--panel); border-radius: var(--radius); padding: 20px; max-width: 460px; width: 90%; }
+    .modal h3 { font-size: 16px; margin-bottom: 10px; }
+    .modal .body { margin-bottom: 16px; color: var(--text-muted); line-height: 1.5; font-size: 13px; }
+    .modal .actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+    .map-legend {
+      background: rgba(255,255,255,0.95);
+      padding: 8px 12px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      font-size: 12px;
+      font-family: 'DM Sans', sans-serif;
+      line-height: 1.7;
+      box-shadow: 0 2px 8px rgba(15,23,42,0.1);
+    }
+    .map-legend .dot {
+      display: inline-block;
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      margin-right: 6px;
+      vertical-align: -2px;
+      border: 2px solid;
+    }
+    .map-legend .dot.red   { background: #ef4444; border-color: #b91c1c; }
+    .map-legend .dot.green { background: #4ade80; border-color: #15803d; }
+    .map-legend .dot.gray  { background: #cbd5e1; border-color: #94a3b8; }
+
+    .candidates-list { display: flex; flex-direction: column; gap: 6px; }
+    .candidate-row {
+      display: flex; align-items: flex-start; gap: 8px;
+      padding: 8px 10px;
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: var(--bg); cursor: pointer; transition: all 0.1s;
+    }
+    .candidate-row:hover { border-color: var(--border-hov); }
+    .candidate-row.picked {
+      border-color: var(--green); background: var(--green-bg);
+    }
+    .candidate-row input[type=radio] { margin-top: 3px; cursor: pointer; }
+    .src-badge {
+      font-family: 'DM Mono', monospace; font-size: 10px; font-weight: 600;
+      padding: 1px 6px; border-radius: 10px;
+    }
+    .src-badge.cpad { background: var(--accent-bg); color: var(--accent-hov); }
+    .src-badge.ccc  { background: var(--amber-bg);  color: var(--amber); }
+
+    .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px); padding: 10px 16px; border-radius: var(--radius); background: var(--text); color: var(--panel); font-size: 13px; opacity: 0; transition: all 0.2s; z-index: 1200; pointer-events: none; }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .toast.err { background: var(--red); }
+    .toast.ok  { background: var(--green); }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <h1>Geocode Review</h1>
+    <span class="summary" id="summary">Loading…</span>
+    <div class="spacer"></div>
+    <a class="btn" href="dedupe-review.html" style="text-decoration: none;">Dedupe →</a>
+    <a class="btn" href="beach-editor.html" style="text-decoration: none;">Beach Editor →</a>
+  </header>
+
+  <main class="workspace">
+    <aside class="flags" id="flag-list">
+      <div style="padding: 20px; color: var(--text-dim);">Loading flags…</div>
+    </aside>
+    <section class="detail" id="detail">
+      <div class="detail-empty">Pick a flagged beach to see its candidate polygon on the map.</div>
+    </section>
+  </main>
+</div>
+
+<div class="overlay" id="modal-overlay" onclick="closeModalIfBackdrop(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h3 id="modal-title"></h3>
+    <div class="body" id="modal-body"></div>
+    <div class="actions" id="modal-actions"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const SUPABASE_URL     = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY         = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+const ADMIN_SECRET_KEY = 'db_admin_secret';
+
+function promptForAdminSecret(msg) {
+  const val = prompt(msg || 'Admin secret:');
+  if (val) localStorage.setItem(ADMIN_SECRET_KEY, val);
+  return val || '';
+}
+function getAdminSecret() { return localStorage.getItem(ADMIN_SECRET_KEY) || promptForAdminSecret(); }
+function clearAdminSecret() { localStorage.removeItem(ADMIN_SECRET_KEY); }
+
+async function edgeFn(fn, body = {}) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const secret = getAdminSecret();
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/${fn}`, {
+      method: 'POST',
+      headers: {
+        'Authorization':   `Bearer ${ANON_KEY}`,
+        'Content-Type':    'application/json',
+        'x-admin-secret':  secret,
+      },
+      body: JSON.stringify(body),
+    });
+    if (r.status === 401) {
+      clearAdminSecret();
+      if (attempt === 0) { promptForAdminSecret('Admin secret rejected — try again:'); continue; }
+      return { error: 'Unauthorized' };
+    }
+    if (r.status === 429) return { error: 'Rate limit exceeded' };
+    return r.json();
+  }
+  return { error: 'Unauthorized' };
+}
+
+function showToast(msg, isErr = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + (isErr ? 'err' : 'ok');
+  setTimeout(() => t.className = 'toast', 2500);
+}
+
+function showModal(title, body, actions) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').innerHTML = body;
+  const actionsEl = document.getElementById('modal-actions');
+  actionsEl.innerHTML = '';
+  for (const a of actions) {
+    const b = document.createElement('button');
+    b.textContent = a.label;
+    if (a.style) b.className = a.style;
+    b.onclick = () => { closeModal(); if (a.onClick) a.onClick(); };
+    actionsEl.appendChild(b);
+  }
+  document.getElementById('modal-overlay').classList.add('open');
+}
+function closeModal() { document.getElementById('modal-overlay').classList.remove('open'); }
+function closeModalIfBackdrop(e) { if (e.target.id === 'modal-overlay') closeModal(); }
+
+const state = { flags: [], selectedFid: null, selectedCandidateIdx: -1, map: null, markers: [] };
+
+async function loadFlags() {
+  const { flags, error } = await edgeFn('admin-list-geocode-flags', { state: 'CA' });
+  if (error) { showToast('Load failed: ' + error, true); return; }
+  state.flags = flags || [];
+  renderSummary();
+  renderFlagList();
+}
+
+function renderSummary() {
+  const a = state.flags.filter(f => f.tier === 'A').length;
+  const b = state.flags.filter(f => f.tier === 'B').length;
+  document.getElementById('summary').textContent =
+    `${state.flags.length} flagged (CA) · ${a} Tier A · ${b} Tier B`;
+}
+
+function renderFlagList() {
+  const root = document.getElementById('flag-list');
+  root.innerHTML = '';
+  if (!state.flags.length) {
+    root.innerHTML = '<div style="padding:20px; color: var(--text-dim);">No flags — everything either resolved or dismissed.</div>';
+    return;
+  }
+  const aList = state.flags.filter(f => f.tier === 'A').sort((x,y) => x.distance_m - y.distance_m);
+  const bList = state.flags.filter(f => f.tier === 'B').sort((x,y) => x.distance_m - y.distance_m);
+  addGroup(root, 'Tier A · within 5 km', aList);
+  addGroup(root, 'Tier B · same county, farther', bList);
+}
+function addGroup(root, label, items) {
+  if (!items.length) return;
+  const lbl = document.createElement('div');
+  lbl.className = 'flag-group-label';
+  lbl.textContent = label;
+  root.appendChild(lbl);
+  for (const f of items) root.appendChild(renderFlagItem(f));
+}
+function renderFlagItem(f) {
+  const el = document.createElement('div');
+  el.className = 'flag-item' + (f.fid === state.selectedFid ? ' active' : '');
+  el.onclick = () => selectFlag(f.fid);
+  const km = f.distance_m >= 1000 ? `${(f.distance_m/1000).toFixed(1)} km` : `${f.distance_m} m`;
+  el.innerHTML = `
+    <div class="flag-row1">
+      <span class="tier-badge ${escapeHtml(f.tier)}">${escapeHtml(f.tier)}</span>
+      <span class="flag-fid">fid ${f.fid}</span>
+      <span class="flag-meta" style="margin-left:auto;">${escapeHtml(km)}</span>
+    </div>
+    <div class="flag-name">${escapeHtml(f.name || '(no name)')}</div>
+    <div class="flag-meta">→ ${escapeHtml(f.candidate_name || '?')}</div>
+  `;
+  return el;
+}
+
+function selectFlag(fid) {
+  state.selectedFid = fid;
+  renderFlagList();
+  const f = state.flags.find(x => x.fid === fid);
+  if (!f) return;
+  renderDetail(f);
+}
+
+function renderDetail(f) {
+  const detail = document.getElementById('detail');
+  // Pre-select the primary candidate if it's in the list, else first
+  const candidates = f.candidates || [];
+  let selectedIdx = candidates.findIndex(c =>
+    c.source === f.primary_candidate_source && c.name === f.primary_candidate_name);
+  if (selectedIdx < 0) selectedIdx = candidates.length > 0 ? 0 : -1;
+  state.selectedCandidateIdx = selectedIdx;
+
+  const candidatesHtml = candidates.length === 0
+    ? '<div class="field-value muted" style="padding: 8px;">No candidates found. Only dismiss / edit / mark-inactive available.</div>'
+    : candidates.map((c, i) => {
+        const km = c.distance_m >= 1000
+          ? `${(c.distance_m/1000).toFixed(1)} km`
+          : `${c.distance_m} m`;
+        const srcBadge = c.source === 'cpad' ? 'CPAD' : 'CCC';
+        const srcClass = c.source;
+        return `
+          <label class="candidate-row ${i === selectedIdx ? 'picked' : ''}" onclick="pickCandidate(${i})">
+            <input type="radio" name="candidate" ${i === selectedIdx ? 'checked' : ''} onchange="pickCandidate(${i})">
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; align-items:baseline; gap:6px;">
+                <span class="src-badge ${srcClass}">${srcBadge}</span>
+                <span style="font-weight:500;">${escapeHtml(c.name)}</span>
+              </div>
+              <div class="field-value muted" style="font-size: 11px;">
+                ${escapeHtml(c.county || '')} · ${km}${c.open_to_public ? ` · open=${escapeHtml(c.open_to_public)}` : ''}
+              </div>
+            </div>
+          </label>
+        `;
+      }).join('');
+
+  const km = f.primary_distance_m >= 1000
+    ? `${(f.primary_distance_m/1000).toFixed(1)} km`
+    : `${f.primary_distance_m} m`;
+
+  detail.innerHTML = `
+    <div class="detail-header">
+      <h2>
+        <a href="${googleSearchUrl(f.name, f.county_name)}" target="_blank" rel="noopener noreferrer" class="beach-search-link" title="Google search (new tab)">
+          ${escapeHtml(f.name)}
+        </a>
+        <span class="sub">fid ${f.fid}</span>
+      </h2>
+      <div class="sub">${escapeHtml(f.county_name || '')} · Tier ${escapeHtml(f.tier)} · primary candidate ${km} away</div>
+    </div>
+    <div class="detail-body">
+      <div id="map"></div>
+      <div class="detail-side">
+        <div class="field">
+          <div class="field-label">Current Coords</div>
+          <div class="field-value mono">${f.beach_lat.toFixed(6)}, ${f.beach_lon.toFixed(6)}</div>
+        </div>
+        <div class="field">
+          <div class="field-label">Candidates — pick one to associate</div>
+          <div class="candidates-list">${candidatesHtml}</div>
+        </div>
+        <div class="actions-stack">
+          <button class="success" onclick="confirmMoveFlow(${f.fid})" ${candidates.length ? '' : 'disabled'}>
+            Associate + move (snap to candidate)
+          </button>
+          <button class="success-outline" onclick="associateOnlyFlow(${f.fid})" ${candidates.length ? '' : 'disabled'}>
+            Associate only — keep coords
+          </button>
+          <button onclick="dismissFlow(${f.fid})">Actually correct here — dismiss</button>
+          <button onclick="toggleEditForm()">Edit coords manually…</button>
+          <button class="danger" onclick="inactiveFlow(${f.fid})">Mark inactive · not a real beach</button>
+          <div class="edit-form" id="edit-form">
+            <div class="edit-form-row">
+              <div style="flex:1;">
+                <label>Latitude</label>
+                <input id="edit-lat" type="number" step="0.0001" value="${f.beach_lat}">
+              </div>
+              <div style="flex:1;">
+                <label>Longitude</label>
+                <input id="edit-lon" type="number" step="0.0001" value="${f.beach_lon}">
+              </div>
+            </div>
+            <button class="primary" style="width:100%;" onclick="editCoordsFlow(${f.fid})">Save coords</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  setTimeout(() => renderMap(f), 50);
+}
+
+function pickCandidate(idx) {
+  state.selectedCandidateIdx = idx;
+  // Update visual picked state
+  document.querySelectorAll('.candidate-row').forEach((el, i) => {
+    el.classList.toggle('picked', i === idx);
+    const radio = el.querySelector('input[type=radio]');
+    if (radio) radio.checked = (i === idx);
+  });
+  // Re-render map with updated highlights
+  const f = state.flags.find(x => x.fid === state.selectedFid);
+  if (f) renderMap(f);
+}
+
+function renderMap(f) {
+  if (state.map) { state.map.remove(); state.map = null; }
+  state.markers = [];
+  const mapEl = document.getElementById('map');
+  if (!mapEl) return;
+  const map = L.map('map');
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap © CartoDB',
+    subdomains: 'abcd', maxZoom: 19,
+  }).addTo(map);
+
+  const beachLatLng = [f.beach_lat, f.beach_lon];
+  const beachMarker = L.circleMarker(beachLatLng, {
+    radius: 11, color: '#b91c1c', fillColor: '#ef4444', fillOpacity: 0.9, weight: 2.5
+  }).addTo(map).bindPopup(`<b>Current position (suspected wrong)</b><br>fid ${f.fid}<br>${f.beach_lat.toFixed(5)}, ${f.beach_lon.toFixed(5)}`);
+  state.markers.push(beachMarker);
+
+  const bounds = [beachLatLng];
+  const candidates = f.candidates || [];
+  const sel = state.selectedCandidateIdx;
+
+  candidates.forEach((c, i) => {
+    const latlng = [c.snap_lat, c.snap_lon];
+    const isPicked = i === sel;
+    const marker = L.circleMarker(latlng, {
+      radius: isPicked ? 12 : 7,
+      color: isPicked ? '#15803d' : '#94a3b8',
+      fillColor: isPicked ? '#4ade80' : '#cbd5e1',
+      fillOpacity: isPicked ? 0.9 : 0.6,
+      weight: isPicked ? 3 : 2,
+    }).addTo(map).bindPopup(
+      `<b>${isPicked ? '★ PICKED — ' : ''}${escapeHtml(c.source.toUpperCase())}: ${escapeHtml(c.name)}</b>` +
+      `<br>${escapeHtml(c.county || '')} · ${c.distance_m >= 1000 ? (c.distance_m/1000).toFixed(1) + ' km' : c.distance_m + ' m'}` +
+      `<br>${latlng[0].toFixed(5)}, ${latlng[1].toFixed(5)}`
+    );
+    marker.on('click', () => pickCandidate(i));
+    state.markers.push(marker);
+    bounds.push(latlng);
+
+    if (isPicked) {
+      const line = L.polyline([beachLatLng, latlng], {
+        color: '#15803d', weight: 2, dashArray: '6, 8'
+      }).addTo(map);
+      state.markers.push(line);
+    }
+  });
+
+  if (bounds.length > 1) {
+    map.fitBounds(bounds, { padding: [50, 50] });
+  } else {
+    map.setView(beachLatLng, 13);
+  }
+
+  const legend = L.control({ position: 'bottomleft' });
+  legend.onAdd = function() {
+    const div = L.DomUtil.create('div', 'map-legend');
+    div.innerHTML = `
+      <div><span class="dot red"></span> Current position (suspected wrong)</div>
+      <div><span class="dot green"></span> Picked candidate</div>
+      <div><span class="dot gray"></span> Other candidates — click to pick</div>
+    `;
+    return div;
+  };
+  legend.addTo(map);
+
+  state.map = map;
+}
+
+function toggleEditForm() {
+  document.getElementById('edit-form').classList.toggle('open');
+}
+
+function confirmMoveFlow(fid) {
+  const f = state.flags.find(x => x.fid === fid);
+  if (!f) return;
+  const cand = (f.candidates || [])[state.selectedCandidateIdx];
+  if (!cand) { showToast('Pick a candidate first', true); return; }
+  const km = cand.distance_m >= 1000
+    ? `${(cand.distance_m/1000).toFixed(1)} km` : `${cand.distance_m} m`;
+  showModal('Associate beach with this candidate?',
+    `<strong>${escapeHtml(f.name)}</strong> (fid ${f.fid}) will be associated with
+     <strong>${escapeHtml(cand.source.toUpperCase())}: ${escapeHtml(cand.name)}</strong>
+     (${escapeHtml(cand.county || '')}, ${km} away).<br><br>
+     Beach coordinates move to <code>${cand.snap_lat.toFixed(4)}, ${cand.snap_lon.toFixed(4)}</code>.
+     orphan_geocode flag cleared. Beach becomes valid.`,
+    [
+      { label: 'Cancel', onClick: null },
+      { label: 'Associate', style: 'success', onClick: () => doConfirmMove(fid, cand) },
+    ]);
+}
+async function doConfirmMove(fid, cand) {
+  const res = await edgeFn('admin-confirm-geocode-move', {
+    fid,
+    candidate_source: cand.source,
+    candidate_name:   cand.name,
+    candidate_county: cand.county,
+  });
+  if (res.error) { showToast('Failed: ' + res.error, true); return; }
+  showToast(`Associated fid ${fid} with ${cand.name}.`);
+  await loadFlags();
+  renderEmpty();
+}
+
+function associateOnlyFlow(fid) {
+  const f = state.flags.find(x => x.fid === fid);
+  if (!f) return;
+  const cand = (f.candidates || [])[state.selectedCandidateIdx];
+  if (!cand) { showToast('Pick a candidate first', true); return; }
+  const km = cand.distance_m >= 1000
+    ? `${(cand.distance_m/1000).toFixed(1)} km` : `${cand.distance_m} m`;
+  showModal('Associate without moving?',
+    `Pin <strong>${escapeHtml(f.name)}</strong> (fid ${f.fid}) to
+     <strong>${escapeHtml(cand.source.toUpperCase())}: ${escapeHtml(cand.name)}</strong>
+     (${km} away) as its canonical authority record.<br><br>
+     Beach coordinates stay at <code>${f.beach_lat.toFixed(4)}, ${f.beach_lon.toFixed(4)}</code>
+     — no geometry change. Downstream enrichment will prefer the explicit
+     association over spatial inference.`,
+    [
+      { label: 'Cancel', onClick: null },
+      { label: 'Associate only', style: 'success-outline', onClick: () => doAssociateOnly(fid, cand) },
+    ]);
+}
+async function doAssociateOnly(fid, cand) {
+  const res = await edgeFn('admin-associate-beach-only', {
+    fid,
+    candidate_source: cand.source,
+    candidate_name:   cand.name,
+    candidate_county: cand.county,
+  });
+  if (res.error) { showToast('Failed: ' + res.error, true); return; }
+  showToast(`Associated fid ${fid} with ${cand.name} (coords unchanged).`);
+  await loadFlags();
+  renderEmpty();
+}
+
+function inactiveFlow(fid) {
+  const f = state.flags.find(x => x.fid === fid);
+  if (!f) return;
+  showModal('Mark inactive — not a real beach?',
+    `Archive <strong>${escapeHtml(f.name)}</strong> (fid ${f.fid}) from the active
+     inventory. Use this when no candidate fits because the record isn't a real
+     locatable beach (scrape artifact, wrong-named business, etc.).<br><br>
+     Row is preserved for history but excluded from active pipeline queries.`,
+    [
+      { label: 'Cancel', onClick: null },
+      { label: 'Mark inactive', style: 'danger', onClick: () => doInactive(fid) },
+    ]);
+}
+async function doInactive(fid) {
+  const res = await edgeFn('admin-mark-beach-inactive', { fid, reason: 'lost cause' });
+  if (res.error) { showToast('Failed: ' + res.error, true); return; }
+  showToast(`Marked fid ${fid} inactive (lost cause).`);
+  await loadFlags();
+  renderEmpty();
+}
+
+function dismissFlow(fid) {
+  const f = state.flags.find(x => x.fid === fid);
+  if (!f) return;
+  showModal('Mark as correct — permanent dismiss?',
+    `Mark <strong>${escapeHtml(f.name)}</strong> as genuinely at
+     <code>${f.beach_lat.toFixed(4)}, ${f.beach_lon.toFixed(4)}</code>.
+     The orphan_geocode check will never re-flag this beach.`,
+    [
+      { label: 'Cancel', onClick: null },
+      { label: 'Dismiss permanently', style: 'danger', onClick: () => doDismiss(fid) },
+    ]);
+}
+async function doDismiss(fid) {
+  const res = await edgeFn('admin-dismiss-geocode', { fid });
+  if (res.error) { showToast('Failed: ' + res.error, true); return; }
+  showToast(`Dismissed fid ${fid}.`);
+  await loadFlags();
+  renderEmpty();
+}
+
+async function editCoordsFlow(fid) {
+  const lat = parseFloat(document.getElementById('edit-lat').value);
+  const lon = parseFloat(document.getElementById('edit-lon').value);
+  if (isNaN(lat) || isNaN(lon)) { showToast('Need valid numeric lat + lon', true); return; }
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) { showToast('Coords out of range', true); return; }
+  const res = await edgeFn('admin-edit-geocode-coords', { fid, lat, lon });
+  if (res.error) { showToast('Failed: ' + res.error, true); return; }
+  showToast(`Updated fid ${fid}.`);
+  await loadFlags();
+  renderEmpty();
+}
+
+function renderEmpty() {
+  state.selectedFid = null;
+  document.getElementById('detail').innerHTML = '<div class="detail-empty">Pick a flagged beach to see its candidate polygon on the map.</div>';
+  if (state.map) { state.map.remove(); state.map = null; }
+}
+
+function googleSearchUrl(beachName, countyName) {
+  const parts = [];
+  if (beachName)  parts.push(`"${beachName}"`);
+  if (countyName) parts.push(`"${countyName}"`);
+  // "California" anchors the search regionally and filters out a lot of
+  // same-named beaches from other states
+  parts.push('California');
+  const q = parts.join(' ');
+  return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+}
+
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s)
+    .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+}
+
+(async function boot() {
+  getAdminSecret();
+  await loadFlags();
+})();
+</script>
+</body>
+</html>

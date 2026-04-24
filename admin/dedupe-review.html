@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dedupe Review — Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:         #f8fafc;
+      --panel:      #ffffff;
+      --border:     #e2e8f0;
+      --border-hov: #cbd5e1;
+      --text:       #0f172a;
+      --text-muted: #475569;
+      --text-dim:   #94a3b8;
+      --accent:     #3b82f6;
+      --accent-hov: #2563eb;
+      --accent-bg:  #dbeafe;
+      --green:      #15803d;
+      --green-bg:   #dcfce7;
+      --red:        #b91c1c;
+      --red-bg:     #fee2e2;
+      --amber:      #b45309;
+      --amber-bg:   #fef3c7;
+      --radius:     8px;
+      --radius-sm:  4px;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Layout ─────────────────────────────────────────────────── */
+    .app { display: flex; flex-direction: column; height: 100vh; }
+
+    header.top {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 12px 20px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    header.top h1 {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    header.top .summary {
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    header.top .spacer { flex: 1; }
+
+    main.workspace {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+    }
+
+    /* Cluster list (left) */
+    aside.clusters {
+      width: 340px;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+    .cluster-group-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+      padding: 12px 16px 4px;
+    }
+    .cluster-item {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .cluster-item:hover { background: var(--bg); }
+    .cluster-item.active { background: var(--accent-bg); }
+    .cluster-item.resolved { opacity: 0.5; }
+
+    .cluster-item-header {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    .cluster-id {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+    .cluster-state {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      padding: 1px 6px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text-muted);
+    }
+    .cluster-badge {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 10px;
+      margin-left: auto;
+    }
+    .cluster-badge.auto { background: var(--green-bg); color: var(--green); }
+    .cluster-badge.review { background: var(--amber-bg); color: var(--amber); }
+    .cluster-badge.done { background: var(--bg); color: var(--text-dim); border: 1px solid var(--border); }
+
+    .cluster-name {
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.3;
+    }
+    .cluster-meta {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* Detail pane (right) */
+    section.detail {
+      flex: 1;
+      overflow: auto;
+      padding: 20px;
+    }
+    .detail-empty {
+      color: var(--text-dim);
+      text-align: center;
+      padding: 80px 20px;
+    }
+    .detail-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .detail-header h2 {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    /* Row grid: one column per row, rows of the grid = fields */
+    .rows-grid {
+      display: grid;
+      gap: 8px;
+      grid-auto-flow: column;
+      grid-auto-columns: minmax(280px, 1fr);
+    }
+    .row-card {
+      background: var(--panel);
+      border: 2px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .row-card.canonical { border-color: var(--green); }
+    .row-card.duplicate { border-color: var(--border); opacity: 0.5; }
+
+    .row-card-title {
+      font-size: 14px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .row-card-fid {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    .field {
+      border-top: 1px solid var(--border);
+      padding-top: 8px;
+    }
+    .field-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+    .field-value {
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .field-value .muted { color: var(--text-muted); }
+    .field-value .mono {
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+    }
+    .field-value.empty { color: var(--text-dim); font-style: italic; font-size: 12px; }
+
+    .bucket-pill {
+      display: inline-block;
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+    }
+    .bucket-pill.cpad_named, .bucket-pill.ccc_named { background: var(--green-bg); color: var(--green); border-color: var(--green); }
+    .bucket-pill.cpad_plain, .bucket-pill.ccc_plain { background: var(--accent-bg); color: var(--accent-hov); border-color: var(--accent); }
+    .bucket-pill.reclaim_cpad, .bucket-pill.reclaim_ccc { background: var(--amber-bg); color: var(--amber); border-color: var(--amber); }
+    .bucket-pill.orphan { background: var(--red-bg); color: var(--red); border-color: var(--red); }
+
+    .assoc-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .assoc-item {
+      padding: 6px 8px;
+      background: var(--bg);
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .assoc-name {
+      font-weight: 500;
+      margin-bottom: 2px;
+    }
+    .assoc-meta {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* Buttons */
+    button, .btn {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 8px 14px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.1s;
+    }
+    button:hover { border-color: var(--border-hov); background: var(--bg); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+    button.primary:hover { background: var(--accent-hov); border-color: var(--accent-hov); }
+    button.success { background: var(--green); color: white; border-color: var(--green); }
+    button.success:hover { filter: brightness(0.9); }
+    button.danger  { background: var(--panel); color: var(--red); border-color: var(--red); }
+    button.danger:hover { background: var(--red-bg); }
+
+    button.make-canonical {
+      width: 100%;
+      margin-top: 8px;
+    }
+
+    /* Modal */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.5);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .overlay.open { display: flex; }
+    .modal {
+      background: var(--panel);
+      border-radius: var(--radius);
+      padding: 20px;
+      max-width: 520px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    .modal h3 { font-size: 16px; margin-bottom: 10px; }
+    .modal .body { margin-bottom: 16px; color: var(--text-muted); line-height: 1.5; }
+    .modal .body pre {
+      background: var(--bg);
+      padding: 10px;
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      overflow: auto;
+      max-height: 200px;
+      margin-top: 8px;
+    }
+    .modal .actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      padding: 10px 16px;
+      border-radius: var(--radius);
+      background: var(--text);
+      color: var(--panel);
+      font-size: 13px;
+      opacity: 0;
+      transition: all 0.2s;
+      z-index: 200;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .toast.err { background: var(--red); }
+    .toast.ok  { background: var(--green); }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <header class="top">
+    <h1>Dedupe Review</h1>
+    <span class="summary" id="summary">Loading…</span>
+    <div class="spacer"></div>
+    <label style="font-size:12px; color:var(--text-muted); display:flex; align-items:center; gap:6px;">
+      Scope:
+      <select id="state-filter" onchange="onStateFilterChange()" style="font-size:12px; padding:4px 6px; border:1px solid var(--border); border-radius:4px; background:var(--panel);">
+        <option value="CA" selected>CA</option>
+      </select>
+    </label>
+    <button class="primary" id="process-all-btn" onclick="processAllFlow()" disabled>Process All (0)</button>
+    <a class="btn" href="beach-editor.html" style="text-decoration: none;">Beach Editor →</a>
+  </header>
+
+  <main class="workspace">
+    <aside class="clusters" id="cluster-list">
+      <div style="padding: 20px; color: var(--text-dim);">Loading clusters…</div>
+    </aside>
+    <section class="detail" id="detail">
+      <div class="detail-empty">Pick a cluster to see side-by-side provenance.</div>
+    </section>
+  </main>
+</div>
+
+<div class="overlay" id="modal-overlay" onclick="closeModalIfBackdrop(event)">
+  <div class="modal" id="modal" onclick="event.stopPropagation()">
+    <h3 id="modal-title"></h3>
+    <div class="body" id="modal-body"></div>
+    <div class="actions" id="modal-actions"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── Constants ──────────────────────────────────────────────────────────
+const SUPABASE_URL     = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY         = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+const ADMIN_SECRET_KEY = 'db_admin_secret';
+
+// ── Auth / API ─────────────────────────────────────────────────────────
+function promptForAdminSecret(msg) {
+  const val = prompt(msg || 'Admin secret:');
+  if (val) localStorage.setItem(ADMIN_SECRET_KEY, val);
+  return val || '';
+}
+function getAdminSecret() {
+  return localStorage.getItem(ADMIN_SECRET_KEY) || promptForAdminSecret();
+}
+function clearAdminSecret() { localStorage.removeItem(ADMIN_SECRET_KEY); }
+
+async function edgeFn(fn, body = {}) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const secret = getAdminSecret();
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/${fn}`, {
+      method: 'POST',
+      headers: {
+        'Authorization':    `Bearer ${ANON_KEY}`,
+        'Content-Type':     'application/json',
+        'x-admin-secret':   secret,
+      },
+      body: JSON.stringify(body),
+    });
+    if (r.status === 401) {
+      clearAdminSecret();
+      if (attempt === 0) { promptForAdminSecret('Admin secret rejected — try again:'); continue; }
+      showToast('Admin secret rejected.', true);
+      return { error: 'Unauthorized' };
+    }
+    if (r.status === 429) return { error: 'Rate limit exceeded — try next hour.' };
+    return r.json();
+  }
+  return { error: 'Unauthorized' };
+}
+
+// ── Toast + Modal ──────────────────────────────────────────────────────
+function showToast(msg, isErr = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + (isErr ? 'err' : 'ok');
+  setTimeout(() => t.className = 'toast', 2500);
+}
+
+function showModal(title, body, actions) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').innerHTML = body;
+  const actionsEl = document.getElementById('modal-actions');
+  actionsEl.innerHTML = '';
+  for (const a of actions) {
+    const b = document.createElement('button');
+    b.textContent = a.label;
+    if (a.style) b.className = a.style;
+    b.onclick = () => {
+      closeModal();
+      if (a.onClick) a.onClick();
+    };
+    actionsEl.appendChild(b);
+  }
+  document.getElementById('modal-overlay').classList.add('open');
+}
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+function closeModalIfBackdrop(e) {
+  if (e.target.id === 'modal-overlay') closeModal();
+}
+
+// ── State ──────────────────────────────────────────────────────────────
+const state = {
+  clusters:      [],
+  selectedId:    null,
+  currentDetail: null,
+  stateFilter:   'CA',   // 'CA' | 'ALL'
+};
+
+function filteredClusters() {
+  if (state.stateFilter === 'ALL') return state.clusters;
+  return state.clusters.filter(c => (c.states || []).includes('CA'));
+}
+
+function onStateFilterChange() {
+  state.stateFilter = document.getElementById('state-filter').value;
+  renderSummary();
+  renderClusterList();
+}
+
+// ── Load + render ──────────────────────────────────────────────────────
+async function loadClusters() {
+  const { clusters, error } = await edgeFn('admin-list-dupe-clusters');
+  if (error) { showToast('Load clusters failed: ' + error, true); return; }
+  state.clusters = clusters;
+  renderSummary();
+  renderClusterList();
+}
+
+function renderSummary() {
+  const visible = filteredClusters();
+  const pending        = visible.filter(c => !c.resolved);
+  const resolved       = visible.filter(c => c.resolved);
+  const pendingAuto    = pending.filter(c => c.auto_resolvable).length;
+  const pendingReview  = pending.length - pendingAuto;
+  const scopeLabel = state.stateFilter === 'CA' ? ' (CA)' : '';
+  document.getElementById('summary').textContent =
+    `${visible.length} clusters${scopeLabel} · ${pendingAuto} auto-resolvable · ${pendingReview} need review · ${resolved.length} done`;
+
+  const btn = document.getElementById('process-all-btn');
+  btn.textContent = `Process All (${pendingAuto})`;
+  btn.disabled = pendingAuto === 0;
+}
+
+function renderClusterList() {
+  const root = document.getElementById('cluster-list');
+  root.innerHTML = '';
+  const visible = filteredClusters();
+  const pendingAuto   = visible.filter(c => !c.resolved &&  c.auto_resolvable);
+  const pendingManual = visible.filter(c => !c.resolved && !c.auto_resolvable);
+  const resolved      = visible.filter(c =>  c.resolved);
+
+  function addGroup(label, items) {
+    if (!items.length) return;
+    const lbl = document.createElement('div');
+    lbl.className = 'cluster-group-label';
+    lbl.textContent = label;
+    root.appendChild(lbl);
+    for (const c of items) root.appendChild(renderClusterItem(c));
+  }
+  addGroup('Auto-resolvable · identical data', pendingAuto);
+  addGroup('Needs review · judgement call',    pendingManual);
+  addGroup('Done · already resolved',          resolved);
+}
+
+function renderClusterItem(c) {
+  const el = document.createElement('div');
+  const classes = ['cluster-item'];
+  if (c.cluster_id === state.selectedId) classes.push('active');
+  if (c.resolved) classes.push('resolved');
+  el.className = classes.join(' ');
+  el.onclick = () => loadClusterDetail(c.cluster_id);
+  const nameText = (c.names && c.names.length) ? c.names.join(' / ') : '(no names)';
+  const stateText = (c.states && c.states.length) ? c.states.join(',') : '?';
+  const countyText = (c.counties && c.counties.length) ? c.counties.join(', ') : '';
+  const badge = c.resolved
+    ? '<span class="cluster-badge done">done</span>'
+    : c.auto_resolvable
+      ? '<span class="cluster-badge auto">auto</span>'
+      : '<span class="cluster-badge review">review</span>';
+  const canonicalNote = c.resolved && c.canonical_fid
+    ? `<div class="cluster-meta" style="color:var(--green);">✓ canonical fid ${c.canonical_fid}</div>`
+    : '';
+  el.innerHTML = `
+    <div class="cluster-item-header">
+      <span class="cluster-id">#${c.cluster_id}</span>
+      <span class="cluster-state">${escapeHtml(stateText)}</span>
+      ${badge}
+    </div>
+    <div class="cluster-name">${escapeHtml(nameText)}</div>
+    <div class="cluster-meta">${c.row_count} rows${countyText ? ' · ' + escapeHtml(countyText) : ''}</div>
+    ${canonicalNote}
+  `;
+  return el;
+}
+
+async function loadClusterDetail(clusterId) {
+  console.log('[dedupe] loadClusterDetail', clusterId);
+  try {
+    state.selectedId = clusterId;
+    renderClusterList();
+    const detail = document.getElementById('detail');
+    detail.innerHTML = '<div class="detail-empty">Loading…</div>';
+
+    const resp = await edgeFn('admin-get-dupe-cluster', { cluster_id: clusterId });
+    console.log('[dedupe] admin-get-dupe-cluster response', resp);
+    if (resp.error) { showToast('Load cluster failed: ' + resp.error, true); detail.innerHTML = '<div class="detail-empty" style="color:var(--red);">' + escapeHtml(resp.error) + '</div>'; return; }
+    if (!resp.rows) { showToast('Unexpected response shape', true); detail.innerHTML = '<pre style="font-size:11px; padding:12px;">' + escapeHtml(JSON.stringify(resp, null, 2)) + '</pre>'; return; }
+    state.currentDetail = { clusterId, rows: resp.rows };
+    renderClusterDetail();
+  } catch (e) {
+    console.error('[dedupe] loadClusterDetail error', e);
+    showToast('JS error: ' + (e?.message || e), true);
+    document.getElementById('detail').innerHTML = '<div class="detail-empty" style="color:var(--red);">JS error: ' + escapeHtml(String(e?.message || e)) + '</div>';
+  }
+}
+
+function renderClusterDetail() {
+  const detail = document.getElementById('detail');
+  if (!state.currentDetail) {
+    detail.innerHTML = '<div class="detail-empty">Pick a cluster to see side-by-side provenance.</div>';
+    return;
+  }
+  const { clusterId, rows } = state.currentDetail;
+  if (!rows.length) {
+    detail.innerHTML = '<div class="detail-empty">Cluster has no rows — may have been resolved or unpinned.</div>';
+    return;
+  }
+
+  const summary = state.clusters.find(c => c.cluster_id === clusterId) || {};
+  const header = `
+    <div class="detail-header">
+      <h2>Cluster #${clusterId}</h2>
+      <span class="cluster-state">${escapeHtml((summary.states || []).join(','))}</span>
+      ${summary.auto_resolvable ? '<span class="cluster-badge auto">auto-resolvable</span>' : '<span class="cluster-badge review">needs review</span>'}
+      <div style="flex:1"></div>
+      <button class="danger" onclick="unpinFlow(${clusterId})">Unpin cluster</button>
+    </div>
+  `;
+
+  const cards = rows.map(r => renderRowCard(r, clusterId)).join('');
+  detail.innerHTML = header + `<div class="rows-grid">${cards}</div>`;
+}
+
+function renderRowCard(r, clusterId) {
+  const statusClass = r.duplicate_status === 'canonical' ? 'canonical'
+                    : r.duplicate_status === 'duplicate'  ? 'duplicate' : '';
+  const isActive = r.duplicate_status !== 'canonical' && r.duplicate_status !== 'duplicate';
+  const button = isActive
+    ? `<button class="success make-canonical" onclick="resolveFlow(${clusterId}, ${r.fid})">Make this canonical</button>`
+    : r.duplicate_status === 'canonical'
+      ? `<div style="text-align:center; color: var(--green); font-weight: 500; font-size: 13px;">✓ CANONICAL</div>`
+      : `<div style="text-align:center; color: var(--text-dim); font-size: 12px;">duplicate of canonical</div>`;
+
+  return `
+    <div class="row-card ${statusClass}">
+      <div class="row-card-title">
+        ${escapeHtml(r.name || '(no name)')}
+        <span class="row-card-fid">fid ${r.fid}</span>
+      </div>
+
+      ${renderField('Location', `
+        <div class="field-value mono">${r.lat?.toFixed(6)}, ${r.lon?.toFixed(6)}</div>
+        <div class="field-value muted">${escapeHtml(r.county_name || '—')}, ${escapeHtml(r.state || '—')}</div>
+      `)}
+
+      ${renderField('Validation', `
+        <div class="field-value">
+          <span class="bucket-pill ${r.validation_status === 'valid' ? '' : 'orphan'}">${escapeHtml(r.validation_status || '—')}</span>
+          ${r.validation_flags?.length ? `<span style="font-size:11px; color:var(--text-muted); margin-left:6px;">${r.validation_flags.length} flag(s)</span>` : ''}
+        </div>
+        ${r.validation_flags?.length ? renderFlags(r.validation_flags) : ''}
+      `)}
+
+      ${renderField('Access bucket', r.access_bucket
+        ? `<span class="bucket-pill ${r.access_bucket}">${escapeHtml(r.access_bucket)}</span>
+           ${r.access_match_name ? `<div class="field-value muted" style="margin-top:4px;">${escapeHtml(r.access_match_name)} @ ${r.access_match_distance_m}m</div>` : ''}`
+        : '<div class="field-value empty">none</div>'
+      )}
+
+      ${renderAssocList('CPAD units', r.cpad, c => `
+        <div class="assoc-name">${escapeHtml(c.unit_name || '(unnamed)')}</div>
+        <div class="assoc-meta">${escapeHtml(c.agncy_lev || '?')} · ${escapeHtml(c.access_typ || '?')} · ${c.distance_m}m</div>
+        ${c.agncy_name ? `<div class="assoc-meta">${escapeHtml(c.agncy_name)}</div>` : ''}
+      `)}
+
+      ${renderAssocList('CCC access points', r.ccc, c => `
+        <div class="assoc-name">${escapeHtml(c.name || '(unnamed)')}</div>
+        <div class="assoc-meta">public=${escapeHtml(c.open_to_public || '?')} · dog=${escapeHtml((c.dog_friendly || '').trim() || '?')} · ${c.distance_m}m</div>
+      `)}
+
+      ${renderAssocList('CSP parks', r.csp, c => `
+        <div class="assoc-name">${escapeHtml(c.unit_name || '(unnamed)')}</div>
+        <div class="assoc-meta">${escapeHtml(c.subtype || '?')} · ${c.distance_m}m</div>
+      `)}
+
+      ${renderAssocList('Tribal lands', r.tribal, t => `
+        <div class="assoc-name">${escapeHtml(t.lar_name || '(unnamed)')}</div>
+        <div class="assoc-meta">${t.distance_m}m</div>
+      `)}
+
+      ${renderAssocList('Private land zones', r.plz, z => `
+        <div class="assoc-name">${escapeHtml(z.name || '(unnamed)')}</div>
+        <div class="assoc-meta">${escapeHtml((z.reason || '').slice(0, 80))}</div>
+      `)}
+
+      ${renderAssocList('Waterbodies', r.waterbodies, w => `
+        <div class="assoc-name">${escapeHtml(w.gnis_name || '(unnamed)')}</div>
+        <div class="assoc-meta">${escapeHtml(w.ftype || '?')} · ${w.distance_m}m</div>
+      `)}
+
+      ${renderAssocList('MPAs (footnote)', r.mpas, m => `
+        <div class="assoc-name">${escapeHtml(m.name || '(unnamed)')}</div>
+        <div class="assoc-meta">${escapeHtml(m.mpa_type || '?')} · ${m.distance_m}m</div>
+      `)}
+
+      ${renderField('Nearest NOAA station', r.noaa_nearest
+        ? `<div class="field-value">${escapeHtml(r.noaa_nearest.name)} <span class="muted">(${r.noaa_nearest.station_id})</span></div>
+           <div class="assoc-meta">${r.noaa_nearest.distance_m}m</div>`
+        : '<div class="field-value empty">none within range</div>')}
+
+      ${button}
+    </div>
+  `;
+}
+
+function renderField(label, innerHtml) {
+  return `<div class="field"><div class="field-label">${label}</div>${innerHtml}</div>`;
+}
+
+function renderAssocList(label, items, fmt) {
+  if (!items || !items.length)
+    return `<div class="field"><div class="field-label">${label}</div><div class="field-value empty">none</div></div>`;
+  const lis = items.map(it => `<li class="assoc-item">${fmt(it)}</li>`).join('');
+  return `<div class="field"><div class="field-label">${label}</div><ul class="assoc-list">${lis}</ul></div>`;
+}
+
+function renderFlags(flags) {
+  const lis = flags.map(f => `<li class="assoc-item">
+    <div class="assoc-name">${escapeHtml(f.check || '?')}</div>
+    <div class="assoc-meta">${escapeHtml((f.details || '').slice(0, 100))}</div>
+  </li>`).join('');
+  return `<ul class="assoc-list" style="margin-top:6px;">${lis}</ul>`;
+}
+
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s)
+    .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+}
+
+// ── Actions ────────────────────────────────────────────────────────────
+function resolveFlow(clusterId, canonicalFid) {
+  const rowName = state.currentDetail?.rows.find(r => r.fid === canonicalFid)?.name || `fid ${canonicalFid}`;
+  showModal(
+    'Promote as canonical?',
+    `Make <strong>${escapeHtml(rowName)}</strong> (fid ${canonicalFid}) the canonical row in cluster #${clusterId}.
+     All other rows will be marked <code>duplicate</code> (soft delete — reversible).`,
+    [
+      { label: 'Cancel', onClick: null },
+      { label: 'Yes, promote', style: 'success', onClick: () => doResolve(clusterId, canonicalFid) },
+    ]
+  );
+}
+
+async function doResolve(clusterId, canonicalFid) {
+  const res = await edgeFn('admin-resolve-dupe-cluster', { cluster_id: clusterId, canonical_fid: canonicalFid });
+  if (res.error) { showToast('Resolve failed: ' + res.error, true); return; }
+  showToast(`Cluster #${clusterId} resolved.`);
+  await loadClusters();  // refresh list
+  await loadClusterDetail(clusterId);  // show updated state
+}
+
+function unpinFlow(clusterId) {
+  showModal(
+    'Unpin cluster?',
+    `Clear dupe markings on all rows in cluster #${clusterId}. Use this if the rows aren't actually duplicates (e.g. misgeocode case where two different beaches share coords).`,
+    [
+      { label: 'Cancel', onClick: null },
+      { label: 'Yes, unpin', style: 'danger', onClick: () => doUnpin(clusterId) },
+    ]
+  );
+}
+
+async function doUnpin(clusterId) {
+  const res = await edgeFn('admin-unpin-dupe-cluster', { cluster_id: clusterId });
+  if (res.error) { showToast('Unpin failed: ' + res.error, true); return; }
+  showToast(`Cluster #${clusterId} unpinned.`);
+  state.currentDetail = null;
+  state.selectedId = null;
+  await loadClusters();
+  document.getElementById('detail').innerHTML = '<div class="detail-empty">Cluster unpinned. Pick another cluster.</div>';
+}
+
+async function processAllFlow() {
+  // Pass the current state filter so the preview + real run see the same scope
+  const scope = state.stateFilter === 'ALL' ? null : state.stateFilter;
+  const preview = await edgeFn('admin-bulk-resolve-identical-dupes', { dry_run: true, state: scope });
+  if (preview.error) { showToast('Preview failed: ' + preview.error, true); return; }
+  if (preview.clusters_resolved === 0) { showToast('No auto-resolvable clusters in scope.'); return; }
+
+  const sample = preview.by_cluster.slice(0, 10).map(c =>
+    `  #${c.cluster_id} — ${escapeHtml(c.sample_name || '')} (keep fid ${c.canonical_fid})`
+  ).join('\n');
+  const more = preview.clusters_resolved > 10 ? `\n  … and ${preview.clusters_resolved - 10} more` : '';
+  const scopeLabel = scope ? ` (${scope} only)` : ' (all states)';
+
+  showModal(
+    `Process ${preview.clusters_resolved} auto-resolvable clusters${scopeLabel}?`,
+    `These clusters have coord-identical rows with identical names — canonical choice is
+     arbitrary on data alone. Lower-fid row wins; others soft-deleted to <code>duplicate</code>.
+     Reversible via the DB.<br>
+     <strong>${preview.clusters_resolved} clusters · ${preview.rows_affected} rows affected</strong>
+     <pre>${sample}${more}</pre>`,
+    [
+      { label: 'Cancel', onClick: null },
+      { label: `Yes, process ${preview.clusters_resolved}`, style: 'primary', onClick: () => doProcessAll(scope) },
+    ]
+  );
+}
+
+async function doProcessAll(scope) {
+  const res = await edgeFn('admin-bulk-resolve-identical-dupes', { state: scope });
+  if (res.error) { showToast('Bulk resolve failed: ' + res.error, true); return; }
+  showToast(`Processed ${res.clusters_resolved} clusters · ${res.rows_affected} rows.`);
+  state.currentDetail = null;
+  state.selectedId = null;
+  await loadClusters();
+  document.getElementById('detail').innerHTML = '<div class="detail-empty">Bulk resolve complete. Remaining clusters need individual review.</div>';
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────
+(async function boot() {
+  getAdminSecret();
+  await loadClusters();
+})();
+</script>
+</body>
+</html>

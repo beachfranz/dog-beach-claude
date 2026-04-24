@@ -64,7 +64,13 @@ $$;
 -- ── View ──────────────────────────────────────────────────────────────────
 
 create or replace view public.beach_access_source as
-with cpad_best as (
+-- Two passes per source (CPAD, CCC): the nearest name-matched polygon/point,
+-- and the nearest overall. The CASE expression below prefers the named match
+-- when it's in buffer range, else falls back to the overall-nearest. This
+-- avoids the earlier "single-DISTINCT-ON" flaw where a beach with 2 CPADs
+-- within 100m would miss the cpad_named classification if the nearest one
+-- didn't share a name token.
+with cpad_named_best as (
   select distinct on (b.fid)
     b.fid,
     c.unit_name as match_name,
@@ -76,15 +82,42 @@ with cpad_best as (
   join public.cpad_units c
     on ST_DWithin(c.geom, b.geom, 0.005)
    and ST_DWithin(c.geom::geography, b.geom::geography, 300)
+   and cardinality(public.shared_name_tokens(b.name, c.unit_name)) > 0
   order by b.fid, ST_Distance(c.geom::geography, b.geom::geography) asc
 ),
-ccc_best as (
+cpad_any_best as (
+  select distinct on (b.fid)
+    b.fid,
+    c.unit_name as match_name,
+    c.access_typ as cpad_access_typ,
+    c.agncy_lev  as cpad_agncy_lev,
+    ST_Distance(c.geom::geography, b.geom::geography)::int as dist_m
+  from public.us_beach_points b
+  join public.cpad_units c
+    on ST_DWithin(c.geom, b.geom, 0.005)
+   and ST_DWithin(c.geom::geography, b.geom::geography, 300)
+  order by b.fid, ST_Distance(c.geom::geography, b.geom::geography) asc
+),
+ccc_named_best as (
   select distinct on (b.fid)
     b.fid,
     c.name as match_name,
     c.open_to_public as ccc_open_to_public,
     ST_Distance(c.geom::geography, b.geom::geography)::int as dist_m,
     public.shared_name_tokens(b.name, c.name) as shared_tokens
+  from public.us_beach_points b
+  join public.ccc_access_points c
+    on ST_DWithin(c.geom, b.geom, 0.005)
+   and ST_DWithin(c.geom::geography, b.geom::geography, 300)
+   and cardinality(public.shared_name_tokens(b.name, c.name)) > 0
+  order by b.fid, ST_Distance(c.geom::geography, b.geom::geography) asc
+),
+ccc_any_best as (
+  select distinct on (b.fid)
+    b.fid,
+    c.name as match_name,
+    c.open_to_public as ccc_open_to_public,
+    ST_Distance(c.geom::geography, b.geom::geography)::int as dist_m
   from public.us_beach_points b
   join public.ccc_access_points c
     on ST_DWithin(c.geom, b.geom, 0.005)
@@ -131,66 +164,78 @@ select
   b.county_name,
 
   case
-    -- Name-matched buckets first (high confidence)
-    when cp.dist_m <= 100 and cardinality(cp.shared_tokens) > 0 then 'cpad_named'
-    when cc.dist_m <= 200 and cardinality(cc.shared_tokens) > 0 then 'ccc_named'
-    -- Then geometry-only buckets
-    when cp.dist_m <= 100 then 'cpad_plain'
-    when cc.dist_m <= 200 then 'ccc_plain'
-    when cs.dist_m <= 100 then 'csp'
-    when tr.dist_m <= 100 then 'tribal'
+    -- Name-matched buckets first (high confidence).
+    -- cpn/ccn are the nearest name-matched polygon/point; if one exists
+    -- within 100m/200m, fire the named bucket regardless of whether the
+    -- closest any-polygon is non-matching.
+    when cpn.dist_m <= 100 then 'cpad_named'
+    when ccn.dist_m <= 200 then 'ccc_named'
+    -- Then geometry-only buckets (nearest, may or may not have a name match)
+    when cpa.dist_m <= 100 then 'cpad_plain'
+    when cca.dist_m <= 200 then 'ccc_plain'
+    when cs.dist_m  <= 100 then 'csp'
+    when tr.dist_m  <= 100 then 'tribal'
     when pz.fid is not null then 'plz'
     -- Reclaim (widened buffer + name match)
-    when cp.dist_m <= 300 and cardinality(cp.shared_tokens) > 0 then 'reclaim_cpad'
-    when cc.dist_m <= 300 and cardinality(cc.shared_tokens) > 0 then 'reclaim_ccc'
+    when cpn.dist_m <= 300 then 'reclaim_cpad'
+    when ccn.dist_m <= 300 then 'reclaim_ccc'
     else 'orphan'
   end as access_bucket,
 
   case
-    when cp.dist_m <= 100 and cardinality(cp.shared_tokens) > 0 then cp.match_name
-    when cc.dist_m <= 200 and cardinality(cc.shared_tokens) > 0 then cc.match_name
-    when cp.dist_m <= 100   then cp.match_name
-    when cc.dist_m <= 200   then cc.match_name
-    when cs.dist_m <= 100   then cs.match_name
-    when tr.dist_m <= 100   then tr.match_name
+    when cpn.dist_m <= 100 then cpn.match_name
+    when ccn.dist_m <= 200 then ccn.match_name
+    when cpa.dist_m <= 100 then cpa.match_name
+    when cca.dist_m <= 200 then cca.match_name
+    when cs.dist_m  <= 100 then cs.match_name
+    when tr.dist_m  <= 100 then tr.match_name
     when pz.fid is not null then pz.match_name
-    when cp.dist_m <= 300 and cardinality(cp.shared_tokens) > 0 then cp.match_name
-    when cc.dist_m <= 300 and cardinality(cc.shared_tokens) > 0 then cc.match_name
+    when cpn.dist_m <= 300 then cpn.match_name
+    when ccn.dist_m <= 300 then ccn.match_name
   end as match_name,
 
   case
-    when cp.dist_m <= 100 and cardinality(cp.shared_tokens) > 0 then cp.dist_m
-    when cc.dist_m <= 200 and cardinality(cc.shared_tokens) > 0 then cc.dist_m
-    when cp.dist_m <= 100   then cp.dist_m
-    when cc.dist_m <= 200   then cc.dist_m
-    when cs.dist_m <= 100   then cs.dist_m
-    when tr.dist_m <= 100   then tr.dist_m
-    when cp.dist_m <= 300 and cardinality(cp.shared_tokens) > 0 then cp.dist_m
-    when cc.dist_m <= 300 and cardinality(cc.shared_tokens) > 0 then cc.dist_m
+    when cpn.dist_m <= 100 then cpn.dist_m
+    when ccn.dist_m <= 200 then ccn.dist_m
+    when cpa.dist_m <= 100 then cpa.dist_m
+    when cca.dist_m <= 200 then cca.dist_m
+    when cs.dist_m  <= 100 then cs.dist_m
+    when tr.dist_m  <= 100 then tr.dist_m
+    when cpn.dist_m <= 300 then cpn.dist_m
+    when ccn.dist_m <= 300 then ccn.dist_m
   end as match_distance_m,
 
+  -- Tokens aligned with match_name. Null for plain/csp/tribal/plz where
+  -- no name-match contributed to the bucket decision. The CASE fall-through
+  -- naturally mirrors the access_bucket CASE above — first matching branch
+  -- wins, so cpad_plain intercepts before reclaim_cpad.
   case
-    when cp.dist_m is not null
-         and cp.dist_m between 101 and 300
-         and cardinality(cp.shared_tokens) > 0
-      then cp.shared_tokens
-    when cc.dist_m is not null
-         and cc.dist_m between 201 and 300
-         and cardinality(cc.shared_tokens) > 0
-      then cc.shared_tokens
+    when cpn.dist_m <= 100 then cpn.shared_tokens  -- cpad_named
+    when ccn.dist_m <= 200 then ccn.shared_tokens  -- ccc_named
+    when cpa.dist_m <= 100 then null               -- cpad_plain
+    when cca.dist_m <= 200 then null               -- ccc_plain
+    when cs.dist_m  <= 100 then null               -- csp
+    when tr.dist_m  <= 100 then null               -- tribal
+    when pz.fid is not null then null              -- plz
+    when cpn.dist_m <= 300 then cpn.shared_tokens  -- reclaim_cpad
+    when ccn.dist_m <= 300 then ccn.shared_tokens  -- reclaim_ccc
   end as match_shared_tokens,
 
-  cp.cpad_access_typ,
-  cp.cpad_agncy_lev,
-  cc.ccc_open_to_public,
+  -- Always report the access-typ / agency / open-to-public of the winning
+  -- polygon/point. If the named match fired, use its metadata; else the any-match.
+  coalesce(cpn.cpad_access_typ,    cpa.cpad_access_typ)    as cpad_access_typ,
+  coalesce(cpn.cpad_agncy_lev,     cpa.cpad_agncy_lev)     as cpad_agncy_lev,
+  coalesce(ccn.ccc_open_to_public, cca.ccc_open_to_public) as ccc_open_to_public,
   cs.csp_subtype,
   pz.plz_reason
 from public.us_beach_points b
-left join cpad_best   cp on cp.fid = b.fid
-left join ccc_best    cc on cc.fid = b.fid
-left join csp_best    cs on cs.fid = b.fid
-left join tribal_best tr on tr.fid = b.fid
-left join plz_best    pz on pz.fid = b.fid;
+left join cpad_named_best cpn on cpn.fid = b.fid
+left join cpad_any_best   cpa on cpa.fid = b.fid
+left join ccc_named_best  ccn on ccn.fid = b.fid
+left join ccc_any_best    cca on cca.fid = b.fid
+left join csp_best        cs  on cs.fid  = b.fid
+left join tribal_best     tr  on tr.fid  = b.fid
+left join plz_best        pz  on pz.fid  = b.fid;
 
 comment on view public.beach_access_source is
 'Access-phase classification per us_beach_points row. Query-time, no persistence. Priority buckets (name-match-first): cpad_named (100m + token) > ccc_named (200m + token) > cpad_plain (100m) > ccc_plain (200m) > csp (100m) > tribal (100m) > plz (bbox) > reclaim_cpad (300m + token) > reclaim_ccc (300m + token) > orphan. See project_pipeline_phases.md and migration 20260425 for full design.';

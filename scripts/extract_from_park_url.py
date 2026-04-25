@@ -61,6 +61,44 @@ USER_AGENT            = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/5
 CACHE_DIR             = Path("./checkpoints/park_url_pages")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+# Candidate selectors for the "main content" of a page, tried in order. We pick
+# the candidate with the most text, since some sites (parks.ca.gov) wrap the
+# real content in a generic `<div class="main">` while leaving an empty
+# semantic `<article>` shell that BS4's find_all-first picks up.
+CONTENT_SELECTORS = [
+    "main", "article",
+    "div.main", "div.content", "div#main", "div#content",
+    "div.entry-content", "div.parkContent", "div.page-content",
+    "section.content",
+]
+
+
+def _pick_main_content(soup: BeautifulSoup) -> Any:
+    """Return the soup node with the most text from a list of common
+    main-content containers. Falls back to body, then the whole soup."""
+    best = None
+    best_len = 0
+    for sel in CONTENT_SELECTORS:
+        for el in soup.select(sel):
+            n = len(el.get_text(strip=True))
+            if n > best_len:
+                best, best_len = el, n
+    if best is not None and best_len > 200:
+        return best
+    return soup.body or soup
+
+
+def _strip_chrome(soup: BeautifulSoup) -> None:
+    """Remove navigation, scripts, and small forms from `soup` in place.
+    `<form>` is kept if it has > 500 chars of text — ASP.NET WebForms
+    (e.g. smgov.net) wraps the entire page in a single `<form runat="server">`,
+    so a blanket form decompose would zero out the body."""
+    for tag in soup(["script", "style", "noscript", "iframe", "nav", "footer", "header", "aside"]):
+        tag.decompose()
+    for form in soup("form"):
+        if len(form.get_text(strip=True)) < 500:
+            form.decompose()
+
 # Min cleaned-page length to bother sending to LLM. Pages below this are
 # typically JS-rendered SPAs where BS4 stripped everything.
 MIN_PAGE_CHARS        = 500
@@ -80,18 +118,18 @@ def sb_headers() -> dict[str, str]:
         "Prefer":        "return=minimal",
     }
 
+_QUEUE_SELECT = (
+    "fid,display_name,state_code,cpad_unit_name,park_url,agncy_web,"
+    "cpad_distance_m,candidate_rank,discovery_source,extraction_type,"
+    "last_scraped_at,last_status"
+)
+
 def fetch_queue(limit: Optional[int] = None, fid_filter: Optional[int] = None) -> list[dict]:
     if fid_filter is not None:
         # Single-fid: bypass the queue view's "stale" filter and just look up CPAD
-        params = (
-            f"fid=eq.{fid_filter}"
-            f"&select=fid,display_name,state_code,cpad_unit_name,park_url,agncy_web,last_scraped_at,last_status"
-        )
+        params = f"fid=eq.{fid_filter}&select={_QUEUE_SELECT}"
     else:
-        params = (
-            f"select=fid,display_name,state_code,cpad_unit_name,park_url,agncy_web,last_scraped_at,last_status"
-            f"&order=last_scraped_at.asc"
-        )
+        params = f"select={_QUEUE_SELECT}&order=last_scraped_at.asc"
         if limit:
             params += f"&limit={limit}"
     url = f"{SUPABASE_URL}/rest/v1/park_url_scrape_queue?{params}"
@@ -99,16 +137,40 @@ def fetch_queue(limit: Optional[int] = None, fid_filter: Optional[int] = None) -
     resp.raise_for_status()
     return resp.json()
 
+_HHMM_RE = re.compile(r"^\d{2}:\d{2}$")
+
+def _sanitize_row(row: dict) -> dict:
+    """Drop values that won't fit their target column type. The LLM occasionally
+    puts phrases like 'sunset' / 'dawn' into open_time/close_time; the column
+    is Postgres `time`, so we null them out and stash the phrase in hours_text
+    if hours_text wasn't otherwise filled."""
+    extras = []
+    for tcol in ("open_time", "close_time"):
+        v = row.get(tcol)
+        if v is not None and not (isinstance(v, str) and _HHMM_RE.match(v)):
+            extras.append(f"{tcol}={v!r}")
+            row[tcol] = None
+    if extras:
+        existing_notes = row.get("extraction_notes") or ""
+        row["extraction_notes"] = (existing_notes + " | non-HHMM time: " + ", ".join(extras)).strip(" |")
+        if not row.get("hours_text"):
+            row["hours_text"] = ", ".join(extras)
+    return row
+
 def upsert_extraction(row: dict, dry_run: bool) -> None:
     if dry_run:
         print(f"  [dry-run] fid={row['fid']} status={row.get('extraction_status')}")
         return
+    row = _sanitize_row(row)
     url = f"{SUPABASE_URL}/rest/v1/park_url_extractions?on_conflict=fid,source_url"
     headers = {**sb_headers(), "Prefer": "resolution=merge-duplicates"}
-    resp = httpx.post(url, headers=headers, json=row, timeout=15)
-    if not resp.is_success:
-        print(f"  upsert failed for fid={row['fid']}: {resp.status_code} {resp.text[:200]}", file=sys.stderr)
-        resp.raise_for_status()
+    try:
+        resp = httpx.post(url, headers=headers, json=row, timeout=15)
+        if not resp.is_success:
+            print(f"  upsert failed for fid={row['fid']}: {resp.status_code} {resp.text[:200]}", file=sys.stderr)
+    except Exception as e:
+        # Never let one bad row kill the whole run.
+        print(f"  upsert exception for fid={row['fid']}: {e}", file=sys.stderr)
 
 
 # ── Fetch + BS4 strip ────────────────────────────────────────────────────────
@@ -150,9 +212,8 @@ async def _fetch_with_playwright(url: str) -> tuple[Optional[str], int]:
             pass
         html = await page.content()
         soup = BeautifulSoup(html, "lxml")
-        for tag in soup(["script", "style", "noscript", "iframe", "nav", "footer", "header", "aside", "form"]):
-            tag.decompose()
-        main = soup.find("main") or soup.find("article") or soup.body or soup
+        _strip_chrome(soup)
+        main = _pick_main_content(soup)
         text = main.get_text(separator="\n", strip=True)
         text = re.sub(r"\n{3,}", "\n\n", text).strip()[:FETCH_CHAR_LIMIT]
         return text, status
@@ -163,13 +224,37 @@ async def _fetch_with_playwright(url: str) -> tuple[Optional[str], int]:
         await context.close()
 
 
+_PARKS_CA_GOV_LEGACY = re.compile(
+    r"^http://www\.parks\.ca\.gov/default\.asp\?", re.IGNORECASE
+)
+_PARKS_CA_GOV_HTTP = re.compile(
+    r"^http://www\.parks\.ca\.gov/", re.IGNORECASE
+)
+
+def _normalize_url(url: str) -> str:
+    """Rewrite known-deprecated URL patterns to working equivalents.
+    parks.ca.gov retired the http://default.asp?page_id= form years ago;
+    the modern https://?page_id= still works. Plain http:// also dies on
+    that domain; force https://. CPAD has not refreshed."""
+    if _PARKS_CA_GOV_LEGACY.match(url):
+        return _PARKS_CA_GOV_LEGACY.sub("https://www.parks.ca.gov/?", url)
+    if _PARKS_CA_GOV_HTTP.match(url):
+        return _PARKS_CA_GOV_HTTP.sub("https://www.parks.ca.gov/", url)
+    return url
+
+
 async def fetch_page(client: httpx.AsyncClient, url: str) -> tuple[Optional[str], int]:
     """Returns (cleaned_text, http_status). Cleaned text is None if fetch failed.
     Retries on connection errors + 5xx; gives up on 4xx (won't change with retry).
-    Falls back to Playwright when httpx hits 403/429/connection errors."""
+    Falls back to Playwright when httpx hits 403/429/connection errors OR when
+    the BS4-stripped text is below MIN_PAGE_CHARS (JS-rendered SPA)."""
+    url = _normalize_url(url)
     cache_key = CACHE_DIR / f"{hashlib.sha1(url.encode()).hexdigest()}.txt"
     if cache_key.exists():
-        return cache_key.read_text(encoding="utf-8", errors="ignore"), 200
+        cached = cache_key.read_text(encoding="utf-8", errors="ignore")
+        # Stale cache from before the JS-render fallback — re-fetch via Playwright
+        if len(cached.strip()) >= MIN_PAGE_CHARS:
+            return cached, 200
 
     last_status = 0
     for attempt in range(MAX_FETCH_RETRIES):
@@ -207,11 +292,19 @@ async def fetch_page(client: httpx.AsyncClient, url: str) -> tuple[Optional[str]
                 return None, last_status
 
             soup = BeautifulSoup(resp.text, "lxml")
-            for tag in soup(["script", "style", "noscript", "iframe", "nav", "footer", "header", "aside", "form"]):
-                tag.decompose()
-            main = soup.find("main") or soup.find("article") or soup.body or soup
+            _strip_chrome(soup)
+            main = _pick_main_content(soup)
             text = main.get_text(separator="\n", strip=True)
             text = re.sub(r"\n{3,}", "\n\n", text).strip()[:FETCH_CHAR_LIMIT]
+            # Thin DOM after BS4 strip → JS-rendered SPA; retry with Playwright.
+            if len(text) < MIN_PAGE_CHARS:
+                pw_text, pw_status = await _fetch_with_playwright(url)
+                if pw_text is not None and len(pw_text) >= MIN_PAGE_CHARS:
+                    cache_key.write_text(pw_text, encoding="utf-8")
+                    return pw_text, pw_status or last_status
+                # Playwright also empty — cache the thin text so we don't re-try forever
+                cache_key.write_text(text, encoding="utf-8")
+                return text, last_status
             cache_key.write_text(text, encoding="utf-8")
             return text, last_status
         except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
@@ -379,6 +472,15 @@ async def extract_fields(client: httpx.AsyncClient, beach_name: str, page_text: 
 
 # ── Main ────────────────────────────────────────────────────────────────────
 
+def _audit_fields(beach: dict) -> dict:
+    """Audit columns to carry into every park_url_extractions row so the
+    populator can attribute evidence to the source CPAD + extraction method."""
+    return {
+        "cpad_unit_name":  beach.get("cpad_unit_name"),
+        "extraction_type": beach.get("extraction_type"),
+    }
+
+
 async def process_one(
     sem: asyncio.Semaphore,
     client: httpx.AsyncClient,
@@ -390,6 +492,7 @@ async def process_one(
         fid       = beach["fid"]
         name      = beach["display_name"]
         url       = beach["park_url"]
+        audit     = _audit_fields(beach)
         text, status = await fetch_page(client, url)
         if text is None:
             row = {
@@ -397,6 +500,7 @@ async def process_one(
                 "extraction_status": "fetch_failed",
                 "http_status": status,
                 "scraped_at": "now()",
+                **audit,
             }
             upsert_extraction(row, dry_run)
             return f"  fid={fid} {name!r}  FETCH_FAILED status={status}"
@@ -414,6 +518,7 @@ async def process_one(
                 "content_hash": content_hash,
                 "extraction_notes": f"LLM error: {e}",
                 "scraped_at": "now()",
+                **audit,
             }
             upsert_extraction(row, dry_run)
             return f"  fid={fid} {name!r}  PARSE_FAILED {e}"
@@ -426,6 +531,7 @@ async def process_one(
                 "raw_text": text[:8000],
                 "content_hash": content_hash,
                 "scraped_at": "now()",
+                **audit,
             }
             upsert_extraction(row, dry_run)
             return f"  fid={fid} {name!r}  NO_DATA"
@@ -439,6 +545,7 @@ async def process_one(
             "content_hash": content_hash,
             "extraction_model": MODEL,
             "scraped_at": "now()",
+            **audit,
             **{k: parsed.get(k) for k in ALLOWED_KEYS},
         }
         # JSONB fields need to be passed as-is (httpx serializes via json=)

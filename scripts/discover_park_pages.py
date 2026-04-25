@@ -52,13 +52,15 @@ SKIP_AGENCY_DOMAINS = {
 }
 USER_AGENT            = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
-# Skip URLs whose path contains these segments — they're not park pages
+# Skip URLs whose path contains these segments — they're not park pages.
+# File extensions are dot-less because url_path_tokens splits on non-alphanumerics
+# (so /foo/bar.pdf → tokens {foo, bar, pdf}, never `.pdf`).
 SKIP_PATH_TOKENS = {
     "blog", "news", "press", "events", "media", "video", "photo", "gallery",
     "calendar", "contact", "search", "login", "account", "cart", "tag",
     "category", "page", "feed", "rss", "atom", "sitemap",
-    "wp-admin", "wp-json", "wp-content", "embed",
-    ".pdf", ".jpg", ".png", ".gif", ".css", ".js",
+    "wp", "admin", "json", "embed",
+    "pdf", "jpg", "jpeg", "png", "gif", "css", "js", "svg",
 }
 
 
@@ -127,8 +129,23 @@ def fetch_targets(limit: Optional[int]) -> list[dict]:
     # ↓ unreachable; filtering happens below
 
 
-def filter_targets(rows: list[dict]) -> list[dict]:
-    return [r for r in rows if not _agency_skipped(r.get("agncy_web") or "")]
+def filter_targets(rows: list[dict], dry_run: bool = False) -> list[dict]:
+    """Drop rows whose agency_url is skipped or missing, and log those
+    drops as attempts so we have a complete audit trail per beach."""
+    keep: list[dict] = []
+    for r in rows:
+        agncy = r.get("agncy_web") or ""
+        if not agncy:
+            insert_attempt(r["fid"], None, "sitemap", "agency_missing",
+                           notes="beach has no CPAD agncy_web", dry_run=dry_run)
+            continue
+        if _agency_skipped(agncy):
+            insert_attempt(r["fid"], agncy, "sitemap", "agency_skipped",
+                           notes="agency_url matched skip-domain (parks.ca.gov, ca.gov, wikipedia)",
+                           dry_run=dry_run)
+            continue
+        keep.append(r)
+    return keep
 
 
 def insert_discovery(fid: int, source_url: str, source_method: str,
@@ -146,6 +163,27 @@ def insert_discovery(fid: int, source_url: str, source_method: str,
     resp = httpx.post(url, headers=headers, json=payload, timeout=15)
     if not resp.is_success and resp.status_code != 409:
         print(f"  insert failed for fid={fid}: {resp.status_code} {resp.text[:200]}", file=sys.stderr)
+
+
+def insert_attempt(fid: int, agency_url: Optional[str], source_method: str,
+                   status: str, sitemap_url_count: Optional[int] = None,
+                   best_score: Optional[float] = None,
+                   best_url: Optional[str] = None,
+                   notes: Optional[str] = None,
+                   dry_run: bool = False) -> None:
+    """Audit log: every discovery attempt outcome (success or failure).
+    Lets us measure no-sitemap and no-match failure modes without re-running."""
+    if dry_run:
+        return
+    payload = {
+        "fid": fid, "agency_url": agency_url, "source_method": source_method,
+        "status": status, "sitemap_url_count": sitemap_url_count,
+        "best_score": best_score, "best_url": best_url, "notes": notes,
+    }
+    url = f"{SUPABASE_URL}/rest/v1/discovery_attempts"
+    resp = httpx.post(url, headers=sb_headers(), json=payload, timeout=15)
+    if not resp.is_success:
+        print(f"  attempt-log insert failed for fid={fid}: {resp.status_code} {resp.text[:200]}", file=sys.stderr)
 
 
 # ── Tokenization for matching ───────────────────────────────────────────────
@@ -170,6 +208,15 @@ def url_path_tokens(url: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", p))
 
 
+def url_path_joined(url: str) -> str:
+    """Path collapsed to alphanumerics-only. Lets us catch single-word slugs
+    like /parks/ribbonbeach where the tokenizer would otherwise split into
+    {parks, ribbonbeach} and miss the `ribbon` name token."""
+    p = urlparse(url).path.lower()
+    p = re.sub(r"\.(html?|aspx?|php|jsp)$", "", p)
+    return re.sub(r"[^a-z0-9]+", "", p)
+
+
 def url_score(beach_name: str, candidate_url: str) -> float:
     """0.00–1.00 score for how well a URL's path matches a beach name."""
     name_tokens = normalize_name(beach_name)
@@ -178,11 +225,18 @@ def url_score(beach_name: str, candidate_url: str) -> float:
     path_tokens = url_path_tokens(candidate_url)
     if any(t in path_tokens for t in SKIP_PATH_TOKENS):
         return 0.0
-    overlap = name_tokens & path_tokens
-    if not overlap:
+    # Exact-token matches against the URL's tokenized path
+    matched = name_tokens & path_tokens
+    # Substring matches against the joined path for longer name tokens
+    # (5+ chars to avoid `art` matching `parts` etc.)
+    joined = url_path_joined(candidate_url)
+    for t in name_tokens:
+        if t not in matched and len(t) >= 5 and t in joined:
+            matched.add(t)
+    if not matched:
         return 0.0
-    # Jaccard-ish: overlap / name_tokens (penalizes URLs that miss name parts)
-    return round(len(overlap) / len(name_tokens), 2)
+    # Jaccard-ish: matched / name_tokens (penalizes URLs that miss name parts)
+    return round(len(matched) / len(name_tokens), 2)
 
 
 # ── Sitemap fetch + parse ───────────────────────────────────────────────────
@@ -258,24 +312,41 @@ async def discover_one(sem: asyncio.Semaphore, client: httpx.AsyncClient,
 
         urls = await fetch_sitemap_urls(client, agency)
         if not urls:
+            insert_attempt(fid, agency, "sitemap", "no_sitemap",
+                           notes="no sitemap.xml/sitemap_index.xml/wp-sitemap.xml accessible",
+                           dry_run=dry_run)
             return f"  fid={fid} {name!r}  no-sitemap  agency={agency}"
 
-        scored = [(url_score(name, u), u) for u in urls]
-        scored = [(s, u) for s, u in scored if s >= MIN_MATCH_SCORE]
-        scored.sort(key=lambda x: -x[0])
+        # Score every URL; track best even if below threshold so we know
+        # "we tried, the sitemap had no per-beach plug for this name"
+        all_scored = [(url_score(name, u), u) for u in urls]
+        all_scored.sort(key=lambda x: -x[0])
+        best_overall_score, best_overall_url = (all_scored[0] if all_scored else (0.0, None))
 
+        scored = [(s, u) for s, u in all_scored if s >= MIN_MATCH_SCORE]
         if not scored:
-            return f"  fid={fid} {name!r}  no-match  ({len(urls)} sitemap urls)"
+            insert_attempt(fid, agency, "sitemap", "no_match",
+                           sitemap_url_count=len(urls),
+                           best_score=best_overall_score,
+                           best_url=best_overall_url,
+                           notes=f"sitemap had {len(urls)} urls but no per-beach plug above {MIN_MATCH_SCORE} threshold",
+                           dry_run=dry_run)
+            return f"  fid={fid} {name!r}  no-match  ({len(urls)} sitemap urls, best={best_overall_score})"
 
         top_score, top_url = scored[0]
         insert_discovery(fid, top_url, "sitemap", agency, top_score,
                          f"top of {len(urls)} sitemap urls", dry_run)
+        insert_attempt(fid, agency, "sitemap", "success",
+                       sitemap_url_count=len(urls),
+                       best_score=top_score,
+                       best_url=top_url,
+                       dry_run=dry_run)
         return f"  fid={fid} {name!r}  ok  score={top_score}  {top_url}"
 
 
 async def run(args: argparse.Namespace) -> None:
     targets = fetch_targets(args.limit)
-    targets = filter_targets(targets)
+    targets = filter_targets(targets, dry_run=args.dry_run)
     print(f"Loaded {len(targets)} discovery targets (after skip-agency filter)")
     if not targets:
         return

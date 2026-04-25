@@ -1,21 +1,15 @@
 // v2-state-parks-dog-policy/index.ts
-// Phase 2 tier 2 — per-state-park dog policy research.
 //
-// For each unique state park unit in our dataset, does ONE pass of:
-//   1. Tavily web search   "<park name> dogs beach California state park"
-//   2. Claude Haiku extraction from top results
-// and applies the resulting policy to all beaches in that park.
-//
-// Covers records with governing_body_source in:
-//   state_polygon, state_name_rescue
-// (not cpad_state — those are UC reserves / Tahoe Conservancy / CDFW with
-// distinct policies; handled in a separate stage if needed.)
-//
-// Writes to: dogs_allowed, dogs_leash_required, dogs_off_leash_area,
-// dogs_time_restrictions, dogs_season_restrictions, dogs_policy_source,
-// dogs_policy_source_url, dogs_policy_notes, dogs_policy_updated_at.
+// Phase 7 of POLICY_RESEARCH_MIGRATION (2026-04-25 rewrite).
+// Reads from locations_stage (filtered to state-governed beaches whose
+// canonical governance came from a state-source: cpad, csp_parks, park_url).
+// Writes extracted dog policy to policy_research_extractions with
+// origin='v2_dog_policy_v2'. populate_from_research consumes those rows
+// and emits beach_enrichment_provenance evidence with source='research'.
 //
 // POST { dry_run?: boolean, park_filter?: string, limit?: number }
+//
+// Pre-rewrite version read/wrote beaches_staging_new — see git history.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Anthropic from "https://esm.sh/@anthropic-ai/sdk@0.39.0";
@@ -27,10 +21,16 @@ const ANTHROPIC_API_KEY    = Deno.env.get("anthropic_api_key")!;
 const TAVILY_API_KEY       = Deno.env.get("TAVILY_API_KEY")!;
 
 const MODEL       = "claude-haiku-4-5-20251001";
-const CONCURRENCY = 3;  // tavily free tier is rate-limited
+const CONCURRENCY = 3;
 
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
+// Source set this function targets — beaches whose canonical governance
+// was assigned by one of these sources (state-park-relevant)
+const STATE_SOURCE_SET = ["cpad", "csp_parks", "park_url", "park_url_buffer_attribution"];
+
+// LLM output enum (free-form so prompt stays semantically clear).
+// Mapped to the NEW pipeline's CHECK enum at write time.
 interface DogPolicy {
   dogs_allowed:             "yes" | "no" | "mixed" | "seasonal" | "unknown";
   dogs_leash_required:      "yes" | "no" | "mixed" | null;
@@ -88,19 +88,17 @@ Extract the dog policy as a JSON object with these fields:
     "seasonal" — dog access is restricted by time of year
     "unknown"  — cannot determine from sources
 
-  Important: for the headline answer, we care about access to the BEACH (sand / shore), not just the campground or parking lot. If dogs are welcome in the parking lot and campground but not on the sand, that is "no" (unless separate beaches within the park do allow dogs, in which case "mixed").
+  Important: for the headline answer, we care about access to the BEACH (sand / shore), not just the campground or parking lot.
 
-- dogs_allowed_areas: short description of where dogs ARE permitted (e.g. "Blind Beach, campgrounds, paved trails"). null if dogs allowed park-wide or if dogs_allowed = "no".
-- dogs_prohibited_areas: short description of where dogs are NOT permitted (e.g. "Bodega Dunes, Russian River SMCA, nature trails, main beach"). null if dogs_allowed = "no" (the whole park is prohibited) or if dogs allowed park-wide.
-- dogs_leash_required: "yes", "no", "mixed", or null if unknown (mixed = rules vary by area or time)
-- dogs_off_leash_area: description if there's a designated off-leash zone; otherwise null
-- dogs_time_restrictions: description if hours limit dog access (e.g. "before 9am and after 5pm"); otherwise null
-- dogs_season_restrictions: description if seasonal limits apply (e.g. "closed to dogs March-September for snowy plover nesting"); otherwise null
-- dogs_policy_notes: one or two sentences summarizing the policy for a user deciding whether to visit.
-- dogs_policy_source_url: the single most authoritative URL from the sources above (prefer parks.ca.gov or the park's official page)
-- confidence: "high" if the sources directly state the park's rules; "low" if inferring from general state park policy or unclear sources
-
-If the sources are unclear or contradictory, mark confidence as "low" and dogs_allowed as "unknown".
+- dogs_allowed_areas: short description of where dogs ARE permitted; null if dogs allowed park-wide or dogs_allowed = "no".
+- dogs_prohibited_areas: short description of where dogs are NOT permitted; null if whole park prohibited or allowed park-wide.
+- dogs_leash_required: "yes", "no", "mixed", or null
+- dogs_off_leash_area: description of designated off-leash zones; otherwise null
+- dogs_time_restrictions: description if hours limit dog access; otherwise null
+- dogs_season_restrictions: description if seasonal limits apply; otherwise null
+- dogs_policy_notes: one or two sentences summarizing the policy
+- dogs_policy_source_url: the single most authoritative URL from the sources above
+- confidence: "high" if sources directly state the rules; "low" if inferring or unclear
 
 Respond with a JSON object only, no other text.`;
 
@@ -149,6 +147,52 @@ function defaultPolicy(): DogPolicy {
   };
 }
 
+// ── Mappers from LLM enum → NEW pipeline CHECK enum ──────────────────────
+
+// LLM 'mixed' becomes 'restricted' (NEW enum doesn't have 'mixed' for dogs_allowed)
+function mapDogsAllowed(v: string): string | null {
+  switch (v) {
+    case "yes":      return "yes";
+    case "no":       return "no";
+    case "seasonal": return "seasonal";
+    case "mixed":    return "restricted";
+    case "unknown":  return "unknown";
+    default:         return null;
+  }
+}
+
+function mapLeashRequired(v: string | null): string | null {
+  switch (v) {
+    case "yes":   return "required";
+    case "no":    return "off_leash_ok";
+    case "mixed": return "mixed";
+    default:      return null;
+  }
+}
+
+// Consolidate freeform area descriptions into a single zone_description
+function buildZoneDescription(p: DogPolicy): string | null {
+  const parts = [
+    p.dogs_allowed_areas    ? `Dogs allowed: ${p.dogs_allowed_areas}` : null,
+    p.dogs_prohibited_areas ? `Dogs prohibited: ${p.dogs_prohibited_areas}` : null,
+    p.dogs_off_leash_area   ? `Off-leash area: ${p.dogs_off_leash_area}` : null,
+  ].filter((s): s is string => s !== null);
+  return parts.length === 0 ? null : parts.join(" | ");
+}
+
+// Stuff temporal restrictions into policy_notes — structured parsing happens
+// downstream via v2-parse-temporal-restrictions (when that's rewritten too).
+function buildPolicyNotes(p: DogPolicy): string {
+  const parts = [p.dogs_policy_notes];
+  if (p.dogs_time_restrictions)   parts.push(`Time restrictions: ${p.dogs_time_restrictions}`);
+  if (p.dogs_season_restrictions) parts.push(`Seasonal: ${p.dogs_season_restrictions}`);
+  return parts.join(" ");
+}
+
+function confidenceToNumeric(c: "high" | "low"): number {
+  return c === "high" ? 0.85 : 0.55;
+}
+
 async function pLimit<T>(tasks: (() => Promise<T>)[], limit: number): Promise<T[]> {
   const results: T[] = new Array(tasks.length);
   let i = 0;
@@ -169,70 +213,125 @@ Deno.serve(async (req: Request) => {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-  // Fetch distinct state parks
-  const { data: rows, error } = await supabase
-    .from("beaches_staging_new")
-    .select("governing_body")
-    .in("governing_body_source", ["state_polygon", "state_name_rescue"])
-    .eq("review_status", "ready")
-    .not("governing_body", "is", null);
+  // Step 1: fids whose canonical governance is from a state source
+  const { data: govRows, error: govErr } = await supabase
+    .from("beach_enrichment_provenance")
+    .select("fid")
+    .eq("field_group", "governance")
+    .eq("is_canonical", true)
+    .in("source", STATE_SOURCE_SET);
+  if (govErr) return json({ error: `gov filter: ${govErr.message}` }, 500);
+  const stateGovernedFids = (govRows ?? []).map(r => r.fid);
+
+  // Step 2: closest STATE-level CPAD unit_name per beach.
+  // Filter to mng_ag_lev='State' so we don't accidentally pick a city/county
+  // park that happens to be the closest polygon — the canonical governance
+  // is state-level so the unit we research must also be state-level.
+  // Order by candidate_rank ASC; first row per fid wins (lowest rank = closest).
+  const { data: candRows, error: candErr } = await supabase
+    .from("beach_cpad_candidates")
+    .select("fid, unit_name, candidate_rank")
+    .in("fid", stateGovernedFids)
+    .eq("mng_ag_lev", "State")
+    .order("candidate_rank", { ascending: true });
+  if (candErr) return json({ error: `cpad cand: ${candErr.message}` }, 500);
+  const fidToUnit = new Map<number, string>();
+  for (const c of candRows ?? []) {
+    if (!fidToUnit.has(c.fid as number)) {
+      fidToUnit.set(c.fid as number, c.unit_name as string);
+    }
+  }
+
+  // Step 3: pull beaches with state governance from locations_stage
+  const { data: beaches, error } = await supabase
+    .from("locations_stage")
+    .select("fid, display_name, governing_body_name, governing_body_type, state_code")
+    .eq("governing_body_type", "state")
+    .in("fid", stateGovernedFids)
+    .not("governing_body_name", "is", null)
+    .eq("is_active", true);
   if (error) return json({ error: error.message }, 500);
 
-  const parkSet = new Set<string>();
-  for (const r of rows ?? []) parkSet.add(r.governing_body);
-  let parks = [...parkSet];
-  if (body.park_filter) parks = parks.filter(p => p.toLowerCase().includes(body.park_filter!.toLowerCase()));
-  if (body.limit)       parks = parks.slice(0, body.limit);
+  // Attach unit_name to each beach. Drop beaches without a CPAD candidate
+  // (no unit to research against). Group by unit_name so we research each
+  // park once and apply policy to all beaches in it.
+  const entityToBeaches = new Map<string, typeof beaches>();
+  for (const b of beaches ?? []) {
+    const unit = fidToUnit.get(b.fid as number);
+    if (!unit) continue;  // no specific park unit known; skip
+    if (!entityToBeaches.has(unit)) entityToBeaches.set(unit, []);
+    entityToBeaches.get(unit)!.push(b);
+  }
+  let entities = [...entityToBeaches.keys()];
+  if (body.park_filter) entities = entities.filter(p => p.toLowerCase().includes(body.park_filter!.toLowerCase()));
+  if (body.limit)       entities = entities.slice(0, body.limit);
 
-  if (parks.length === 0) return json({ parks: 0 });
+  if (entities.length === 0) return json({ entities: 0, beaches: 0 });
 
-  // Research each park once
-  const tasks = parks.map(park => async () => {
-    const query   = `${park} dogs on beach California`;
+  // Research each entity once
+  const tasks = entities.map(entity => async () => {
+    const query   = `${entity} dogs on beach California`;
     const sources = await tavilySearch(query);
-    const policy  = sources.length === 0 ? defaultPolicy() : await extractPolicy(park, sources);
-    return { park, sources_count: sources.length, policy };
+    const policy  = sources.length === 0 ? defaultPolicy() : await extractPolicy(entity, sources);
+    return { entity, sources, policy };
   });
   const researched = await pLimit(tasks, CONCURRENCY);
 
   if (body.dry_run) {
     return json({
       dry_run: true,
-      parks:   parks.length,
-      preview: researched.slice(0, 10),
+      entities: entities.length,
+      preview:  researched.slice(0, 10),
     });
   }
 
-  // Write policy to all beaches for each researched park
+  // Write to policy_research_extractions — one row per (fid, primary_source_url)
   const now = new Date().toISOString();
-  let beaches_updated = 0;
+  let rows_written = 0;
   const writeErrors: string[] = [];
 
   for (const r of researched) {
-    const { error: uErr } = await supabase
-      .from("beaches_staging_new")
-      .update({
-        dogs_allowed:             r.policy.dogs_allowed,
-        dogs_leash_required:      r.policy.dogs_leash_required,
-        dogs_allowed_areas:       r.policy.dogs_allowed_areas,
-        dogs_prohibited_areas:    r.policy.dogs_prohibited_areas,
-        dogs_off_leash_area:      r.policy.dogs_off_leash_area,
-        dogs_time_restrictions:   r.policy.dogs_time_restrictions,
-        dogs_season_restrictions: r.policy.dogs_season_restrictions,
-        dogs_policy_source:       "state_parks_research",
-        dogs_policy_source_url:   r.policy.dogs_policy_source_url,
-        dogs_policy_notes:        r.policy.dogs_policy_notes,
-        dogs_policy_updated_at:   now,
-      })
-      .eq("governing_body", r.park)
-      .in("governing_body_source", ["state_polygon", "state_name_rescue"]);
-    if (uErr) writeErrors.push(`park "${r.park}": ${uErr.message}`);
-    else      beaches_updated += 1;   // approximate; eq() updates all matches
+    const beachesForEntity = entityToBeaches.get(r.entity) ?? [];
+    const sourceUrls = r.sources.map(s => s.url);
+    const primaryUrl = r.policy.dogs_policy_source_url ?? sourceUrls[0] ?? null;
+
+    for (const b of beachesForEntity) {
+      const status =
+        r.sources.length === 0      ? "no_sources" :
+        r.policy.confidence === "high" ? "success" :
+                                      "low_confidence";
+
+      const { error: uErr } = await supabase
+        .from("policy_research_extractions")
+        .upsert({
+          fid:                   b.fid,
+          extracted_at:          now,
+          extraction_status:     status,
+          origin:                "v2_dog_policy_v2",
+          research_query:        `${r.entity} dogs on beach California`,
+          source_urls:           sourceUrls,
+          primary_source_url:    primaryUrl,
+          source_count:          r.sources.length,
+          extraction_model:      MODEL,
+          extraction_confidence: confidenceToNumeric(r.policy.confidence),
+          dogs_allowed:          mapDogsAllowed(r.policy.dogs_allowed),
+          dogs_leash_required:   mapLeashRequired(r.policy.dogs_leash_required),
+          dogs_zone_description: buildZoneDescription(r.policy),
+          dogs_policy_notes:     buildPolicyNotes(r.policy),
+          // dogs_restricted_hours / dogs_seasonal_rules left null —
+          // freeform text gets stuffed into dogs_policy_notes; downstream
+          // v2-parse-temporal-restrictions (when rewritten) parses these
+          // into structured jsonb.
+        }, { onConflict: "fid,primary_source_url,origin" });
+      if (uErr) writeErrors.push(`fid=${b.fid} entity="${r.entity}": ${uErr.message}`);
+      else      rows_written += 1;
+    }
   }
 
   return json({
-    parks:          researched.length,
-    beaches_updated,
+    entities:        researched.length,
+    beaches:         beaches?.length ?? 0,
+    rows_written,
     summary: {
       yes:        researched.filter(r => r.policy.dogs_allowed === "yes").length,
       no:         researched.filter(r => r.policy.dogs_allowed === "no").length,
@@ -242,6 +341,6 @@ Deno.serve(async (req: Request) => {
       high_conf:  researched.filter(r => r.policy.confidence === "high").length,
       low_conf:   researched.filter(r => r.policy.confidence === "low").length,
     },
-    errors:         writeErrors,
+    errors: writeErrors,
   });
 });

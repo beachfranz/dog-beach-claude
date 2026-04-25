@@ -402,7 +402,7 @@
         "cpad_unit_name": "Mission Bay Park",
         "extraction_type": "cpad_source",
         "field_group": "dogs",
-        "is_canonical": false,
+        "is_canonical": true,
         "source": "park_url",
         "source_url": "https://www.sandiego.gov/park-and-recreation/parks/regional/missionbay/"
       },
@@ -437,7 +437,7 @@
         "cpad_unit_name": "Mission Bay Park",
         "extraction_type": "cpad_source",
         "field_group": "practical",
-        "is_canonical": false,
+        "is_canonical": true,
         "source": "park_url",
         "source_url": "https://www.sandiego.gov/park-and-recreation/parks/regional/missionbay/"
       }
@@ -446,41 +446,21 @@
     "name": "Mission Bay Bike Path",
     "stage": {
       "dogs_allowed": "restricted",
-      "dogs_leash_required": "required",
-      "dogs_restricted_hours": [
-        {
-          "end": "09:00",
-          "start": "00:00"
-        },
-        {
-          "end": "23:59",
-          "start": "18:00"
-        }
-      ],
-      "dogs_seasonal_rules": [
-        {
-          "from": "04-01",
-          "notes": "leashed only before 9am and after 6pm",
-          "to": "10-31"
-        },
-        {
-          "from": "11-01",
-          "notes": "leashed only before 9am and after 4pm",
-          "to": "03-31"
-        }
-      ],
-      "dogs_zone_description": "Ocean Beach (Dog Beach), Fiesta Island, Pacific Beach, Mission Beach, La Jolla Shores",
+      "dogs_leash_required": null,
+      "dogs_restricted_hours": null,
+      "dogs_seasonal_rules": null,
+      "dogs_zone_description": null,
       "governing_body_name": "San Diego, City of",
       "governing_body_type": "city",
-      "has_disabled_access": null,
+      "has_disabled_access": true,
       "has_drinking_water": null,
-      "has_fire_pits": null,
+      "has_fire_pits": true,
       "has_food": true,
       "has_lifeguards": true,
       "has_parking": true,
-      "has_picnic_area": null,
+      "has_picnic_area": true,
       "has_restrooms": true,
-      "has_showers": false,
+      "has_showers": true,
       "parking_notes": "Dog Beach has free parking; some areas have metered street parking nearby",
       "parking_type": "mixed",
       "review_notes": "multi_cpad_disagreement: dogs:[Mission Bay Park, Mission Beach Park]; practical:[Mission Bay Park, Mission Beach Park]| source_governing_mismatch: contains:Mission Bay Park / source:[Mission Beach Park]",
@@ -508,7 +488,7 @@
         "cpad_unit_name": "Monterey State Beach",
         "extraction_type": "cpad_source",
         "field_group": "dogs",
-        "is_canonical": false,
+        "is_canonical": true,
         "source": "park_url",
         "source_url": "https://www.parks.ca.gov/?page_id=576"
       },
@@ -524,7 +504,7 @@
         "cpad_unit_name": "Roberts Lake Open Space",
         "extraction_type": "cpad_source",
         "field_group": "practical",
-        "is_canonical": false,
+        "is_canonical": true,
         "source": "park_url",
         "source_url": "https://ca-seaside.civicplus.com/Facilities/Facility/Details/Roberts-Lake-11"
       },
@@ -555,26 +535,27 @@
     "stage": {
       "dogs_allowed": "restricted",
       "dogs_leash_required": "required",
-      "dogs_restricted_hours": [
+      "dogs_restricted_hours": null,
+      "dogs_seasonal_rules": [
         {
-          "end": "16:30",
-          "start": "10:00"
+          "from": "03-01",
+          "notes": "Western snowy plover seasonal resting areas - dogs must avoid these areas",
+          "to": "05-31"
         }
       ],
-      "dogs_seasonal_rules": null,
-      "dogs_zone_description": "Dogs allowed on paved areas (paths, sidewalks, parking lots, ramps) but not on the beach sand itself",
+      "dogs_zone_description": "Dogs are allowed on leash south of the Monterey Tides Hotel. Dogs are NOT allowed north of the Monterey Tides Hotel.",
       "governing_body_name": "Monterey Peninsula Regional Park District",
       "governing_body_type": "unknown",
       "has_disabled_access": true,
-      "has_drinking_water": null,
+      "has_drinking_water": true,
       "has_fire_pits": false,
       "has_food": false,
       "has_lifeguards": false,
       "has_parking": true,
-      "has_picnic_area": false,
+      "has_picnic_area": true,
       "has_restrooms": true,
       "has_showers": false,
-      "parking_notes": "Parking lots available",
+      "parking_notes": "North access point: west of Hwy 1, take Hwy 218 (Seaside) exit, proceed west to parking lot. South end: accessible west of intersection of Figueroa St & Del Monte Ave.",
       "parking_type": "lot",
       "review_notes": "multi_cpad_disagreement: practical:[Monterey State Beach, Roberts Lake Open Space]",
       "review_status": "needs_review"
@@ -609,7 +590,7 @@
         "cpad_unit_name": "Poplar Beach",
         "extraction_type": "cpad_source",
         "field_group": "dogs",
-        "is_canonical": false,
+        "is_canonical": true,
         "source": "park_url",
         "source_url": "https://www.visithalfmoonbay.org/discover/poplar-beach"
       },
@@ -649,7 +630,7 @@
         "cpad_unit_name": "Poplar Beach",
         "extraction_type": "cpad_source",
         "field_group": "practical",
-        "is_canonical": false,
+        "is_canonical": true,
         "source": "park_url",
         "source_url": "https://www.visithalfmoonbay.org/discover/poplar-beach"
       }
@@ -657,24 +638,24 @@
     "fid": 4411973,
     "name": "Wavecrest Beach",
     "stage": {
-      "dogs_allowed": "no",
-      "dogs_leash_required": null,
+      "dogs_allowed": "yes",
+      "dogs_leash_required": "required",
       "dogs_restricted_hours": null,
       "dogs_seasonal_rules": null,
-      "dogs_zone_description": "Poplar Beach (City/County operated)",
+      "dogs_zone_description": "Dogs are prohibited on the beaches at all times. Dogs are permitted in the campground, in the day-use picnic areas, and on the Coastside Trail.",
       "governing_body_name": "Half Moon Bay, City of",
       "governing_body_type": "city",
-      "has_disabled_access": null,
-      "has_drinking_water": null,
+      "has_disabled_access": true,
+      "has_drinking_water": true,
       "has_fire_pits": false,
       "has_food": false,
-      "has_lifeguards": null,
+      "has_lifeguards": false,
       "has_parking": true,
       "has_picnic_area": true,
       "has_restrooms": true,
-      "has_showers": false,
-      "parking_notes": "Poplar Beach parking requires a fee; Annual Parking Permit Application available",
-      "parking_type": "metered",
+      "has_showers": true,
+      "parking_notes": "Paid parking available via self-serve kiosk accepting credit and debit cards. Designated spaces available for trucks with horse trailers. Free admission to beach.",
+      "parking_type": "lot",
       "review_notes": "multi_cpad_disagreement: dogs:[Half Moon Bay State Beach, Poplar Beach]; practical:[Half Moon Bay State Beach, Poplar Beach]",
       "review_status": "needs_review"
     }
@@ -958,7 +939,7 @@
         "cpad_unit_name": "Burton Creek State Park",
         "extraction_type": "cpad_source",
         "field_group": "dogs",
-        "is_canonical": false,
+        "is_canonical": true,
         "source": "park_url",
         "source_url": "https://www.parks.ca.gov/?page_id=512"
       },
@@ -1015,7 +996,7 @@
         "cpad_unit_name": "Commons Beach",
         "extraction_type": "cpad_source",
         "field_group": "practical",
-        "is_canonical": false,
+        "is_canonical": true,
         "source": "park_url",
         "source_url": "https://www.tahoecitypud.com/parksrec/4e3_commons_beach.shtml"
       }
@@ -1023,24 +1004,30 @@
     "fid": 8783604,
     "name": "Commons Beach",
     "stage": {
-      "dogs_allowed": "yes",
-      "dogs_leash_required": "required",
+      "dogs_allowed": "restricted",
+      "dogs_leash_required": null,
       "dogs_restricted_hours": null,
-      "dogs_seasonal_rules": null,
-      "dogs_zone_description": null,
+      "dogs_seasonal_rules": [
+        {
+          "from": "11-01",
+          "notes": "Dogs not allowed on designated ski trails within the Sierra District when snow is present",
+          "to": "05-01"
+        }
+      ],
+      "dogs_zone_description": "Dogs allowed only on fire roads",
       "governing_body_name": "Tahoe City Public Utilities District",
       "governing_body_type": "unknown",
       "has_disabled_access": null,
-      "has_drinking_water": null,
-      "has_fire_pits": null,
-      "has_food": null,
+      "has_drinking_water": true,
+      "has_fire_pits": false,
+      "has_food": false,
       "has_lifeguards": null,
       "has_parking": true,
-      "has_picnic_area": null,
-      "has_restrooms": null,
-      "has_showers": null,
-      "parking_notes": "Most Placer County public parking lots are free and open from 7:00 a.m. to 10:00 p.m. Overnight parking is restricted.",
-      "parking_type": null,
+      "has_picnic_area": true,
+      "has_restrooms": true,
+      "has_showers": false,
+      "parking_notes": "Parking lot (closed until 2p on Thursdays during Farmers Market)",
+      "parking_type": "lot",
       "review_notes": "multi_cpad_disagreement: practical:[Burton Creek State Park, Commons Beach]",
       "review_status": "needs_review"
     }
@@ -1056,7 +1043,7 @@
         "cpad_unit_name": "Mission Beach Park",
         "extraction_type": "cpad_source",
         "field_group": "dogs",
-        "is_canonical": false,
+        "is_canonical": true,
         "source": "park_url",
         "source_url": "https://www.sandiego.gov/lifeguards/beaches/mb"
       },
@@ -1121,7 +1108,7 @@
         "cpad_unit_name": "Mission Beach Park",
         "extraction_type": "cpad_source",
         "field_group": "practical",
-        "is_canonical": false,
+        "is_canonical": true,
         "source": "park_url",
         "source_url": "https://www.sandiego.gov/lifeguards/beaches/mb"
       },
@@ -1145,42 +1132,22 @@
     "fid": 8912496,
     "name": "Mission Beach",
     "stage": {
-      "dogs_allowed": "restricted",
-      "dogs_leash_required": "required",
-      "dogs_restricted_hours": [
-        {
-          "end": "09:00",
-          "start": "00:00"
-        },
-        {
-          "end": "23:59",
-          "start": "18:00"
-        }
-      ],
-      "dogs_seasonal_rules": [
-        {
-          "from": "04-01",
-          "notes": "leashed only before 9am and after 6pm",
-          "to": "10-31"
-        },
-        {
-          "from": "11-01",
-          "notes": "leashed only before 9am and after 4pm",
-          "to": "03-31"
-        }
-      ],
-      "dogs_zone_description": "Ocean Beach (Dog Beach), Fiesta Island, Pacific Beach, Mission Beach, La Jolla Shores",
+      "dogs_allowed": "no",
+      "dogs_leash_required": null,
+      "dogs_restricted_hours": null,
+      "dogs_seasonal_rules": null,
+      "dogs_zone_description": null,
       "governing_body_name": "San Diego, City of",
       "governing_body_type": "city",
-      "has_disabled_access": null,
+      "has_disabled_access": true,
       "has_drinking_water": null,
-      "has_fire_pits": null,
+      "has_fire_pits": true,
       "has_food": true,
       "has_lifeguards": true,
       "has_parking": true,
-      "has_picnic_area": null,
+      "has_picnic_area": true,
       "has_restrooms": true,
-      "has_showers": false,
+      "has_showers": true,
       "parking_notes": "Dog Beach has free parking; some areas have metered street parking nearby",
       "parking_type": "mixed",
       "review_notes": "multi_cpad_disagreement: dogs:[Mission Bay Park, Mission Beach Park]; practical:[Mission Bay Park, Mission Beach Park]",
@@ -1422,7 +1389,7 @@
         "cpad_unit_name": "Carpinteria State Beach",
         "extraction_type": "cpad_source",
         "field_group": "dogs",
-        "is_canonical": false,
+        "is_canonical": true,
         "source": "park_url",
         "source_url": "https://www.parks.ca.gov/?page_id=599"
       },
@@ -1500,10 +1467,10 @@
     "name": "Carpinteria City Beach",
     "stage": {
       "dogs_allowed": "restricted",
-      "dogs_leash_required": "required",
+      "dogs_leash_required": null,
       "dogs_restricted_hours": null,
       "dogs_seasonal_rules": null,
-      "dogs_zone_description": "Loon Point Beach (nearby; outside main city beach zone)",
+      "dogs_zone_description": "Dogs allowed in campground and day-use area. Dogs not allowed on beach.",
       "governing_body_name": "California Department of Parks and Recreation",
       "governing_body_type": "state",
       "has_disabled_access": true,
@@ -1535,7 +1502,7 @@
         "cpad_unit_name": "Mount Tamalpais State Park",
         "extraction_type": "cpad_source",
         "field_group": "dogs",
-        "is_canonical": false,
+        "is_canonical": true,
         "source": "park_url",
         "source_url": "https://www.parks.ca.gov/?page_id=471"
       },
@@ -1562,7 +1529,7 @@
         "cpad_unit_name": "Bolinas Lagoon Open Space Preserve",
         "extraction_type": "cpad_source",
         "field_group": "practical",
-        "is_canonical": false,
+        "is_canonical": true,
         "source": "park_url",
         "source_url": "https://www.marincountyparks.org/depts/pk/divisions/open-space/bolinas"
       },
@@ -1598,26 +1565,20 @@
       "dogs_allowed": "restricted",
       "dogs_leash_required": "required",
       "dogs_restricted_hours": null,
-      "dogs_seasonal_rules": [
-        {
-          "from": "03-01",
-          "notes": "snowy plover protection",
-          "to": "09-30"
-        }
-      ],
-      "dogs_zone_description": "Stinson Beach, Crissy Field, Ocean Beach, and designated trails throughout GGNRA",
+      "dogs_seasonal_rules": null,
+      "dogs_zone_description": "Dogs allowed only on paved roads, Old Stage Fire Rd, Verna Dunshee Trail, in developed areas, campgrounds, and picnic areas. Dogs not allowed on trails, dirt roads, and backcountry areas.",
       "governing_body_name": "Marin County Parks Department, County of",
       "governing_body_type": "county",
       "has_disabled_access": true,
-      "has_drinking_water": null,
-      "has_fire_pits": null,
-      "has_food": null,
+      "has_drinking_water": true,
+      "has_fire_pits": true,
+      "has_food": false,
       "has_lifeguards": true,
       "has_parking": true,
       "has_picnic_area": true,
       "has_restrooms": true,
       "has_showers": false,
-      "parking_notes": "Multiple parking areas at Stinson Beach and other GGNRA locations",
+      "parking_notes": "Parking available; camping in vehicles prohibited in all parking lots.",
       "parking_type": "lot",
       "review_notes": "multi_cpad_disagreement: practical:[Bolinas Lagoon Open Space Preserve, Golden Gate National Recreation Area, Mount Tamalpais State Park]| source_governing_mismatch: contains:Upton County Beach / source:[Bolinas Lagoon Open Space Preserve, Golden Gate National Recreation Area, Mount Tamalpais State Park]",
       "review_status": "needs_review"
@@ -1688,7 +1649,7 @@
         "cpad_unit_name": "Hearst San Simeon State Park",
         "extraction_type": "cpad_source",
         "field_group": "dogs",
-        "is_canonical": false,
+        "is_canonical": true,
         "source": "park_url",
         "source_url": "https://www.parks.ca.gov/?page_id=590"
       },
@@ -1736,7 +1697,7 @@
       "dogs_leash_required": "required",
       "dogs_restricted_hours": null,
       "dogs_seasonal_rules": null,
-      "dogs_zone_description": "developed areas only \u00e2\u20ac\u201d generally NOT on the sandy beach itself",
+      "dogs_zone_description": "Dogs are permitted only on leash at: William Randolph Hearst Memorial Beach, Junge Ranch Trail off Lone Palm Drive, Moonstone Beach Boardwalk, and all campgrounds and parking lots. Dogs are prohibited at: The Boucher Trail, San Simeon Pier, San Simeon Creek Trail, San Simeon Creek Beach leading directly from the campgrounds, Washburn Day Use Beach, Leffingwell Landing, Santa Rosa Creek Beach, and wherever posted.",
       "governing_body_name": "California Department of Parks and Recreation",
       "governing_body_type": "state",
       "has_disabled_access": true,

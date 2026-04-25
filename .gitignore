@@ -6,6 +6,7 @@ scripts/pipeline/.env
 # Pipeline scratch — regenerable from source
 scripts/pipeline/checkpoints/
 scripts/pipeline/*.csv
+/checkpoints/
 
 # Local-only tooling state
 .claude/

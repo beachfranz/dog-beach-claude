@@ -1193,7 +1193,7 @@
     "fid": 9031619,
     "name": "La Jolla Cove",
     "stage": {
-      "dogs_allowed": "restricted",
+      "dogs_allowed": "yes",
       "dogs_leash_required": "required",
       "dogs_restricted_hours": [
         {
@@ -1217,7 +1217,7 @@
           "to": "03-31"
         }
       ],
-      "dogs_zone_description": "Ocean Beach (Dog Beach), Fiesta Island, Pacific Beach, Mission Beach, La Jolla Shores",
+      "dogs_zone_description": "Dogs allowed: La Jolla Cove beach (sand/shore) | Dogs prohibited: Beach during restricted hours",
       "governing_body_name": "San Diego, City of",
       "governing_body_type": "city",
       "has_disabled_access": false,
@@ -1604,7 +1604,7 @@
     "fid": 17070553,
     "name": "Santa Monica Beach",
     "stage": {
-      "dogs_allowed": "restricted",
+      "dogs_allowed": "no",
       "dogs_leash_required": "required",
       "dogs_restricted_hours": [
         {
@@ -1617,7 +1617,7 @@
         }
       ],
       "dogs_seasonal_rules": null,
-      "dogs_zone_description": "Other City Parks only",
+      "dogs_zone_description": "Dogs allowed: Leashed dogs are allowed on paved pedestrian walking paths and in parks adjacent to the beach | Dogs prohibited: Beach sand/shore itself and bike paths",
       "governing_body_name": "Santa Monica, City of",
       "governing_body_type": "city",
       "has_disabled_access": true,

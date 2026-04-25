@@ -51,6 +51,14 @@ USER_AGENT            = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/5
 CACHE_DIR             = Path("./checkpoints/park_url_pages")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+# Min cleaned-page length to bother sending to LLM. Pages below this are
+# typically JS-rendered SPAs where BS4 stripped everything.
+MIN_PAGE_CHARS        = 500
+
+# Retry settings
+MAX_FETCH_RETRIES     = 3
+FETCH_RETRY_DELAY_S   = 2.0
+
 
 # ── Supabase REST helpers ────────────────────────────────────────────────────
 
@@ -96,36 +104,58 @@ def upsert_extraction(row: dict, dry_run: bool) -> None:
 # ── Fetch + BS4 strip ────────────────────────────────────────────────────────
 
 async def fetch_page(client: httpx.AsyncClient, url: str) -> tuple[Optional[str], int]:
-    """Returns (cleaned_text, http_status). Cleaned text is None if fetch failed."""
+    """Returns (cleaned_text, http_status). Cleaned text is None if fetch failed.
+    Retries on connection errors + 5xx; gives up on 4xx (won't change with retry)."""
     cache_key = CACHE_DIR / f"{hashlib.sha1(url.encode()).hexdigest()}.txt"
     if cache_key.exists():
         return cache_key.read_text(encoding="utf-8", errors="ignore"), 200
 
-    try:
-        resp = await client.get(
-            url,
-            headers={"User-Agent": USER_AGENT, "Accept": "text/html,*/*"},
-            timeout=FETCH_TIMEOUT,
-            follow_redirects=True,
-        )
-        status = resp.status_code
-        if not resp.is_success:
-            return None, status
-        ctype = resp.headers.get("content-type", "")
-        if "html" not in ctype.lower():
-            return None, status
+    last_status = 0
+    for attempt in range(MAX_FETCH_RETRIES):
+        try:
+            resp = await client.get(
+                url,
+                headers={
+                    "User-Agent": USER_AGENT,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.9",
+                },
+                timeout=FETCH_TIMEOUT,
+                follow_redirects=True,
+            )
+            last_status = resp.status_code
+            # 4xx: giving up — won't change with retry
+            if 400 <= resp.status_code < 500:
+                return None, last_status
+            # 5xx: retry with backoff
+            if resp.status_code >= 500:
+                if attempt < MAX_FETCH_RETRIES - 1:
+                    await asyncio.sleep(FETCH_RETRY_DELAY_S * (2 ** attempt))
+                    continue
+                return None, last_status
+            # 2xx — process
+            ctype = resp.headers.get("content-type", "")
+            if "html" not in ctype.lower():
+                return None, last_status
 
-        soup = BeautifulSoup(resp.text, "lxml")
-        for tag in soup(["script", "style", "noscript", "iframe", "nav", "footer", "header", "aside", "form"]):
-            tag.decompose()
-        main = soup.find("main") or soup.find("article") or soup.body or soup
-        text = main.get_text(separator="\n", strip=True)
-        text = re.sub(r"\n{3,}", "\n\n", text).strip()[:FETCH_CHAR_LIMIT]
-        cache_key.write_text(text, encoding="utf-8")
-        return text, status
-    except Exception as e:
-        print(f"    fetch error ({url}): {e}", file=sys.stderr)
-        return None, 0
+            soup = BeautifulSoup(resp.text, "lxml")
+            for tag in soup(["script", "style", "noscript", "iframe", "nav", "footer", "header", "aside", "form"]):
+                tag.decompose()
+            main = soup.find("main") or soup.find("article") or soup.body or soup
+            text = main.get_text(separator="\n", strip=True)
+            text = re.sub(r"\n{3,}", "\n\n", text).strip()[:FETCH_CHAR_LIMIT]
+            cache_key.write_text(text, encoding="utf-8")
+            return text, last_status
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
+            if attempt < MAX_FETCH_RETRIES - 1:
+                await asyncio.sleep(FETCH_RETRY_DELAY_S * (2 ** attempt))
+                continue
+            print(f"    fetch error after {MAX_FETCH_RETRIES} retries ({url}): {e}", file=sys.stderr)
+            return None, 0
+        except Exception as e:
+            print(f"    fetch error ({url}): {e}", file=sys.stderr)
+            return None, 0
+    return None, last_status
 
 
 # ── LLM extraction ───────────────────────────────────────────────────────────
@@ -182,17 +212,42 @@ ALLOWED_KEYS = {
     "extraction_confidence", "extraction_notes",
 }
 
-async def extract_fields(client: httpx.AsyncClient, beach_name: str, page_text: str) -> dict[str, Any]:
-    if not page_text or len(page_text.strip()) < 100:
-        return {}
+DOG_FOCUSED_PROMPT = """\
+Extract beach dog/pet policy from this page. The page may not have a
+"DOG RULES" section — look for ANY mention of dogs, pets, leashes,
+service animals, or pet-related restrictions, even buried in prose.
+
+Return ONLY JSON with these keys (null when not stated):
+
+{
+  "dogs_allowed":           "yes" | "no" | "seasonal" | "restricted" | "unknown" | null,
+  "dogs_leash_required":    "required" | "off_leash_ok" | "mixed" | null,
+  "dogs_restricted_hours":  [{"start":"HH:MM","end":"HH:MM"}] | null,
+  "dogs_seasonal_rules":    [{"from":"MM-DD","to":"MM-DD","notes":string}] | null,
+  "dogs_zone_description":  string | null,
+  "dogs_policy_notes":      string | null,
+  "extraction_confidence":  number 0.00-1.00,
+  "extraction_notes":       string | null
+}
+
+Common phrasings to look for:
+- "Pets are welcome" / "Pets must be" / "no pets" / "service animals only"
+- "Dogs allowed on..." / "leashed at all times" / "6-foot leash"
+- "Pets prohibited on beaches" / "Pets allowed in developed areas only"
+- "Dogs allowed before 9am and after 6pm" (time windows)
+
+Reply with raw JSON only. If truly nothing about dogs/pets is
+mentioned, return all-null with extraction_notes explaining.
+"""
+
+
+async def _llm_call(client: httpx.AsyncClient, system: str, user: str) -> dict[str, Any]:
+    """Single LLM call with JSON-fence stripping. Returns parsed dict or {}."""
     payload = {
         "model": MODEL,
         "max_tokens": 1024,
-        "system": EXTRACTION_PROMPT,
-        "messages": [{
-            "role": "user",
-            "content": f"Beach name: {beach_name}\n\nPage content (truncated to {FETCH_CHAR_LIMIT} chars):\n{page_text}"
-        }],
+        "system": system,
+        "messages": [{"role": "user", "content": user}],
     }
     resp = await client.post(
         "https://api.anthropic.com/v1/messages",
@@ -206,17 +261,47 @@ async def extract_fields(client: httpx.AsyncClient, beach_name: str, page_text: 
     )
     resp.raise_for_status()
     text = resp.json()["content"][0]["text"].strip()
-    # Strip markdown fences if Claude included them
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
     try:
-        parsed = json.loads(text)
+        return json.loads(text)
     except json.JSONDecodeError as e:
         print(f"    parse error: {e}", file=sys.stderr)
         print(f"    first 200 chars: {text[:200]}", file=sys.stderr)
         return {}
-    # Filter to allowed keys (defensive against LLM adding extras)
-    return {k: v for k, v in parsed.items() if k in ALLOWED_KEYS}
+
+
+def _has_useful_data(parsed: dict[str, Any]) -> bool:
+    """True if at least one substantive field beyond the meta keys is filled."""
+    substantive = {k for k in ALLOWED_KEYS if k not in {"extraction_confidence", "extraction_notes"}}
+    return any(parsed.get(k) is not None for k in substantive)
+
+
+async def extract_fields(client: httpx.AsyncClient, beach_name: str, page_text: str) -> dict[str, Any]:
+    if not page_text or len(page_text.strip()) < MIN_PAGE_CHARS:
+        return {}
+
+    # Pass 1 — full structured extraction
+    user = f"Beach name: {beach_name}\n\nPage content (truncated to {FETCH_CHAR_LIMIT} chars):\n{page_text}"
+    parsed = await _llm_call(client, EXTRACTION_PROMPT, user)
+    parsed = {k: v for k, v in parsed.items() if k in ALLOWED_KEYS}
+
+    # Pass 2 — if pass 1 yielded no useful data AND the page mentions dogs/pets,
+    # re-prompt with the dog-focused framing.
+    if not _has_useful_data(parsed) and re.search(r"(?i)\b(dog|pet|leash)", page_text):
+        dog_user = f"Beach name: {beach_name}\n\nPage content:\n{page_text}"
+        dog_parsed = await _llm_call(client, DOG_FOCUSED_PROMPT, dog_user)
+        dog_parsed = {k: v for k, v in dog_parsed.items() if k in ALLOWED_KEYS}
+        if _has_useful_data(dog_parsed):
+            # Merge: dog-focused fills any nulls from pass 1
+            for k, v in dog_parsed.items():
+                if parsed.get(k) is None and v is not None:
+                    parsed[k] = v
+            # Annotate that this was a multi-pass result
+            existing = parsed.get("extraction_notes") or ""
+            parsed["extraction_notes"] = (existing + " | dog-focused-rescue").strip(" |")
+
+    return parsed
 
 
 # ── Main ────────────────────────────────────────────────────────────────────

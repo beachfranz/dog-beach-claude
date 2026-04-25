@@ -36,6 +36,16 @@ import httpx
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
+# Playwright is optional — only loaded when an httpx fetch hits a 403/429/connect
+# error and we want to retry with a real browser. Failure to import is non-fatal
+# (script falls back to httpx-only mode).
+try:
+    from playwright.async_api import async_playwright, Browser as PlaywrightBrowser
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+    PlaywrightBrowser = None
+
 load_dotenv(Path(__file__).parent / "pipeline" / ".env")
 
 SUPABASE_URL          = os.environ["SUPABASE_URL"]
@@ -103,9 +113,60 @@ def upsert_extraction(row: dict, dry_run: bool) -> None:
 
 # ── Fetch + BS4 strip ────────────────────────────────────────────────────────
 
+_playwright_browser: Optional["PlaywrightBrowser"] = None
+_playwright_lock = asyncio.Lock()
+
+async def _get_browser():
+    """Lazy-init shared Playwright browser. Returns None if Playwright unavailable."""
+    global _playwright_browser
+    if not PLAYWRIGHT_AVAILABLE:
+        return None
+    async with _playwright_lock:
+        if _playwright_browser is None:
+            pw = await async_playwright().start()
+            _playwright_browser = await pw.chromium.launch(headless=True)
+    return _playwright_browser
+
+
+async def _fetch_with_playwright(url: str) -> tuple[Optional[str], int]:
+    """Render the page in Chromium and return cleaned text. Falls back to None on failure."""
+    browser = await _get_browser()
+    if browser is None:
+        return None, 0
+    context = await browser.new_context(
+        user_agent=USER_AGENT,
+        viewport={"width": 1280, "height": 800},
+    )
+    page = await context.new_page()
+    try:
+        resp = await page.goto(url, timeout=30_000, wait_until="domcontentloaded")
+        status = resp.status if resp else 0
+        if status >= 400:
+            return None, status
+        # Wait briefly for client-side render
+        try:
+            await page.wait_for_load_state("networkidle", timeout=8_000)
+        except Exception:
+            pass
+        html = await page.content()
+        soup = BeautifulSoup(html, "lxml")
+        for tag in soup(["script", "style", "noscript", "iframe", "nav", "footer", "header", "aside", "form"]):
+            tag.decompose()
+        main = soup.find("main") or soup.find("article") or soup.body or soup
+        text = main.get_text(separator="\n", strip=True)
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()[:FETCH_CHAR_LIMIT]
+        return text, status
+    except Exception as e:
+        print(f"    playwright error ({url}): {e}", file=sys.stderr)
+        return None, 0
+    finally:
+        await context.close()
+
+
 async def fetch_page(client: httpx.AsyncClient, url: str) -> tuple[Optional[str], int]:
     """Returns (cleaned_text, http_status). Cleaned text is None if fetch failed.
-    Retries on connection errors + 5xx; gives up on 4xx (won't change with retry)."""
+    Retries on connection errors + 5xx; gives up on 4xx (won't change with retry).
+    Falls back to Playwright when httpx hits 403/429/connection errors."""
     cache_key = CACHE_DIR / f"{hashlib.sha1(url.encode()).hexdigest()}.txt"
     if cache_key.exists():
         return cache_key.read_text(encoding="utf-8", errors="ignore"), 200
@@ -124,7 +185,14 @@ async def fetch_page(client: httpx.AsyncClient, url: str) -> tuple[Optional[str]
                 follow_redirects=True,
             )
             last_status = resp.status_code
-            # 4xx: giving up — won't change with retry
+            # 403/429: bot-blocked — fall through to Playwright
+            if resp.status_code in (403, 429):
+                pw_text, pw_status = await _fetch_with_playwright(url)
+                if pw_text is not None:
+                    cache_key.write_text(pw_text, encoding="utf-8")
+                    return pw_text, pw_status
+                return None, last_status
+            # Other 4xx: giving up — won't change with retry
             if 400 <= resp.status_code < 500:
                 return None, last_status
             # 5xx: retry with backoff
@@ -150,6 +218,11 @@ async def fetch_page(client: httpx.AsyncClient, url: str) -> tuple[Optional[str]
             if attempt < MAX_FETCH_RETRIES - 1:
                 await asyncio.sleep(FETCH_RETRY_DELAY_S * (2 ** attempt))
                 continue
+            # Final attempt failed — try Playwright as last resort
+            pw_text, pw_status = await _fetch_with_playwright(url)
+            if pw_text is not None:
+                cache_key.write_text(pw_text, encoding="utf-8")
+                return pw_text, pw_status
             print(f"    fetch error after {MAX_FETCH_RETRIES} retries ({url}): {e}", file=sys.stderr)
             return None, 0
         except Exception as e:
@@ -395,6 +468,14 @@ async def run(args: argparse.Namespace) -> None:
         for t in asyncio.as_completed(tasks):
             line = await t
             print(line)
+
+    # Clean up Playwright browser if it was started
+    global _playwright_browser
+    if _playwright_browser is not None:
+        try:
+            await _playwright_browser.close()
+        except Exception:
+            pass
 
 
 def main() -> int:

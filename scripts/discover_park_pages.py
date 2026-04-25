@@ -38,10 +38,12 @@ load_dotenv(Path(__file__).parent / "pipeline" / ".env")
 
 SUPABASE_URL          = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY  = os.environ["SUPABASE_SERVICE_KEY"]
+TAVILY_API_KEY        = os.environ.get("TAVILY_API_KEY")  # optional; enables site-search fallback
 
 WORKERS               = 5
 SITEMAP_TIMEOUT       = 20.0
 MIN_MATCH_SCORE       = 0.30
+TAVILY_MIN_SCORE      = 0.50  # Tavily relevance threshold for the site-search fallback
 
 # Skip these agency websites entirely — no sitemap or known dead-ends
 SKIP_AGENCY_DOMAINS = {
@@ -301,6 +303,72 @@ async def fetch_sitemap_urls(client: httpx.AsyncClient, agency_url: str,
     return all_urls
 
 
+# ── Tavily site-search fallback ─────────────────────────────────────────────
+# Used when sitemap-grep yields nothing. Tavily's `include_domains` parameter
+# restricts results to a single host, effectively giving us `site:host beach name`
+# search without needing a Google/Bing API key. Tavily handles indexing, so this
+# works for sites that don't expose sitemaps at all.
+
+async def _tavily_search(client: httpx.AsyncClient, query: str,
+                          include_domains: Optional[list[str]] = None,
+                          max_results: int = 3) -> list[dict]:
+    """Generic Tavily search wrapper. Filters skip-token URLs. Returns
+    list of {url, title, score} sorted by Tavily relevance, or [] on failure."""
+    if not TAVILY_API_KEY:
+        return []
+    try:
+        payload = {
+            "api_key":      TAVILY_API_KEY,
+            "query":        query,
+            "search_depth": "basic",
+            "max_results":  max_results,
+        }
+        if include_domains:
+            payload["include_domains"] = include_domains
+        resp = await client.post(
+            "https://api.tavily.com/search",
+            json=payload,
+            timeout=20.0,
+        )
+        if not resp.is_success:
+            return []
+        data = resp.json()
+        results = data.get("results", []) or []
+        clean = []
+        for r in results:
+            url = r.get("url")
+            if not url:
+                continue
+            path_tokens = url_path_tokens(url)
+            if any(t in path_tokens for t in SKIP_PATH_TOKENS):
+                continue
+            clean.append({
+                "url":   url,
+                "title": r.get("title", ""),
+                "score": float(r.get("score", 0.0)),
+            })
+        return clean
+    except Exception as e:
+        print(f"    tavily error ({query!r} domains={include_domains}): {e}", file=sys.stderr)
+        return []
+
+
+async def tavily_site_search(client: httpx.AsyncClient, beach_name: str,
+                              agency_url: str) -> list[dict]:
+    """Tavily search restricted to the agency's host."""
+    host = urlparse(agency_url).netloc
+    if not host:
+        return []
+    return await _tavily_search(client, beach_name, include_domains=[host])
+
+
+async def tavily_web_search(client: httpx.AsyncClient, beach_name: str) -> list[dict]:
+    """Tavily web-wide search (no domain restriction). Catches CVB/tourism
+    pages and dog-travel sites. Query biased toward dog policy + California."""
+    query = f'"{beach_name}" California beach dogs'
+    return await _tavily_search(client, query)
+
+
 # ── Discovery flow ──────────────────────────────────────────────────────────
 
 async def discover_one(sem: asyncio.Semaphore, client: httpx.AsyncClient,
@@ -311,37 +379,71 @@ async def discover_one(sem: asyncio.Semaphore, client: httpx.AsyncClient,
         agency  = beach["agncy_web"]
 
         urls = await fetch_sitemap_urls(client, agency)
+        sitemap_status = None
+        sitemap_best_score = None
+        sitemap_best_url   = None
+
         if not urls:
+            sitemap_status = "no_sitemap"
             insert_attempt(fid, agency, "sitemap", "no_sitemap",
                            notes="no sitemap.xml/sitemap_index.xml/wp-sitemap.xml accessible",
                            dry_run=dry_run)
-            return f"  fid={fid} {name!r}  no-sitemap  agency={agency}"
+        else:
+            # Score every URL; track best even if below threshold
+            all_scored = [(url_score(name, u), u) for u in urls]
+            all_scored.sort(key=lambda x: -x[0])
+            sitemap_best_score, sitemap_best_url = (all_scored[0] if all_scored else (0.0, None))
 
-        # Score every URL; track best even if below threshold so we know
-        # "we tried, the sitemap had no per-beach plug for this name"
-        all_scored = [(url_score(name, u), u) for u in urls]
-        all_scored.sort(key=lambda x: -x[0])
-        best_overall_score, best_overall_url = (all_scored[0] if all_scored else (0.0, None))
-
-        scored = [(s, u) for s, u in all_scored if s >= MIN_MATCH_SCORE]
-        if not scored:
+            scored = [(s, u) for s, u in all_scored if s >= MIN_MATCH_SCORE]
+            if scored:
+                top_score, top_url = scored[0]
+                insert_discovery(fid, top_url, "sitemap", agency, top_score,
+                                 f"top of {len(urls)} sitemap urls", dry_run)
+                insert_attempt(fid, agency, "sitemap", "success",
+                               sitemap_url_count=len(urls),
+                               best_score=top_score,
+                               best_url=top_url,
+                               dry_run=dry_run)
+                return f"  fid={fid} {name!r}  ok via sitemap  score={top_score}  {top_url}"
+            sitemap_status = "no_match"
             insert_attempt(fid, agency, "sitemap", "no_match",
                            sitemap_url_count=len(urls),
-                           best_score=best_overall_score,
-                           best_url=best_overall_url,
+                           best_score=sitemap_best_score,
+                           best_url=sitemap_best_url,
                            notes=f"sitemap had {len(urls)} urls but no per-beach plug above {MIN_MATCH_SCORE} threshold",
                            dry_run=dry_run)
-            return f"  fid={fid} {name!r}  no-match  ({len(urls)} sitemap urls, best={best_overall_score})"
 
-        top_score, top_url = scored[0]
-        insert_discovery(fid, top_url, "sitemap", agency, top_score,
-                         f"top of {len(urls)} sitemap urls", dry_run)
-        insert_attempt(fid, agency, "sitemap", "success",
-                       sitemap_url_count=len(urls),
-                       best_score=top_score,
-                       best_url=top_url,
+        # ── Fallback: Tavily site-restricted search ─────────────────────
+        # Only fires when sitemap path failed (no_sitemap or no_match).
+        # Tavily handles indexing for sites that don't expose sitemaps.
+        # Note: a tavily_web_search() helper exists for an open-web tier-3,
+        # but it's intentionally not wired in — pilot run on 15 residue
+        # targets returned ~50% noise (wrong-state beaches, social media,
+        # listicles). Residue beaches lack authoritative sources to find.
+        if not TAVILY_API_KEY:
+            return f"  fid={fid} {name!r}  no-match  ({sitemap_status}; no Tavily key)"
+
+        tavily_results = await tavily_site_search(client, name, agency)
+        if not tavily_results:
+            insert_attempt(fid, agency, "site_search", "no_match",
+                           notes="Tavily returned no usable results",
+                           dry_run=dry_run)
+            return f"  fid={fid} {name!r}  no-match  (sitemap={sitemap_status}, tavily=empty)"
+
+        top = tavily_results[0]
+        if top["score"] < TAVILY_MIN_SCORE:
+            insert_attempt(fid, agency, "site_search", "no_match",
+                           best_score=top["score"], best_url=top["url"],
+                           notes=f"Tavily best score {top['score']} below {TAVILY_MIN_SCORE} threshold",
+                           dry_run=dry_run)
+            return f"  fid={fid} {name!r}  no-match  (sitemap={sitemap_status}, tavily best={top['score']:.2f})"
+
+        insert_discovery(fid, top["url"], "site_search", agency, top["score"],
+                         f"Tavily site-search fallback after sitemap {sitemap_status}", dry_run)
+        insert_attempt(fid, agency, "site_search", "success",
+                       best_score=top["score"], best_url=top["url"],
                        dry_run=dry_run)
-        return f"  fid={fid} {name!r}  ok  score={top_score}  {top_url}"
+        return f"  fid={fid} {name!r}  ok via tavily  score={top['score']:.2f}  {top['url']}"
 
 
 async def run(args: argparse.Namespace) -> None:

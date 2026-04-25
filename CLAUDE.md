@@ -514,6 +514,77 @@ Key migrations in order:
 
 ---
 
+## Data Ingestion Pipeline — Evidence → Resolve → Promote
+
+The catalog ingest pipeline (separate from the consumer-facing scoring app) follows a layered architecture for collecting and reconciling beach metadata across multiple external sources (CPAD, CCC, TIGER places, NPS, LLM research, park URL scrapes, etc.). All evidence-bearing populators write into `beach_enrichment_provenance` (one row per `(fid, field_group, source, source_url)`), then resolvers pick canonical winners, and promoters write canonical values back to `locations_stage` columns.
+
+### Function family
+
+| Layer | Function pattern | Purpose |
+|---|---|---|
+| 1. Emit | `_emit_evidence_from_<source>(p_fid)` | Read source data, INSERT/UPSERT evidence rows. No canonical mutation. Idempotent via `ON CONFLICT (fid, field_group, source, source_url)`. |
+| 2a. Rank | `_rank_<source>_evidence(p_fid, p_field_group)` | When one source contributes multiple evidence rows per beach (e.g., CPAD candidate fan-out), produce a ranked temp table `_resolver_ranked` per Tier 1 rules. |
+| 2b. Resolve | `_resolve_<field_group>(p_fid)` | Apply per-field-group cross-source overrides; set `is_canonical=true` on the winning evidence row. |
+| 3. Promote | `_promote_<field_group>_to_stage(p_fid)` | Read canonical evidence's `claimed_values` jsonb, write to `locations_stage` columns. Preserves existing values where claimed_values is null. Validates enums + casts types. |
+| 4. Flag | `_compute_review_flags(p_fid)` | Detection-only. Updates `locations_stage.review_status` / `review_notes` for ambiguous cases. |
+| Public | `populate_from_<source>(p_fid)` | Orchestrator. Calls emit → resolvers → promoters → flags in order. |
+
+### Tier 1 ranking (in priority order)
+
+When a single source produces multiple evidence rows for one beach (e.g., CPAD candidate fan-out via `beach_cpad_candidates`):
+
+1. **Demote environmental overlays** — Marine Parks / Ecological Reserves / Wildlife Areas lose to non-overlay candidates, BUT keep overlay as fallback when no alternative exists.
+2. **Containing CPAD with "Beach" in name wins** — catches the Coronado Municipal Beach pattern.
+3. **Trigram similarity to display_name** — picks Mission Beach Park over Mission Bay Park for "Mission Beach".
+4. **Smallest CPAD area** — most-specific polygon wins.
+
+Final tiebreaks: confidence desc, id asc.
+
+### Cross-source override patterns (governance field_group)
+
+Three override layers in `_resolve_governance(p_fid)`:
+
+1. **State-park override**: `park_url`/`park_url_buffer_attribution` beats `tiger_places`/`cpad` when source CPAD's `unit_name` matches `\m(state beach|state park|state recreation)\M`. Always beats `name`/`governing_body` (weak inference signals).
+2. **Tiger-vs-operator override** (`_resolve_tiger_vs_operator`): when `tiger_places` holds canonical and any operator-source disagrees, tiger loses. Operator candidates ranked by (a) trigram name-similarity, (b) park_url-agreement bonus, (c) hierarchy fallback: `nps_places > csp_parks > tribal_lands > military_bases > park_operators > cpad > park_url`.
+3. **Never overridden**: `manual` source (always wins per resolution-rules-design memory).
+
+### Audit trail
+
+Every evidence row carries:
+- `cpad_unit_name` — which CPAD unit supplied the data (for park_url-derived sources)
+- `extraction_type` — `cpad_source` (URL from CPAD park_url field), `cpad_source_crawl` (URL discovered via CPAD agncy_web sitemap-grep), or `derived_url_crawl` (future: external derivation like place-name + site:search)
+- `cpad_role` — `beach_access` or `environmental_overlay`
+- `source_url` — the URL the evidence was extracted from
+- `source` — which populator emitted it (`park_url`, `cpad`, `tiger_places`, `csp_parks`, `nps_places`, `tribal_lands`, `military_bases`, `park_operators`, `park_url_buffer_attribution`, `name`, `governing_body`, `manual`, etc.)
+
+URL-discovery attempts (sitemap-grep, etc.) log every outcome to `discovery_attempts` with status in `(success, no_sitemap, no_match, agency_skipped, agency_missing, fetch_error)`.
+
+### Review flags
+
+Set on `locations_stage.review_status='needs_review'`, detail in `review_notes`:
+
+| Flag | Trigger |
+|---|---|
+| `multi_cpad_disagreement` | Beach has ≥2 successful park_url extractions from different CPADs in same field_group |
+| `source_governing_mismatch` | Source CPAD ≠ strict-containing CPAD |
+| `dogs disagreement (research more permissive)` | LLM research extraction differs from agency-default (pre-existing) |
+
+Flags refresh in place via `regexp_replace` — no append-duplication on re-run.
+
+### Adding a new source
+
+To add a new evidence source (e.g., PAD-US for Oregon, a new research scrape, an external API):
+
+1. Create `_emit_evidence_from_<source>(p_fid)` that inserts evidence rows with all standard audit columns. Use `ON CONFLICT (fid, field_group, source, coalesce(source_url, ''))`.
+2. If the new source has its own value in `beach_enrichment_provenance.source` CHECK constraint, extend that constraint.
+3. If multiple evidence rows per beach are possible, write `_rank_<source>_evidence` (or reuse `_rank_park_url_evidence` if the same Tier 1 rules apply).
+4. Decide cross-source override semantics: does this new source beat existing ones for any field_group? Extend `_resolve_<field_group>` accordingly.
+5. The promoter, flag computation, and orchestrator wrap the existing pieces — usually no changes needed unless the new source has unique field_groups.
+
+See `project_pipeline_refactor_trigger.md` memory for guidance on when to refactor the helper-function family vs. extending in place.
+
+---
+
 ## SMS Alerts (Blocked)
 
 `send-daily-alerts` and the full subscriber pipeline (tables, Twilio integration) are built but not operational. Twilio toll-free number verification is backlogged. Will resume once the from-number is approved.

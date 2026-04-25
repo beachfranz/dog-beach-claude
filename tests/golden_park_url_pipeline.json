@@ -1,0 +1,1757 @@
+[
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "allowed": "restricted",
+          "leash_required": "required",
+          "notes": "All dogs must be on a six-foot maximum leash and under human control at all times. Please do not leave your dog unattended in a vehicle. No dogs on the boardwalk in the Monarch Grove.",
+          "zone_description": "Dogs are allowed only in the parking lots and picnic areas, but NOT on the beach and trails (except for ADA service animals)."
+        },
+        "confidence": 0.95,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Natural Bridges State Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": true,
+        "source": "park_url",
+        "source_url": "http://www.parks.ca.gov/default.asp?page_id=541"
+      },
+      {
+        "claimed_values": {
+          "allowed": "yes",
+          "notes": "Dog walking is listed as an available activity"
+        },
+        "confidence": 0.65,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Antonelli Pond",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://landtrustsantacruz.org/protected-areas/antonelli-pond/"
+      },
+      {
+        "claimed_values": {
+          "allowed": "restricted",
+          "leash_required": "required",
+          "notes": "All dogs must be on a six-foot maximum leash and under human control at all times. Please do not leave your dog unattended in a vehicle. No dogs on the boardwalk in the Monarch Grove preserve.",
+          "zone_description": "Dogs are allowed only in the parking lots and picnic areas, but NOT on the beach and trails (except for ADA service animals)."
+        },
+        "confidence": 0.95,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Natural Bridges State Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=541"
+      },
+      {
+        "claimed_values": {
+          "has_disabled_access": true,
+          "has_drinking_water": true,
+          "has_fire_pits": false,
+          "has_food": false,
+          "has_lifeguards": false,
+          "has_parking": true,
+          "has_picnic_area": true,
+          "has_restrooms": true,
+          "has_showers": false,
+          "hours_text": "Park Hours: 8am to Sunset. Visitor Center Hours: 11 am to 4 pm (October 1 \u00e2\u20ac\u201c January 31: Daily; February 1 \u00e2\u20ac\u201c September 30: Friday through Monday)",
+          "open_time": "08:00:00",
+          "parking_notes": "Vehicle day-use fee: $10.00 (Senior $9, age 62 or older); Bus Parking (10-24 passengers): $50; Bus Parking (25+ passengers): $100",
+          "parking_type": "lot"
+        },
+        "confidence": 0.95,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Natural Bridges State Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": true,
+        "source": "park_url",
+        "source_url": "http://www.parks.ca.gov/default.asp?page_id=541"
+      },
+      {
+        "claimed_values": {
+          "has_disabled_access": true,
+          "has_picnic_area": true,
+          "hours_text": "open from dawn to dusk"
+        },
+        "confidence": 0.65,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Antonelli Pond",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://landtrustsantacruz.org/protected-areas/antonelli-pond/"
+      },
+      {
+        "claimed_values": {
+          "has_disabled_access": true,
+          "has_drinking_water": true,
+          "has_fire_pits": false,
+          "has_food": false,
+          "has_lifeguards": false,
+          "has_parking": true,
+          "has_picnic_area": true,
+          "has_restrooms": true,
+          "has_showers": false,
+          "hours_text": "Park Hours: 8am to Sunset. Visitor Center Hours: 11 am to 4 pm October 1 \u00e2\u20ac\u201c January 31: Daily; February 1 \u00e2\u20ac\u201c September 30: Friday through Monday",
+          "open_time": "08:00:00",
+          "parking_notes": "Main parking lot with $10 vehicle day-use fee",
+          "parking_type": "lot"
+        },
+        "confidence": 0.95,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Natural Bridges State Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=541"
+      }
+    ],
+    "fid": 1093168,
+    "name": "Natural Bridges State Beach",
+    "stage": {
+      "dogs_allowed": "restricted",
+      "dogs_leash_required": "required",
+      "dogs_restricted_hours": null,
+      "dogs_seasonal_rules": null,
+      "dogs_zone_description": "Dogs are allowed only in the parking lots and picnic areas, but NOT on the beach and trails (except for ADA service animals).",
+      "governing_body_name": "California Department of Parks and Recreation",
+      "governing_body_type": "state",
+      "has_disabled_access": true,
+      "has_drinking_water": true,
+      "has_fire_pits": false,
+      "has_food": false,
+      "has_lifeguards": false,
+      "has_parking": true,
+      "has_picnic_area": true,
+      "has_restrooms": true,
+      "has_showers": false,
+      "parking_notes": "Vehicle day-use fee: $10.00 (Senior $9, age 62 or older); Bus Parking (10-24 passengers): $50; Bus Parking (25+ passengers): $100",
+      "parking_type": "lot",
+      "review_notes": "multi_cpad_disagreement: dogs:[Antonelli Pond, Natural Bridges State Beach]; practical:[Antonelli Pond, Natural Bridges State Beach]| source_governing_mismatch: contains:Natural Bridges State Beach / source:[Antonelli Pond]",
+      "review_status": "needs_review"
+    }
+  },
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "allowed": "yes",
+          "leash_required": "required",
+          "notes": "All dogs must be on-leash within City limits."
+        },
+        "confidence": 0.8,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Morro Bay City Beach",
+        "extraction_type": "cpad_source_crawl",
+        "field_group": "dogs",
+        "is_canonical": true,
+        "source": "park_url",
+        "source_url": "https://www.morrobayca.gov/383/Morro-Rock-Beach"
+      },
+      {
+        "claimed_values": {
+          "has_picnic_area": true
+        },
+        "confidence": 0.35,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Coleman Park",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.morrobayca.gov/376/Coleman-Park"
+      },
+      {
+        "claimed_values": {
+          "has_fire_pits": false,
+          "has_lifeguards": true,
+          "hours_text": "Lifeguards on duty from 10 a.m. to 6 p.m. during summer months (roughly Memorial Day to Labor Day)"
+        },
+        "confidence": 0.8,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Morro Bay City Beach",
+        "extraction_type": "cpad_source_crawl",
+        "field_group": "practical",
+        "is_canonical": true,
+        "source": "park_url",
+        "source_url": "https://www.morrobayca.gov/383/Morro-Rock-Beach"
+      }
+    ],
+    "fid": 1163237,
+    "name": "Morro Rock Beach",
+    "stage": {
+      "dogs_allowed": "yes",
+      "dogs_leash_required": "required",
+      "dogs_restricted_hours": null,
+      "dogs_seasonal_rules": null,
+      "dogs_zone_description": null,
+      "governing_body_name": "Morro Bay, City of",
+      "governing_body_type": "city",
+      "has_disabled_access": null,
+      "has_drinking_water": null,
+      "has_fire_pits": false,
+      "has_food": null,
+      "has_lifeguards": true,
+      "has_parking": true,
+      "has_picnic_area": null,
+      "has_restrooms": null,
+      "has_showers": null,
+      "parking_notes": "Parking available along Highway 1 at Toro Creek Dog Beach; parking noted as tight in some areas",
+      "parking_type": "lot",
+      "review_notes": "multi_cpad_disagreement: practical:[Coleman Park, Morro Bay City Beach]| source_governing_mismatch: contains:Morro Bay City Beach / source:[Coleman Park]",
+      "review_status": "needs_review"
+    }
+  },
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "allowed": "restricted",
+          "leash_required": "required",
+          "notes": "Pets must remain on leash at all times. Service animals exempt from restrictions.",
+          "zone_description": "Dogs allowed only in developed areas, paved roads, Old Stage Fire Rd, Verna Dunshee Trail, campgrounds, and picnic areas. Dogs not allowed on trails, dirt roads, and backcountry areas."
+        },
+        "confidence": 0.85,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Mount Tamalpais State Park",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": true,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=471"
+      },
+      {
+        "claimed_values": {
+          "has_disabled_access": true,
+          "has_picnic_area": true
+        },
+        "confidence": 0.25,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Golden Gate National Recreation Area",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "http://www.nps.gov/goga/index.htm"
+      },
+      {
+        "claimed_values": {
+          "has_disabled_access": true,
+          "has_drinking_water": true,
+          "has_fire_pits": true,
+          "has_food": true,
+          "has_parking": true,
+          "has_picnic_area": true,
+          "has_restrooms": true,
+          "hours_text": "Daily: 7:00 a.m. to Sunset, year round.",
+          "open_time": "07:00:00",
+          "parking_notes": "Camping in vehicles is prohibited in all parking lots.",
+          "parking_type": "lot"
+        },
+        "confidence": 0.85,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Mount Tamalpais State Park",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": true,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=471"
+      }
+    ],
+    "fid": 1620294,
+    "name": "Mickey's Beach",
+    "stage": {
+      "dogs_allowed": "restricted",
+      "dogs_leash_required": "required",
+      "dogs_restricted_hours": null,
+      "dogs_seasonal_rules": null,
+      "dogs_zone_description": "Dogs allowed only in developed areas, paved roads, Old Stage Fire Rd, Verna Dunshee Trail, campgrounds, and picnic areas. Dogs not allowed on trails, dirt roads, and backcountry areas.",
+      "governing_body_name": "California Department of Parks and Recreation",
+      "governing_body_type": "state",
+      "has_disabled_access": true,
+      "has_drinking_water": true,
+      "has_fire_pits": true,
+      "has_food": true,
+      "has_lifeguards": false,
+      "has_parking": true,
+      "has_picnic_area": true,
+      "has_restrooms": true,
+      "has_showers": false,
+      "parking_notes": "Camping in vehicles is prohibited in all parking lots.",
+      "parking_type": "lot",
+      "review_notes": "multi_cpad_disagreement: practical:[Golden Gate National Recreation Area, Mount Tamalpais State Park]| source_governing_mismatch: contains:Mount Tamalpais State Park / source:[Golden Gate National Recreation Area]",
+      "review_status": "needs_review"
+    }
+  },
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "allowed": "no",
+          "notes": "Dogs are prohibited on the beach. Dogs must be monitored and leashed within the campground.",
+          "zone_description": "Dogs are prohibited on the beach. Dogs must be monitored and leashed within the campground."
+        },
+        "confidence": 0.95,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Morro Strand State Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": true,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=593"
+      },
+      {
+        "claimed_values": {
+          "has_disabled_access": true,
+          "has_fire_pits": true,
+          "has_food": false,
+          "has_picnic_area": true,
+          "has_restrooms": true,
+          "has_showers": false
+        },
+        "confidence": 0.4,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Cloisters Park",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.morrobayca.gov/375/Cloisters-Park"
+      },
+      {
+        "claimed_values": {
+          "close_time": "22:00:00",
+          "has_disabled_access": true,
+          "has_drinking_water": true,
+          "has_fire_pits": true,
+          "has_food": false,
+          "has_lifeguards": false,
+          "has_parking": true,
+          "has_picnic_area": true,
+          "has_restrooms": true,
+          "has_showers": true,
+          "hours_text": "Park day use is open 6am-10pm",
+          "open_time": "06:00:00",
+          "parking_notes": "No Overflow Parking spaces for overnight camping available in this park.",
+          "parking_type": "lot"
+        },
+        "confidence": 0.95,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Morro Strand State Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": true,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=593"
+      }
+    ],
+    "fid": 2052963,
+    "name": "Morro Strand State Beach",
+    "stage": {
+      "dogs_allowed": "no",
+      "dogs_leash_required": null,
+      "dogs_restricted_hours": null,
+      "dogs_seasonal_rules": null,
+      "dogs_zone_description": "Dogs are prohibited on the beach. Dogs must be monitored and leashed within the campground.",
+      "governing_body_name": "California Department of Parks and Recreation",
+      "governing_body_type": "state",
+      "has_disabled_access": true,
+      "has_drinking_water": true,
+      "has_fire_pits": true,
+      "has_food": false,
+      "has_lifeguards": false,
+      "has_parking": true,
+      "has_picnic_area": true,
+      "has_restrooms": true,
+      "has_showers": true,
+      "parking_notes": "No Overflow Parking spaces for overnight camping available in this park.",
+      "parking_type": "lot",
+      "review_notes": "dogs disagreement (research more permissive): allowed=seasonal (vs agency=restricted), leash=required (vs agency=required) [https://www.parks.ca.gov/?page_id=24317] | multi_cpad_disagreement: practical:[Cloisters Park, Morro Strand State Beach]| source_governing_mismatch: contains:Morro Strand State Beach / source:[Cloisters Park]",
+      "review_status": "needs_review"
+    }
+  },
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "allowed": "no"
+        },
+        "confidence": 0.92,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Mission Beach Park",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.sandiego.gov/lifeguards/beaches/mb"
+      },
+      {
+        "claimed_values": {
+          "allowed": "restricted",
+          "notes": "Dogs section mentioned in navigation but detailed policy not provided in excerpt"
+        },
+        "confidence": 0.45,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Mission Bay Park",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.sandiego.gov/park-and-recreation/parks/regional/missionbay/"
+      },
+      {
+        "claimed_values": {
+          "has_disabled_access": true,
+          "has_fire_pits": true,
+          "has_lifeguards": true,
+          "has_parking": true,
+          "has_picnic_area": true,
+          "has_restrooms": true,
+          "has_showers": true
+        },
+        "confidence": 0.92,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Mission Beach Park",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.sandiego.gov/lifeguards/beaches/mb"
+      },
+      {
+        "claimed_values": {
+          "has_lifeguards": true,
+          "has_picnic_area": true,
+          "has_restrooms": true,
+          "has_showers": true
+        },
+        "confidence": 0.45,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Mission Bay Park",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.sandiego.gov/park-and-recreation/parks/regional/missionbay/"
+      }
+    ],
+    "fid": 2649621,
+    "name": "Mission Bay Bike Path",
+    "stage": {
+      "dogs_allowed": "restricted",
+      "dogs_leash_required": "required",
+      "dogs_restricted_hours": [
+        {
+          "end": "09:00",
+          "start": "00:00"
+        },
+        {
+          "end": "23:59",
+          "start": "18:00"
+        }
+      ],
+      "dogs_seasonal_rules": [
+        {
+          "from": "04-01",
+          "notes": "leashed only before 9am and after 6pm",
+          "to": "10-31"
+        },
+        {
+          "from": "11-01",
+          "notes": "leashed only before 9am and after 4pm",
+          "to": "03-31"
+        }
+      ],
+      "dogs_zone_description": "Ocean Beach (Dog Beach), Fiesta Island, Pacific Beach, Mission Beach, La Jolla Shores",
+      "governing_body_name": "San Diego, City of",
+      "governing_body_type": "city",
+      "has_disabled_access": null,
+      "has_drinking_water": null,
+      "has_fire_pits": null,
+      "has_food": true,
+      "has_lifeguards": true,
+      "has_parking": true,
+      "has_picnic_area": null,
+      "has_restrooms": true,
+      "has_showers": false,
+      "parking_notes": "Dog Beach has free parking; some areas have metered street parking nearby",
+      "parking_type": "mixed",
+      "review_notes": "multi_cpad_disagreement: dogs:[Mission Bay Park, Mission Beach Park]; practical:[Mission Bay Park, Mission Beach Park]| source_governing_mismatch: contains:Mission Bay Park / source:[Mission Beach Park]",
+      "review_status": "needs_review"
+    }
+  },
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "allowed": "restricted",
+          "leash_required": "required",
+          "notes": "Dogs must be kept on leash at all times. Visitors should be aware of families with small children and early spring Western snowy plover seasonal resting areas.",
+          "seasonal_rules": [
+            {
+              "from": "03-01",
+              "notes": "Western snowy plover seasonal resting areas - dogs must avoid these areas",
+              "to": "05-31"
+            }
+          ],
+          "zone_description": "Dogs are allowed on leash south of the Monterey Tides Hotel. Dogs are NOT allowed north of the Monterey Tides Hotel."
+        },
+        "confidence": 0.92,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Monterey State Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=576"
+      },
+      {
+        "claimed_values": {
+          "has_parking": true,
+          "has_picnic_area": true,
+          "hours_text": "Dawn till Dusk",
+          "parking_type": "lot"
+        },
+        "confidence": 0.4,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Roberts Lake Open Space",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://ca-seaside.civicplus.com/Facilities/Facility/Details/Roberts-Lake-11"
+      },
+      {
+        "claimed_values": {
+          "has_disabled_access": true,
+          "has_drinking_water": true,
+          "has_fire_pits": false,
+          "has_parking": true,
+          "has_picnic_area": true,
+          "hours_text": "8 AM \u00e2\u20ac\u201c Sunset",
+          "open_time": "08:00:00",
+          "parking_notes": "North access point: west of Hwy 1, take Hwy 218 (Seaside) exit, proceed west to parking lot. South end: accessible west of intersection of Figueroa St & Del Monte Ave.",
+          "parking_type": "lot"
+        },
+        "confidence": 0.92,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Monterey State Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=576"
+      }
+    ],
+    "fid": 3322659,
+    "name": "Houghton M. Roberts Beach",
+    "stage": {
+      "dogs_allowed": "restricted",
+      "dogs_leash_required": "required",
+      "dogs_restricted_hours": [
+        {
+          "end": "16:30",
+          "start": "10:00"
+        }
+      ],
+      "dogs_seasonal_rules": null,
+      "dogs_zone_description": "Dogs allowed on paved areas (paths, sidewalks, parking lots, ramps) but not on the beach sand itself",
+      "governing_body_name": "Monterey Peninsula Regional Park District",
+      "governing_body_type": "unknown",
+      "has_disabled_access": true,
+      "has_drinking_water": null,
+      "has_fire_pits": false,
+      "has_food": false,
+      "has_lifeguards": false,
+      "has_parking": true,
+      "has_picnic_area": false,
+      "has_restrooms": true,
+      "has_showers": false,
+      "parking_notes": "Parking lots available",
+      "parking_type": "lot",
+      "review_notes": "multi_cpad_disagreement: practical:[Monterey State Beach, Roberts Lake Open Space]",
+      "review_status": "needs_review"
+    }
+  },
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "allowed": "restricted",
+          "leash_required": "required",
+          "notes": "Dogs must be controlled with a leash no more than six feet at all times.",
+          "zone_description": "Dogs are prohibited on the beaches at all times. Dogs are permitted in the campground, in the day-use picnic areas, and on the Coastside Trail."
+        },
+        "confidence": 0.92,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Half Moon Bay State Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "http://www.parks.ca.gov/default.asp?page_id=531"
+      },
+      {
+        "claimed_values": {
+          "allowed": "yes",
+          "leash_required": "required",
+          "notes": "Dogs are allowed on the sand and must be on a leash. Rule-breakers may have off-leash pets present."
+        },
+        "confidence": 0.85,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Poplar Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.visithalfmoonbay.org/discover/poplar-beach"
+      },
+      {
+        "claimed_values": {
+          "has_disabled_access": true,
+          "has_drinking_water": true,
+          "has_fire_pits": false,
+          "has_food": false,
+          "has_lifeguards": false,
+          "has_parking": true,
+          "has_picnic_area": true,
+          "has_restrooms": true,
+          "has_showers": true,
+          "hours_text": "8am - Sunset",
+          "open_time": "08:00:00",
+          "parking_notes": "Three parking lots in the City of Half Moon Bay: Francis Beach (Kelly Avenue), Venice Beach (Venice Boulevard), Dunes Beach (Young Avenue). Roosevelt Beach also has a parking lot.",
+          "parking_type": "lot"
+        },
+        "confidence": 0.92,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Half Moon Bay State Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "http://www.parks.ca.gov/default.asp?page_id=531"
+      },
+      {
+        "claimed_values": {
+          "has_parking": true,
+          "parking_notes": "Paid parking available via self-serve kiosk accepting credit and debit cards. Designated spaces available for trucks with horse trailers. Free admission to beach.",
+          "parking_type": "lot"
+        },
+        "confidence": 0.85,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Poplar Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.visithalfmoonbay.org/discover/poplar-beach"
+      }
+    ],
+    "fid": 4411973,
+    "name": "Wavecrest Beach",
+    "stage": {
+      "dogs_allowed": "no",
+      "dogs_leash_required": null,
+      "dogs_restricted_hours": null,
+      "dogs_seasonal_rules": null,
+      "dogs_zone_description": "Poplar Beach (City/County operated)",
+      "governing_body_name": "Half Moon Bay, City of",
+      "governing_body_type": "city",
+      "has_disabled_access": null,
+      "has_drinking_water": null,
+      "has_fire_pits": false,
+      "has_food": false,
+      "has_lifeguards": null,
+      "has_parking": true,
+      "has_picnic_area": true,
+      "has_restrooms": true,
+      "has_showers": false,
+      "parking_notes": "Poplar Beach parking requires a fee; Annual Parking Permit Application available",
+      "parking_type": "metered",
+      "review_notes": "multi_cpad_disagreement: dogs:[Half Moon Bay State Beach, Poplar Beach]; practical:[Half Moon Bay State Beach, Poplar Beach]",
+      "review_status": "needs_review"
+    }
+  },
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "allowed": "restricted",
+          "leash_required": "required",
+          "notes": "Stay on trails to avoid poison oak and ticks that may carry Lyme disease.",
+          "zone_description": "Dogs are permitted only on leash at William Randolph Hearst Memorial Beach, Junge Ranch Trail off of Lone Palm Drive, Moonstone Beach Boardwalk, and all campgrounds and parking lots. Dogs are prohibited at The Boucher Trail, San Simeon Pier, San Simeon Creek Trail, San Simeon Creek Beach leading directly from the campgrounds, Washburn Day Use Beach, Leffingwell Landing, Santa Rosa Creek Beach, and wherever posted. Dogs must be monitored and leashed within the campgrounds. Dogs are prohibited on the beach and trails adjacent to the campgrounds."
+        },
+        "confidence": 0.88,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Hearst San Simeon State Park",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": true,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=590"
+      },
+      {
+        "claimed_values": {
+          "has_restrooms": true
+        },
+        "confidence": 0.15,
+        "cpad_role": "environmental_overlay",
+        "cpad_unit_name": "Cambria State Marine Park",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://wildlife.ca.gov/Conservation/Marine/MPAs/Cambria-White-Rock"
+      },
+      {
+        "claimed_values": {
+          "has_disabled_access": true,
+          "has_drinking_water": true,
+          "has_fire_pits": true,
+          "has_food": true,
+          "has_parking": true,
+          "has_picnic_area": true,
+          "has_restrooms": true,
+          "has_showers": true,
+          "hours_text": "8am-Sunset",
+          "open_time": "08:00:00",
+          "parking_notes": "Parking lots open 8am-Sunset",
+          "parking_type": "lot"
+        },
+        "confidence": 0.88,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Hearst San Simeon State Park",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": true,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=590"
+      }
+    ],
+    "fid": 6754273,
+    "name": "William Randolph Hearst Memorial State Beach",
+    "stage": {
+      "dogs_allowed": "restricted",
+      "dogs_leash_required": "required",
+      "dogs_restricted_hours": null,
+      "dogs_seasonal_rules": null,
+      "dogs_zone_description": "Dogs are permitted only on leash at William Randolph Hearst Memorial Beach, Junge Ranch Trail off of Lone Palm Drive, Moonstone Beach Boardwalk, and all campgrounds and parking lots. Dogs are prohibited at The Boucher Trail, San Simeon Pier, San Simeon Creek Trail, San Simeon Creek Beach leading directly from the campgrounds, Washburn Day Use Beach, Leffingwell Landing, Santa Rosa Creek Beach, and wherever posted. Dogs must be monitored and leashed within the campgrounds. Dogs are prohibited on the beach and trails adjacent to the campgrounds.",
+      "governing_body_name": "California Department of Parks and Recreation",
+      "governing_body_type": "state",
+      "has_disabled_access": true,
+      "has_drinking_water": true,
+      "has_fire_pits": true,
+      "has_food": true,
+      "has_lifeguards": false,
+      "has_parking": true,
+      "has_picnic_area": true,
+      "has_restrooms": true,
+      "has_showers": true,
+      "parking_notes": "Parking lots open 8am-Sunset",
+      "parking_type": "lot",
+      "review_notes": "multi_cpad_disagreement: practical:[Cambria State Marine Park, Hearst San Simeon State Park]| source_governing_mismatch: contains:Hearst San Simeon State Park / source:[Cambria State Marine Park]",
+      "review_status": "needs_review"
+    }
+  },
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "allowed": "no"
+        },
+        "confidence": 0.92,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Dockweiler State Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": true,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=617"
+      },
+      {
+        "claimed_values": {
+          "hours_text": "Monday - Friday: Dawn to Dusk, Saturday - Sunday: Dawn to Dusk"
+        },
+        "confidence": 0.35,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Del Rey Lagoon Park",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.laparks.org/park/del-rey-lagoon"
+      },
+      {
+        "claimed_values": {
+          "close_time": "17:00:00",
+          "has_drinking_water": true,
+          "has_food": true,
+          "has_parking": true,
+          "has_picnic_area": true,
+          "has_restrooms": true,
+          "has_showers": true,
+          "hours_text": "Mon-Fri, 9 am-5 pm",
+          "open_time": "09:00:00"
+        },
+        "confidence": 0.92,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Dockweiler State Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": true,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=617"
+      }
+    ],
+    "fid": 8135145,
+    "name": "Playa Del Rey Beach",
+    "stage": {
+      "dogs_allowed": "no",
+      "dogs_leash_required": null,
+      "dogs_restricted_hours": null,
+      "dogs_seasonal_rules": null,
+      "dogs_zone_description": null,
+      "governing_body_name": "Los Angeles, County of",
+      "governing_body_type": "county",
+      "has_disabled_access": null,
+      "has_drinking_water": true,
+      "has_fire_pits": null,
+      "has_food": true,
+      "has_lifeguards": null,
+      "has_parking": true,
+      "has_picnic_area": true,
+      "has_restrooms": true,
+      "has_showers": true,
+      "parking_notes": null,
+      "parking_type": null,
+      "review_notes": "multi_cpad_disagreement: practical:[Del Rey Lagoon Park, Dockweiler State Beach]| source_governing_mismatch: contains:Dockweiler State Beach / source:[Del Rey Lagoon Park]",
+      "review_status": "needs_review"
+    }
+  },
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "allowed": "yes",
+          "leash_required": "required",
+          "notes": "Dogs must remain on a leash no longer than 6 feet and under owner's control at all times",
+          "zone_description": "Cardiff Reef and Seaside, South of Tower 16"
+        },
+        "confidence": 0.92,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Cardiff State Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": true,
+        "source": "park_url",
+        "source_url": "http://www.parks.ca.gov/default.asp?page_id=656"
+      },
+      {
+        "claimed_values": {
+          "allowed": "restricted",
+          "leash_required": "required",
+          "notes": "Dogs must be under owner's control at all times and on a leash (10-foot maximum) when not actively engaged in hunting"
+        },
+        "confidence": 0.65,
+        "cpad_role": "environmental_overlay",
+        "cpad_unit_name": "San Elijo Lagoon Ecological Reserve",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.wildlife.ca.gov/Lands/Places-to-Visit/San-Elijo-Lagoon-ER"
+      },
+      {
+        "claimed_values": {
+          "has_disabled_access": true,
+          "has_drinking_water": true,
+          "has_lifeguards": true,
+          "has_parking": true,
+          "has_restrooms": true,
+          "has_showers": true,
+          "hours_text": "Gates open at 7am and close at Sunset",
+          "open_time": "07:00:00",
+          "parking_notes": "Very popular surfing location with busy year-round parking lot. General Admission Day Use Fee $12-$25 per vehicle (demand based pricing) or valid annual California State Parks Vehicle Day Use Pass. Automated Pay Machine available at Cardiff Reef near restroom and at Seaside Parking Lot entrance. No camping or tailgating permitted.",
+          "parking_type": "lot"
+        },
+        "confidence": 0.92,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Cardiff State Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": true,
+        "source": "park_url",
+        "source_url": "http://www.parks.ca.gov/default.asp?page_id=656"
+      },
+      {
+        "claimed_values": {
+          "has_disabled_access": true,
+          "has_fire_pits": false,
+          "has_food": false,
+          "has_lifeguards": false,
+          "has_parking": true,
+          "has_picnic_area": true,
+          "has_restrooms": true,
+          "has_showers": false,
+          "parking_notes": "Year-round parking allowed in numbered lots only. Multiple parking lots available (at least 18 lots). Information on parking areas available year-round at Main Business Office and Parking Lot #14, and seasonally at Entrance Check Station.",
+          "parking_type": "lot"
+        },
+        "confidence": 0.65,
+        "cpad_role": "environmental_overlay",
+        "cpad_unit_name": "San Elijo Lagoon Ecological Reserve",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.wildlife.ca.gov/Lands/Places-to-Visit/San-Elijo-Lagoon-ER"
+      }
+    ],
+    "fid": 8778653,
+    "name": "Seaside Reef",
+    "stage": {
+      "dogs_allowed": "yes",
+      "dogs_leash_required": "required",
+      "dogs_restricted_hours": null,
+      "dogs_seasonal_rules": null,
+      "dogs_zone_description": "Cardiff Reef and Seaside, South of Tower 16",
+      "governing_body_name": "California Department of Parks and Recreation",
+      "governing_body_type": "state",
+      "has_disabled_access": true,
+      "has_drinking_water": true,
+      "has_fire_pits": false,
+      "has_food": null,
+      "has_lifeguards": true,
+      "has_parking": true,
+      "has_picnic_area": null,
+      "has_restrooms": true,
+      "has_showers": true,
+      "parking_notes": "Very popular surfing location with busy year-round parking lot. General Admission Day Use Fee $12-$25 per vehicle (demand based pricing) or valid annual California State Parks Vehicle Day Use Pass. Automated Pay Machine available at Cardiff Reef near restroom and at Seaside Parking Lot entrance. No camping or tailgating permitted.",
+      "parking_type": "lot",
+      "review_notes": "multi_cpad_disagreement: dogs:[Cardiff State Beach, San Elijo Lagoon Ecological Reserve]; practical:[Cardiff State Beach, San Elijo Lagoon Ecological Reserve]| source_governing_mismatch: contains:Cardiff State Beach / source:[San Elijo Lagoon Ecological Reserve]",
+      "review_status": "needs_review"
+    }
+  },
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "allowed": "restricted",
+          "notes": "To protect the integrity of the groomed Nordic ski courses, dogs not allowed on designated ski trails within the Sierra District, from Nov. 1 to May 1 annually, when snow is present.",
+          "seasonal_rules": [
+            {
+              "from": "11-01",
+              "notes": "Dogs not allowed on designated ski trails within the Sierra District when snow is present",
+              "to": "05-01"
+            }
+          ],
+          "zone_description": "Dogs allowed only on fire roads"
+        },
+        "confidence": 0.85,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Burton Creek State Park",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=512"
+      },
+      {
+        "claimed_values": {
+          "governing_body_name": "Tahoe City Public Utilities District",
+          "governing_body_type": "Special District",
+          "governing_body_type_label": "Water District",
+          "owner_name": "Tahoe City Public Utilities District"
+        },
+        "confidence": 0.75,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Commons Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "governance",
+        "is_canonical": false,
+        "source": "park_url_buffer_attribution",
+        "source_url": "https://www.tahoecitypud.com/parksrec/4e3_commons_beach.shtml"
+      },
+      {
+        "claimed_values": {
+          "has_drinking_water": false,
+          "has_fire_pits": false,
+          "has_food": false,
+          "has_restrooms": false,
+          "has_showers": false,
+          "hours_text": "Sunrise to Sunset"
+        },
+        "confidence": 0.85,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Burton Creek State Park",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=512"
+      },
+      {
+        "claimed_values": {
+          "close_time": "22:00:00",
+          "has_drinking_water": true,
+          "has_fire_pits": false,
+          "has_parking": true,
+          "has_picnic_area": true,
+          "has_restrooms": true,
+          "has_showers": false,
+          "hours_text": "Daily, 8:00am - 10:00pm",
+          "open_time": "08:00:00",
+          "parking_notes": "Parking lot (closed until 2p on Thursdays during Farmers Market)",
+          "parking_type": "lot"
+        },
+        "confidence": 0.85,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Commons Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.tahoecitypud.com/parksrec/4e3_commons_beach.shtml"
+      }
+    ],
+    "fid": 8783604,
+    "name": "Commons Beach",
+    "stage": {
+      "dogs_allowed": "yes",
+      "dogs_leash_required": "required",
+      "dogs_restricted_hours": null,
+      "dogs_seasonal_rules": null,
+      "dogs_zone_description": null,
+      "governing_body_name": "Tahoe City Public Utilities District",
+      "governing_body_type": "unknown",
+      "has_disabled_access": null,
+      "has_drinking_water": null,
+      "has_fire_pits": null,
+      "has_food": null,
+      "has_lifeguards": null,
+      "has_parking": true,
+      "has_picnic_area": null,
+      "has_restrooms": null,
+      "has_showers": null,
+      "parking_notes": "Most Placer County public parking lots are free and open from 7:00 a.m. to 10:00 p.m. Overnight parking is restricted.",
+      "parking_type": null,
+      "review_notes": "multi_cpad_disagreement: practical:[Burton Creek State Park, Commons Beach]",
+      "review_status": "needs_review"
+    }
+  },
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "allowed": "no"
+        },
+        "confidence": 0.92,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Mission Beach Park",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.sandiego.gov/lifeguards/beaches/mb"
+      },
+      {
+        "claimed_values": {
+          "allowed": "restricted",
+          "notes": "Page mentions 'Dogs, Camping, Fishing' as a topic but detailed dog policy rules are not provided in the extracted content."
+        },
+        "confidence": 0.45,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Mission Bay Park",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.sandiego.gov/park-and-recreation/parks/regional/missionbay/"
+      },
+      {
+        "claimed_values": {
+          "governing_body_name": "San Diego, City of",
+          "governing_body_type": "City",
+          "governing_body_type_label": "City Agency",
+          "owner_name": "San Diego, City of"
+        },
+        "confidence": 0.75,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Mission Beach Park",
+        "extraction_type": "cpad_source",
+        "field_group": "governance",
+        "is_canonical": false,
+        "source": "park_url_buffer_attribution",
+        "source_url": "https://www.sandiego.gov/lifeguards/beaches/mb"
+      },
+      {
+        "claimed_values": {
+          "governing_body_name": "San Diego, City of",
+          "governing_body_type": "City",
+          "governing_body_type_label": "City Agency",
+          "owner_name": "San Diego, City of"
+        },
+        "confidence": 0.75,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Mission Bay Park",
+        "extraction_type": "cpad_source",
+        "field_group": "governance",
+        "is_canonical": false,
+        "source": "park_url_buffer_attribution",
+        "source_url": "https://www.sandiego.gov/park-and-recreation/parks/regional/missionbay/"
+      },
+      {
+        "claimed_values": {
+          "has_disabled_access": true,
+          "has_fire_pits": true,
+          "has_lifeguards": true,
+          "has_parking": true,
+          "has_picnic_area": true,
+          "has_restrooms": true,
+          "has_showers": true
+        },
+        "confidence": 0.92,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Mission Beach Park",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.sandiego.gov/lifeguards/beaches/mb"
+      },
+      {
+        "claimed_values": {
+          "has_lifeguards": true,
+          "has_picnic_area": true,
+          "has_restrooms": true,
+          "has_showers": true
+        },
+        "confidence": 0.45,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Mission Bay Park",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.sandiego.gov/park-and-recreation/parks/regional/missionbay/"
+      }
+    ],
+    "fid": 8912496,
+    "name": "Mission Beach",
+    "stage": {
+      "dogs_allowed": "restricted",
+      "dogs_leash_required": "required",
+      "dogs_restricted_hours": [
+        {
+          "end": "09:00",
+          "start": "00:00"
+        },
+        {
+          "end": "23:59",
+          "start": "18:00"
+        }
+      ],
+      "dogs_seasonal_rules": [
+        {
+          "from": "04-01",
+          "notes": "leashed only before 9am and after 6pm",
+          "to": "10-31"
+        },
+        {
+          "from": "11-01",
+          "notes": "leashed only before 9am and after 4pm",
+          "to": "03-31"
+        }
+      ],
+      "dogs_zone_description": "Ocean Beach (Dog Beach), Fiesta Island, Pacific Beach, Mission Beach, La Jolla Shores",
+      "governing_body_name": "San Diego, City of",
+      "governing_body_type": "city",
+      "has_disabled_access": null,
+      "has_drinking_water": null,
+      "has_fire_pits": null,
+      "has_food": true,
+      "has_lifeguards": true,
+      "has_parking": true,
+      "has_picnic_area": null,
+      "has_restrooms": true,
+      "has_showers": false,
+      "parking_notes": "Dog Beach has free parking; some areas have metered street parking nearby",
+      "parking_type": "mixed",
+      "review_notes": "multi_cpad_disagreement: dogs:[Mission Bay Park, Mission Beach Park]; practical:[Mission Bay Park, Mission Beach Park]",
+      "review_status": "needs_review"
+    }
+  },
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "has_food": true
+        },
+        "confidence": 0.15,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "La Jolla Cove",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "http://www.lajollabythesea.com/la-jolla-cove"
+      },
+      {
+        "claimed_values": {
+          "close_time": "20:00:00",
+          "has_food": true,
+          "has_parking": true,
+          "has_restrooms": true,
+          "hours_text": "4 a.m. to 8 p.m.",
+          "open_time": "04:00:00",
+          "parking_notes": "Street parking only",
+          "parking_type": "street"
+        },
+        "confidence": 0.6,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Ellen Browning Scripps Neighborhood Park",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.sandiego.gov/park-and-recreation/parks/regional/shoreline/ebscripps"
+      }
+    ],
+    "fid": 9031619,
+    "name": "La Jolla Cove",
+    "stage": {
+      "dogs_allowed": "restricted",
+      "dogs_leash_required": "required",
+      "dogs_restricted_hours": [
+        {
+          "end": "09:00",
+          "start": "00:00"
+        },
+        {
+          "end": "23:59",
+          "start": "18:00"
+        }
+      ],
+      "dogs_seasonal_rules": [
+        {
+          "from": "04-01",
+          "notes": "leashed only before 9am and after 6pm",
+          "to": "10-31"
+        },
+        {
+          "from": "11-01",
+          "notes": "leashed only before 9am and after 4pm",
+          "to": "03-31"
+        }
+      ],
+      "dogs_zone_description": "Ocean Beach (Dog Beach), Fiesta Island, Pacific Beach, Mission Beach, La Jolla Shores",
+      "governing_body_name": "San Diego, City of",
+      "governing_body_type": "city",
+      "has_disabled_access": false,
+      "has_drinking_water": null,
+      "has_fire_pits": false,
+      "has_food": true,
+      "has_lifeguards": true,
+      "has_parking": false,
+      "has_picnic_area": null,
+      "has_restrooms": true,
+      "has_showers": false,
+      "parking_notes": "Dog Beach has free parking; some areas have metered street parking nearby",
+      "parking_type": "mixed",
+      "review_notes": "multi_cpad_disagreement: practical:[Ellen Browning Scripps Neighborhood Park, La Jolla Cove]| source_governing_mismatch: contains:La Jolla Cove / source:[Ellen Browning Scripps Neighborhood Park]",
+      "review_status": "needs_review"
+    }
+  },
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "allowed": "restricted",
+          "notes": "Dogs are allowed in the northern section of the beach where they can freely roam in the sea and sand",
+          "zone_description": "northern section of the beach"
+        },
+        "confidence": 0.72,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Coronado Municipal Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": true,
+        "source": "park_url",
+        "source_url": "https://www.sandiego.com/beaches/coronado-beach"
+      },
+      {
+        "claimed_values": {
+          "has_disabled_access": true
+        },
+        "confidence": 0.15,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Sunset Park",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.coronado.ca.us/cms/one.aspx?portalId=746090&pageId=3816985"
+      },
+      {
+        "claimed_values": {
+          "has_fire_pits": true,
+          "has_picnic_area": true
+        },
+        "confidence": 0.72,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Coronado Municipal Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.sandiego.com/beaches/coronado-beach"
+      }
+    ],
+    "fid": 11558454,
+    "name": "Coronado Dog Beach",
+    "stage": {
+      "dogs_allowed": "restricted",
+      "dogs_leash_required": null,
+      "dogs_restricted_hours": null,
+      "dogs_seasonal_rules": null,
+      "dogs_zone_description": "northern section of the beach",
+      "governing_body_name": "Coronado, City of",
+      "governing_body_type": "city",
+      "has_disabled_access": false,
+      "has_drinking_water": null,
+      "has_fire_pits": true,
+      "has_food": null,
+      "has_lifeguards": null,
+      "has_parking": true,
+      "has_picnic_area": null,
+      "has_restrooms": true,
+      "has_showers": null,
+      "parking_notes": null,
+      "parking_type": null,
+      "review_notes": "multi_cpad_disagreement: practical:[Coronado Municipal Beach, Sunset Park]| source_governing_mismatch: contains:Coronado Municipal Beach / source:[Sunset Park]",
+      "review_status": "needs_review"
+    }
+  },
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "allowed": "no",
+          "notes": "Dogs are prohibited at Santa Rosa Creek Beach. Dogs are permitted only on leash at other locations within the park including William Randolph Hearst Memorial Beach, Junge Ranch Trail off Lone Palm Drive, Moonstone Beach Boardwalk, and all campgrounds and parking lots. Dogs are prohibited on the beach and trails adjacent to campgrounds."
+        },
+        "confidence": 0.95,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Hearst San Simeon State Park",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": true,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=590"
+      },
+      {
+        "claimed_values": {
+          "has_restrooms": true
+        },
+        "confidence": 0.25,
+        "cpad_role": "environmental_overlay",
+        "cpad_unit_name": "Cambria State Marine Park",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://wildlife.ca.gov/Conservation/Marine/MPAs/Cambria-White-Rock"
+      },
+      {
+        "claimed_values": {
+          "close_time": "18:00:00",
+          "has_parking": true,
+          "hours_text": "Parking Lots Open 8am-Sunset",
+          "open_time": "08:00:00",
+          "parking_type": "lot"
+        },
+        "confidence": 0.95,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Hearst San Simeon State Park",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": true,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=590"
+      }
+    ],
+    "fid": 12690329,
+    "name": "Santa Rosa Creek Beach",
+    "stage": {
+      "dogs_allowed": "no",
+      "dogs_leash_required": null,
+      "dogs_restricted_hours": null,
+      "dogs_seasonal_rules": null,
+      "dogs_zone_description": null,
+      "governing_body_name": "Santa Rosa Creek NP",
+      "governing_body_type": "state",
+      "has_disabled_access": null,
+      "has_drinking_water": true,
+      "has_fire_pits": true,
+      "has_food": false,
+      "has_lifeguards": false,
+      "has_parking": true,
+      "has_picnic_area": true,
+      "has_restrooms": true,
+      "has_showers": false,
+      "parking_notes": "On-site parking available at day use areas including William Randolph Hearst Memorial Beach and Washburn Day Use area",
+      "parking_type": "lot",
+      "review_notes": "multi_cpad_disagreement: practical:[Cambria State Marine Park, Hearst San Simeon State Park]| source_governing_mismatch: contains:Hearst San Simeon State Park / source:[Cambria State Marine Park]",
+      "review_status": "needs_review"
+    }
+  },
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "allowed": "restricted",
+          "zone_description": "Dogs allowed in campground and day-use area. Dogs not allowed on beach."
+        },
+        "confidence": 0.92,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Carpinteria State Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=599"
+      },
+      {
+        "claimed_values": {
+          "governing_body_name": "California Department of Parks and Recreation",
+          "governing_body_type": "State",
+          "governing_body_type_label": "State Agency",
+          "owner_name": "California Department of Parks and Recreation"
+        },
+        "confidence": 0.75,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Carpinteria State Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "governance",
+        "is_canonical": true,
+        "source": "park_url_buffer_attribution",
+        "source_url": "https://www.parks.ca.gov/?page_id=599"
+      },
+      {
+        "claimed_values": {
+          "governing_body_name": "Carpinteria, City of",
+          "governing_body_type": "City",
+          "governing_body_type_label": "City Agency",
+          "owner_name": "Carpinteria, City of"
+        },
+        "confidence": 0.75,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Carpinteria Salt Marsh Reserve",
+        "extraction_type": "cpad_source",
+        "field_group": "governance",
+        "is_canonical": false,
+        "source": "park_url_buffer_attribution",
+        "source_url": "https://www.sblandtrust.org/portfolio-item/carpinteria-salt-marsh/"
+      },
+      {
+        "claimed_values": {
+          "has_disabled_access": true,
+          "has_drinking_water": true,
+          "has_fire_pits": true,
+          "has_parking": true,
+          "has_picnic_area": true,
+          "has_restrooms": true,
+          "has_showers": true,
+          "hours_text": "Day Use: Sunrise to Sunset",
+          "parking_type": "lot"
+        },
+        "confidence": 0.92,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Carpinteria State Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=599"
+      },
+      {
+        "claimed_values": {
+          "has_parking": true,
+          "hours_text": "sunrise to sunset daily",
+          "parking_notes": "Park on Ash Avenue",
+          "parking_type": "lot"
+        },
+        "confidence": 0.45,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Carpinteria Salt Marsh Reserve",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.sblandtrust.org/portfolio-item/carpinteria-salt-marsh/"
+      }
+    ],
+    "fid": 13566763,
+    "name": "Carpinteria City Beach",
+    "stage": {
+      "dogs_allowed": "restricted",
+      "dogs_leash_required": "required",
+      "dogs_restricted_hours": null,
+      "dogs_seasonal_rules": null,
+      "dogs_zone_description": "Loon Point Beach (nearby; outside main city beach zone)",
+      "governing_body_name": "California Department of Parks and Recreation",
+      "governing_body_type": "state",
+      "has_disabled_access": true,
+      "has_drinking_water": null,
+      "has_fire_pits": false,
+      "has_food": null,
+      "has_lifeguards": false,
+      "has_parking": true,
+      "has_picnic_area": null,
+      "has_restrooms": true,
+      "has_showers": true,
+      "parking_notes": null,
+      "parking_type": null,
+      "review_notes": "multi_cpad_disagreement: practical:[Carpinteria Salt Marsh Reserve, Carpinteria State Beach]",
+      "review_status": "needs_review"
+    }
+  },
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "allowed": "restricted",
+          "leash_required": "required",
+          "notes": "Pets must remain on leash at all times. Service animals exempt from restrictions.",
+          "zone_description": "Dogs allowed only on paved roads, Old Stage Fire Rd, Verna Dunshee Trail, in developed areas, campgrounds, and picnic areas. Dogs not allowed on trails, dirt roads, and backcountry areas."
+        },
+        "confidence": 0.92,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Mount Tamalpais State Park",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=471"
+      },
+      {
+        "claimed_values": {
+          "has_disabled_access": true,
+          "has_picnic_area": true
+        },
+        "confidence": 0.35,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Golden Gate National Recreation Area",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "http://www.nps.gov/goga/index.htm"
+      },
+      {
+        "claimed_values": {
+          "has_lifeguards": true
+        },
+        "confidence": 0.15,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Bolinas Lagoon Open Space Preserve",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.marincountyparks.org/depts/pk/divisions/open-space/bolinas"
+      },
+      {
+        "claimed_values": {
+          "has_disabled_access": true,
+          "has_drinking_water": true,
+          "has_fire_pits": true,
+          "has_food": false,
+          "has_lifeguards": false,
+          "has_parking": true,
+          "has_picnic_area": true,
+          "has_restrooms": true,
+          "has_showers": false,
+          "hours_text": "Daily: 7:00 a.m. to Sunset, year round.",
+          "open_time": "07:00:00",
+          "parking_notes": "Parking available; camping in vehicles prohibited in all parking lots.",
+          "parking_type": "lot"
+        },
+        "confidence": 0.92,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Mount Tamalpais State Park",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=471"
+      }
+    ],
+    "fid": 16276554,
+    "name": "Stinson Beach",
+    "stage": {
+      "dogs_allowed": "restricted",
+      "dogs_leash_required": "required",
+      "dogs_restricted_hours": null,
+      "dogs_seasonal_rules": [
+        {
+          "from": "03-01",
+          "notes": "snowy plover protection",
+          "to": "09-30"
+        }
+      ],
+      "dogs_zone_description": "Stinson Beach, Crissy Field, Ocean Beach, and designated trails throughout GGNRA",
+      "governing_body_name": "Marin County Parks Department, County of",
+      "governing_body_type": "county",
+      "has_disabled_access": true,
+      "has_drinking_water": null,
+      "has_fire_pits": null,
+      "has_food": null,
+      "has_lifeguards": true,
+      "has_parking": true,
+      "has_picnic_area": true,
+      "has_restrooms": true,
+      "has_showers": false,
+      "parking_notes": "Multiple parking areas at Stinson Beach and other GGNRA locations",
+      "parking_type": "lot",
+      "review_notes": "multi_cpad_disagreement: practical:[Bolinas Lagoon Open Space Preserve, Golden Gate National Recreation Area, Mount Tamalpais State Park]| source_governing_mismatch: contains:Upton County Beach / source:[Bolinas Lagoon Open Space Preserve, Golden Gate National Recreation Area, Mount Tamalpais State Park]",
+      "review_status": "needs_review"
+    }
+  },
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "has_restrooms": true,
+          "has_showers": true
+        },
+        "confidence": 0.35,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Santa Monica State Beach",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.smgov.net/portals/beach/"
+      }
+    ],
+    "fid": 17070553,
+    "name": "Santa Monica Beach",
+    "stage": {
+      "dogs_allowed": "restricted",
+      "dogs_leash_required": "required",
+      "dogs_restricted_hours": [
+        {
+          "end": "07:30",
+          "start": "00:00"
+        },
+        {
+          "end": "23:59",
+          "start": "19:30"
+        }
+      ],
+      "dogs_seasonal_rules": null,
+      "dogs_zone_description": "Other City Parks only",
+      "governing_body_name": "Santa Monica, City of",
+      "governing_body_type": "city",
+      "has_disabled_access": true,
+      "has_drinking_water": null,
+      "has_fire_pits": false,
+      "has_food": null,
+      "has_lifeguards": false,
+      "has_parking": true,
+      "has_picnic_area": true,
+      "has_restrooms": true,
+      "has_showers": true,
+      "parking_notes": null,
+      "parking_type": null,
+      "review_notes": "source_governing_mismatch: contains:Crescent Bay Park / source:[Santa Monica State Beach]",
+      "review_status": "needs_review"
+    }
+  },
+  {
+    "evidence": [
+      {
+        "claimed_values": {
+          "allowed": "restricted",
+          "leash_required": "required",
+          "notes": "Dogs must be monitored and leashed within the campgrounds. Dogs are prohibited on the beach and trails adjacent to the campgrounds. Stay on trails to avoid poison oak and ticks that may carry Lyme disease.",
+          "zone_description": "Dogs are permitted only on leash at: William Randolph Hearst Memorial Beach, Junge Ranch Trail off Lone Palm Drive, Moonstone Beach Boardwalk, and all campgrounds and parking lots. Dogs are prohibited at: The Boucher Trail, San Simeon Pier, San Simeon Creek Trail, San Simeon Creek Beach leading directly from the campgrounds, Washburn Day Use Beach, Leffingwell Landing, Santa Rosa Creek Beach, and wherever posted."
+        },
+        "confidence": 0.92,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Hearst San Simeon State Park",
+        "extraction_type": "cpad_source",
+        "field_group": "dogs",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=590"
+      },
+      {
+        "claimed_values": {
+          "has_restrooms": true
+        },
+        "confidence": 0.35,
+        "cpad_role": "environmental_overlay",
+        "cpad_unit_name": "Cambria State Marine Park",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": false,
+        "source": "park_url",
+        "source_url": "https://wildlife.ca.gov/Conservation/Marine/MPAs/Cambria-White-Rock"
+      },
+      {
+        "claimed_values": {
+          "has_disabled_access": true,
+          "has_drinking_water": true,
+          "has_fire_pits": true,
+          "has_food": true,
+          "has_parking": true,
+          "has_picnic_area": true,
+          "has_restrooms": true,
+          "has_showers": true,
+          "hours_text": "Parking Lots Open 8am-Sunset",
+          "open_time": "08:00:00",
+          "parking_type": "lot"
+        },
+        "confidence": 0.92,
+        "cpad_role": "beach_access",
+        "cpad_unit_name": "Hearst San Simeon State Park",
+        "extraction_type": "cpad_source",
+        "field_group": "practical",
+        "is_canonical": true,
+        "source": "park_url",
+        "source_url": "https://www.parks.ca.gov/?page_id=590"
+      }
+    ],
+    "fid": 20158735,
+    "name": "San Simeon Beach",
+    "stage": {
+      "dogs_allowed": "restricted",
+      "dogs_leash_required": "required",
+      "dogs_restricted_hours": null,
+      "dogs_seasonal_rules": null,
+      "dogs_zone_description": "developed areas only \u00e2\u20ac\u201d generally NOT on the sandy beach itself",
+      "governing_body_name": "California Department of Parks and Recreation",
+      "governing_body_type": "state",
+      "has_disabled_access": true,
+      "has_drinking_water": true,
+      "has_fire_pits": true,
+      "has_food": true,
+      "has_lifeguards": null,
+      "has_parking": true,
+      "has_picnic_area": true,
+      "has_restrooms": true,
+      "has_showers": true,
+      "parking_notes": null,
+      "parking_type": "lot",
+      "review_notes": "multi_cpad_disagreement: practical:[Cambria State Marine Park, Hearst San Simeon State Park]| source_governing_mismatch: contains:Cambria State Marine Park / source:[Hearst San Simeon State Park]",
+      "review_status": "needs_review"
+    }
+  }
+]

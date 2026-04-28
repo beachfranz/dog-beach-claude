@@ -109,8 +109,13 @@ L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
       const opLine = p.operator_name
         ? `<div class="tip-meta">${escHtml(p.operator_name)}</div>`
         : `<div class="tip-meta" style="color:#cbd5e1;"><i>(no operator)</i></div>`;
+      const nameDisplay = p.name
+        ? (p.name_source === 'borrowed_from_beach'
+            ? `${escHtml(p.name)} <span style="color:#a16207;font-size:10px;">(borrowed)</span>`
+            : escHtml(p.name))
+        : '<i>(no name)</i>';
       lyr.bindTooltip(
-        `<div class="tip-name">${escHtml(p.name) || '<i>(no name)</i>'}</div>
+        `<div class="tip-name">${nameDisplay}</div>
          ${opLine}
          <div class="tip-meta">${escHtml(p.feature_type)}</div>
          <div class="tip-osm">${escHtml(p.osm_type)}/${escHtml(p.osm_id)}</div>`,

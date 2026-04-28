@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<!--
+  admin/cpad-unit-policy-map.html — Map of CPAD-unit dog policies.
+  Default scope: LA + Orange + San Diego (?counties= override).
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CPAD Dog Policy Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px; color: #0f172a;
+      display: flex; flex-direction: column;
+    }
+
+    header {
+      background: #1e293b; color: #f1f5f9;
+      padding: 10px 18px;
+      display: flex; align-items: center; gap: 14px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+      z-index: 1000;
+    }
+    header h1 { font-size: 15px; font-weight: 600; }
+    header .counties { color: #94a3b8; font-size: 12px; }
+    header #status { margin-left: auto; font-size: 12px; color: #cbd5e1; }
+    header #legend { display: flex; gap: 10px; font-size: 12px; }
+    header #legend .swatch {
+      display: inline-block; width: 12px; height: 12px; border-radius: 2px;
+      vertical-align: middle; margin-right: 4px;
+      border: 1px solid rgba(0,0,0,0.2);
+    }
+
+    #map { flex: 1; }
+
+    /* Tooltip */
+    .leaflet-tooltip.unit-tip {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 10px 12px;
+      max-width: 360px;
+      font-size: 12px;
+      line-height: 1.4;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+      pointer-events: none;
+    }
+    .leaflet-tooltip.unit-tip:before { display: none; }
+
+    .tip-name { font-size: 14px; font-weight: 600; margin-bottom: 2px; color: #0f172a; }
+    .tip-meta { font-size: 11px; color: #64748b; margin-bottom: 6px; }
+
+    .tip-rule {
+      display: inline-block;
+      font-size: 11px; font-weight: 600;
+      padding: 2px 8px; border-radius: 999px;
+      text-transform: uppercase; letter-spacing: 0.04em;
+      margin-bottom: 8px;
+    }
+    .rule-yes        { background: #dcfce7; color: #15803d; }
+    .rule-no         { background: #fee2e2; color: #b91c1c; }
+    .rule-restricted { background: #fef3c7; color: #b45309; }
+    .rule-unknown    { background: #f1f5f9; color: #475569; }
+
+    .tip-areas { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin: 6px 0; }
+    .tip-area { border: 1px solid #e2e8f0; border-radius: 4px; padding: 4px 2px; text-align: center; }
+    .tip-area-label { font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
+    .tip-area-val { font-size: 10px; font-weight: 600; padding: 1px 4px; border-radius: 3px; display: inline-block; margin-top: 2px; }
+    .area-off_leash { background: #d1fae5; color: #065f46; }
+    .area-on_leash  { background: #dbeafe; color: #1e40af; }
+    .area-forbidden { background: #fee2e2; color: #b91c1c; }
+    .area-unknown   { background: #f1f5f9; color: #94a3b8; }
+    .area-null      { color: #cbd5e1; }
+
+    .tip-zones { font-size: 11px; margin-top: 6px; }
+    .tip-zones .yes  { color: #15803d; }
+    .tip-zones .no   { color: #b91c1c; }
+    .tip-quote {
+      margin-top: 6px;
+      font-style: italic;
+      background: #fef9c3;
+      padding: 5px 8px;
+      border-left: 2px solid #fbbf24;
+      border-radius: 3px;
+      font-size: 11px;
+      color: #422006;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>CPAD Unit Dog Policy</h1>
+    <span class="counties" id="counties-label">— loading —</span>
+    <span id="legend">
+      <span><span class="swatch" style="background:#22c55e"></span>yes</span>
+      <span><span class="swatch" style="background:#f59e0b"></span>restricted</span>
+      <span><span class="swatch" style="background:#ef4444"></span>no</span>
+      <span><span class="swatch" style="background:#94a3b8"></span>unknown</span>
+    </span>
+    <span id="status"></span>
+  </header>
+  <div id="map"></div>
+
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+const qs       = new URLSearchParams(location.search);
+const counties = (qs.get('counties') || 'Los Angeles,Orange,San Diego')
+                   .split(',').map(s => s.trim()).filter(Boolean);
+
+document.getElementById('counties-label').textContent = counties.join(' · ');
+
+const escapeHtml = s => (s ?? '').toString()
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+const RULE_FILL = {
+  'yes':         { color: '#15803d', fill: '#22c55e' },
+  'restricted':  { color: '#b45309', fill: '#f59e0b' },
+  'no':          { color: '#b91c1c', fill: '#ef4444' },
+  'unknown':     { color: '#475569', fill: '#94a3b8' },
+};
+const DEFAULT_STYLE = { color: '#475569', fill: '#cbd5e1' };
+
+const AREAS = [
+  ['sand', 'Sand'],
+  ['water', 'Water'],
+  ['picnic_area', 'Picnic'],
+  ['parking_lot', 'Parking'],
+  ['trails', 'Trails'],
+  ['campground', 'Campgr'],
+];
+
+// Map
+const map = L.map('map', { preferCanvas: true });
+L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '&copy; OSM France'
+}).addTo(map);
+
+function tooltipHtml(p) {
+  const rule = p.dogs_allowed || 'unknown';
+  const ruleClass = `rule-${rule}`;
+  const areasHtml = AREAS.map(([key, label]) => {
+    const v = p['area_' + key];
+    const cls = v ? `area-${v}` : 'area-null';
+    const txt = v || '—';
+    return `<div class="tip-area"><div class="tip-area-label">${label}</div><div class="tip-area-val ${cls}">${escapeHtml(txt)}</div></div>`;
+  }).join('');
+
+  const zonesParts = [];
+  if (p.designated_dog_zones) zonesParts.push(`<div class="yes">✓ ${escapeHtml(p.designated_dog_zones)}</div>`);
+  if (p.prohibited_areas)     zonesParts.push(`<div class="no">✗ ${escapeHtml(p.prohibited_areas)}</div>`);
+
+  return `
+    <div class="tip-name">${escapeHtml(p.unit_name) || '—'}</div>
+    <div class="tip-meta">${escapeHtml(p.agency_name) || ''} · ${escapeHtml(p.layer) || ''}</div>
+    <div class="tip-rule ${ruleClass}">${escapeHtml(rule)}${p.leash_required ? ' · leash' : ''}</div>
+    <div class="tip-areas">${areasHtml}</div>
+    ${zonesParts.length ? `<div class="tip-zones">${zonesParts.join('')}</div>` : ''}
+    ${p.source_quote ? `<div class="tip-quote">${escapeHtml(p.source_quote.length > 220 ? p.source_quote.slice(0, 220) + '…' : p.source_quote)}</div>` : ''}
+  `;
+}
+
+async function load() {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/cpad_unit_dogs_geojson`, {
+    method: 'POST',
+    headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_counties: counties })
+  });
+  if (!r.ok) {
+    document.getElementById('status').textContent = `error: ${r.status} ${r.statusText}`;
+    return;
+  }
+  const rows = await r.json();
+  document.getElementById('status').textContent = `${rows.length} units`;
+
+  const features = rows.filter(r => r.geom_json).map(r => ({
+    type: 'Feature',
+    geometry: r.geom_json,
+    properties: r,
+  }));
+
+  const layer = L.geoJSON(features, {
+    style: f => {
+      const s = RULE_FILL[f.properties.dogs_allowed] || DEFAULT_STYLE;
+      return { color: s.color, weight: 1, fillColor: s.fill, fillOpacity: 0.45 };
+    },
+    onEachFeature: (f, lyr) => {
+      lyr.bindTooltip(tooltipHtml(f.properties), {
+        sticky: true,
+        className: 'unit-tip',
+        direction: 'top',
+        opacity: 1,
+      });
+      lyr.on('mouseover', () => lyr.setStyle({ weight: 2.5, fillOpacity: 0.7 }));
+      lyr.on('mouseout', () => lyr.setStyle({ weight: 1, fillOpacity: 0.45 }));
+    },
+  }).addTo(map);
+
+  if (layer.getLayers().length) {
+    map.fitBounds(layer.getBounds(), { padding: [40, 40] });
+  } else {
+    map.setView([33.8, -117.9], 9);
+  }
+}
+
+load();
+</script>
+</body>
+</html>

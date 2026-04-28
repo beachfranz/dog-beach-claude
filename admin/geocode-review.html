@@ -420,9 +420,9 @@ function renderMap(f) {
   const mapEl = document.getElementById('map');
   if (!mapEl) return;
   const map = L.map('map');
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap © CartoDB',
-    subdomains: 'abcd', maxZoom: 19,
+  L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap France | © OpenStreetMap contributors',
+    subdomains: 'abc', maxZoom: 20,
   }).addTo(map);
 
   const beachLatLng = [f.beach_lat, f.beach_lon];

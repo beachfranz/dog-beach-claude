@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<!--
+  admin/ccc-map.html — Standalone map of California Coastal Commission
+  access points. No other layers, no editor pane. Just the CCC dataset
+  on a basemap. Useful for sanity-checking the CCC layer in isolation.
+
+  Same query mechanism as locations_stage in location-editor.html:
+  direct PostgREST select on the table.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CCC Access Points — Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+    header {
+      background: #1e293b; color: #f1f5f9;
+      padding: 12px 20px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    header h1 { font-size: 16px; font-weight: 600; }
+    header .links { margin-left: auto; display: flex; gap: 14px; font-size: 13px; }
+    header a { color: #94a3b8; text-decoration: none; }
+    header a:hover { color: #f1f5f9; }
+
+    #map { height: calc(100vh - 48px - 36px); width: 100vw; }
+    .filter-banner {
+      background: #fef3c7; color: #78350f;
+      border-bottom: 1px solid #fde68a;
+      padding: 8px 20px; font-size: 13px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .filter-banner b { color: #422006; }
+
+    .label-marker {
+      background: rgba(255,255,255,0.92);
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 11px; white-space: nowrap;
+      border: 1px solid rgba(0,0,0,0.15);
+      pointer-events: none;
+    }
+
+    .status-pill {
+      background: #fff; padding: 8px 12px; border-radius: 6px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>CCC Access Points</h1>
+  <div class="links">
+    <a href="location-editor.html">Location editor</a>
+    <a href="../index.html">Site home</a>
+  </div>
+</header>
+
+<div class="filter-banner">
+  <b>Filtered:</b> sandy-beach access points whose name contains "beach". CPAD polygons shown beneath for jurisdictional context.
+</div>
+<div id="map"></div>
+
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+// Color encodes dog_friendly answer completeness:
+//   Yes  → saturated green (clear positive)
+//   No   → saturated red   (clear negative)
+//   null / blank / anything else → gray (no info on file)
+function cccColor(v) {
+  const s = (v || '').trim();
+  if (s === 'Yes') return '#16a34a'; // green-600
+  if (s === 'No')  return '#dc2626'; // red-600
+  return '#9ca3af';                  // gray-400
+}
+
+// CPAD polygon palette by mng_ag_lev (managing-agency level)
+const CPAD_COLORS = {
+  'Federal':                  '#1e40af',
+  'State':                    '#15803d',
+  'County':                   '#c2410c',
+  'City':                     '#a16207',
+  'Special District':         '#7c3aed',
+  'Non Profit':               '#0d9488',
+  'Joint':                    '#6b7280',
+  'Tribal':                   '#be185d',
+  'Home Owners Association':  '#9ca3af',
+  'Private':                  '#475569',
+};
+
+async function restGet(path) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
+  });
+  if (!r.ok) throw new Error(`REST ${r.status}: ${await r.text()}`);
+  return r.json();
+}
+
+// Paginated fetch — PostgREST caps at 1000 rows per response regardless
+// of the &limit= param. Loop until a partial page comes back.
+async function restGetAll(path, pageSize = 1000) {
+  const all = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const sep = path.includes('?') ? '&' : '?';
+    const batch = await restGet(`${path}${sep}offset=${offset}&limit=${pageSize}`);
+    all.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+  return all;
+}
+
+function escHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+const map = L.map('map').setView([36.7783, -119.4179], 6);
+L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+  maxZoom: 20,
+  attribution: '&copy; OpenStreetMap France | &copy; OpenStreetMap contributors',
+  subdomains: 'abc',
+}).addTo(map);
+
+// Status pill in the top-right
+const statusCtl = L.control({ position: 'topright' });
+statusCtl.onAdd = () => {
+  const div = L.DomUtil.create('div', 'status-pill');
+  div.id = 'ccc-status';
+  div.textContent = 'loading…';
+  return div;
+};
+statusCtl.addTo(map);
+
+// CPAD polygon layer — load from the same matview RPC used by the
+// multi-layer location editor. Renders to overlayPane (default for
+// L.geoJSON, zIndex 400), which sits BELOW markerPane (zIndex 600)
+// where CCC dots end up — so CCC stays on top automatically.
+(async function loadCpad() {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/cpad_units_near_active_beaches`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+    if (!r.ok) throw new Error(`RPC ${r.status}: ${await r.text()}`);
+    const rows = await r.json();
+    if (!rows.length) return;
+
+    const features = rows.map(row => ({
+      type: 'Feature',
+      geometry: row.geom_geojson,
+      properties: {
+        unit_id:    row.unit_id,
+        unit_name:  row.unit_name,
+        mng_agncy:  row.mng_agncy,
+        mng_ag_lev: row.mng_ag_lev,
+      },
+    }));
+
+    L.geoJSON(features, {
+      style: f => {
+        const color = CPAD_COLORS[f.properties.mng_ag_lev] || '#9ca3af';
+        return {
+          color, weight: 1.2, opacity: 0.85,
+          fillColor: color, fillOpacity: 0.18,
+        };
+      },
+      onEachFeature: (f, layer) => {
+        const p = f.properties;
+        layer.bindTooltip(
+          `<b>${escHtml(p.unit_name || '(no name)')}</b><br>` +
+          `${escHtml(p.mng_agncy || '')} <small>(${escHtml(p.mng_ag_lev || '?')})</small>`,
+          { sticky: true, className: 'label-marker' }
+        );
+      },
+    }).addTo(map);
+  } catch (err) {
+    console.error('CPAD load error:', err);
+  }
+})();
+
+(async function loadCcc() {
+  const status = document.getElementById('ccc-status');
+  try {
+    const points = await restGetAll(
+      'ccc_access_points'
+      + '?select=objectid,name,county,district,latitude,longitude,dog_friendly,parking,restrooms,fee,open_to_public,archived,sandy_beach'
+      + '&latitude=not.is.null&longitude=not.is.null'
+      + '&archived=not.eq.Yes'
+      + '&sandy_beach=eq.Yes'           // sandy-beach access points only
+      + '&name=ilike.*beach*'           // and only points whose name contains "beach"
+    );
+    if (!points.length) { status.textContent = 'no points'; return; }
+
+    const layer = L.featureGroup().addTo(map);
+    const bounds = [];
+    for (const p of points) {
+      const m = L.circleMarker([p.latitude, p.longitude], {
+        radius: 8,
+        fillColor: cccColor(p.dog_friendly),
+        color: '#0f172a',
+        weight: 1.2,
+        opacity: 1,
+        fillOpacity: 0.65,
+      });
+      m.bindTooltip(p.name || `(CCC #${p.objectid})`, {
+        direction: 'top', offset: [0, -4], className: 'label-marker',
+      });
+      m.bindPopup(
+        `<b>${escHtml(p.name || '(unnamed)')}</b><br>` +
+        `<small>CCC #${p.objectid}</small><br>` +
+        `${escHtml(p.county || '')} County · District ${escHtml(p.district || '?')}<br>` +
+        (p.dog_friendly  ? `🐕 dogs: ${escHtml(p.dog_friendly)}<br>` : '') +
+        (p.parking       ? `🅿 parking: ${escHtml(p.parking)}<br>` : '') +
+        (p.restrooms     ? `🚻 restrooms: ${escHtml(p.restrooms)}<br>` : '') +
+        (p.fee           ? `💲 fee: ${escHtml(p.fee)}` : '')
+      );
+      layer.addLayer(m);
+      bounds.push([p.latitude, p.longitude]);
+    }
+    layer.bringToFront();
+    if (bounds.length) map.fitBounds(bounds, { padding: [40, 40] });
+    status.textContent = `${points.length} sandy-beach CCC points`;
+  } catch (err) {
+    status.textContent = `error: ${err.message}`;
+    console.error(err);
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Daily Beach Refresh</title>
+<style>
+  body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+         max-width: 720px; margin: 32px auto; padding: 0 16px; color: #0f172a; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .hint { color: #64748b; font-size: 13px; margin-bottom: 18px; }
+  button { font: inherit; padding: 10px 16px; border-radius: 8px; border: 1px solid #cbd5e1;
+           background: #fff; cursor: pointer; }
+  button.primary { background: #0ea5e9; color: #fff; border-color: #0ea5e9; }
+  button:disabled { opacity: 0.5; cursor: wait; }
+  input { font: inherit; padding: 8px 10px; border-radius: 6px; border: 1px solid #cbd5e1;
+          width: 320px; }
+  .row { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+  pre { background: #f1f5f9; padding: 12px; border-radius: 8px; overflow: auto;
+        max-height: 60vh; font-size: 12px; line-height: 1.4; white-space: pre-wrap; }
+  .ok  { color: #15803d; }
+  .err { color: #b91c1c; }
+  .muted { color: #64748b; font-size: 12px; }
+  a { color: #0ea5e9; }
+</style>
+</head>
+<body>
+
+<h1>Daily Beach Refresh</h1>
+<div class="hint">Triggers <code>daily-beach-refresh</code> with the admin secret header.
+Equivalent to the Supabase Test button + the <code>x-admin-secret</code> header it can't send.</div>
+
+<div class="row">
+  <button class="primary" id="run-all">Refresh ALL active beaches</button>
+  <span class="muted">POST {} — runs full pipeline for every <code>is_active=true</code> beach</span>
+</div>
+
+<div class="row">
+  <input id="loc-id" placeholder="location_id (e.g. coronado-dog-beach)">
+  <button id="run-one">Refresh this beach</button>
+</div>
+
+<div class="row">
+  <button id="reset-secret">Reset stored admin secret</button>
+  <span class="muted" id="secret-status"></span>
+</div>
+
+<div id="status" class="muted"></div>
+<pre id="out"></pre>
+
+<script>
+const SUPABASE_URL     = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY         = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+const ADMIN_SECRET_KEY = 'db_admin_secret';
+
+function promptForAdminSecret(reason) {
+  const msg = reason
+    ? `${reason}\n\nAdmin secret (ADMIN_SECRET in Supabase):`
+    : 'Admin secret (ADMIN_SECRET in Supabase):';
+  while (true) {
+    const s = (prompt(msg) || '').trim();
+    if (s) { localStorage.setItem(ADMIN_SECRET_KEY, s); refreshSecretStatus(); return s; }
+  }
+}
+function getAdminSecret() {
+  return localStorage.getItem(ADMIN_SECRET_KEY) || promptForAdminSecret();
+}
+function clearAdminSecret() {
+  localStorage.removeItem(ADMIN_SECRET_KEY);
+  refreshSecretStatus();
+}
+function refreshSecretStatus() {
+  const el = document.getElementById('secret-status');
+  el.textContent = localStorage.getItem(ADMIN_SECRET_KEY)
+    ? 'Secret stored.'
+    : 'No secret stored — will prompt on next call.';
+}
+
+async function callDailyRefresh(body) {
+  const out    = document.getElementById('out');
+  const status = document.getElementById('status');
+  out.textContent = '';
+  status.textContent = 'Running… (can take 30–90s for all beaches)';
+  status.className = 'muted';
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const secret = getAdminSecret();
+    const t0 = performance.now();
+    let resp, raw;
+    try {
+      resp = await fetch(`${SUPABASE_URL}/functions/v1/daily-beach-refresh`, {
+        method:  'POST',
+        headers: {
+          Authorization:    `Bearer ${ANON_KEY}`,
+          'Content-Type':   'application/json',
+          'x-admin-secret': secret,
+        },
+        body: JSON.stringify(body),
+      });
+      raw = await resp.text();
+    } catch (err) {
+      status.textContent = `Network error: ${err.message}`;
+      status.className = 'err';
+      return;
+    }
+    const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+
+    if (resp.status === 401 && attempt === 0) {
+      clearAdminSecret();
+      promptForAdminSecret('Admin secret rejected — try again:');
+      continue;
+    }
+
+    status.textContent = `HTTP ${resp.status} in ${elapsed}s`;
+    status.className = resp.ok ? 'ok' : 'err';
+    try { out.textContent = JSON.stringify(JSON.parse(raw), null, 2); }
+    catch { out.textContent = raw; }
+    return;
+  }
+}
+
+document.getElementById('run-all').addEventListener('click', () => {
+  callDailyRefresh({});
+});
+document.getElementById('run-one').addEventListener('click', () => {
+  const id = document.getElementById('loc-id').value.trim();
+  if (!id) { alert('Enter a location_id first.'); return; }
+  callDailyRefresh({ location_ids: [id] });
+});
+document.getElementById('reset-secret').addEventListener('click', clearAdminSecret);
+
+refreshSecretStatus();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OSM beaches by operator · LA + Orange counties</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  html,body { margin:0; padding:0; height:100%; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
+  #map { width:100%; height:100vh; }
+  .panel {
+    position:absolute; top:12px; left:12px; z-index:1000;
+    background:#fff; border:1px solid #d1dde8; border-radius:6px;
+    padding:10px 14px; box-shadow:0 2px 8px rgba(0,0,0,.08);
+    max-width:320px; font-size:13px; line-height:1.4;
+  }
+  .panel h1 { margin:0 0 6px 0; font-size:15px; font-weight:600; }
+  .panel .muted { color:#647688; font-size:12px; }
+  .legend { margin-top:10px; max-height:60vh; overflow-y:auto; }
+  .legend .row { display:flex; align-items:center; gap:8px; padding:3px 0; cursor:pointer; }
+  .legend .row.muted-row { opacity:0.35; }
+  .legend .swatch { width:14px; height:14px; border-radius:3px; border:1px solid rgba(0,0,0,.15); flex-shrink:0; }
+  .legend .name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+  .legend .meta { color:#647688; font-size:11px; flex-shrink:0; }
+  .leaflet-popup-content { font-size:13px; line-height:1.5; }
+  .leaflet-popup-content strong { display:block; margin-bottom:4px; }
+
+  .op-label {
+    background: rgba(255,255,255,.9);
+    border: none; border-radius: 3px; box-shadow: none;
+    padding: 1px 5px; font-size: 11px; font-weight: 500;
+    color: #1f2933; pointer-events: none; white-space: nowrap;
+  }
+  .op-label::before { display: none; }
+  #status { margin-top:6px; font-size:11px; color:#647688; }
+</style>
+</head>
+<body>
+
+<div class="panel">
+  <h1>OSM beach polys by operator</h1>
+  <div class="muted">Los Angeles + Orange counties. Each operator gets its own color.</div>
+  <div class="legend" id="legend">loading…</div>
+  <div id="status"></div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+const COUNTY_GEOIDS = ['06037', '06059'];  // LA County + Orange County, CA
+
+// Tableau 20 — distinguishable categorical palette for per-operator coloring
+const PALETTE = [
+  '#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd',
+  '#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf',
+  '#aec7e8','#ffbb78','#98df8a','#ff9896','#c5b0d5',
+  '#c49c94','#f7b6d2','#c7c7c7','#dbdb8d','#9edae5',
+];
+
+const map = L.map('map', { preferCanvas: true }).setView([33.85, -118.25], 9);
+L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '© OpenStreetMap France · OSM beach polygons · operators table',
+}).addTo(map);
+
+const layersByKey = {};
+const countByKey  = {};
+
+function shortName(name) {
+  if (!name) return '— unresolved —';
+  return name
+    .replace(/^City of /i, '')
+    .replace(/, City of$/i, '')
+    .replace(/, County of$/i, '')
+    .replace(/^California Department of /i, 'CA Dept of ')
+    .replace(/ Department of /i, ' Dept of ');
+}
+
+async function load() {
+  // Fetch each county in parallel and merge.
+  const fetches = COUNTY_GEOIDS.map(geoid =>
+    fetch(`${SUPABASE_URL}/rest/v1/rpc/osm_beach_polys_with_operator_in_county`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY,
+        Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({ p_geoid: geoid }),
+    })
+  );
+  const responses = await Promise.all(fetches);
+  for (const r of responses) {
+    if (!r.ok) {
+      document.getElementById('status').textContent = `error: ${r.status} ${r.statusText}`;
+      return;
+    }
+  }
+  const arrays = await Promise.all(responses.map(r => r.json()));
+  // De-dupe across counties on (osm_type, osm_id) — a polygon spanning
+  // a county line would otherwise appear twice.
+  const seen = new Set();
+  const rows = [];
+  for (const arr of arrays) {
+    for (const row of arr) {
+      const key = `${row.osm_type}/${row.osm_id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push(row);
+    }
+  }
+
+  // Inactive features render gray regardless of operator. Only count
+  // active features for the operator-color assignment + legend.
+  const INACTIVE_COLOR = '#9aa5b1';
+  const INACTIVE_KEY   = '(inactive)';
+
+  const opOrder = [];
+  const opMeta  = {};
+  let inactiveCount = 0;
+  for (const row of rows) {
+    if (row.admin_inactive) { inactiveCount++; continue; }
+    const key = row.operator_slug || '(unresolved)';
+    if (!opMeta[key]) {
+      opMeta[key] = {
+        canonical: row.operator_canonical || '— unresolved —',
+        level: row.operator_level || '',
+        polys: 0,
+      };
+      opOrder.push(key);
+    }
+    opMeta[key].polys++;
+    countByKey[key] = (countByKey[key] || 0) + 1;
+  }
+
+  // Sort active operators by poly count desc so the busiest ones get
+  // the distinctive front colors
+  opOrder.sort((a, b) => opMeta[b].polys - opMeta[a].polys);
+  const colorByKey = {};
+  opOrder.forEach((k, i) => colorByKey[k] = PALETTE[i % PALETTE.length]);
+
+  let allBounds = null;
+  for (const row of rows) {
+    const isInactive = !!row.admin_inactive;
+    const key   = isInactive ? INACTIVE_KEY : (row.operator_slug || '(unresolved)');
+    const color = isInactive ? INACTIVE_COLOR : colorByKey[key];
+    if (!layersByKey[key]) layersByKey[key] = L.featureGroup().addTo(map);
+
+    const poly = L.geoJSON(row.geojson, {
+      style: isInactive
+        ? { color, weight: 1, fillColor: color, fillOpacity: 0.25, dashArray: '4 3' }
+        : { color, weight: 1.5, fillColor: color, fillOpacity: 0.55 },
+      onEachFeature: (_, lyr) => {
+        lyr.bindPopup(`
+          <strong>${row.name || '(unnamed)'}${isInactive ? ' · <span style="color:#647688">inactive</span>' : ''}</strong>
+          OSM ${row.osm_type}/${row.osm_id} · ${row.feature_type}<br>
+          Operator: ${row.operator_canonical || '<em>unresolved</em>'}${row.operator_level ? ' (' + row.operator_level + ')' : ''}<br>
+          ${row.managing_agency_source ? `<span style="color:#647688;font-size:11px">via ${row.managing_agency_source}</span>` : ''}
+        `);
+      },
+    });
+    poly.addTo(layersByKey[key]);
+    const b = poly.getBounds();
+    if (b.isValid()) allBounds = allBounds ? allBounds.extend(b) : L.latLngBounds(b.getSouthWest(), b.getNorthEast());
+
+    // Permanent label at the polygon centroid, showing the OPERATOR name.
+    // Skip inactive features so dead labels don't clutter the map.
+    if (!isInactive && row.label_lat != null && row.label_lng != null) {
+      L.tooltip([row.label_lat, row.label_lng], {
+        permanent: true,
+        direction: 'center',
+        className: 'op-label',
+      }).setContent(shortName(row.operator_canonical))
+        .addTo(layersByKey[key]);
+    }
+  }
+
+  if (allBounds && allBounds.isValid()) map.fitBounds(allBounds, { padding: [30, 30] });
+
+  // Legend (active operators + an inactive entry at the bottom)
+  const legend = document.getElementById('legend');
+  legend.innerHTML = '';
+  const addLegendRow = (key, label, count, color) => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `
+      <span class="swatch" style="background:${color}"></span>
+      <span class="name" title="${label}">${label}</span>
+      <span class="meta">${count}</span>
+    `;
+    row.addEventListener('click', () => {
+      const layer = layersByKey[key];
+      if (!layer) return;
+      if (map.hasLayer(layer)) { map.removeLayer(layer); row.classList.add('muted-row'); }
+      else                     { layer.addTo(map);       row.classList.remove('muted-row'); }
+    });
+    legend.appendChild(row);
+  };
+  for (const key of opOrder) {
+    addLegendRow(key, opMeta[key].canonical, opMeta[key].polys, colorByKey[key]);
+  }
+  if (inactiveCount > 0) {
+    addLegendRow(INACTIVE_KEY, 'inactive', inactiveCount, INACTIVE_COLOR);
+  }
+
+  document.getElementById('status').textContent =
+    `${rows.length} OSM beach polygons in LA + OC · ${opOrder.length} operators${inactiveCount ? ` (+ ${inactiveCount} inactive)` : ''} · click polygon for details`;
+}
+
+load();
+</script>
+</body>
+</html>

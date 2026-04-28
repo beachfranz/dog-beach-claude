@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OC Operators · Management Mosaic</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  html,body { margin:0; padding:0; height:100%; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
+  #map { width:100%; height:100vh; }
+  .panel {
+    position:absolute; top:12px; left:12px; z-index:1000;
+    background:#fff; border:1px solid #d1dde8; border-radius:6px;
+    padding:10px 14px; box-shadow:0 2px 8px rgba(0,0,0,.08);
+    max-width:300px; font-size:13px; line-height:1.4;
+  }
+  .panel h1 { margin:0 0 6px 0; font-size:15px; font-weight:600; }
+  .panel .muted { color:#647688; font-size:12px; }
+  .legend { margin-top:10px; }
+  .legend .row { display:flex; align-items:center; gap:8px; padding:3px 0; cursor:pointer; }
+  .legend .row.muted-row { opacity:0.35; }
+  .legend .swatch { width:14px; height:14px; border-radius:3px; border:1px solid rgba(0,0,0,.15); flex-shrink:0; }
+  .legend .name { flex:1; text-transform:capitalize; }
+  .legend .meta { color:#647688; font-size:11px; }
+  .leaflet-popup-content { font-size:13px; line-height:1.5; }
+  .leaflet-popup-content strong { display:block; margin-bottom:4px; }
+
+  /* Permanent label tooltips: small, transparent background, no arrow */
+  .op-label {
+    background: rgba(255,255,255,.85);
+    border: none;
+    border-radius: 3px;
+    box-shadow: none;
+    padding: 1px 5px;
+    font-size: 11px;
+    font-weight: 500;
+    color: #1f2933;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  .op-label::before { display: none; }
+  #status { margin-top:6px; font-size:11px; color:#647688; }
+</style>
+</head>
+<body>
+
+<div class="panel">
+  <h1>Orange County operators</h1>
+  <div class="muted">Polygons clipped to OC, colored by level. Labels at footprint centroids.</div>
+  <div class="legend" id="legend">loading…</div>
+  <div id="status"></div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+const COUNTY_GEOID = '06059';  // Orange County, CA
+
+const LEVEL_COLOR = {
+  'federal':          '#8c564b',
+  'state':            '#2ca02c',
+  'tribal':           '#9467bd',
+  'county':           '#ff7f0e',
+  'city':             '#1f77b4',
+  'special-district': '#17becf',
+  'private':          '#e377c2',
+  'joint':            '#7f7f7f',
+  'unknown':          '#bcbd22',
+};
+const LEVEL_ORDER = ['federal','state','tribal','county','city','special-district','joint','unknown','private'];
+
+const map = L.map('map', { preferCanvas: true }).setView([33.7, -117.85], 10);
+L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '© OpenStreetMap France · CPAD via GreenInfo Network · TIGER',
+}).addTo(map);
+
+const layersByLevel = {};
+const countByLevel = {};
+
+// Strip noise prefixes/suffixes for compact labels
+function shortName(name) {
+  return name
+    .replace(/^City of /i, '')
+    .replace(/, City of$/i, '')
+    .replace(/, County of$/i, '')
+    .replace(/, State of$/i, '')
+    .replace(/^California Department of /i, 'CA Dept of ')
+    .replace(/ Department of /i, ' Dept of ')
+    .replace(/^United States /i, 'U.S. ');
+}
+
+async function load() {
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/operator_polygons_by_county_cache?county_geoid=eq.${COUNTY_GEOID}&select=operator_id,slug,canonical_name,level,subtype,area_km2,label_lat,label_lng,geojson&order=area_km2.desc.nullslast`,
+    {
+      headers: {
+        apikey: ANON_KEY,
+        Authorization: `Bearer ${ANON_KEY}`,
+        Accept: 'application/json',
+        'Range': '0-9999',
+      },
+    }
+  );
+  if (!r.ok) {
+    document.getElementById('status').textContent = `error: ${r.status} ${r.statusText}`;
+    return;
+  }
+  const rows = await r.json();
+
+  // Group by level so render order is deterministic (federal at bottom,
+  // private on top so the small city/private patches show through).
+  const byLevel = {};
+  for (const row of rows) {
+    const lvl = row.level || 'unknown';
+    (byLevel[lvl] = byLevel[lvl] || []).push(row);
+    countByLevel[lvl] = (countByLevel[lvl] || 0) + 1;
+  }
+
+  let allBounds = null;
+  for (const lvl of LEVEL_ORDER) {
+    const list = byLevel[lvl];
+    if (!list) continue;
+    const color = LEVEL_COLOR[lvl] || '#999';
+    const group = L.featureGroup();
+    for (const row of list) {
+      const poly = L.geoJSON(row.geojson, {
+        style: { color, weight: 0.8, fillColor: color, fillOpacity: 0.4 },
+        onEachFeature: (_, lyr) => {
+          lyr.bindPopup(`
+            <strong>${row.canonical_name}</strong>
+            ${row.level}${row.subtype ? ' · ' + row.subtype : ''}<br>
+            ${row.area_km2 ? `${Number(row.area_km2).toLocaleString()} km² in OC<br>` : ''}
+            <span style="color:#647688;font-size:11px">slug: ${row.slug}</span>
+          `);
+        },
+      });
+      poly.addTo(group);
+      const b = poly.getBounds();
+      if (b.isValid()) allBounds = allBounds ? allBounds.extend(b) : L.latLngBounds(b.getSouthWest(), b.getNorthEast());
+
+      // One label per operator at the precomputed centroid. L.tooltip()
+      // directly avoids the L.marker default-icon fetch that trips
+      // file:// same-origin warnings.
+      if (row.label_lat != null && row.label_lng != null) {
+        L.tooltip([row.label_lat, row.label_lng], {
+          permanent: true,
+          direction: 'center',
+          className: 'op-label',
+        }).setContent(shortName(row.canonical_name))
+          .addTo(group);
+      }
+    }
+    group.addTo(map);
+    layersByLevel[lvl] = group;
+  }
+
+  if (allBounds && allBounds.isValid()) map.fitBounds(allBounds, { padding: [20, 20] });
+
+  // Legend
+  const legend = document.getElementById('legend');
+  legend.innerHTML = '';
+  for (const lvl of LEVEL_ORDER) {
+    if (!countByLevel[lvl]) continue;
+    const color = LEVEL_COLOR[lvl];
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `
+      <span class="swatch" style="background:${color}"></span>
+      <span class="name">${lvl}</span>
+      <span class="meta">${countByLevel[lvl]}</span>
+    `;
+    row.addEventListener('click', () => {
+      const layer = layersByLevel[lvl];
+      if (map.hasLayer(layer)) { map.removeLayer(layer); row.classList.add('muted-row'); }
+      else                     { layer.addTo(map);       row.classList.remove('muted-row'); }
+    });
+    legend.appendChild(row);
+  }
+
+  document.getElementById('status').textContent =
+    `${rows.length} operators in OC · click a label or polygon for details`;
+}
+
+load();
+</script>
+</body>
+</html>

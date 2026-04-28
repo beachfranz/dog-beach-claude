@@ -54,9 +54,12 @@ const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
 //   ?all=1                            — LA + Orange + SD by default;
 //                                       add &statewide=1 for all CA
 //   ?lat=X&lng=Y&radius=M (default)   — focal-radius around a point
-const qs        = new URLSearchParams(location.search);
-const ALL_MODE  = qs.has('all');
-const STATEWIDE = qs.has('statewide');
+// Optional flag:
+//   &beaches=1                        — suppress access features (805 only)
+const qs           = new URLSearchParams(location.search);
+const ALL_MODE     = qs.has('all');
+const STATEWIDE    = qs.has('statewide');
+const BEACHES_ONLY = qs.has('beaches');
 const FOCAL_LAT = parseFloat(qs.get('lat'))   || 36.605;
 const FOCAL_LNG = parseFloat(qs.get('lng'))   || -121.892;
 const RADIUS_M  = parseFloat(qs.get('radius')) || 3000;
@@ -155,7 +158,9 @@ async function load() {
     document.getElementById('status').textContent = `error: ${r.status} ${r.statusText}`;
     return;
   }
-  const rows = await r.json();
+  let rows = await r.json();
+  // Beaches-only mode: drop access-layer rows so the map shows pure 805
+  if (BEACHES_ONLY) rows = rows.filter(row => row.layer === 'beach');
 
   // Auto-derive title from the nearest 'beach' layer feature
   function haversine(lat1, lng1, lat2, lng2) {
@@ -202,9 +207,9 @@ async function load() {
     const isBeach = row.layer === 'beach';
     const ft      = row.feature_type || 'unknown';
     const verdict = row.dogs_verdict || 'unknown';
-    // Beach layer keyed by verdict so the legend can toggle yes/no/unknown
-    // independently. Access layer keyed by feature_type as before.
-    const key     = isBeach ? `beach_${verdict}` : ft;
+    // One 'beach' bucket regardless of verdict (icon color still tracks
+    // verdict — yes=green, no=red, unknown=sand).
+    const key     = isBeach ? 'beach' : ft;
     if (!layersByKey[key]) layersByKey[key] = L.featureGroup().addTo(map);
     countByKey[key] = (countByKey[key] || 0) + 1;
 

@@ -43,6 +43,43 @@ def tavily_extract(url: str) -> tuple[str, str]:
         return (f"tavily_error:{type(e).__name__}", "")
 
 
+def playwright_fetch(url: str, timeout_ms: int = 20000) -> tuple[str, str]:
+    """Render a page with headless Chromium. Strips images/fonts/media to
+    speed up loads. Returns (status, plain_text). Plain text is body.innerText
+    after the page's network is mostly idle."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return ("playwright_unavailable", "")
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(args=["--disable-blink-features=AutomationControlled"])
+            ctx = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 800},
+            )
+            page = ctx.new_page()
+            # Block heavy resources for speed
+            page.route("**/*.{png,jpg,jpeg,gif,webp,svg,ico,woff,woff2,ttf,otf,mp4,webm}",
+                       lambda r: r.abort())
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                # Best-effort wait for network to quiet
+                try:
+                    page.wait_for_load_state("networkidle", timeout=8000)
+                except Exception:
+                    pass
+                text = page.evaluate("() => document.body ? document.body.innerText : ''") or ""
+            finally:
+                ctx.close(); browser.close()
+            text = re.sub(r"\n{3,}", "\n\n", text)[:15000]
+            if len(text) < 100:
+                return ("playwright_thin", text)
+            return ("ok_playwright", text)
+    except Exception as e:
+        return (f"playwright_error:{type(e).__name__}", "")
+
+
 SYSTEM = """You read a single park or beach detail page from a public agency's website
 and extract dog-access policy for THAT park/unit only.
 
@@ -58,7 +95,18 @@ Return ONLY a JSON object with these fields:
   "time_windows":      [{"description": "...", "start_hour": 0-23, "end_hour": 0-23}, ...] OR null,
   "seasonal_rules":    [{"description": "...", "start_date": "MM-DD", "end_date": "MM-DD"}, ...] OR null,
   "ordinance_ref":     "<city/county code citation if mentioned, e.g. 'Mun. Code 8.32'>" OR null,
-  "confidence":        0.0-1.0
+  "confidence":        0.0-1.0,
+
+  "areas": {
+    "sand":         "off_leash" | "on_leash" | "forbidden" | "unknown",
+    "water":        "off_leash" | "on_leash" | "forbidden" | "unknown",
+    "picnic_area":  "off_leash" | "on_leash" | "forbidden" | "unknown",
+    "parking_lot":  "off_leash" | "on_leash" | "forbidden" | "unknown",
+    "trails":       "off_leash" | "on_leash" | "forbidden" | "unknown",
+    "campground":   "off_leash" | "on_leash" | "forbidden" | "unknown"
+  },
+  "designated_dog_zones": "<verbatim text describing any named dog-permitted zones>" OR null,
+  "prohibited_areas":     "<verbatim text describing any named off-limits zones>" OR null
 }
 
 RULE SEMANTICS:
@@ -72,19 +120,30 @@ IMPORTANT: A SINGLE MENTION of leash, dog rules, or pet policy is enough to dete
 - "No dogs allowed" / "Pets prohibited" → default_rule="no"
 - "Dogs allowed in designated areas only" / "before 9am" → default_rule="restricted"
 - "Service animals only" → default_rule="no" (with note in source_quote)
-- ONLY return "unknown" if there is genuinely zero dog/leash/pet content. A header like "Are dogs Allowed?" with no answer text below it counts as unknown — note this in source_quote.
+- ONLY return "unknown" if there is genuinely zero dog/leash/pet content. A header like "Are dogs Allowed?" with no answer text below it counts as unknown.
 
-EXCEPTIONS: only populate when the page mentions specific named sub-beaches/zones with rules different from the default. Don't manufacture exceptions from generic mentions.
+AREA SEMANTICS (independent decomposition — fill these IN ADDITION to default_rule):
+- The 6 fixed areas: sand, water, picnic_area, parking_lot, trails, campground.
+- A beach can be default_rule="yes" even if 5 of 6 areas are forbidden — as long as ONE area allows dogs.
+- "off_leash" — page explicitly says dogs may be off-leash in this area.
+- "on_leash" — dogs allowed but leash required. CA-default rules of thumb: "Dogs allowed" without further qualifier usually means on_leash on city/state agency pages.
+- "forbidden" — page explicitly says dogs not allowed in this area (e.g., "Dogs not allowed on sand").
+- "unknown" — page does not address this area. DEFAULT for any area not explicitly mentioned.
+- "Day-use areas" → picnic_area = on_leash. Day-use does NOT cover sand/water/trails.
+- "Multiuse trail / bike path" → trails = on_leash.
+- "Not allowed on the beach" → sand = forbidden, water = forbidden.
+- "Allowed only in parking lot" → parking_lot = on_leash; ALL other named-but-excluded = forbidden; unmentioned = unknown.
+- NEVER infer off_leash unless the quote literally says "off-leash" or "no leash required".
 
-TIME_WINDOWS: only if specific hours are stated (e.g., "off-leash before 9am"). Use 0-23 24h. start_hour=6, end_hour=9 means 6:00-9:00am.
+DESIGNATED_DOG_ZONES / PROHIBITED_AREAS: verbatim text from the page. E.g., "Dog Beach (north end)" or "south of lifeguard tower 3". Null if no such named zones.
 
-SEASONAL_RULES: only if specific date ranges are stated (e.g., "no dogs March 1 to September 15 for snowy plover"). Use MM-DD format.
+EXCEPTIONS: only populate when the page mentions specific NAMED sub-beaches/zones with rules different from the default. Don't manufacture exceptions from generic mentions.
 
-ORDINANCE_REF: only if the page cites a specific code/section.
+TIME_WINDOWS / SEASONAL_RULES / ORDINANCE_REF: only if specific values are stated.
 
-If the page text is empty, error, or unrelated, return default_rule="unknown" with confidence ≤0.2.
+If the page text is empty, error, or unrelated, return default_rule="unknown" with confidence ≤0.2 and all areas="unknown".
 
-NO PROSE OUTSIDE THE JSON. No markdown fences."""
+NO PROSE OUTSIDE THE JSON. NO MARKDOWN FENCES."""
 
 
 def call_llm(page_text: str, unit_name: str) -> dict:
@@ -220,13 +279,40 @@ def main():
     ap.add_argument("--refresh", action="store_true")
     ap.add_argument("--counties", type=str, default=None,
                     help="comma-separated, e.g. 'Los Angeles,Orange,San Diego'")
+    ap.add_argument("--retry-failed-only", action="store_true",
+                    help="only re-process rows where prior pass returned fetch_failed or dogs_allowed='unknown'; uses Playwright fallback")
     args = ap.parse_args()
 
     counties = [c.strip() for c in args.counties.split(",")] if args.counties else None
     units = fetch_target_units(counties=counties)
     print(f"Loaded {len(units)} CPAD units (805 ∩ has park_url)")
 
-    if not args.refresh:
+    # Always exclude rows already populated by the CDPR master-table parse —
+    # their data is richer (per-area + nuanced source quotes) than what a
+    # per-park park_url scrape would produce.
+    headers = {"apikey": SERVICE_KEY, "Authorization": f"Bearer {SERVICE_KEY}",
+               "Range": "0-9999"}
+    r = httpx.get(f"{SUPABASE_URL}/rest/v1/cpad_unit_dogs_policy",
+                  headers=headers,
+                  params={"select":"cpad_unit_id,source_quote,dogs_allowed,extraction_model"},
+                  timeout=30)
+    r.raise_for_status()
+    existing_rows = r.json()
+    table_parse_ids = {row["cpad_unit_id"] for row in existing_rows
+                       if row.get("extraction_model") == "table_parse"}
+    if table_parse_ids:
+        before = len(units)
+        units = [u for u in units if u["unit_id"] not in table_parse_ids]
+        print(f"Excluded {before - len(units)} rows already from CDPR master-table parse")
+
+    if args.retry_failed_only:
+        retry_ids = {row["cpad_unit_id"] for row in existing_rows
+                     if (row.get("source_quote") or "").startswith("fetch_failed:")
+                     or row.get("dogs_allowed") == "unknown"}
+        before = len(units)
+        units = [u for u in units if u["unit_id"] in retry_ids]
+        print(f"--retry-failed-only: kept {len(units)} of {before} (rows that previously failed or returned unknown)")
+    elif not args.refresh:
         existing = db_existing_unit_ids()
         before = len(units)
         units = [u for u in units if u["unit_id"] not in existing]
@@ -240,7 +326,17 @@ def main():
     for n, u in enumerate(units, 1):
         url = u["park_url"]
         status, text = tavily_extract(url)
-        if status != "ok" or len(text) < 200:
+        # If Tavily failed OR returned a page without any dog/leash/pet keywords,
+        # fall back to Playwright (real Chromium can render JS + bypass Cloudflare).
+        if status != "ok" or len(text) < 200 or not re.search(r"\b(dog|leash|pet)s?\b", (text or "")[:8000], re.I):
+            print(f"  [{n}/{len(units)}] unit {u['unit_id']} {u['unit_name']!r}: tavily {status} (chars={len(text)}) -> trying Playwright")
+            pw_status, pw_text = playwright_fetch(url)
+            if pw_status.startswith("ok") and len(pw_text) >= 200:
+                status, text = pw_status, pw_text
+                print(f"      Playwright OK ({len(text)} chars)")
+            else:
+                print(f"      Playwright {pw_status}")
+        if status not in ("ok","ok_playwright") or len(text) < 200:
             print(f"  [{n}/{len(units)}] unit {u['unit_id']} {u['unit_name']!r}: fetch_{status}")
             # still record a row so we don't re-try
             batch.append({
@@ -267,6 +363,13 @@ def main():
         if leash not in (True, False, None):
             leash = None
 
+        # Area decomposition
+        valid_areas = {"off_leash","on_leash","forbidden","unknown"}
+        areas = cls.get("areas") or {}
+        def san_area(name: str) -> str | None:
+            v = (areas.get(name) or "").strip().lower().replace("-","_")
+            return v if v in valid_areas else None
+
         print(f"  [{n}/{len(units)}] unit {u['unit_id']} {u['unit_name']!r}: {rule} (conf={conf:.2f}, leash={leash})")
         batch.append({
             "cpad_unit_id": u["unit_id"],
@@ -284,6 +387,14 @@ def main():
             "ordinance_ref": cls.get("ordinance_ref") or None,
             "extraction_model": SONNET,
             "extraction_confidence": conf,
+            "area_sand":        san_area("sand"),
+            "area_water":       san_area("water"),
+            "area_picnic_area": san_area("picnic_area"),
+            "area_parking_lot": san_area("parking_lot"),
+            "area_trails":      san_area("trails"),
+            "area_campground":  san_area("campground"),
+            "designated_dog_zones": (cls.get("designated_dog_zones") or "").strip() or None,
+            "prohibited_areas":     (cls.get("prohibited_areas") or "").strip() or None,
         })
         if len(batch) >= 5:
             db_upsert(batch); batch.clear()

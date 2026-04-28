@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coastal mosaic · beaches + access features</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  html,body { margin:0; padding:0; height:100%; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
+  #map { width:100%; height:100vh; }
+  .panel {
+    position:absolute; top:12px; left:12px; z-index:1000;
+    background:#fff; border:1px solid #d1dde8; border-radius:6px;
+    padding:10px 14px; box-shadow:0 2px 8px rgba(0,0,0,.08);
+    max-width:300px; font-size:13px; line-height:1.4;
+  }
+  .panel h1 { margin:0 0 6px 0; font-size:15px; font-weight:600; }
+  .panel .muted { color:#647688; font-size:12px; }
+  .legend { margin-top:10px; max-height:60vh; overflow-y:auto; }
+  .legend .row { display:flex; align-items:center; gap:8px; padding:3px 0; cursor:pointer; }
+  .legend .row.muted-row { opacity:0.35; }
+  .legend .swatch { width:14px; height:14px; border-radius:3px; border:1px solid rgba(0,0,0,.15); flex-shrink:0; }
+  .legend .name { flex:1; text-transform:capitalize; }
+  .legend .meta { color:#647688; font-size:11px; flex-shrink:0; }
+  .leaflet-popup-content { font-size:13px; line-height:1.5; }
+  .leaflet-popup-content strong { display:block; margin-bottom:4px; }
+  .hover-tip {
+    background: rgba(31,41,51,.92); color:#fff; border:none; border-radius:4px;
+    padding:4px 8px; font-size:12px; line-height:1.35; white-space:nowrap;
+  }
+  .hover-tip::before { border-top-color: rgba(31,41,51,.92) !important; }
+  .hover-tip .name { font-weight: 600; }
+  .hover-tip .type { color:#cbd5e1; font-size:11px; margin-left:4px; }
+  #status { margin-top:6px; font-size:11px; color:#647688; }
+</style>
+</head>
+<body>
+
+<div class="panel">
+  <h1 id="panel-title">Coastal mosaic</h1>
+  <div class="muted">Beaches (sand fill) + CCC access features within radius. Click a legend row to toggle.</div>
+  <div class="legend" id="legend">loading…</div>
+  <div id="status"></div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+// Two modes:
+//   ?all=1                            — LA + Orange + SD by default;
+//                                       add &statewide=1 for all CA
+//   ?lat=X&lng=Y&radius=M (default)   — focal-radius around a point
+const qs        = new URLSearchParams(location.search);
+const ALL_MODE  = qs.has('all');
+const STATEWIDE = qs.has('statewide');
+const FOCAL_LAT = parseFloat(qs.get('lat'))   || 36.605;
+const FOCAL_LNG = parseFloat(qs.get('lng'))   || -121.892;
+const RADIUS_M  = parseFloat(qs.get('radius')) || 3000;
+
+// Color + emoji per feature_type. Color goes on the icon ring; emoji
+// goes inside. Most emoji are cross-platform; a few rare types fall
+// back to a single capital letter so they always render.
+const TYPE_COLOR = {
+  'beach':              '#fbbf24', 'dog_friendly_beach': '#16a34a',
+  'named_beach':        '#fbbf24', 'park':               '#16a34a',
+  'urban':              '#7f7f7f', 'access_feature':     '#22c55e',
+  'pier':               '#1f77b4', 'harbor':             '#0ea5e9',
+  'lighthouse':         '#eab308', 'trail':              '#92400e',
+  'point':              '#67e8f9', 'reserve':            '#84cc16',
+  'cove':               '#06b6d4', 'campground':         '#dc2626',
+  'island':             '#9467bd', 'water':              '#0891b2',
+  'cliff':              '#a3a3a3', 'unknown':            '#bcbd22',
+};
+const TYPE_EMOJI = {
+  'beach':              '🏖',     'dog_friendly_beach': '🐾',
+  'named_beach':        '🏖',     'park':               '🌳',
+  'urban':              '🏙',     'access_feature':     '🪜',
+  'pier':               '⚓',     'harbor':             '⛵',
+  'lighthouse':         '🗼',     'trail':              '🥾',
+  'point':              '📍',     'reserve':            '🌿',
+  'cove':               '🏝',     'campground':         '⛺',
+  'island':             '🏝',     'water':              '💧',
+  'cliff':              '⛰',     'unknown':            '?',
+};
+
+// Beach color comes from dogs_verdict — green=yes, red=no, sand=unknown.
+// Access features keep their type-color.
+const BEACH_VERDICT_COLOR = {
+  'yes':     '#16a34a',  // green
+  'no':      '#dc2626',  // red
+  'unknown': '#fbbf24',  // sand
+};
+function makeIcon(featureType, isBeach, dogsVerdict, originSource) {
+  const color = isBeach
+    ? (BEACH_VERDICT_COLOR[dogsVerdict || 'unknown'] || BEACH_VERDICT_COLOR.unknown)
+    : (TYPE_COLOR[featureType] || '#888');
+  // UBP-only beaches get a paw — they're catalog records without OSM
+  // polygon detail, the paw signals "named beach we know about".
+  const emoji = (isBeach && originSource === 'ubp')
+    ? '🐾'
+    : (TYPE_EMOJI[featureType] || '•');
+  const size  = isBeach ? 28 : 24;
+  return L.divIcon({
+    html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};
+                       border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.35);
+                       display:flex;align-items:center;justify-content:center;
+                       font-size:${isBeach?16:14}px;line-height:1;">${emoji}</div>`,
+    iconSize:   [size, size],
+    iconAnchor: [size/2, size/2],
+    className:  'feature-icon',
+  });
+}
+
+// Map default view: SoCal-3 in all-mode (unless statewide), focal in focal-mode
+const initView  = ALL_MODE ? (STATEWIDE ? [37.5, -119.5] : [33.5, -118.0])
+                           : [FOCAL_LAT, FOCAL_LNG];
+const initZoom  = ALL_MODE ? (STATEWIDE ? 6 : 9) : 14;
+const map = L.map('map', { preferCanvas: true }).setView(initView, initZoom);
+L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '© OpenStreetMap France · CCC + OSM + UBP',
+}).addTo(map);
+
+// Pane for access dots so they sit above polygons
+map.createPane('access');
+map.getPane('access').style.zIndex = 650;
+
+// Pane for the focal-beach paw — sits above everything else
+map.createPane('focal');
+map.getPane('focal').style.zIndex = 700;
+
+const layersByKey = {};   // legend toggle target — keyed by 'beach' | feature_type
+const countByKey  = {};
+
+async function load() {
+  const rpc  = ALL_MODE ? 'all_coastal_features_lite' : 'nearby_coastal_features';
+  const body = ALL_MODE
+    ? { p_counties: STATEWIDE ? null : ['Los Angeles', 'Orange', 'San Diego'] }
+    : { p_lat: FOCAL_LAT, p_lng: FOCAL_LNG, p_radius_m: RADIUS_M };
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${rpc}`, {
+    method: 'POST',
+    headers: {
+      apikey: ANON_KEY,
+      Authorization: `Bearer ${ANON_KEY}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    document.getElementById('status').textContent = `error: ${r.status} ${r.statusText}`;
+    return;
+  }
+  const rows = await r.json();
+
+  // Auto-derive title from the nearest 'beach' layer feature
+  function haversine(lat1, lng1, lat2, lng2) {
+    const R = 6371000;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLng/2)**2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+  let nearestBeach = null, nearestDist = Infinity;
+  for (const r of rows) {
+    if (r.layer !== 'beach' || !r.name) continue;
+    const d = haversine(FOCAL_LAT, FOCAL_LNG, r.lat, r.lng);
+    if (d < nearestDist) { nearestBeach = r; nearestDist = d; }
+  }
+  const derivedTitle = ALL_MODE
+    ? `${STATEWIDE ? 'All CA' : 'LA + Orange + SD'} · ${rows.length.toLocaleString()} coastal features`
+    : (nearestBeach?.name || 'Coastal mosaic');
+  document.getElementById('panel-title').textContent = derivedTitle;
+  document.title = `${derivedTitle} · beaches + access features`;
+
+  // Big paw icon over the focal beach. Sits in the 'focal' pane so it
+  // renders above polygons, dots, and labels. Skipped in ALL_MODE.
+  if (!ALL_MODE && nearestBeach) {
+    const pawIcon = L.divIcon({
+      html: `<div style="width:32px;height:32px;border-radius:50%;
+                          background:rgba(251,191,36,.85);
+                          border:2px solid #fff;
+                          box-shadow:0 1px 4px rgba(0,0,0,.4);
+                          display:flex;align-items:center;justify-content:center;
+                          font-size:18px;line-height:1;
+                          pointer-events:none;">🐾</div>`,
+      iconSize:   [32, 32],
+      iconAnchor: [16, 16],
+      className:  'focal-paw',
+    });
+    L.marker([nearestBeach.lat, nearestBeach.lng], {
+      icon: pawIcon, pane: 'focal', interactive: false,
+    }).addTo(map);
+  }
+
+  let allBounds = null;
+  for (const row of rows) {
+    const isBeach = row.layer === 'beach';
+    const ft      = row.feature_type || 'unknown';
+    const verdict = row.dogs_verdict || 'unknown';
+    // Beach layer keyed by verdict so the legend can toggle yes/no/unknown
+    // independently. Access layer keyed by feature_type as before.
+    const key     = isBeach ? `beach_${verdict}` : ft;
+    if (!layersByKey[key]) layersByKey[key] = L.featureGroup().addTo(map);
+    countByKey[key] = (countByKey[key] || 0) + 1;
+
+    if (isBeach && row.geojson && row.geojson.type !== 'Point') {
+      // Polygon beach: render polygon with sand fill
+      const poly = L.geoJSON(row.geojson, {
+        style: { color: '#d4a574', weight: 1.5, fillColor: '#fde68a', fillOpacity: 0.55 },
+      });
+      poly.bindTooltip(
+        `<span class="name">${row.name || '(unnamed)'}</span><span class="type">${row.feature_type} · ${row.origin_source}</span>`,
+        { sticky: true, className: 'hover-tip', direction: 'top', offset: [0,-4] }
+      );
+      poly.bindPopup(`
+        <strong>${row.name || '(unnamed)'}</strong>
+        ${row.feature_type} · ${row.origin_source}<br>
+        ${row.operator_canonical ? `Operator: ${row.operator_canonical}<br>` : ''}
+        <span style="color:#647688;font-size:11px">${row.origin_key}</span>
+      `);
+      poly.addTo(layersByKey[key]);
+      const b = poly.getBounds();
+      if (b.isValid()) allBounds = allBounds ? allBounds.extend(b) : L.latLngBounds(b.getSouthWest(), b.getNorthEast());
+    } else {
+      // Point: divIcon marker — beaches sand-yellow ringed icon (size 28),
+      // access features colored ringed icon (size 24)
+      const markerOpts = { icon: makeIcon(ft, isBeach, verdict, row.origin_source) };
+      if (!isBeach) markerOpts.pane = 'access';
+      const m = L.marker([row.lat, row.lng], markerOpts);
+      m.bindTooltip(
+        `<span class="name">${row.name || '(unnamed)'}</span><span class="type">${row.feature_type} · ${row.origin_source}</span>`,
+        { sticky: true, className: 'hover-tip', direction: 'top', offset: [0,-4] }
+      );
+      m.bindPopup(`
+        <strong>${row.name || '(unnamed)'}</strong>
+        ${row.feature_type} · ${row.origin_source}<br>
+        ${row.operator_canonical ? `Operator: ${row.operator_canonical}<br>` : ''}
+        ${row.dogs_verdict ? `<span style="font-weight:600;color:${row.dogs_verdict==='yes'?'#16a34a':'#dc2626'}">dogs: ${row.dogs_verdict}</span><br>` : ''}
+        ${row.description ? `<div style="color:#647688;margin-top:4px">${row.description}</div>` : ''}
+        <span style="color:#647688;font-size:11px">${row.origin_key}</span>
+      `);
+      m.addTo(layersByKey[key]);
+      if (!allBounds) allBounds = L.latLngBounds([row.lat, row.lng], [row.lat, row.lng]);
+      else allBounds.extend([row.lat, row.lng]);
+    }
+  }
+
+  if (allBounds && allBounds.isValid()) map.fitBounds(allBounds, { padding: [30, 30], maxZoom: 16 });
+
+  // Legend (beach first, then access types alphabetical)
+  const legend = document.getElementById('legend');
+  legend.innerHTML = '';
+  const orderedKeys = Object.keys(countByKey).sort((a, b) => {
+    if (a === 'beach') return -1;
+    if (b === 'beach') return 1;
+    return countByKey[b] - countByKey[a];
+  });
+  for (const key of orderedKeys) {
+    const color = key === 'beach' ? '#fbbf24' : (TYPE_COLOR[key] || '#888');
+    const emoji = key === 'beach' ? '🏖' : (TYPE_EMOJI[key] || '•');
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `
+      <span class="swatch" style="background:${color};display:flex;align-items:center;justify-content:center;font-size:11px;line-height:1;">${emoji}</span>
+      <span class="name">${key}</span>
+      <span class="meta">${countByKey[key]}</span>
+    `;
+    row.addEventListener('click', () => {
+      const layer = layersByKey[key];
+      if (!layer) return;
+      if (map.hasLayer(layer)) { map.removeLayer(layer); row.classList.add('muted-row'); }
+      else                     { layer.addTo(map);       row.classList.remove('muted-row'); }
+    });
+    legend.appendChild(row);
+  }
+
+  document.getElementById('status').textContent =
+    `${rows.length} features rendered · click a legend row to toggle`;
+}
+
+load();
+</script>
+</body>
+</html>

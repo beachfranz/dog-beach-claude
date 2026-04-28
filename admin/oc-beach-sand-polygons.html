@@ -102,8 +102,12 @@ L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
     },
     onEachFeature: (f, lyr) => {
       const p = f.properties;
+      const opLine = p.operator_name
+        ? `<div class="tip-meta">${escHtml(p.operator_name)}</div>`
+        : `<div class="tip-meta" style="color:#cbd5e1;"><i>(no operator)</i></div>`;
       lyr.bindTooltip(
         `<div class="tip-name">${escHtml(p.name) || '<i>(no name)</i>'}</div>
+         ${opLine}
          <div class="tip-meta">${escHtml(p.feature_type)}</div>
          <div class="tip-osm">${escHtml(p.osm_type)}/${escHtml(p.osm_id)}</div>`,
         { sticky: true, className: 'poly-tip', direction: 'top', opacity: 1 }

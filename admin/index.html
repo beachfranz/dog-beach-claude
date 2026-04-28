@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<!-- admin/index.html — link directory for all admin tooling. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dog Beach Admin</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f8fafc; color: #0f172a;
+      font-size: 14px; padding: 32px;
+      max-width: 880px; margin: 0 auto;
+    }
+    h1 { font-size: 20px; margin-bottom: 4px; }
+    p.lead { color: #64748b; margin-bottom: 24px; font-size: 13px; }
+
+    h2 {
+      font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em;
+      color: #475569; margin: 22px 0 8px; padding-top: 8px;
+      border-top: 1px solid #e2e8f0;
+    }
+    h2:first-of-type { border: none; padding-top: 0; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 10px;
+    }
+    a.tile {
+      background: #fff;
+      border: 1px solid #e2e8f0; border-radius: 8px;
+      padding: 12px 14px;
+      text-decoration: none; color: inherit;
+      transition: border-color 0.1s, box-shadow 0.1s;
+      display: block;
+    }
+    a.tile:hover { border-color: #3b82f6; box-shadow: 0 2px 8px rgba(59,130,246,0.12); }
+    a.tile .name {
+      font-size: 14px; font-weight: 500; color: #0f172a;
+      display: flex; align-items: center; gap: 6px;
+    }
+    a.tile .desc { font-size: 12px; color: #64748b; margin-top: 4px; }
+    .tag {
+      font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 999px;
+      text-transform: uppercase; letter-spacing: 0.04em;
+      margin-left: auto;
+    }
+    .tag.map    { background: #dbeafe; color: #1e40af; }
+    .tag.editor { background: #fef3c7; color: #b45309; }
+    .tag.viewer { background: #dcfce7; color: #15803d; }
+    .tag.review { background: #fee2e2; color: #b91c1c; }
+    .tag.tool   { background: #f1f5f9; color: #475569; }
+  </style>
+</head>
+<body>
+
+<h1>Dog Beach — Admin</h1>
+<p class="lead">Internal tools. Service-role writes go through edge functions; service-role obscure-URL only.</p>
+
+<h2>Editors</h2>
+<div class="grid">
+  <a class="tile" href="beach-editor.html">
+    <div class="name">Beach Editor <span class="tag editor">edit</span></div>
+    <div class="desc">Edit metadata for the 5 consumer-facing beaches.</div>
+  </a>
+  <a class="tile" href="location-editor.html">
+    <div class="name">Location Editor <span class="tag editor">edit</span></div>
+    <div class="desc">Edit a single locations_stage row (full inventory).</div>
+  </a>
+  <a class="tile" href="beach-operator-editor.html">
+    <div class="name">Beach Operator Editor <span class="tag editor">edit</span></div>
+    <div class="desc">Fix the operator_id field on a beach (UBP or CCC source).</div>
+  </a>
+</div>
+
+<h2>Maps</h2>
+<div class="grid">
+  <a class="tile" href="oc-beach-sand-polygons.html">
+    <div class="name">OC Beach Polygons <span class="tag map">map</span></div>
+    <div class="desc">OSM beach + sand polygons + CCC points overlaid (county selectable).</div>
+  </a>
+  <a class="tile" href="cpad-unit-policy-map.html">
+    <div class="name">CPAD Unit Policy Map <span class="tag map">map</span></div>
+    <div class="desc">Beach-level dog policy from CPAD-unit extractions, color-coded by rule.</div>
+  </a>
+  <a class="tile" href="monterey-map.html">
+    <div class="name">Coastal Mosaic <span class="tag map">map</span></div>
+    <div class="desc">CCC + OSM + UBP coastal mosaic. Statewide / county / focal modes.</div>
+  </a>
+  <a class="tile" href="active-map.html">
+    <div class="name">Active Map <span class="tag map">map</span></div>
+    <div class="desc">Active beach inventory (admin-inactive filter).</div>
+  </a>
+  <a class="tile" href="beaches-all-map.html">
+    <div class="name">Beaches — All <span class="tag map">map</span></div>
+    <div class="desc">All beaches across sources.</div>
+  </a>
+  <a class="tile" href="ccc-map.html">
+    <div class="name">CCC Map <span class="tag map">map</span></div>
+    <div class="desc">CCC access points only.</div>
+  </a>
+  <a class="tile" href="osm-map.html">
+    <div class="name">OSM Map <span class="tag map">map</span></div>
+    <div class="desc">OSM beach features only.</div>
+  </a>
+  <a class="tile" href="operators-map.html">
+    <div class="name">Operators Map <span class="tag map">map</span></div>
+    <div class="desc">Operator polygons statewide.</div>
+  </a>
+  <a class="tile" href="operators-oc-map.html">
+    <div class="name">Operators — OC <span class="tag map">map</span></div>
+    <div class="desc">Operator polygons clipped to Orange County.</div>
+  </a>
+  <a class="tile" href="osm-beaches-by-operator.html">
+    <div class="name">OSM Beaches by Operator <span class="tag map">map</span></div>
+    <div class="desc">OSM beach polygons grouped by operator.</div>
+  </a>
+</div>
+
+<h2>Viewers</h2>
+<div class="grid">
+  <a class="tile" href="cpad-unit-policy-viewer.html">
+    <div class="name">CPAD Unit Policy Viewer <span class="tag viewer">view</span></div>
+    <div class="desc">Per-unit dog-policy data with cascading Type → Operator → Unit dropdowns.</div>
+  </a>
+</div>
+
+<h2>Review queues</h2>
+<div class="grid">
+  <a class="tile" href="dedupe-review.html">
+    <div class="name">Dedupe Review <span class="tag review">queue</span></div>
+    <div class="desc">Cross-source duplicate clusters needing human resolution.</div>
+  </a>
+  <a class="tile" href="geocode-review.html">
+    <div class="name">Geocode Review <span class="tag review">queue</span></div>
+    <div class="desc">Suspect geocodes flagged for confirm / dismiss / move.</div>
+  </a>
+</div>
+
+<h2>Operations</h2>
+<div class="grid">
+  <a class="tile" href="daily-refresh.html">
+    <div class="name">Daily Refresh <span class="tag tool">ops</span></div>
+    <div class="desc">Trigger / monitor the daily-beach-refresh pipeline.</div>
+  </a>
+</div>
+
+</body>
+</html>

@@ -235,20 +235,13 @@
 
   <main>
     <div class="filter-bar">
-      <label for="filter-text">Filter:</label>
-      <input id="filter-text" type="text" placeholder="search by unit name, agency, or quote">
-
-      <label for="filter-rule">Rule:</label>
-      <select id="filter-rule">
-        <option value="">all</option>
-        <option value="yes">yes</option>
-        <option value="no">no</option>
-        <option value="restricted">restricted</option>
-        <option value="unknown">unknown</option>
+      <label for="unit-select">Unit:</label>
+      <select id="unit-select" style="flex:1; min-width: 320px;">
+        <option value="">— loading —</option>
       </select>
     </div>
 
-    <div id="cards" class="loading">Loading…</div>
+    <div id="card-host" class="empty">Pick a unit above.</div>
   </main>
 
 <script>
@@ -392,9 +385,6 @@ function renderCard(row) {
 }
 
 async function loadData() {
-  const cardsEl = document.getElementById('cards');
-  cardsEl.className = 'loading';
-  cardsEl.textContent = 'Loading…';
 
   // Postgres function call: get rows for the CPAD units that intersect
   // beach_locations within the chosen counties. Done via an inline RPC
@@ -419,8 +409,9 @@ async function loadData() {
     if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
     rows = await r.json();
   } catch (e) {
-    cardsEl.className = 'error';
-    cardsEl.textContent = `error: ${e.message}`;
+    const host = document.getElementById('card-host');
+    host.className = 'error';
+    host.textContent = `error: ${e.message}`;
     return;
   }
 
@@ -455,32 +446,65 @@ async function loadData() {
 
   const filtered = whitelist ? rows.filter(r => whitelist.has(r.cpad_unit_id)) : rows;
 
-  document.getElementById('summary').textContent = `${filtered.length} units`;
+  // Sort: classified rules first, then unknown/null; alphabetical within each
+  const ruleOrder = { 'yes': 0, 'restricted': 1, 'no': 2, 'unknown': 3 };
+  filtered.sort((a, b) => {
+    const ra = ruleOrder[a.dogs_allowed] ?? 4;
+    const rb = ruleOrder[b.dogs_allowed] ?? 4;
+    if (ra !== rb) return ra - rb;
+    return (a.unit_name || '').localeCompare(b.unit_name || '');
+  });
 
-  cardsEl.className = '';
-  cardsEl.innerHTML = filtered.map(renderCard).join('') || '<div class="empty">no rows</div>';
+  const tally = filtered.reduce((acc, r) => {
+    const k = r.dogs_allowed || 'null';
+    acc[k] = (acc[k] || 0) + 1;
+    return acc;
+  }, {});
+  const tallyStr = ['yes','restricted','no','unknown','null']
+    .filter(k => tally[k])
+    .map(k => `${tally[k]} ${k}`).join(' · ');
+  document.getElementById('summary').textContent = `${filtered.length} units — ${tallyStr}`;
 
-  // Wire up filters
-  const textIn = document.getElementById('filter-text');
-  const ruleIn = document.getElementById('filter-rule');
-  function applyFilter() {
-    const q = textIn.value.toLowerCase().trim();
-    const ruleSel = ruleIn.value;
-    const cards = cardsEl.querySelectorAll('.card');
-    let shown = 0;
-    cards.forEach(c => {
-      const search = c.dataset.search || '';
-      const rule = c.dataset.rule || '';
-      const okText = !q || search.includes(q);
-      const okRule = !ruleSel || rule === ruleSel;
-      const visible = okText && okRule;
-      c.style.display = visible ? '' : 'none';
-      if (visible) shown++;
-    });
-    document.getElementById('summary').textContent = `${shown} of ${filtered.length} units`;
+  // Build the dropdown
+  const sel = document.getElementById('unit-select');
+  const ruleEmoji = { yes: '✓', restricted: '~', no: '✗', unknown: '?' };
+  sel.innerHTML = '<option value="">— pick a unit —</option>' +
+    filtered.map(r => {
+      const tag = ruleEmoji[r.dogs_allowed] || '·';
+      const name = (r.unit_name || `unit ${r.cpad_unit_id}`).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+      return `<option value="${r.cpad_unit_id}">${tag}  ${name}</option>`;
+    }).join('');
+
+  // By id lookup for fast render
+  const byId = new Map(filtered.map(r => [r.cpad_unit_id, r]));
+  const host = document.getElementById('card-host');
+
+  function showUnit(id) {
+    if (!id) {
+      host.className = 'empty';
+      host.textContent = 'Pick a unit above.';
+      return;
+    }
+    const row = byId.get(parseInt(id, 10));
+    if (!row) {
+      host.className = 'empty';
+      host.textContent = 'not found';
+      return;
+    }
+    host.className = '';
+    host.innerHTML = renderCard(row);
+    // Sync URL hash so reload preserves selection
+    history.replaceState(null, '', `#${id}`);
   }
-  textIn.addEventListener('input', applyFilter);
-  ruleIn.addEventListener('change', applyFilter);
+
+  sel.addEventListener('change', e => showUnit(e.target.value));
+
+  // Restore from #hash if present
+  const hashId = location.hash.replace(/^#/, '');
+  if (hashId && byId.has(parseInt(hashId, 10))) {
+    sel.value = hashId;
+    showUnit(hashId);
+  }
 }
 
 loadData();

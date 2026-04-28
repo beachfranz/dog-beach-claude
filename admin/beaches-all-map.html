@@ -1,0 +1,930 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>All CA Beach Sources Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; font-family: 'DM Sans', system-ui, sans-serif; }
+  #map { position: absolute; inset: 0; }
+
+  .filter-panel {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 1000;
+    background: #ffffff;
+    border: 1px solid #d1dde8;
+    border-radius: 8px;
+    padding: 10px 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+    font-size: 13px;
+    color: #0f2742;
+    min-width: 240px;
+  }
+  .filter-panel h1 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
+  .filter-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 0;
+    cursor: pointer;
+  }
+  .filter-row input { margin: 0; }
+  .filter-swatch {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    box-shadow: 0 0 0 1px #0f172a;
+  }
+  .filter-label { flex: 1; }
+  .filter-count { color: #64748b; font-variant-numeric: tabular-nums; font-size: 12px; }
+  .filter-status { margin-top: 6px; padding-top: 6px; border-top: 1px solid #e2e8f0;
+                   color: #64748b; font-size: 11px; }
+
+  /* Legend — bottom-right corner */
+  .legend-panel {
+    position: absolute;
+    bottom: 16px;
+    right: 12px;
+    z-index: 1000;
+    background: #ffffff;
+    border: 1px solid #d1dde8;
+    border-radius: 8px;
+    padding: 8px 10px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+    font-size: 11px;
+    color: #0f2742;
+    line-height: 1.4;
+  }
+  .legend-panel h2 { font-size: 11px; font-weight: 600; margin: 0 0 4px;
+                     letter-spacing: 0.04em; text-transform: uppercase; color: #475569; }
+  .legend-row { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
+  .legend-dot {
+    width: 11px; height: 11px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    box-shadow: 0 0 0 1px #0f172a;
+  }
+  .legend-poly {
+    width: 14px; height: 9px;
+    flex-shrink: 0;
+    border: 1.5px solid;
+  }
+  .legend-divider { margin: 5px 0 3px; height: 1px; background: #e2e8f0; }
+
+  /* Inactive marker — semi-transparent + greyscale */
+  .beach-mk.is-inactive { filter: grayscale(1) opacity(0.45); }
+
+  /* Modal dialog for double-click → mark inactive/active */
+  .modal-overlay {
+    position: absolute; inset: 0;
+    z-index: 1500;
+    background: rgba(15, 23, 42, 0.45);
+    display: none;
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-card {
+    background: #fff;
+    border: 1px solid #d1dde8;
+    border-radius: 10px;
+    padding: 16px 18px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.30);
+    min-width: 320px;
+    max-width: 420px;
+    color: #0f2742;
+    font-size: 14px;
+  }
+  .modal-card h2 { font-size: 14px; font-weight: 600; margin: 0 0 6px; }
+  .modal-card .muted { color: #64748b; font-size: 12px; }
+  .modal-card .row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .modal-card .actions {
+    display: flex; justify-content: flex-end; gap: 8px;
+    margin-top: 14px; padding-top: 12px; border-top: 1px solid #e2e8f0;
+  }
+  .modal-card button {
+    padding: 6px 14px;
+    border-radius: 6px; border: 1px solid #d1dde8;
+    background: #f5f9fc; color: #0f2742; cursor: pointer;
+    font: inherit;
+  }
+  .modal-card button.primary { background: #0369a1; color: #fff; border-color: #0369a1; }
+  .modal-card button:hover { filter: brightness(0.96); }
+
+  /* Link-mode visual cue: crosshair cursor + button highlight */
+  body.link-mode { cursor: crosshair; }
+  body.link-mode .leaflet-clickable,
+  body.link-mode .leaflet-interactive { cursor: crosshair !important; }
+  #btn-link.active {
+    background: #db2777 !important;
+    color: #fff !important;
+    border-color: #db2777 !important;
+  }
+  .link-step {
+    margin-top: 5px; padding-top: 5px; border-top: 1px solid #e2e8f0;
+    font-size: 11px; color: #db2777; font-weight: 600;
+  }
+
+  /* Copy-to-clipboard toast — fades in on click, out after ~1.4s */
+  .copy-toast {
+    position: absolute;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1100;
+    background: #0f172a;
+    color: #fff;
+    font-size: 13px;
+    padding: 8px 14px;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.18s ease-out;
+  }
+  .copy-toast.show { opacity: 1; }
+
+  /* Per-source beach marker: white paw on a filled colored circle.
+     Half the size of the previous design. Tiny dark outline keeps the
+     pin visible against pale OSM tiles without competing with the
+     fill color. */
+  .beach-mk {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    user-select: none;
+    box-shadow: 0 0 0 1px rgba(15,23,42,0.6);
+  }
+  .beach-mk.ccc     { background: #db2777; }
+  .beach-mk.osm     { background: #ea580c; }
+  .beach-mk.usbeach { background: #9333ea; }
+
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="copy-toast" class="copy-toast"></div>
+
+<div id="modal-overlay" class="modal-overlay" onclick="if(event.target===this)closeInactiveDialog()">
+  <div class="modal-card" id="modal-card">
+    <h2>Edit point</h2>
+    <div class="muted" id="modal-id"></div>
+    <div class="muted" id="modal-operator" style="font-size:12px;line-height:1.4"></div>
+    <div class="row" style="flex-direction:column;align-items:stretch;gap:4px;">
+      <label for="modal-name" class="muted" style="font-size:12px">Name</label>
+      <input type="text" id="modal-name" maxlength="200"
+             style="font:inherit;font-size:13px;padding:5px 8px;border:1px solid #d1dde8;border-radius:4px;">
+    </div>
+    <div class="row">
+      <input type="checkbox" id="modal-inactive">
+      <label for="modal-inactive">Inactive (hide on map; exclude from working set)</label>
+    </div>
+    <div class="actions">
+      <button onclick="closeInactiveDialog()">Cancel</button>
+      <button class="primary" id="modal-ok">OK</button>
+    </div>
+  </div>
+</div>
+
+<div id="move-overlay" class="modal-overlay" onclick="if(event.target===this)cancelMoveDialog()">
+  <div class="modal-card">
+    <h2>Move point?</h2>
+    <div class="muted" id="move-id"></div>
+    <div class="row" style="font-family:monospace;font-size:12px">
+      <div>
+        <div class="muted">From:</div>
+        <div id="move-from"></div>
+        <div class="muted" style="margin-top:6px">To:</div>
+        <div id="move-to"></div>
+      </div>
+    </div>
+    <div class="actions">
+      <button onclick="cancelMoveDialog()">Cancel</button>
+      <button class="primary" id="move-ok">OK</button>
+    </div>
+  </div>
+</div>
+
+<div class="legend-panel">
+  <h2>Points</h2>
+  <div class="legend-row">
+    <span class="legend-dot" style="background:#db2777"></span>
+    <span>CCC access points</span>
+  </div>
+  <div class="legend-row">
+    <span class="legend-dot" style="background:#ea580c"></span>
+    <span>OSM beaches</span>
+  </div>
+  <div class="legend-row">
+    <span class="legend-dot" style="background:#9333ea"></span>
+    <span>us_beach_points</span>
+  </div>
+  <div class="legend-divider"></div>
+  <h2>Polygons</h2>
+  <div class="legend-row">
+    <span class="legend-poly" style="background:rgba(234,88,12,.20);border-color:#ea580c"></span>
+    <span>OSM <code>natural=beach</code> (way)</span>
+  </div>
+  <div class="legend-row">
+    <span class="legend-poly" style="background:rgba(147,51,234,.20);border-color:#9333ea"></span>
+    <span>OSM <code>natural=beach</code> (relation)</span>
+  </div>
+  <div class="legend-row">
+    <span class="legend-poly" style="background:rgba(250,204,21,.20);border-color:#facc15"></span>
+    <span>OSM <code>natural=sand</code></span>
+  </div>
+  <div class="legend-row">
+    <span style="display:inline-block;width:14px;height:0;border-top:2px solid #1e3a5f;flex-shrink:0;"></span>
+    <span>OSM <code>natural=coastline</code></span>
+  </div>
+</div>
+
+<div class="filter-panel">
+  <h1>CA Beach Sources</h1>
+  <div style="margin-bottom:8px;">
+    <select id="county-select" style="width:100%;padding:6px 8px;border:1px solid #d1dde8;border-radius:4px;font:inherit;color:#0f2742;background:#f5f9fc;">
+      <option value="">All counties</option>
+    </select>
+  </div>
+  <label class="filter-row" data-src="ccc">
+    <input type="checkbox" checked>
+    <span class="filter-swatch" style="background:#db2777"></span>
+    <span class="filter-label">CCC access points</span>
+    <span class="filter-count" id="count-ccc">…</span>
+  </label>
+  <label class="filter-row" data-src="osm">
+    <input type="checkbox" checked>
+    <span class="filter-swatch" style="background:#ea580c"></span>
+    <span class="filter-label">OSM beaches</span>
+    <span class="filter-count" id="count-osm">…</span>
+  </label>
+  <label class="filter-row" data-src="usbeach">
+    <input type="checkbox" checked>
+    <span class="filter-swatch" style="background:#9333ea"></span>
+    <span class="filter-label">us_beach_points (CA)</span>
+    <span class="filter-count" id="count-usbeach">…</span>
+  </label>
+  <div class="filter-status" id="status">loading…</div>
+  <div style="margin-top:6px; padding-top:6px; border-top:1px solid #e2e8f0;">
+    <button id="btn-link" type="button"
+            style="width:100%;padding:5px 8px;border:1px solid #d1dde8;background:#f5f9fc;border-radius:4px;cursor:pointer;font:inherit;color:#0f2742;">
+      🔗 Make link
+    </button>
+    <div id="link-step" class="link-step" style="display:none;"></div>
+  </div>
+</div>
+
+<div id="link-overlay" class="modal-overlay" onclick="if(event.target===this)cancelLinkDialog()">
+  <div class="modal-card">
+    <h2>Confirm link</h2>
+    <div class="muted">A new association record will be created.</div>
+    <div class="row" style="font-family:monospace;font-size:12px;flex-direction:column;align-items:flex-start;gap:4px;">
+      <div><span class="muted">A:</span> <span id="link-a"></span></div>
+      <div><span class="muted">B:</span> <span id="link-b"></span></div>
+      <div><span class="muted">relationship:</span>
+        <select id="link-rel" style="font:inherit;font-size:12px;padding:2px 4px;border-radius:3px;border:1px solid #d1dde8;">
+          <option value="manual_pair">manual_pair</option>
+          <option value="contained_in">contained_in (A is inside B)</option>
+          <option value="contains">contains (A surrounds B)</option>
+          <option value="duplicate_of">duplicate_of</option>
+          <option value="part_of">part_of</option>
+        </select>
+      </div>
+      <div style="margin-top:6px;">
+        <span class="muted">note (optional):</span><br>
+        <input id="link-note" type="text" maxlength="200"
+               style="width:100%;font:inherit;font-size:12px;padding:3px 6px;border-radius:3px;border:1px solid #d1dde8;">
+      </div>
+    </div>
+    <div class="actions">
+      <button onclick="cancelLinkDialog()">Cancel</button>
+      <button class="primary" id="link-ok">OK</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+const map = L.map('map').setView([36.7783, -119.4179], 6);
+L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+  maxZoom: 20,
+  attribution: '&copy; OpenStreetMap France | &copy; OpenStreetMap contributors',
+  subdomains: 'abc',
+}).addTo(map);
+
+// Plain layer groups, one per source. Marker.options.county is set at
+// add time so the dropdown filter can subset client-side.
+const layers = {
+  ccc:     L.layerGroup().addTo(map),
+  osm:     L.layerGroup().addTo(map),
+  usbeach: L.layerGroup().addTo(map),
+};
+const markersBySource = { ccc: [], osm: [], usbeach: [] };
+
+// OSM beach polygons (`geom_full`) for the currently-selected county.
+// Rebuilt on each county change via the RPC. Kept under the markers
+// in z-order so paws stay visible on top.
+let polygonLayer  = L.layerGroup().addTo(map);
+let coastlineLayer = L.layerGroup().addTo(map);
+
+
+// One icon per source. Same shape (paw on a circle), different ring
+// color so the three datasets remain visually distinct on the map.
+function makeIcon(src) {
+  return L.divIcon({
+    className:  '',
+    html:       `<div class="beach-mk ${src}"></div>`,
+    iconSize:   [14, 14],
+    iconAnchor: [7, 7],
+  });
+}
+const PAW_ICONS = {
+  ccc:     makeIcon('ccc'),
+  osm:     makeIcon('osm'),
+  usbeach: makeIcon('usbeach'),
+};
+
+async function restGetAll(path, page = 1000) {
+  const all = [];
+  for (let offset = 0; offset < 100000; offset += page) {
+    const sep = path.includes('?') ? '&' : '?';
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}${sep}offset=${offset}&limit=${page}`, {
+      headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
+    });
+    if (!r.ok) throw new Error(`REST ${r.status}: ${await r.text()}`);
+    const batch = await r.json();
+    all.push(...batch);
+    if (batch.length < page) break;
+  }
+  return all;
+}
+
+function addPoint(src, lat, lng, label, county, id, raw) {
+  const m = L.marker([lat, lng], {
+    icon: PAW_ICONS[src],
+    draggable: true,
+    autoPan: true,
+  });
+  if (label) m.bindTooltip(label, { direction: 'top', offset: [0, -6], className: 'label-marker' });
+  m.options.src = src;
+  m.options.county = county || null;
+  m.options.copy_id = id || null;
+  m.options.raw = raw || null;          // {objectid|fid|osm_type+osm_id}
+  m.options.inactive = !!(raw && raw.admin_inactive);
+  m.options.current_name = raw?.name ?? null;
+  // Re-apply class every time the marker is (re-)added to the map —
+  // Leaflet rebuilds the DOM element on each layer add/remove cycle.
+  m.on('add', () => applyInactiveStyle(m));
+  if (id) m.on('click', (e) => {
+    L.DomEvent.stopPropagation(e);
+    if (linkMode !== 'idle') {
+      captureLinkPick({ source: src, id, label: label || id });
+    } else {
+      copyToClipboard(id);
+    }
+  });
+  m.on('dblclick', (e) => {
+    L.DomEvent.stopPropagation(e);
+    L.DomEvent.preventDefault(e);
+    openInactiveDialog(m);
+  });
+  // Capture the pre-drag latlng so Cancel can revert.
+  m.on('dragstart', () => { m.options.dragOrigin = m.getLatLng(); });
+  m.on('dragend',   () => openMoveDialog(m));
+  markersBySource[src].push(m);
+}
+
+function applyInactiveStyle(m) {
+  // The icon HTML is built once; patch its class to grey out inactive.
+  const el = m.getElement && m.getElement();
+  if (!el) return;  // not on map yet — will be reapplied on next render
+  const inner = el.querySelector('.beach-mk');
+  if (inner) inner.classList.toggle('is-inactive', !!m.options.inactive);
+}
+
+let dialogTarget = null;
+function openInactiveDialog(marker) {
+  dialogTarget = marker;
+  const status = marker.options.inactive ? 'inactive' : 'active';
+  document.getElementById('modal-id').textContent =
+    `${marker.options.copy_id} · ${marker.options.src} · ${status}`;
+  const op = marker.options.raw?.operator;
+  const src = marker.options.raw?.operator_source;
+  document.getElementById('modal-operator').textContent = op
+    ? `Operator: ${op.canonical_name} (${op.level})${src ? ` · via ${src}` : ''}`
+    : 'Operator: — (unresolved)';
+  document.getElementById('modal-name').value     = marker.options.current_name || '';
+  document.getElementById('modal-inactive').checked = !!marker.options.inactive;
+  document.getElementById('modal-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('modal-name').focus(), 50);
+}
+function closeInactiveDialog() {
+  dialogTarget = null;
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+// ── Move-confirm dialog ─────────────────────────────────────────
+let moveTarget = null;
+function openMoveDialog(marker) {
+  moveTarget = marker;
+  const from = marker.options.dragOrigin;
+  const to   = marker.getLatLng();
+  document.getElementById('move-id').textContent = marker.options.copy_id || '(no id)';
+  document.getElementById('move-from').textContent = `${from.lat.toFixed(6)}, ${from.lng.toFixed(6)}`;
+  document.getElementById('move-to').textContent   = `${to.lat.toFixed(6)}, ${to.lng.toFixed(6)}`;
+  document.getElementById('move-overlay').classList.add('open');
+}
+function cancelMoveDialog() {
+  if (moveTarget && moveTarget.options.dragOrigin) {
+    moveTarget.setLatLng(moveTarget.options.dragOrigin);
+  }
+  moveTarget = null;
+  document.getElementById('move-overlay').classList.remove('open');
+}
+document.getElementById('move-ok').addEventListener('click', async () => {
+  const m = moveTarget;
+  if (!m) return cancelMoveDialog();
+  const to  = m.getLatLng();
+  const params = { p_source: m.options.src, p_lat: to.lat, p_lng: to.lng };
+  const raw = m.options.raw || {};
+  if (m.options.src === 'ccc')      params.p_objectid = raw.objectid;
+  if (m.options.src === 'usbeach')  params.p_fid      = raw.fid;
+  if (m.options.src === 'osm')   {  params.p_osm_type = raw.osm_type; params.p_osm_id = raw.osm_id; }
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/set_feature_location`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY,
+        Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(params),
+    });
+    if (!r.ok) throw new Error(`RPC ${r.status}: ${await r.text()}`);
+    const ok = await r.json();
+    if (!ok) throw new Error('row not found');
+    const toast = document.getElementById('copy-toast');
+    toast.textContent = `${m.options.copy_id} → moved`;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 1400);
+    moveTarget = null;
+    document.getElementById('move-overlay').classList.remove('open');
+  } catch (err) {
+    alert(`Move failed: ${err.message}`);
+    // On failure, revert to origin so the marker isn't visually lying.
+    cancelMoveDialog();
+  }
+});
+
+document.getElementById('modal-ok').addEventListener('click', async () => {
+  const m = dialogTarget;
+  if (!m) return closeInactiveDialog();
+  const wantName     = document.getElementById('modal-name').value.trim() || null;
+  const wantInactive = document.getElementById('modal-inactive').checked;
+  const params = {
+    p_source:   m.options.src,
+    p_name:     wantName,
+    p_inactive: wantInactive,
+  };
+  const raw = m.options.raw || {};
+  if (m.options.src === 'ccc')      params.p_objectid = raw.objectid;
+  if (m.options.src === 'usbeach')  params.p_fid      = raw.fid;
+  if (m.options.src === 'osm')   {  params.p_osm_type = raw.osm_type; params.p_osm_id = raw.osm_id; }
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/set_feature_props`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY,
+        Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(params),
+    });
+    if (!r.ok) throw new Error(`RPC ${r.status}: ${await r.text()}`);
+    const ok = await r.json();
+    if (!ok) throw new Error('row not found');
+    m.options.inactive     = wantInactive;
+    m.options.current_name = wantName;
+    applyInactiveStyle(m);
+    const toast = document.getElementById('copy-toast');
+    toast.textContent = `${m.options.copy_id} updated`;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 1400);
+  } catch (err) {
+    alert(`Update failed: ${err.message}`);
+  }
+  closeInactiveDialog();
+});
+
+// ── Make-link state machine ─────────────────────────────────────
+// linkMode: 'idle' → user clicks "Make link" → 'pickingA' → first
+// click captures A → 'pickingB' → second click captures B and opens
+// the confirm dialog. While in pickingA/pickingB, normal click
+// handlers route the click to captureLinkPick instead of running.
+let linkMode = 'idle';
+let linkA = null;
+let linkB = null;
+
+function setLinkMode(state) {
+  linkMode = state;
+  const btn  = document.getElementById('btn-link');
+  const step = document.getElementById('link-step');
+  document.body.classList.toggle('link-mode', state !== 'idle');
+  btn.classList.toggle('active', state !== 'idle');
+  if (state === 'pickingA') {
+    btn.textContent = '✕ cancel link';
+    step.style.display = '';
+    step.textContent = '1/2 · click first feature';
+  } else if (state === 'pickingB') {
+    btn.textContent = '✕ cancel link';
+    step.style.display = '';
+    step.textContent = '2/2 · click second feature';
+  } else {
+    btn.textContent = '🔗 Make link';
+    step.style.display = 'none';
+    step.textContent = '';
+  }
+}
+
+function captureLinkPick(pick) {
+  // pick = { source, id, label }
+  if (linkMode === 'pickingA') {
+    linkA = pick;
+    setLinkMode('pickingB');
+  } else if (linkMode === 'pickingB') {
+    if (linkA && pick.source === linkA.source && pick.id === linkA.id) {
+      // Same feature picked twice — ignore.
+      return;
+    }
+    linkB = pick;
+    openLinkDialog();
+  }
+}
+
+function openLinkDialog() {
+  document.getElementById('link-a').textContent = `${linkA.id} · ${linkA.label}`;
+  document.getElementById('link-b').textContent = `${linkB.id} · ${linkB.label}`;
+  document.getElementById('link-rel').value = 'manual_pair';
+  document.getElementById('link-note').value = '';
+  document.getElementById('link-overlay').classList.add('open');
+}
+
+function cancelLinkDialog() {
+  document.getElementById('link-overlay').classList.remove('open');
+  linkA = null; linkB = null;
+  setLinkMode('idle');
+}
+
+document.getElementById('btn-link').addEventListener('click', () => {
+  if (linkMode === 'idle') {
+    linkA = null; linkB = null;
+    setLinkMode('pickingA');
+  } else {
+    // user pressed cancel
+    linkA = null; linkB = null;
+    setLinkMode('idle');
+  }
+});
+
+document.getElementById('link-ok').addEventListener('click', async () => {
+  const rel  = document.getElementById('link-rel').value;
+  const note = document.getElementById('link-note').value.trim() || null;
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/create_feature_association`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY,
+        Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        p_a_source: linkA.source, p_a_id: linkA.id,
+        p_b_source: linkB.source, p_b_id: linkB.id,
+        p_relationship: rel, p_note: note,
+      }),
+    });
+    if (!r.ok) throw new Error(`RPC ${r.status}: ${await r.text()}`);
+    const newId = await r.json();
+    const toast = document.getElementById('copy-toast');
+    toast.textContent = newId
+      ? `linked: ${linkA.id} ↔ ${linkB.id}`
+      : `link already exists`;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 1600);
+  } catch (err) {
+    alert(`Link failed: ${err.message}`);
+  }
+  cancelLinkDialog();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && linkMode !== 'idle') cancelLinkDialog();
+});
+
+function copyToClipboard(text) {
+  const toast = document.getElementById('copy-toast');
+  const finish = (msg) => {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 1400);
+  };
+  try {
+    navigator.clipboard.writeText(text).then(
+      () => finish(`copied: ${text}`),
+      ()  => finish('copy failed'),
+    );
+  } catch {
+    // Older browsers without async clipboard — silent fall-through.
+    finish('copy not supported');
+  }
+}
+
+async function loadAll() {
+  const status = document.getElementById('status');
+  status.textContent = 'loading three sources…';
+
+  // ── CCC access points ───────────────────────────────────────────
+  // Pull all non-archived rows. No working_set filter; user wants the
+  // full picture.
+  const cccPromise = restGetAll(
+    'ccc_access_points?select=objectid,name,latitude,longitude,archived,county_name_tiger,admin_inactive,inferred_type,managing_agency_source,operator:operator_id(canonical_name,level,slug)'
+    + '&latitude=not.is.null&longitude=not.is.null'
+    + '&or=(archived.is.null,archived.neq.Yes)'
+    + '&inferred_type=eq.named_beach'
+  ).then(rows => {
+    let n = 0;
+    for (const r of rows) {
+      const typeTag = r.inferred_type ? ` ${r.inferred_type}` : '';
+      addPoint('ccc', r.latitude, r.longitude,
+               `${r.name || '(unnamed)'} [CCC${typeTag} #${r.objectid}]`,
+               r.county_name_tiger,
+               `CCC #${r.objectid}`,
+               { objectid: r.objectid, admin_inactive: r.admin_inactive, name: r.name,
+                 operator: r.operator, operator_source: r.managing_agency_source });
+      n++;
+    }
+    document.getElementById('count-ccc').textContent = n.toLocaleString();
+    return n;
+  });
+
+  // ── OSM beaches (beach + dog_friendly_beach, no parks) ──────────
+  const osmPromise = restGetAll(
+    'osm_features?select=osm_type,osm_id,name,latitude,longitude,feature_type,county_name_tiger,admin_inactive,managing_agency_source,operator:operator_id(canonical_name,level,slug)'
+    + '&feature_type=in.(beach,dog_friendly_beach)'
+    + '&latitude=not.is.null&longitude=not.is.null'
+  ).then(rows => {
+    let n = 0;
+    for (const r of rows) {
+      addPoint('osm', r.latitude, r.longitude,
+               `${r.name || '(unnamed)'} [OSM ${r.osm_type}/${r.osm_id}]`,
+               r.county_name_tiger,
+               `OSM ${r.osm_type}/${r.osm_id}`,
+               { osm_type: r.osm_type, osm_id: r.osm_id, admin_inactive: r.admin_inactive, name: r.name,
+                 operator: r.operator, operator_source: r.managing_agency_source });
+      n++;
+    }
+    document.getElementById('count-osm').textContent = n.toLocaleString();
+    return n;
+  });
+
+  // ── us_beach_points (CA only) ───────────────────────────────────
+  // Schema has no latitude/longitude columns — coords live inside geom.
+  // Use PostgREST's PostGIS shim: ST_X(geom), ST_Y(geom) via select.
+  // Filter to CA via the state column for a clean cut.
+  const usPromise = restGetAll(
+    'us_beach_points?select=fid,name,state,raw_wkt,county_name_tiger,admin_inactive,managing_agency_source,operator:operator_id(canonical_name,level,slug)'
+    + '&state=eq.CA'
+  ).then(rows => {
+    let n = 0, skipped = 0;
+    for (const r of rows) {
+      // raw_wkt is "POINT(lon lat)" — parse it.
+      const m = (r.raw_wkt || '').match(/POINT\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)/i);
+      if (!m) { skipped++; continue; }
+      const lng = parseFloat(m[1]), lat = parseFloat(m[2]);
+      if (!isFinite(lat) || !isFinite(lng)) { skipped++; continue; }
+      addPoint('usbeach', lat, lng,
+               `${r.name || '(unnamed)'} [us_beach #${r.fid}]`,
+               r.county_name_tiger,
+               `us_beach #${r.fid}`,
+               { fid: r.fid, admin_inactive: r.admin_inactive, name: r.name,
+                 operator: r.operator, operator_source: r.managing_agency_source });
+      n++;
+    }
+    document.getElementById('count-usbeach').textContent = n.toLocaleString();
+    if (skipped) console.warn(`us_beach_points: skipped ${skipped} rows without parseable WKT`);
+    return n;
+  });
+
+  try {
+    const [cN, oN, uN] = await Promise.all([cccPromise, osmPromise, usPromise]);
+    populateCountyDropdown();
+    // Default to Orange county so the page lands on a useful local
+    // view instead of CA-wide. Falls through gracefully if Orange isn't
+    // present in the dropdown options.
+    const sel = document.getElementById('county-select');
+    if ([...sel.options].some(o => o.value === 'Orange')) sel.value = 'Orange';
+    applyFilters();
+    loadCountyPolygons();
+    loadCoastline();
+    // Initial zoom: Huntington Beach (covers HB City, HB Dog Beach, and
+    // Bolsa Chica). Picking a county from the dropdown later still
+    // reframes via zoomToCountySelection().
+    map.setView([33.6700, -118.0050], 13);
+    status.textContent = `${(cN + oN + uN).toLocaleString()} points · pick a county to focus`;
+  } catch (err) {
+    status.textContent = `error: ${err.message}`;
+    console.error(err);
+  }
+}
+
+function applyFilters() {
+  // Two filters compose: per-source checkbox + selected county.
+  // "All counties" = no county filter; otherwise county must match.
+  const wantCounty = (document.getElementById('county-select').value || '').trim();
+  for (const row of document.querySelectorAll('.filter-row')) {
+    const src    = row.dataset.src;
+    const srcOn  = row.querySelector('input').checked;
+    layers[src].clearLayers();
+    if (!srcOn) continue;
+    for (const m of markersBySource[src]) {
+      if (wantCounty && (m.options.county || '') !== wantCounty) continue;
+      layers[src].addLayer(m);
+    }
+  }
+}
+
+// Build the county dropdown from the union of county values across the
+// three sources. Sorted alphabetically; "All" stays at the top.
+function populateCountyDropdown() {
+  const set = new Set();
+  for (const src of ['ccc','osm','usbeach']) {
+    for (const m of markersBySource[src]) {
+      const c = (m.options.county || '').trim();
+      if (c) set.add(c);
+    }
+  }
+  const sel = document.getElementById('county-select');
+  for (const c of [...set].sort()) {
+    const opt = document.createElement('option');
+    opt.value = c;
+    opt.textContent = c;
+    sel.appendChild(opt);
+  }
+}
+document.querySelectorAll('.filter-row input').forEach(el => {
+  el.addEventListener('change', applyFilters);
+});
+document.getElementById('county-select').addEventListener('change', () => {
+  applyFilters();
+  loadCountyPolygons();
+  loadCoastline();
+  zoomToCountySelection();
+});
+
+// Fetch + render OSM `natural=coastline` LineStrings whose geometry
+// intersects the selected county polygon. Drawn as a thin navy line
+// — visual ground-truth for "where the actual waterline is."
+async function loadCoastline() {
+  coastlineLayer.clearLayers();
+  const wantCounty = (document.getElementById('county-select').value || '').trim();
+  if (!wantCounty) return;
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/osm_coastline_in_county`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY,
+        Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_county: wantCounty }),
+    });
+    if (!r.ok) throw new Error(`RPC ${r.status}: ${await r.text()}`);
+    const rows = await r.json();
+    const features = rows
+      .filter(p => p.geom_geojson)
+      .map(p => ({
+        type: 'Feature',
+        properties: { name: p.name || '(coastline)', osm_id: p.osm_id },
+        geometry: p.geom_geojson,
+      }));
+    if (features.length === 0) return;
+    const layer = L.geoJSON({ type: 'FeatureCollection', features }, {
+      style: { color: '#1e3a5f', weight: 1.8, opacity: 0.85 },
+      interactive: false,
+    });
+    coastlineLayer.addLayer(layer);
+  } catch (err) {
+    console.error('coastline fetch failed:', err);
+  }
+}
+
+// Fetch + render OSM beach polygons (geom_full) for the selected
+// county. "All counties" clears the polygon layer (we don't render
+// statewide — too many polygons, too laggy).
+async function loadCountyPolygons() {
+  polygonLayer.clearLayers();
+  const wantCounty = (document.getElementById('county-select').value || '').trim();
+  if (!wantCounty) return;
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/osm_beach_polygons_in_county`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY,
+        Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_county: wantCounty }),
+    });
+    if (!r.ok) throw new Error(`RPC ${r.status}: ${await r.text()}`);
+    const polys = await r.json();
+    const features = polys
+      .filter(p => p.geom_geojson)
+      .map(p => ({
+        type: 'Feature',
+        properties: {
+          name:         p.name || '(unnamed)',
+          osm_id:       p.osm_id,
+          osm_type:     p.osm_type,
+          feature_type: p.feature_type,
+        },
+        geometry: p.geom_geojson,  // GeoJSON Polygon or MultiPolygon
+      }));
+    if (features.length === 0) return;
+    const layer = L.geoJSON({ type: 'FeatureCollection', features }, {
+      style: (feature) => {
+        // Color rules:
+        //   - sand/shingle → yellow (matches OSM Carto basemap)
+        //   - beach via OSM RELATION (multipolygon) → transparent purple
+        //   - beach via OSM WAY (single polygon) → orange
+        const ft = feature.properties.feature_type;
+        const isBeach = ['beach','dog_friendly_beach'].includes(ft);
+        let color;
+        if (!isBeach)                              color = '#facc15';
+        else if (feature.properties.osm_type === 'relation') color = '#9333ea';
+        else                                       color = '#ea580c';
+        return {
+          color,
+          weight: 1.5,
+          fillColor: color,
+          fillOpacity: 0.20,
+        };
+      },
+      onEachFeature: (feature, sub) => {
+        const t = feature.properties.feature_type;
+        const idStr = `OSM ${feature.properties.osm_type}/${feature.properties.osm_id}`;
+        const tip = `${feature.properties.name} [${t}] · ${idStr}`;
+        sub.bindTooltip(tip, { sticky: true, className: 'label-marker' });
+        // Click polygon → zoom + copy ID, OR capture as link target if
+        // in link mode.
+        sub.on('click', (e) => {
+          L.DomEvent.stopPropagation(e);
+          if (linkMode !== 'idle') {
+            captureLinkPick({
+              source: 'osm_poly',
+              id:     idStr,
+              label:  feature.properties.name || '(unnamed polygon)',
+            });
+          } else {
+            map.fitBounds(sub.getBounds(), { padding: [40, 40], maxZoom: 16 });
+            copyToClipboard(idStr);
+          }
+        });
+      },
+    });
+    polygonLayer.addLayer(layer);
+  } catch (err) {
+    console.error('beach polygons fetch failed:', err);
+  }
+}
+
+// Frame the map on the selected county (using whatever's currently
+// visible after source toggles + county filter). "All counties" rolls
+// back to the CA-wide initial view.
+function zoomToCountySelection() {
+  const wantCounty = (document.getElementById('county-select').value || '').trim();
+  if (!wantCounty) {
+    map.setView([36.7783, -119.4179], 6);
+    return;
+  }
+  const bounds = L.latLngBounds([]);
+  let n = 0;
+  for (const src of ['ccc','osm','usbeach']) {
+    if (!document.querySelector(`.filter-row[data-src="${src}"] input`).checked) continue;
+    for (const m of markersBySource[src]) {
+      if ((m.options.county || '') === wantCounty) {
+        bounds.extend(m.getLatLng());
+        n++;
+      }
+    }
+  }
+  if (n > 0) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 });
+}
+
+loadAll();
+</script>
+
+</body>
+</html>

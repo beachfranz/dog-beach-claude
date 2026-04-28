@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OSM Dog Features Map (CA)</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; font-family: 'DM Sans', system-ui, sans-serif; }
+  #map { position: absolute; inset: 0; }
+
+  /* Filter panel — top-right, sits on top of the map */
+  .filter-panel {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 1000;
+    background: #ffffff;
+    border: 1px solid #d1dde8;
+    border-radius: 8px;
+    padding: 10px 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+    font-size: 13px;
+    color: #0f2742;
+    min-width: 240px;
+  }
+  .filter-panel h1 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
+  .filter-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 0;
+    cursor: pointer;
+  }
+  .filter-row input { margin: 0; }
+  .filter-swatch {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    box-shadow: 0 0 0 1px #0f172a;
+  }
+  .filter-emoji { font-size: 14px; line-height: 1; width: 18px; text-align: center; }
+  .filter-label { flex: 1; }
+  .filter-count { color: #64748b; font-variant-numeric: tabular-nums; font-size: 12px; }
+  .filter-actions {
+    display: flex; gap: 6px;
+    margin-top: 8px; padding-top: 8px;
+    border-top: 1px solid #e2e8f0;
+    font-size: 11px;
+  }
+  .filter-actions button {
+    flex: 1; padding: 4px 8px;
+    border: 1px solid #d1dde8; background: #f5f9fc;
+    border-radius: 4px; cursor: pointer;
+    color: #0f2742;
+  }
+  .filter-actions button:hover { background: #e8eef5; }
+  .filter-status { margin-top: 6px; color: #64748b; font-size: 11px; }
+
+  /* Per-feature_type marker — emoji on a colored dot. Same colors as
+     location-editor.html for visual continuity. */
+  .osm-mk {
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    color: #fff;
+    font-size: 13px;
+    line-height: 24px;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
+    box-shadow: 0 0 0 1px #0f172a;
+  }
+  .osm-mk.dog_park           { background: rgba(22, 163, 74, 0.90); }   /* hunter green */
+  .osm-mk.dog_friendly_park  { background: rgba(132, 204, 22, 0.90); }  /* lime */
+  .osm-mk.dog_friendly_beach { background: rgba(8, 145, 178, 0.95); }   /* teal */
+  .osm-mk.park               { background: rgba(100, 116, 139, 0.85); } /* slate */
+  .osm-mk.beach              { background: rgba(217, 119, 6,  0.90); }  /* sand */
+
+  /* Cluster bubble — color-coded per feature_type. Built via
+     iconCreateFunction below. */
+  .osm-cluster {
+    border-radius: 50%;
+    color: #fff;
+    font-weight: 600;
+    text-align: center;
+    box-shadow: 0 0 0 4px rgba(255,255,255,0.65), 0 0 0 5px #0f172a;
+    line-height: 30px;
+  }
+  .osm-cluster.dog_park           { background: rgba(22, 163, 74, 0.85); }
+  .osm-cluster.dog_friendly_park  { background: rgba(132, 204, 22, 0.85); }
+  .osm-cluster.dog_friendly_beach { background: rgba(8, 145, 178, 0.9);  }
+  .osm-cluster.park               { background: rgba(100, 116, 139, 0.8); }
+  .osm-cluster.beach              { background: rgba(217, 119, 6,  0.85); }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="filter-panel">
+  <h1>OSM Features (CA)</h1>
+  <label class="filter-row" data-type="dog_park">
+    <input type="checkbox" checked>
+    <span class="filter-swatch" style="background:rgba(22,163,74,.9)"></span>
+    <span class="filter-emoji">🦴</span>
+    <span class="filter-label">Dog Park</span>
+    <span class="filter-count" id="count-dog_park">…</span>
+  </label>
+  <label class="filter-row" data-type="dog_friendly_park">
+    <input type="checkbox" checked>
+    <span class="filter-swatch" style="background:rgba(132,204,22,.9)"></span>
+    <span class="filter-emoji">🐕</span>
+    <span class="filter-label">Dog-Friendly Park</span>
+    <span class="filter-count" id="count-dog_friendly_park">…</span>
+  </label>
+  <label class="filter-row" data-type="dog_friendly_beach">
+    <input type="checkbox" checked>
+    <span class="filter-swatch" style="background:rgba(8,145,178,.95)"></span>
+    <span class="filter-emoji">🐕</span>
+    <span class="filter-label">Dog-Friendly Beach</span>
+    <span class="filter-count" id="count-dog_friendly_beach">…</span>
+  </label>
+  <label class="filter-row" data-type="beach">
+    <input type="checkbox" checked>
+    <span class="filter-swatch" style="background:rgba(217,119,6,.9)"></span>
+    <span class="filter-emoji">🏖️</span>
+    <span class="filter-label">Beach (any)</span>
+    <span class="filter-count" id="count-beach">…</span>
+  </label>
+  <label class="filter-row" data-type="park">
+    <input type="checkbox">
+    <span class="filter-swatch" style="background:rgba(100,116,139,.85)"></span>
+    <span class="filter-emoji">🌳</span>
+    <span class="filter-label">Park (any)</span>
+    <span class="filter-count" id="count-park">…</span>
+  </label>
+  <div class="filter-actions">
+    <button id="btn-all">All</button>
+    <button id="btn-none">None</button>
+    <button id="btn-dogs">Dogs only</button>
+  </div>
+  <div class="filter-status" id="status">loading…</div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+// Per-feature_type symbol + display label.
+const TYPE_META = {
+  dog_park:           { emoji: '🦴', label: 'Dog Park' },
+  dog_friendly_park:  { emoji: '🐕', label: 'Dog-Friendly Park' },
+  dog_friendly_beach: { emoji: '🐕', label: 'Dog-Friendly Beach' },
+  beach:              { emoji: '🏖️', label: 'Beach' },
+  park:               { emoji: '🌳', label: 'Park' },
+};
+
+// California-wide initial view.
+const map = L.map('map').setView([37.0, -119.5], 6);
+// OSM France serves the standard OSM Carto style from independent
+// infrastructure; our network blocks tile.openstreetmap.org but
+// historically not the .fr mirror.
+L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+  maxZoom: 20,
+  attribution: '&copy; OpenStreetMap France | &copy; OpenStreetMap contributors',
+  subdomains: 'abc',
+}).addTo(map);
+
+// One MarkerClusterGroup per feature_type. Toggle via filter checkboxes.
+const groups = {};
+for (const t of Object.keys(TYPE_META)) {
+  groups[t] = L.markerClusterGroup({
+    chunkedLoading: true,
+    chunkInterval: 80,
+    showCoverageOnHover: false,
+    spiderfyOnMaxZoom: true,
+    maxClusterRadius: 60,
+    iconCreateFunction: (cluster) => {
+      const n = cluster.getChildCount();
+      const size = n < 10 ? 30 : n < 100 ? 36 : n < 500 ? 42 : 48;
+      return L.divIcon({
+        html: `<div class="osm-cluster ${t}" style="width:${size}px;height:${size}px;line-height:${size}px;font-size:${n < 10 ? 12 : n < 100 ? 13 : 14}px;">${n}</div>`,
+        className: '',
+        iconSize: [size, size],
+      });
+    },
+  });
+}
+
+async function restGetAll(path, page = 1000) {
+  const all = [];
+  for (let offset = 0; offset < 100000; offset += page) {
+    const sep = path.includes('?') ? '&' : '?';
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}${sep}offset=${offset}&limit=${page}`, {
+      headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
+    });
+    if (!r.ok) throw new Error(`REST ${r.status}: ${await r.text()}`);
+    const batch = await r.json();
+    all.push(...batch);
+    if (batch.length < page) break;
+  }
+  return all;
+}
+
+function makeMarker(p) {
+  const meta = TYPE_META[p.feature_type] ?? { emoji: '?', label: p.feature_type };
+  const icon = L.divIcon({
+    className:  '',
+    html:       `<div class="osm-mk ${p.feature_type}">${meta.emoji}</div>`,
+    iconSize:   [24, 24],
+    iconAnchor: [12, 12],
+  });
+  const m = L.marker([p.latitude, p.longitude], { icon });
+  const tipBits = [
+    p.name || '(unnamed)',
+    `${meta.label}${p.dog_status ? ` · ${p.dog_status}` : ''}`,
+    p.city ? p.city : null,
+  ].filter(Boolean);
+  m.bindTooltip(tipBits.join(' — '), {
+    direction: 'top', offset: [0, -10], className: 'label-marker',
+  });
+  m.on('click', (e) => {
+    L.DomEvent.stopPropagation(e);
+    window.open(`https://www.openstreetmap.org/${p.osm_type}/${p.osm_id}`, '_blank', 'noopener');
+  });
+  return m;
+}
+
+const counts = { dog_park:0, dog_friendly_park:0, dog_friendly_beach:0, beach:0, park:0 };
+
+(async () => {
+  const status = document.getElementById('status');
+  status.textContent = 'fetching osm_features…';
+  try {
+    const rows = await restGetAll(
+      'osm_features?select=osm_type,osm_id,feature_type,dog_status,name,latitude,longitude,city'
+      + '&latitude=not.is.null&longitude=not.is.null'
+    );
+    status.textContent = `building ${rows.length.toLocaleString()} markers…`;
+
+    // Bucket markers by type so we can stage adds via chunkedLoading.
+    const byType = {};
+    for (const r of rows) {
+      counts[r.feature_type] = (counts[r.feature_type] || 0) + 1;
+      (byType[r.feature_type] ??= []).push(makeMarker(r));
+    }
+    for (const [t, ms] of Object.entries(byType)) {
+      groups[t].addLayers(ms);
+    }
+    // Wire counts into the filter panel.
+    for (const [t, n] of Object.entries(counts)) {
+      const el = document.getElementById(`count-${t}`);
+      if (el) el.textContent = n.toLocaleString();
+    }
+
+    syncLayersFromCheckboxes();
+    status.textContent = `${rows.length.toLocaleString()} features loaded`;
+  } catch (err) {
+    status.textContent = `error: ${err.message}`;
+    console.error(err);
+  }
+})();
+
+// Filter wiring — checkboxes drive which cluster groups are on the map.
+function syncLayersFromCheckboxes() {
+  let visible = 0;
+  for (const row of document.querySelectorAll('.filter-row')) {
+    const t  = row.dataset.type;
+    const on = row.querySelector('input').checked;
+    if (on) {
+      if (!map.hasLayer(groups[t])) groups[t].addTo(map);
+      visible += counts[t] || 0;
+    } else {
+      if (map.hasLayer(groups[t])) map.removeLayer(groups[t]);
+    }
+  }
+  const status = document.getElementById('status');
+  if (status && status.textContent.endsWith(' features loaded')) {
+    status.textContent = `${visible.toLocaleString()} features visible`;
+  }
+}
+document.querySelectorAll('.filter-row input').forEach(el => {
+  el.addEventListener('change', syncLayersFromCheckboxes);
+});
+
+// Quick-action buttons.
+function setAll(state) {
+  document.querySelectorAll('.filter-row input').forEach(el => { el.checked = state; });
+  syncLayersFromCheckboxes();
+}
+document.getElementById('btn-all').addEventListener('click',  () => setAll(true));
+document.getElementById('btn-none').addEventListener('click', () => setAll(false));
+document.getElementById('btn-dogs').addEventListener('click', () => {
+  document.querySelectorAll('.filter-row').forEach(row => {
+    row.querySelector('input').checked = row.dataset.type.startsWith('dog_');
+  });
+  syncLayersFromCheckboxes();
+});
+</script>
+
+</body>
+</html>

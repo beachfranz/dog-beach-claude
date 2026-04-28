@@ -29,18 +29,44 @@ FIELDS = ["STATEFP", "PLACEFP", "GEOID", "NAME", "NAMELSAD",
           "INTPTLAT", "INTPTLON"]
 
 
+def _signed_area(ring):
+    # Shoelace on raw shapefile (lon, lat) coords. Sign tells outer vs hole:
+    # ESRI convention is outer rings CW (negative), inner rings CCW (positive).
+    s = 0.0
+    n = len(ring)
+    for i in range(n - 1):
+        x1, y1 = ring[i]
+        x2, y2 = ring[i + 1]
+        s += x1 * y2 - x2 * y1
+    return s / 2.0
+
+
 def shape_to_polygon_geojson(shape, transformer):
     if shape.shapeType not in (5, 15, 25):
         return None
     points = shape.points
     parts  = list(shape.parts) + [len(points)]
-    rings  = []
+    polygons = []  # list of [outer_ring, *holes]
     for i in range(len(parts) - 1):
         raw = points[parts[i]:parts[i+1]]
         if len(raw) < 4:
             continue
-        rings.append([[*transformer.transform(x, y)] for x, y in raw])
-    return {"type": "Polygon", "coordinates": rings} if rings else None
+        projected = [[*transformer.transform(x, y)] for x, y in raw]
+        if _signed_area(raw) < 0:
+            # outer ring → start a new polygon
+            polygons.append([projected])
+        else:
+            # inner ring → attach to the most recent outer
+            if polygons:
+                polygons[-1].append(projected)
+            else:
+                # orphan hole with no preceding outer; treat as outer to be safe
+                polygons.append([projected])
+    if not polygons:
+        return None
+    if len(polygons) == 1:
+        return {"type": "Polygon", "coordinates": polygons[0]}
+    return {"type": "MultiPolygon", "coordinates": polygons}
 
 
 def run_sql_file(path):

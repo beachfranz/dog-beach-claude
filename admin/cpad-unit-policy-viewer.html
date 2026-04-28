@@ -245,8 +245,9 @@
         <option value="">— all —</option>
       </select>
 
-      <label for="unit-select">Unit:</label>
-      <select id="unit-select" style="flex:1; min-width: 320px;">
+      <label for="unit-search">Unit:</label>
+      <input id="unit-search" type="text" placeholder="type to filter unit names" style="flex:1; min-width: 220px;">
+      <select id="unit-select" style="flex:1; min-width: 280px;" size="1">
         <option value="">— loading —</option>
       </select>
     </div>
@@ -457,14 +458,8 @@ async function loadData() {
   const filtered = (whitelist ? rows.filter(r => whitelist.has(r.cpad_unit_id)) : rows)
     .map(r => ({ ...r, _layer: layerByUnit.get(r.cpad_unit_id) || '(no layer)' }));
 
-  // Sort: classified rules first, then unknown/null; alphabetical within each
-  const ruleOrder = { 'yes': 0, 'restricted': 1, 'no': 2, 'unknown': 3 };
-  filtered.sort((a, b) => {
-    const ra = ruleOrder[a.dogs_allowed] ?? 4;
-    const rb = ruleOrder[b.dogs_allowed] ?? 4;
-    if (ra !== rb) return ra - rb;
-    return (a.unit_name || '').localeCompare(b.unit_name || '');
-  });
+  // Sort alphabetically by unit name
+  filtered.sort((a, b) => (a.unit_name || '').localeCompare(b.unit_name || ''));
 
   const tally = filtered.reduce((acc, r) => {
     const k = r.dogs_allowed || 'null';
@@ -476,9 +471,10 @@ async function loadData() {
     .map(k => `${tally[k]} ${k}`).join(' · ');
   document.getElementById('summary').textContent = `${filtered.length} units — ${tallyStr}`;
 
-  const sel    = document.getElementById('unit-select');
-  const opSel  = document.getElementById('op-select');
-  const typeSel= document.getElementById('type-select');
+  const sel       = document.getElementById('unit-select');
+  const searchIn  = document.getElementById('unit-search');
+  const opSel     = document.getElementById('op-select');
+  const typeSel   = document.getElementById('type-select');
   const ruleEmoji = { yes: '✓', restricted: '~', no: '✗', unknown: '?' };
   const escOpt = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');
 
@@ -520,8 +516,12 @@ async function loadData() {
 
   function rebuildUnitDropdown() {
     const visible = visibleAfterTypeAndOp();
-    sel.innerHTML = `<option value="">— pick a unit (${visible.length}) —</option>` +
-      visible.map(r => {
+    const q = (searchIn.value || '').toLowerCase().trim();
+    const matched = q
+      ? visible.filter(r => (r.unit_name || '').toLowerCase().includes(q))
+      : visible;
+    sel.innerHTML = `<option value="">— pick a unit (${matched.length} of ${visible.length}) —</option>` +
+      matched.map(r => {
         const tag = ruleEmoji[r.dogs_allowed] || '·';
         const name = escOpt(r.unit_name || `unit ${r.cpad_unit_id}`);
         return `<option value="${r.cpad_unit_id}">${tag}  ${name}</option>`;
@@ -559,6 +559,9 @@ async function loadData() {
     rebuildUnitDropdown();
     sel.value = '';
     showUnit('');
+  });
+  searchIn.addEventListener('input', () => {
+    rebuildUnitDropdown();
   });
   sel.addEventListener('change', e => showUnit(e.target.value));
 

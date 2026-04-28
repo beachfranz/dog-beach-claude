@@ -49,7 +49,6 @@
   <span class="county" id="county-label">— loading —</span>
   <span id="legend">
     <span><span class="swatch" style="background:#fbbf24"></span>beach</span>
-    <span><span class="swatch" style="background:#fde68a"></span>sand</span>
     <span><span class="swatch" style="background:#a78bfa"></span>dog_friendly_beach</span>
     <span style="margin-left:14px;">CCC:</span>
     <span><span class="swatch" style="background:#22c55e;border-radius:50%;"></span>yes</span>
@@ -95,9 +94,10 @@ L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
   const tStr = ['beach','sand','dog_friendly_beach'].filter(k=>tally[k]).map(k => `${tally[k]} ${k}`).join(' · ');
   document.getElementById('status').textContent = `${rows.length} polygons — ${tStr}`;
 
-  const features = rows.filter(r => r.geom_json).map(r => ({
-    type: 'Feature', geometry: r.geom_json, properties: r,
-  }));
+  // Hide sand polygons — only render beach + dog_friendly_beach
+  const features = rows
+    .filter(r => r.geom_json && r.feature_type !== 'sand')
+    .map(r => ({ type: 'Feature', geometry: r.geom_json, properties: r }));
 
   const layer = L.geoJSON(features, {
     style: f => {

@@ -46,14 +46,14 @@ Deno.serve(async (req: Request) => {
       .lt("hour", new Date(Date.now() - 86_400_000).toISOString());
   }
 
-  let body: { location_id?: string; question?: string; conversation_history?: ConversationTurn[] };
+  let body: { location_id?: string; question?: string; conversation_history?: ConversationTurn[]; local_date?: string };
   try {
     body = await req.json();
   } catch {
     return json({ error: "Invalid JSON body" }, 400);
   }
 
-  const { location_id, question, conversation_history = [] } = body;
+  const { location_id, question, conversation_history = [], local_date } = body;
 
   if (!location_id || !question) {
     return json({ error: "location_id and question are required" }, 400);
@@ -61,7 +61,11 @@ Deno.serve(async (req: Request) => {
   try {
     let systemPrompt: string;
 
-    if (isComparativeQuestion(question)) {
+    // local_date scopes the chat to a single beach + day (used by detail.html).
+    // Comparative-question routing is bypassed: when the user is on a specific
+    // day's detail page, they want answers about THAT day, not "go to a
+    // different beach."
+    if (isComparativeQuestion(question) && !local_date) {
       // ── Cross-beach mode: summary data for all beaches ──────────────
       // All beaches are in California — use Pacific time for "today"
       const todayPacific = localDateForTimezone(new Date(), "America/Los_Angeles");
@@ -108,32 +112,36 @@ Deno.serve(async (req: Request) => {
         hour: "numeric", minute: "2-digit", hour12: true,
       }).format(nowUtc);
 
+      // Scope: if local_date is provided, fetch only that one day. Otherwise
+      // fetch the next 7 days starting today.
+      const dayQuery = supabase
+        .from("beach_day_recommendations")
+        .select("*")
+        .eq("location_id", location_id);
+      const hourQuery = supabase
+        .from("beach_day_hourly_scores")
+        .select("local_date, local_hour, hour_label, hour_status, hour_score, tide_height, wind_speed, temp_air, precip_chance, uv_index, busyness_category, is_in_best_window, is_candidate_window, tide_status, wind_status, crowd_status, rain_status, temp_status, uv_status")
+        .eq("location_id", location_id);
+
       const [{ data: days, error: daysErr }, { data: hours, error: hoursErr }] = await Promise.all([
-        supabase
-          .from("beach_day_recommendations")
-          .select("*")
-          .eq("location_id", location_id)
-          .gte("local_date", today)
-          .order("local_date", { ascending: true })
-          .limit(7),
-        supabase
-          .from("beach_day_hourly_scores")
-          .select("local_date, local_hour, hour_label, hour_status, hour_score, tide_height, wind_speed, temp_air, precip_chance, uv_index, busyness_category, is_in_best_window, is_candidate_window, tide_status, wind_status, crowd_status, rain_status, temp_status, uv_status")
-          .eq("location_id", location_id)
-          .gte("local_date", today)
-          .order("local_date", { ascending: true })
-          .order("local_hour", { ascending: true }),
+        local_date
+          ? dayQuery.eq("local_date", local_date)
+          : dayQuery.gte("local_date", today).order("local_date", { ascending: true }).limit(7),
+        local_date
+          ? hourQuery.eq("local_date", local_date).order("local_hour", { ascending: true })
+          : hourQuery.gte("local_date", today).order("local_date", { ascending: true }).order("local_hour", { ascending: true }),
       ]);
 
       if (daysErr) throw new Error(`Failed to load daily data: ${daysErr.message}`);
       if (hoursErr) throw new Error(`Failed to load hourly data: ${hoursErr.message}`);
 
-      // Filter out past hours for today — Scout should only see what's ahead
+      // Filter out past hours when the scoped day IS today.
+      const filterDate = local_date ?? today;
       const remainingHours = (hours ?? []).filter(h =>
-        h.local_date !== today || Number(h.local_hour) >= currentLocalHour
+        h.local_date !== filterDate || Number(h.local_hour) >= currentLocalHour
       );
 
-      systemPrompt = buildSystemPrompt(beach, days ?? [], remainingHours, currentTimeLabel);
+      systemPrompt = buildSystemPrompt(beach, days ?? [], remainingHours, currentTimeLabel, local_date ?? null);
     }
 
     const answer = await callAnthropic(systemPrompt, conversation_history, question);
@@ -159,6 +167,7 @@ function buildSystemPrompt(
   days: Record<string, unknown>[],
   hours: Record<string, unknown>[],
   currentTimeLabel?: string,
+  scopedDate: string | null = null,
 ): string {
   const hoursByDate = new Map<string, Record<string, unknown>[]>();
   for (const h of hours) {
@@ -267,13 +276,17 @@ ${beach.website ? `Website: ${beach.website}` : ""}
 Timezone: ${beach.timezone}
 
 ${currentTimeLabel ? `Current local time: ${currentTimeLabel} — only today's remaining hours are shown in the hourly data below.` : ""}
-7-DAY FORECAST DATA:
+${scopedDate
+  ? `SCOPE: This conversation is about ${scopedDate} ONLY. The data below is for that single day. If the user asks about another date, the weather a different day, or whether they should go on a different day, say you can only speak to ${scopedDate} on this screen and tell them to switch to that day's view.\n\nFORECAST DATA (single day):`
+  : `7-DAY FORECAST DATA:`}
 ${daysContext}
 
 Rules:
 - Answer questions about conditions, timing, crowds, tides, weather using the data above
 - Reference specific hours, dates, and numbers when relevant — but weave them in naturally, don't just list them
-- If the user asks about a day not in the data, say you only have 7 days ahead
+${scopedDate
+  ? `- DO NOT mention or recommend any other day. Only ${scopedDate}.`
+  : `- If the user asks about a day not in the data, say you only have 7 days ahead`}
 - Keep answers to 2 sentences max, 3 only if a third sentence meaningfully adds context to your answer
 - Lead with a direct answer to the question — no preamble, no restating the question
 - No emojis, no markdown formatting, plain text only

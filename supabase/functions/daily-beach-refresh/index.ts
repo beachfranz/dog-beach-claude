@@ -2,6 +2,7 @@
 // Supabase Edge Function — orchestrates the full daily data pipeline.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { corsHeaders }  from "../_shared/cors.ts";
 import { fetchWeather, wmoToSummaryWeather }   from "./openmeteo.ts";
 import { fetchTides }                           from "./noaa.ts";
 import { fetchCrowds, jsDayToBestTimeDay }      from "./besttime.ts";
@@ -137,17 +138,18 @@ console.log("ENV CHECK — all keys present:", [
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
+  const cors = { ...corsHeaders(req, "POST, OPTIONS"), "Content-Type": "application/json" };
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+    return new Response("Method not allowed", { status: 405, headers: cors });
   }
 
   // Auth gate. Deployed with --no-verify-jwt so the admin editor can
   // proxy a call through admin-refresh-beach (the gateway JWT check
   // rejects our sb_secret_-format service-role key). requireAdmin()
   // recreates that gate at the function level.
-  const jsonHeaders = { "Content-Type": "application/json" };
   const { requireAdmin } = await import("../_shared/admin-auth.ts");
-  const authFail = await requireAdmin(req, jsonHeaders);
+  const authFail = await requireAdmin(req, cors);
   if (authFail) return authFail;
 
   let targetLocationIds: string[] | null = null;
@@ -177,7 +179,7 @@ Deno.serve(async (req: Request) => {
 
     if (beachErr) throw new Error(`Failed to load beaches: ${beachErr.message}`);
     if (!beaches || beaches.length === 0) {
-      return json({ ok: true, message: "No active beaches found", results: [] });
+      return json({ ok: true, message: "No active beaches found", results: [] }, 200, cors);
     }
 
     // 2. Load scoring config
@@ -194,11 +196,11 @@ Deno.serve(async (req: Request) => {
     // 4. Trigger notification dispatch (non-fatal)
     // await triggerNotificationDispatch(supabase);
 
-    return json({ ok: true, runAt: runAt.toISOString(), results });
+    return json({ ok: true, runAt: runAt.toISOString(), results }, 200, cors);
 
   } catch (err) {
     console.error("Top-level error:", String(err));
-    return json({ ok: false, error: String(err) }, 500);
+    return json({ ok: false, error: String(err) }, 500, cors);
   }
 });
 
@@ -701,9 +703,9 @@ function maxTs(timestamps: string[]): string | null {
   return timestamps.reduce((a, b) => (a > b ? a : b));
 }
 
-function json(body: unknown, status = 200): Response {
+function json(body: unknown, status = 200, cors?: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: cors ?? { "Content-Type": "application/json" },
   });
 }

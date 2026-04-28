@@ -13,21 +13,21 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:           #0f1117;
-      --surface:      #181c27;
-      --surface-hover:#1e2333;
-      --border:       #252a3a;
-      --text:         #e8eaf0;
-      --text-muted:   #6b7280;
-      --text-dim:     #4b5268;
-      --green:        #4ade80;
-      --green-dim:    #1a3a27;
-      --advisory:     #38bdf8;
-      --advisory-dim: #0c2a3a;
-      --amber:        #fbbf24;
-      --amber-dim:    #3a2e10;
-      --red:          #f87171;
-      --red-dim:      #3a1a1a;
+      --bg:           #eef4f8;  /* sea fog */
+      --surface:      #ffffff;
+      --surface-hover:#f5f9fc;
+      --border:       #d1dde8;  /* cool gray-blue */
+      --text:         #0f2742;  /* marine navy */
+      --text-muted:   #5b6b7d;
+      --text-dim:     #94a3b8;
+      --green:        #15803d;  /* hunter */
+      --green-dim:    #d1fae5;
+      --advisory:     #0369a1;  /* deep sea blue */
+      --advisory-dim: #e0f2fe;
+      --amber:        #b45309;  /* burnt orange */
+      --amber-dim:    #fed7aa;
+      --red:          #9f1239;  /* rose burgundy */
+      --red-dim:      #ffe4e6;
       --radius:       14px;
       --radius-sm:    8px;
     }
@@ -219,6 +219,24 @@
       cursor: pointer;
     }
     .scout-blurb.loading { animation: pulse 1.4s ease-in-out infinite; }
+
+    /* Aggregated product chip strip — sits beneath the Scout blurb,
+       chips reflect ANY condition firing across the visible beaches'
+       next 7 days. */
+    .product-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      margin: 8px 16px 0;
+    }
+    .product-chip {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      color: var(--advisory);
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .product-chip:hover { color: var(--blue); text-decoration: underline; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
     /* ── Beach cards (index.html style) ───────────────────────────── */
@@ -470,7 +488,7 @@
   <header class="header">
     <div class="header-top">
       <a href="index.html" class="wordmark">
-        <img src="src/avatar.png" style="width:28px;height:28px;border-radius:50%;cursor:pointer;" alt="Scout" onclick="event.preventDefault();toggleChat()" title="Ask Scout">
+        <img src="src/avatar.png" class="scout-trigger" alt="Scout" onclick="event.preventDefault();toggleChat()" title="Ask Scout">
         Dog Beach Scout
       </a>
       <a href="index.html" class="back-link">← Back</a>
@@ -503,6 +521,11 @@
 
   <div class="top-card" id="top-card"></div>
   <div class="scout-blurb loading" id="scout-blurb" onclick="toggleChat()">...</div>
+
+  <!-- Aggregated product chip strip — populated by loadAggregatedChips()
+       across all beaches × next 7 days. Hidden until at least one chip
+       is rendered. -->
+  <div class="product-chips" id="product-chips" style="display:none;"></div>
 
   <div class="beach-list" id="beach-list">
     <div class="skeleton"></div>
@@ -1192,12 +1215,80 @@
     if (e.key === 'Escape') closeDirections();
   });
 
+  // ── Aggregated product chip strip ─────────────────────────────────
+  // Single PostgREST fetch across all beaches × next 7 days. Any
+  // condition firing anywhere in that window surfaces its product chip.
+  // Bowl is the universal fallback so the strip is never empty.
+  const CHIP_DEFS = {
+    bowl:      { icon: '💧',  label: 'Collapsible Bowl', href: 'https://www.amazon.com/s?k=collapsible+dog+water+bowl' },
+    ball:      { icon: '🦴',  label: 'Fetch Ball',       href: 'https://www.amazon.com/s?k=chuckit+ball+launcher' },
+    towel:     { icon: '🛍️', label: 'Quick-Dry Towel',  href: 'https://www.amazon.com/s?k=microfiber+dog+towel' },
+    sunscreen: { icon: '🌞',  label: 'Dog Sunscreen',    href: 'https://www.amazon.com/s?k=dog+sunscreen' },
+    booties:   { icon: '👟',  label: 'Booties',          href: 'https://www.amazon.com/s?k=dog+boots+for+hot+sand' },
+    leash:     { icon: '🐕',  label: 'Long Leash',       href: 'https://www.amazon.com/s?k=long+dog+training+leash' },
+  };
+
+  async function loadAggregatedChips() {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const seventh = new Date(Date.now() + 6 * 86400000)
+      .toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    let rows;
+    try {
+      const r = await fetch(
+        `${SUPABASE_URL}/rest/v1/beach_day_recommendations` +
+        `?select=avg_uv,avg_temp,lowest_tide_height,bacteria_risk,busyness_category` +
+        `&local_date=gte.${today}&local_date=lte.${seventh}`,
+        { headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } });
+      if (!r.ok) return;
+      rows = await r.json();
+    } catch { return; }
+    if (!Array.isArray(rows) || rows.length === 0) return;
+
+    // Day-level numeric thresholds mirror scoring_config severity bands
+    // (no/caution/advisory): UV {11,8,6}, hot temp {95,85,80}, crowd
+    // category, low tide {0, 0.5, 1.0}. Take max intensity across all
+    // beach-days for each chip, filter > 0, sort desc, cap at 3.
+    const num = (v) => v === null || v === undefined ? null : Number(v);
+    const tier = (v, t) => v === null ? 0
+                       : v >= t[0] ? 3 : v >= t[1] ? 2 : v >= t[2] ? 1 : 0;
+    const tideTier  = (v) => v === null ? 0 : v <= 0 ? 3 : v <= 0.5 ? 2 : v <= 1.0 ? 1 : 0;
+    const busyTier  = (c) => c === 'too_crowded' ? 3 : c === 'dog_party' ? 2 : 0;
+    const swimSafe  = (d) => !d.bacteria_risk || d.bacteria_risk === 'none' || d.bacteria_risk === 'low';
+
+    const maxBy = (fn) => rows.reduce((m, d) => Math.max(m, fn(d) ?? 0), 0);
+    const uvInt    = maxBy(d => tier(num(d.avg_uv),   [11, 8, 6]));
+    const tempInt  = maxBy(d => tier(num(d.avg_temp), [95, 85, 80]));
+    const crowdInt = maxBy(d => busyTier(d.busyness_category));
+    const tideInt  = maxBy(d => swimSafe(d) ? tideTier(num(d.lowest_tide_height)) : 0);
+
+    const candidates = [
+      { def: CHIP_DEFS.bowl,      intensity: 0.5 },
+      { def: CHIP_DEFS.ball,      intensity: tideInt },
+      { def: CHIP_DEFS.towel,     intensity: tideInt },
+      { def: CHIP_DEFS.sunscreen, intensity: uvInt    },
+      { def: CHIP_DEFS.booties,   intensity: tempInt  },
+      { def: CHIP_DEFS.leash,     intensity: crowdInt },
+    ];
+
+    const chips = candidates
+      .filter(c => c.intensity > 0)
+      .sort((a, b) => b.intensity - a.intensity)
+      .slice(0, 3);
+
+    const el = document.getElementById('product-chips');
+    el.innerHTML = chips.map(c =>
+      `<a class="product-chip" href="${c.href}" target="_blank" rel="noopener noreferrer">[ ${c.icon} ${c.label} ]</a>`
+    ).join('');
+    el.style.display = '';
+  }
+
   // ── Boot ───────────────────────────────────────────────────────────
   requestGeolocation();
   // Pre-fetch today so TDY pill is instant; warms beach list for NOW mode
   const _todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   loadBeachesForDate(_todayISO);
   sortAndRenderNow();   // NOW is default — fetch immediately
+  loadAggregatedChips();
 </script>
 <script>
   window.CHAT_CONFIG = {

@@ -12,22 +12,22 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:           #0f1117;
-      --surface:      #181c27;
-      --border:       #252a3a;
-      --text:         #e8eaf0;
-      --text-muted:   #6b7280;
-      --text-dim:     #4b5268;
-      --green:        #4ade80;
-      --advisory:     #38bdf8;
-      --amber:        #fbbf24;
-      --red:          #ef4444;
-      --blue:         #60a5fa;
-      --bar-go:       #4ade80;
-      --bar-advisory: #38bdf8;
-      --bar-caution:  #f59e0b;
-      --bar-no_go:    #ef4444;
-      --bar-window:   #16a34a;
+      --bg:           #eef4f8;  /* sea fog */
+      --surface:      #ffffff;
+      --border:       #d1dde8;  /* cool gray-blue */
+      --text:         #0f2742;  /* marine navy */
+      --text-muted:   #5b6b7d;
+      --text-dim:     #94a3b8;
+      --green:        #15803d;  /* hunter */
+      --advisory:     #0369a1;  /* deep sea blue */
+      --amber:        #b45309;  /* burnt orange */
+      --red:          #9f1239;  /* rose burgundy */
+      --blue:         #0369a1;  /* matches advisory */
+      --bar-go:       #15803d;
+      --bar-advisory: #0369a1;
+      --bar-caution:  #b45309;
+      --bar-no_go:    #9f1239;
+      --bar-window:   #a8b4bc;  /* cool silver — best window */
       --radius:       14px;
       --radius-sm:    8px;
     }
@@ -105,7 +105,15 @@
     /* ── Charts ───────────────────────────────────────────────────── */
     .charts { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 
-    .metric-row { display: flex; flex-direction: column; gap: 6px; }
+    .metric-row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 10px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
 
     .metric-label {
       font-family: 'DM Mono', monospace;
@@ -177,7 +185,7 @@
       display: flex;
       align-items: flex-start;
       gap: 10px;
-      padding: 12px 20px 0;
+      margin: 12px 16px 0;
     }
 
     .status-board {
@@ -186,7 +194,10 @@
       display: flex;
       flex-direction: column;
       gap: 10px;
-      padding-top: 2px;
+      padding: 10px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
     }
 
     .sb-item {
@@ -244,12 +255,14 @@
 
     /* ── Narrative ────────────────────────────────────────────────── */
     .narrative {
-      margin: 20px 20px 0;
+      margin: 16px 16px 0;
       display: flex;
       flex-direction: column;
       gap: 10px;
-      border-top: 1px solid var(--border);
-      padding-top: 16px;
+      padding: 14px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
     }
 
     .narrative-block { display: flex; flex-direction: column; gap: 4px; }
@@ -271,6 +284,24 @@
 
     .narrative-text.amber { color: var(--amber); }
     .narrative-text.red   { color: var(--red); }
+
+    /* Product chip strip beneath the Scout blurb. Bracket aesthetic
+       matches the design mock — terminal-style affordances rather
+       than full pill buttons. */
+    .product-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      margin-top: 8px;
+    }
+    .product-chip {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      color: var(--advisory);
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .product-chip:hover { color: var(--blue); text-decoration: underline; }
 
     /* ── Tooltip ─────────────────────────────────────────────────── */
     .bar-col { position: relative; }
@@ -315,9 +346,11 @@
     /* ── Score tooltip breakdown bars ───────────────────────────── */
     .tt-breakdown { margin-top: 5px; display: flex; flex-direction: column; gap: 3px; }
     .tt-row { display: flex; align-items: center; gap: 5px; }
-    .tt-label { font-family: 'DM Mono', monospace; font-size: 9px; color: #c8d0e0; width: 32px; text-align: right; flex-shrink: 0; }
-    .tt-track { width: 64px; height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
+    /* Track is first, label sits to its right. Fill grows from the
+       track's RIGHT edge (zero origin on the right) by floating it. */
+    .tt-track { width: 64px; height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; flex-shrink: 0; display: flex; justify-content: flex-end; }
     .tt-fill  { height: 100%; border-radius: 3px; }
+    .tt-label { font-size: 13px; line-height: 1; width: 18px; text-align: left; flex-shrink: 0; }
 
     /* ── Loading / error ──────────────────────────────────────────── */
     .state {
@@ -345,7 +378,7 @@
   <header class="header">
     <div class="header-left" id="header-left">
       <div class="header-title">
-        <img src="src/avatar.png" style="width:28px;height:28px;border-radius:50%;cursor:pointer;" alt="Scout" onclick="toggleChat()" title="Ask Scout">
+        <img src="src/avatar.png" class="scout-trigger" alt="Scout" onclick="toggleChat()" title="Ask Scout">
         <span id="day-title">Loading...</span>
       </div>
       <div class="window-label" id="window-label"></div>
@@ -446,6 +479,15 @@
     blurbEl.onclick = toggleChat;
     blurbEl.textContent = 'Getting Scout\'s take…';
     document.getElementById('header-left').appendChild(blurbEl);
+
+    // Product chip strip directly beneath the scout blurb. Replace
+    // mode: chip set is conditional on the day's actual data, with the
+    // bowl as the only universal essential.
+    const chipStrip = document.createElement('div');
+    chipStrip.className = 'product-chips';
+    chipStrip.innerHTML = buildChipStripHtml(day, hours);
+    document.getElementById('header-left').appendChild(chipStrip);
+
     loadScoutBlurb(locationId, date, day, hours);
 
     if (hours.length === 0) {
@@ -758,6 +800,7 @@
   }
 
   function buildMetricRow(metric, hours, day) {
+    const statusRank = { no_go: 3, caution: 2, advisory: 1 };
     const values  = hours.map(h => h[metric.key]);
     const maxVal  = metric.max ? metric.max(hours) : Math.max(...values.filter(v => v !== null), 1);
     const minVal  = metric.relative ? Math.min(...values.filter(v => v !== null)) : 0;
@@ -795,26 +838,60 @@
 
       // Score bar gets a component breakdown chart
       const isScoreBar = metric.key === 'hour_score';
+
+      // Score tooltip header: per-metric advisories/warnings, each
+      // line colored to match the metric's status. Empty when every
+      // metric is 'go' for this hour.
+      const scoreAdvisories = isScoreBar ? (() => {
+        const items = [
+          { icon: '🌊',  label: 'Tide',    status: h.tide_status    },
+          { icon: '💨',  label: 'Wind',    status: h.wind_status    },
+          { icon: '🌧️', label: 'Rain',    status: h.rain_status    },
+          { icon: '👥',  label: 'Crowd',   status: h.crowd_status   },
+          { icon: '🌡️', label: 'Temp',    status: h.temp_status    },
+          { icon: '☀️',  label: 'UV',      status: h.uv_status      },
+          { icon: '🏖️', label: 'Sand',    status: h.sand_status    },
+          { icon: '🚶',  label: 'Asphalt', status: h.asphalt_status },
+          { icon: WMO_ICONS[h.weather_code] ?? '🌤️',
+            label: 'Weather', status: wmoStatus(h.weather_code) },
+        ];
+        const sevLabel = s => s === 'no_go' ? 'No Go' : s === 'caution' ? 'Caution' : 'Advisory';
+        return items
+          .filter(it => it.status && it.status !== 'go')
+          .sort((a, b) => (statusRank[b.status] ?? 0) - (statusRank[a.status] ?? 0))
+          .map(it => `<div class="tooltip-line tooltip-status-${it.status}">${it.icon} ${it.label}: ${sevLabel(it.status)}</div>`)
+          .join('');
+      })() : '';
+
       const breakdownHtml = isScoreBar ? (() => {
         const components = [
-          { label: 'Tide',  score: h.tide_score,    status: h.tide_status           },
-          { label: 'Wind',  score: h.wind_score,    status: h.wind_status           },
-          { label: 'Rain',  score: h.rain_score,    status: h.rain_status           },
-          { label: 'Crowd', score: h.crowd_score,   status: h.crowd_status          },
-          { label: 'Wx',    score: h.weather_score, status: wmoStatus(h.weather_code) },
-          { label: 'Temp',  score: h.temp_score,    status: h.temp_status           },
-          { label: 'UV',    score: h.uv_score,      status: h.uv_status             },
+          { label: '🌊',  score: h.tide_score,    status: h.tide_status           },
+          { label: '💨',  score: h.wind_score,    status: h.wind_status           },
+          { label: '🌧️', score: h.rain_score,    status: h.rain_status           },
+          { label: '👥',  score: h.crowd_score,   status: h.crowd_status          },
+          { label: WMO_ICONS[h.weather_code] ?? '🌤️',
+                          score: h.weather_score, status: wmoStatus(h.weather_code) },
+          { label: '🌡️', score: h.temp_score,    status: h.temp_status           },
+          { label: '☀️',  score: h.uv_score,      status: h.uv_status             },
         ];
-        const rows = components.map(c => {
-          const raw   = c.score !== null ? Math.round(c.score * 100)
-                      : c.status === 'no_go' ? 100
-                      : c.status === 'caution' ? 60
+        const firing = components
+          .filter(c => c.status && c.status !== 'go')
+          .sort((a, b) => (statusRank[b.status] ?? 0) - (statusRank[a.status] ?? 0));
+        if (firing.length === 0) return '';
+        const rows = firing.map(c => {
+          // Inverted: bar length = 100 - score. Worst offenders (low
+          // raw score) get the longest bar. Falls back to status-based
+          // lengths when the per-component score is null.
+          const raw   = c.score !== null ? Math.round((1 - c.score) * 100)
+                      : c.status === 'no_go'    ? 100
+                      : c.status === 'caution'  ? 60
+                      : c.status === 'advisory' ? 30
                       : 0;
-          const pct   = c.status ? Math.max(raw, 8) : raw;
-          const color = c.status === 'no_go' ? 'var(--bar-no_go)' : c.status === 'caution' ? 'var(--bar-caution)' : c.status === 'advisory' ? 'var(--bar-advisory)' : 'var(--bar-go)';
+          const pct   = Math.max(raw, 8);
+          const color = c.status === 'no_go' ? 'var(--bar-no_go)' : c.status === 'caution' ? 'var(--bar-caution)' : 'var(--bar-advisory)';
           return `<div class="tt-row">
-            <div class="tt-label">${c.label}</div>
             <div class="tt-track"><div class="tt-fill" style="width:${pct}%;background:${color}"></div></div>
+            <div class="tt-label">${c.label}</div>
           </div>`;
         }).join('');
         return `<div class="tt-breakdown">${rows}</div>`;
@@ -827,9 +904,12 @@
           <div class="bar" style="height:${height}px;background:${barColor}"></div>
           <div class="tooltip">
             <div class="tooltip-hour">${h.hour_label}</div>
-            <div class="tooltip-line ${statusClass}">${statusIcon} ${statusText}${!isScoreBar && scoreLine !== null ? ` · ${scoreLine}` : ''}</div>
-            ${metricLine ? `<div class="tooltip-line">${metricLine}</div>` : ''}
-            ${reason     ? `<div class="tooltip-line">${reason}</div>` : ''}
+            ${isScoreBar
+              ? ''
+              : `<div class="tooltip-line ${statusClass}">${statusIcon} ${statusText}${scoreLine !== null ? ` · ${scoreLine}` : ''}</div>
+                 ${metricLine ? `<div class="tooltip-line">${metricLine}</div>` : ''}
+                 ${reason     ? `<div class="tooltip-line">${reason}</div>` : ''}`
+            }
             ${breakdownHtml}
           </div>
         </div>`;
@@ -877,6 +957,62 @@
     return `<div class="narrative">${blocks.join('')}</div>`;
   }
 
+  // ── Product chip strip — condition-based (replace mode) ─────────
+  // Bowl is universal. Tide-low + clean water → swim kit (ball/towel).
+  // Per-metric statuses (uv/sand/asphalt/crowd) drive the rest.
+  const CHIP_DEFS = {
+    bowl:      { icon: '💧',  label: 'Collapsible Bowl', href: 'https://www.amazon.com/s?k=collapsible+dog+water+bowl' },
+    ball:      { icon: '🦴',  label: 'Fetch Ball',       href: 'https://www.amazon.com/s?k=chuckit+ball+launcher' },
+    towel:     { icon: '🛍️', label: 'Quick-Dry Towel',  href: 'https://www.amazon.com/s?k=microfiber+dog+towel' },
+    sunscreen: { icon: '🌞',  label: 'Dog Sunscreen',    href: 'https://www.amazon.com/s?k=dog+sunscreen' },
+    booties:   { icon: '👟',  label: 'Booties',          href: 'https://www.amazon.com/s?k=dog+boots+for+hot+sand' },
+    leash:     { icon: '🐕',  label: 'Long Leash',       href: 'https://www.amazon.com/s?k=long+dog+training+leash' },
+  };
+
+  function chipHtml(def) {
+    return `<a class="product-chip" href="${def.href}" target="_blank" rel="noopener noreferrer">[ ${def.icon} ${def.label} ]</a>`;
+  }
+
+  function buildChipStripHtml(day, hours) {
+    // Each candidate carries an intensity (0–3). Filter > 0, sort desc,
+    // cap at 3. Bowl carries a low baseline so it shows on calm days
+    // but loses out when 3 conditional chips fire harder.
+    const sevRank = { no_go: 3, caution: 2, advisory: 1 };
+    const maxStatusSeverity = (key) => {
+      let m = 0;
+      for (const h of hours ?? []) {
+        const r = sevRank[h[key]] ?? 0;
+        if (r > m) m = r;
+      }
+      return m;
+    };
+    const tide      = day.lowest_tide_height === null ? null : Number(day.lowest_tide_height);
+    const swimSafe  = !day.bacteria_risk || day.bacteria_risk === 'none' || day.bacteria_risk === 'low';
+    const tideInt   = (!swimSafe || tide === null) ? 0
+                    : tide <= 0   ? 3
+                    : tide <= 0.5 ? 2
+                    : tide <= 1.0 ? 1 : 0;
+    const busyInt   = day.busyness_category === 'too_crowded' ? 3
+                    : day.busyness_category === 'dog_party'   ? 2 : 0;
+
+    const candidates = [
+      { def: CHIP_DEFS.bowl,      intensity: 0.5 },
+      { def: CHIP_DEFS.ball,      intensity: tideInt },
+      { def: CHIP_DEFS.towel,     intensity: tideInt },
+      { def: CHIP_DEFS.sunscreen, intensity: maxStatusSeverity('uv_status') },
+      { def: CHIP_DEFS.booties,   intensity: Math.max(maxStatusSeverity('sand_status'),
+                                                       maxStatusSeverity('asphalt_status')) },
+      { def: CHIP_DEFS.leash,     intensity: Math.max(maxStatusSeverity('crowd_status'), busyInt) },
+    ];
+
+    return candidates
+      .filter(c => c.intensity > 0)
+      .sort((a, b) => b.intensity - a.intensity)
+      .slice(0, 3)
+      .map(c => chipHtml(c.def))
+      .join('');
+  }
+
   // ── Scout header blurb ───────────────────────────────────────────
   async function loadScoutBlurb(locationId, date, day, hours) {
     const el = document.getElementById('scout-blurb');
@@ -916,7 +1052,11 @@
       const { answer } = await res.json();
       if (answer) {
         el.style.opacity = '1';
-        el.textContent = answer;
+        if (typeof window.withProductLinks === 'function') {
+          el.innerHTML = window.withProductLinks(answer);
+        } else {
+          el.textContent = answer;
+        }
       } else {
         el.remove();
       }
@@ -939,6 +1079,7 @@
 <script>
   window.CHAT_CONFIG = {
     getLocationId: () => locationId,
+    getLocalDate:  () => date,
     placeholder: 'What time should I go today?',
   };
 </script>

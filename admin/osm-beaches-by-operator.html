@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OSM beaches by operator · LA + Orange counties</title>
+<title>OSM beaches by operator · LA + Orange + San Diego counties</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
@@ -33,6 +33,15 @@
     color: #1f2933; pointer-events: none; white-space: nowrap;
   }
   .op-label::before { display: none; }
+  .hover-tip {
+    background: rgba(31,41,51,.92); color: #fff;
+    border: none; border-radius: 4px;
+    padding: 4px 8px; font-size: 12px; line-height: 1.35;
+    white-space: nowrap;
+  }
+  .hover-tip::before { border-top-color: rgba(31,41,51,.92) !important; }
+  .hover-tip .beach { font-weight: 600; }
+  .hover-tip .type  { color: #cbd5e1; font-size: 11px; margin-left: 4px; }
   #status { margin-top:6px; font-size:11px; color:#647688; }
 </style>
 </head>
@@ -40,7 +49,7 @@
 
 <div class="panel">
   <h1>OSM beach polys by operator</h1>
-  <div class="muted">Los Angeles + Orange counties. Each operator gets its own color.</div>
+  <div class="muted">Los Angeles + Orange + San Diego counties. Click a legend row to zoom to that operator. Hover a polygon for name/type; click for details.</div>
   <div class="legend" id="legend">loading…</div>
   <div id="status"></div>
 </div>
@@ -52,7 +61,7 @@
 const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
 const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
 
-const COUNTY_GEOIDS = ['06037', '06059'];  // LA County + Orange County, CA
+const COUNTY_GEOIDS = ['06037', '06059', '06073'];  // LA + Orange + San Diego counties, CA
 
 // Tableau 20 — distinguishable categorical palette for per-operator coloring
 const PALETTE = [
@@ -62,11 +71,20 @@ const PALETTE = [
   '#c49c94','#f7b6d2','#c7c7c7','#dbdb8d','#9edae5',
 ];
 
-const map = L.map('map', { preferCanvas: true }).setView([33.85, -118.25], 9);
+const map = L.map('map', { preferCanvas: true }).setView([33.5, -117.7], 8);
 L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
   maxZoom: 19,
   attribution: '© OpenStreetMap France · OSM beach polygons · operators table',
 }).addTo(map);
+
+// Dedicated pane for CCC + UBP dots so they always render above polygons.
+map.createPane('dots');
+map.getPane('dots').style.zIndex = 650;
+
+const CCC_COLOR = '#dc2626';   // red
+const UBP_COLOR = '#ea580c';   // orange
+const CCC_KEY   = '__ccc__';
+const UBP_KEY   = '__ubp__';
 
 const layersByKey = {};
 const countByKey  = {};
@@ -81,9 +99,25 @@ function shortName(name) {
     .replace(/ Department of /i, ' Dept of ');
 }
 
+// TIGER county names matching the geoids (used for CCC/UBP filters
+// because those tables carry county_name_tiger as text, not geoid).
+const COUNTY_NAMES = { '06037': 'Los Angeles', '06059': 'Orange', '06073': 'San Diego' };
+
+const restGet = (path) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+  headers: {
+    apikey: ANON_KEY,
+    Authorization: `Bearer ${ANON_KEY}`,
+    Accept: 'application/json',
+    Range: '0-9999',
+  },
+});
+
 async function load() {
-  // Fetch each county in parallel and merge.
-  const fetches = COUNTY_GEOIDS.map(geoid =>
+  const wantedCounties = COUNTY_GEOIDS.map(g => COUNTY_NAMES[g]).filter(Boolean);
+  const countyFilter   = `(${wantedCounties.map(n => `"${n}"`).join(',')})`;
+
+  // Fire all fetches in parallel: OSM polys per geoid + CCC + UBP.
+  const osmFetches = COUNTY_GEOIDS.map(geoid =>
     fetch(`${SUPABASE_URL}/rest/v1/rpc/osm_beach_polys_with_operator_in_county`, {
       method: 'POST',
       headers: {
@@ -95,37 +129,89 @@ async function load() {
       body: JSON.stringify({ p_geoid: geoid }),
     })
   );
-  const responses = await Promise.all(fetches);
-  for (const r of responses) {
+
+  const cccFetch = restGet(
+    `ccc_access_points?select=objectid,name,latitude,longitude,county_name_tiger,managing_agency_source,admin_inactive,operator:operator_id(canonical_name,level,slug)`
+    + `&inferred_type=eq.named_beach`
+    + `&or=(archived.is.null,archived.neq.Yes)`
+    + `&latitude=not.is.null&longitude=not.is.null`
+    + `&county_name_tiger=in.${encodeURIComponent(countyFilter)}`
+  );
+  const ubpFetch = restGet(
+    `us_beach_points?select=fid,name,raw_wkt,county_name_tiger,managing_agency_source,admin_inactive,operator:operator_id(canonical_name,level,slug)`
+    + `&state=eq.CA`
+    + `&county_name_tiger=in.${encodeURIComponent(countyFilter)}`
+  );
+
+  const allResponses = await Promise.all([...osmFetches, cccFetch, ubpFetch]);
+  for (const r of allResponses) {
     if (!r.ok) {
       document.getElementById('status').textContent = `error: ${r.status} ${r.statusText}`;
       return;
     }
   }
-  const arrays = await Promise.all(responses.map(r => r.json()));
-  // De-dupe across counties on (osm_type, osm_id) — a polygon spanning
-  // a county line would otherwise appear twice.
-  const seen = new Set();
+  const osmArrays = await Promise.all(allResponses.slice(0, COUNTY_GEOIDS.length).map(r => r.json()));
+  const cccRows   = await allResponses[COUNTY_GEOIDS.length].json();
+  const ubpRows   = await allResponses[COUNTY_GEOIDS.length + 1].json();
+
+  // Normalize each source into a common shape with a `source` field.
+  const seenOsm = new Set();
   const rows = [];
-  for (const arr of arrays) {
-    for (const row of arr) {
-      const key = `${row.osm_type}/${row.osm_id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      rows.push(row);
+  for (const arr of osmArrays) {
+    for (const r of arr) {
+      const key = `${r.osm_type}/${r.osm_id}`;
+      if (seenOsm.has(key)) continue;
+      seenOsm.add(key);
+      rows.push({ ...r, source: 'osm' });
     }
   }
+  for (const r of cccRows) {
+    rows.push({
+      source: 'ccc',
+      ccc_id: r.objectid,
+      name: r.name,
+      lat: r.latitude,
+      lng: r.longitude,
+      operator_canonical: r.operator?.canonical_name ?? null,
+      operator_level: r.operator?.level ?? null,
+      operator_slug: r.operator?.slug ?? null,
+      managing_agency_source: r.managing_agency_source,
+      admin_inactive: !!r.admin_inactive,
+    });
+  }
+  for (const r of ubpRows) {
+    const m = (r.raw_wkt || '').match(/POINT\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)/i);
+    if (!m) continue;
+    const lng = parseFloat(m[1]), lat = parseFloat(m[2]);
+    if (!isFinite(lat) || !isFinite(lng)) continue;
+    rows.push({
+      source: 'ubp',
+      ubp_fid: r.fid,
+      name: r.name,
+      lat, lng,
+      operator_canonical: r.operator?.canonical_name ?? null,
+      operator_level: r.operator?.level ?? null,
+      operator_slug: r.operator?.slug ?? null,
+      managing_agency_source: r.managing_agency_source,
+      admin_inactive: !!r.admin_inactive,
+    });
+  }
 
-  // Inactive features render gray regardless of operator. Only count
-  // active features for the operator-color assignment + legend.
+  // Inactive features render gray. CCC + UBP get source-fixed colors
+  // (red / orange) regardless of operator. Operator legend entries
+  // count OSM polygons only.
   const INACTIVE_COLOR = '#9aa5b1';
   const INACTIVE_KEY   = '(inactive)';
 
   const opOrder = [];
   const opMeta  = {};
   let inactiveCount = 0;
+  let cccCount = 0;
+  let ubpCount = 0;
   for (const row of rows) {
     if (row.admin_inactive) { inactiveCount++; continue; }
+    if (row.source === 'ccc') { cccCount++; continue; }
+    if (row.source === 'ubp') { ubpCount++; continue; }
     const key = row.operator_slug || '(unresolved)';
     if (!opMeta[key]) {
       opMeta[key] = {
@@ -152,32 +238,71 @@ async function load() {
     const color = isInactive ? INACTIVE_COLOR : colorByKey[key];
     if (!layersByKey[key]) layersByKey[key] = L.featureGroup().addTo(map);
 
-    const poly = L.geoJSON(row.geojson, {
-      style: isInactive
-        ? { color, weight: 1, fillColor: color, fillOpacity: 0.25, dashArray: '4 3' }
-        : { color, weight: 1.5, fillColor: color, fillOpacity: 0.55 },
-      onEachFeature: (_, lyr) => {
-        lyr.bindPopup(`
-          <strong>${row.name || '(unnamed)'}${isInactive ? ' · <span style="color:#647688">inactive</span>' : ''}</strong>
-          OSM ${row.osm_type}/${row.osm_id} · ${row.feature_type}<br>
-          Operator: ${row.operator_canonical || '<em>unresolved</em>'}${row.operator_level ? ' (' + row.operator_level + ')' : ''}<br>
-          ${row.managing_agency_source ? `<span style="color:#647688;font-size:11px">via ${row.managing_agency_source}</span>` : ''}
-        `);
-      },
-    });
-    poly.addTo(layersByKey[key]);
-    const b = poly.getBounds();
-    if (b.isValid()) allBounds = allBounds ? allBounds.extend(b) : L.latLngBounds(b.getSouthWest(), b.getNorthEast());
+    if (row.source === 'osm') {
+      // Polygon
+      const poly = L.geoJSON(row.geojson, {
+        style: isInactive
+          ? { color, weight: 1, fillColor: color, fillOpacity: 0.25, dashArray: '4 3' }
+          : { color, weight: 1.5, fillColor: color, fillOpacity: 0.55 },
+        onEachFeature: (_, lyr) => {
+          lyr.bindTooltip(
+            `<span class="beach">${row.name || '(unnamed)'}</span><span class="type">${row.feature_type} · OSM</span>`,
+            { sticky: true, className: 'hover-tip', direction: 'top', offset: [0, -4] }
+          );
+          lyr.bindPopup(`
+            <strong>${row.name || '(unnamed)'}${isInactive ? ' · <span style="color:#647688">inactive</span>' : ''}</strong>
+            OSM ${row.osm_type}/${row.osm_id} · ${row.feature_type}<br>
+            Operator: ${row.operator_canonical || '<em>unresolved</em>'}${row.operator_level ? ' (' + row.operator_level + ')' : ''}<br>
+            ${row.managing_agency_source ? `<span style="color:#647688;font-size:11px">via ${row.managing_agency_source}</span>` : ''}
+          `);
+        },
+      });
+      poly.addTo(layersByKey[key]);
+      const b = poly.getBounds();
+      if (b.isValid()) allBounds = allBounds ? allBounds.extend(b) : L.latLngBounds(b.getSouthWest(), b.getNorthEast());
 
-    // Permanent label at the polygon centroid, showing the OPERATOR name.
-    // Skip inactive features so dead labels don't clutter the map.
-    if (!isInactive && row.label_lat != null && row.label_lng != null) {
-      L.tooltip([row.label_lat, row.label_lng], {
-        permanent: true,
-        direction: 'center',
-        className: 'op-label',
-      }).setContent(shortName(row.operator_canonical))
-        .addTo(layersByKey[key]);
+      // Permanent label at the polygon centroid: OPERATOR name only.
+      // (Beach name + type live on the hover tooltip on the polygon.)
+      if (!isInactive && row.label_lat != null && row.label_lng != null) {
+        L.tooltip([row.label_lat, row.label_lng], {
+          permanent: true, direction: 'center', className: 'op-label',
+        }).setContent(shortName(row.operator_canonical))
+          .addTo(layersByKey[key]);
+      }
+    } else {
+      // CCC (radius 9, red) or UBP (radius 7, orange) — source-fixed
+      // colors regardless of operator. Drawn in 'dots' pane so they
+      // always sit above polygons.
+      const isCcc        = row.source === 'ccc';
+      const radius       = isCcc ? 9 : 7;
+      const sourceLabel  = isCcc ? 'CCC' : 'UBP';
+      const idLabel      = isCcc ? `CCC #${row.ccc_id}` : `us_beach #${row.ubp_fid}`;
+      const sourceColor  = isCcc ? CCC_COLOR : UBP_COLOR;
+      const sourceKey    = isCcc ? CCC_KEY  : UBP_KEY;
+      const groupKey     = isInactive ? INACTIVE_KEY : sourceKey;
+      const fill         = isInactive ? INACTIVE_COLOR : sourceColor;
+      if (!layersByKey[groupKey]) layersByKey[groupKey] = L.featureGroup().addTo(map);
+      const m = L.circleMarker([row.lat, row.lng], {
+        pane:        'dots',
+        radius,
+        color:       '#fff',
+        weight:      1.5,
+        fillColor:   fill,
+        fillOpacity: isInactive ? 0.4 : 0.95,
+      });
+      m.bindTooltip(
+        `<span class="beach">${row.name || '(unnamed)'}</span><span class="type">${sourceLabel}${row.operator_canonical ? ' · ' + shortName(row.operator_canonical) : ''}</span>`,
+        { sticky: true, className: 'hover-tip', direction: 'top', offset: [0, -4] }
+      );
+      m.bindPopup(`
+        <strong>${row.name || '(unnamed)'}${isInactive ? ' · <span style="color:#647688">inactive</span>' : ''}</strong>
+        ${idLabel}<br>
+        Operator: ${row.operator_canonical || '<em>unresolved</em>'}${row.operator_level ? ' (' + row.operator_level + ')' : ''}<br>
+        ${row.managing_agency_source ? `<span style="color:#647688;font-size:11px">via ${row.managing_agency_source}</span>` : ''}
+      `);
+      m.addTo(layersByKey[groupKey]);
+      if (!allBounds) allBounds = L.latLngBounds([row.lat, row.lng], [row.lat, row.lng]);
+      else allBounds.extend([row.lat, row.lng]);
     }
   }
 
@@ -197,20 +322,23 @@ async function load() {
     row.addEventListener('click', () => {
       const layer = layersByKey[key];
       if (!layer) return;
-      if (map.hasLayer(layer)) { map.removeLayer(layer); row.classList.add('muted-row'); }
-      else                     { layer.addTo(map);       row.classList.remove('muted-row'); }
+      if (!map.hasLayer(layer)) { layer.addTo(map); row.classList.remove('muted-row'); }
+      const bounds = layer.getBounds();
+      if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
     });
     legend.appendChild(row);
   };
   for (const key of opOrder) {
     addLegendRow(key, opMeta[key].canonical, opMeta[key].polys, colorByKey[key]);
   }
-  if (inactiveCount > 0) {
-    addLegendRow(INACTIVE_KEY, 'inactive', inactiveCount, INACTIVE_COLOR);
-  }
+  if (cccCount > 0)      addLegendRow(CCC_KEY,      'CCC access points', cccCount, CCC_COLOR);
+  if (ubpCount > 0)      addLegendRow(UBP_KEY,      'UBP records',       ubpCount, UBP_COLOR);
+  if (inactiveCount > 0) addLegendRow(INACTIVE_KEY, 'inactive',          inactiveCount, INACTIVE_COLOR);
 
+  const counts = { osm: 0, ccc: 0, ubp: 0 };
+  for (const r of rows) counts[r.source]++;
   document.getElementById('status').textContent =
-    `${rows.length} OSM beach polygons in LA + OC · ${opOrder.length} operators${inactiveCount ? ` (+ ${inactiveCount} inactive)` : ''} · click polygon for details`;
+    `LA + OC + SD · ${counts.osm} OSM polys, ${counts.ccc} CCC pts, ${counts.ubp} UBP pts · ${opOrder.length} operators${inactiveCount ? ` (+ ${inactiveCount} inactive)` : ''}`;
 }
 
 load();

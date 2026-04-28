@@ -134,7 +134,7 @@ L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
     + `?select=objectid,name,latitude,longitude,inferred_type,sandy_beach,dogs_verdict,operator_id`
     + `&county_name_tiger=eq.${encodeURIComponent(county)}`
     + `&latitude=not.is.null`
-    + `&archived=is.null`
+    + `&archived=not.eq.Yes`        // CCC stores ' ' (space) as not-archived sentinel
     + `&admin_inactive=not.is.true`
     + `&limit=2000`;
   const cccR = await fetch(cccUrl, {

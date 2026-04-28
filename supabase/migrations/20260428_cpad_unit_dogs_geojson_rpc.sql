@@ -26,15 +26,10 @@ create or replace function public.cpad_unit_dogs_geojson(
   extraction_confidence numeric,
   geom_json             jsonb
 ) language sql stable security definer as $$
-  with bl_sc as (
-    select bl.geom from public.beach_locations bl
-    join public.counties c on st_intersects(c.geom, bl.geom)
-    where c.name = any(p_counties)
-  ),
-  hits as (
-    select distinct cu.unit_id from bl_sc bl
-    join public.cpad_units cu on st_intersects(cu.geom, bl.geom)
-  )
+  -- cpad_unit_dogs_policy is pre-filtered to the LA-OC-SD universe
+  -- (only those units have policy rows). We just join cpad_units for
+  -- geom + layer + county tag, and narrow by county column directly —
+  -- avoids the runtime spatial join that was timing out.
   select
     p.cpad_unit_id, p.unit_name, p.agency_name, cu.layer,
     p.dogs_allowed, p.default_rule, p.leash_required,
@@ -42,10 +37,10 @@ create or replace function public.cpad_unit_dogs_geojson(
     p.area_parking_lot, p.area_trails, p.area_campground,
     p.designated_dog_zones, p.prohibited_areas,
     p.source_quote, p.url_used, p.extraction_model, p.extraction_confidence,
-    st_asgeojson(st_simplify(cu.geom, 0.00005))::jsonb as geom_json
+    st_asgeojson(st_simplify(cu.geom, 0.0005))::jsonb as geom_json
   from public.cpad_unit_dogs_policy p
   join public.cpad_units cu on cu.unit_id = p.cpad_unit_id
-  where p.cpad_unit_id in (select unit_id from hits);
+  where cu.county = any(p_counties);
 $$;
 
 grant execute on function public.cpad_unit_dogs_geojson(text[]) to anon, authenticated;

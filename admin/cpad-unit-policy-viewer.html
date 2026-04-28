@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<!--
+  admin/cpad-unit-policy-viewer.html — Read-only viewer for the
+  cpad_unit_dogs_policy table. Layout mirrors admin/beach-editor.html.
+
+  Default scope: CPAD units that intersect beach_locations in
+  Los Angeles + Orange + San Diego counties. Switch via ?counties=... .
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CPAD Unit Dog Policy — Viewer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:         #f8fafc;
+      --panel:      #ffffff;
+      --border:     #e2e8f0;
+      --border-hov: #cbd5e1;
+      --text:       #0f172a;
+      --text-muted: #475569;
+      --text-dim:   #94a3b8;
+      --accent:     #3b82f6;
+      --green:      #15803d;
+      --green-bg:   #dcfce7;
+      --red:        #b91c1c;
+      --red-bg:     #fee2e2;
+      --amber:      #b45309;
+      --amber-bg:   #fef3c7;
+      --gray-bg:    #f1f5f9;
+      --blue-bg:    #dbeafe;
+      --blue:       #1e40af;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #1e293b;
+      color: #f1f5f9;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    }
+    header h1 { font-size: 16px; font-weight: 600; }
+    header .counties { color: #94a3b8; font-size: 12px; }
+    header .summary { margin-left: auto; font-size: 12px; color: #cbd5e1; }
+
+    main {
+      max-width: 920px;
+      margin: 24px auto;
+      padding: 0 24px;
+    }
+
+    .filter-bar {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      font-size: 13px;
+    }
+    .filter-bar label { color: var(--text-muted); }
+    .filter-bar input[type=text] {
+      padding: 6px 10px;
+      font-size: 13px; font-family: inherit;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      min-width: 240px;
+    }
+    .filter-bar select {
+      padding: 6px 10px;
+      font-size: 13px; font-family: inherit;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+
+    /* ── Card per CPAD unit ───────────────────────────────────────── */
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 16px;
+      overflow: hidden;
+    }
+    .card-header {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      background: #f8fafc;
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    .card-name { font-size: 16px; font-weight: 600; }
+    .card-id {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px; color: var(--text-muted);
+      background: var(--gray-bg); padding: 2px 8px; border-radius: 4px;
+    }
+    .card-agency { font-size: 12px; color: var(--text-muted); }
+    .badge {
+      margin-left: auto;
+      font-size: 12px; font-weight: 600;
+      padding: 3px 10px; border-radius: 999px;
+      text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .badge-yes        { background: var(--green-bg);  color: var(--green); }
+    .badge-no         { background: var(--red-bg);    color: var(--red); }
+    .badge-restricted { background: var(--amber-bg);  color: var(--amber); }
+    .badge-unknown    { background: var(--gray-bg);   color: var(--text-muted); }
+    .badge-null       { background: #fee2e2;          color: var(--red); }
+
+    .card-body { padding: 14px 20px; }
+
+    .section { padding: 10px 0; }
+    .section + .section { border-top: 1px solid var(--gray-bg); }
+    .section-title {
+      font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    .field-grid {
+      display: grid;
+      grid-template-columns: 160px 1fr;
+      gap: 10px 16px;
+      font-size: 13px;
+    }
+    .field-grid dt { color: var(--text-muted); }
+    .field-grid dd {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      word-break: break-word;
+    }
+    .field-grid dd a { color: var(--accent); text-decoration: none; }
+    .field-grid dd a:hover { text-decoration: underline; }
+
+    .quote {
+      font-style: italic;
+      background: #fef9c3;
+      padding: 8px 12px;
+      border-left: 3px solid #fbbf24;
+      border-radius: 3px;
+      font-size: 13px;
+      color: #422006;
+      white-space: pre-wrap;
+    }
+
+    /* ── Areas grid ──────────────────────────────────────────────── */
+    .areas {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .area {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 6px;
+      text-align: center;
+    }
+    .area-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+    .area-value {
+      font-size: 12px; font-weight: 600;
+      padding: 2px 6px; border-radius: 4px;
+      display: inline-block;
+    }
+    .area-value.off_leash { background: #d1fae5; color: #065f46; }
+    .area-value.on_leash  { background: var(--blue-bg); color: var(--blue); }
+    .area-value.forbidden { background: var(--red-bg); color: var(--red); }
+    .area-value.unknown   { background: var(--gray-bg); color: var(--text-muted); }
+    .area-value.null      { color: var(--text-dim); }
+
+    @media (max-width: 720px) {
+      .areas { grid-template-columns: repeat(3, 1fr); }
+      .field-grid { grid-template-columns: 1fr; gap: 4px; }
+    }
+
+    /* ── JSONB lists ─────────────────────────────────────────────── */
+    .json-list {
+      font-size: 12px; color: var(--text);
+      background: var(--gray-bg);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: pre-wrap;
+    }
+
+    .empty { color: var(--text-dim); font-style: italic; font-size: 12px; }
+
+    .free-text {
+      background: var(--blue-bg);
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 13px;
+      color: var(--blue);
+    }
+
+    .loading, .error {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+    }
+    .error { color: var(--red); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>CPAD Unit Dog Policy</h1>
+    <span class="counties" id="counties-label">— loading —</span>
+    <span class="summary" id="summary"></span>
+  </header>
+
+  <main>
+    <div class="filter-bar">
+      <label for="filter-text">Filter:</label>
+      <input id="filter-text" type="text" placeholder="search by unit name, agency, or quote">
+
+      <label for="filter-rule">Rule:</label>
+      <select id="filter-rule">
+        <option value="">all</option>
+        <option value="yes">yes</option>
+        <option value="no">no</option>
+        <option value="restricted">restricted</option>
+        <option value="unknown">unknown</option>
+      </select>
+    </div>
+
+    <div id="cards" class="loading">Loading…</div>
+  </main>
+
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+const qs        = new URLSearchParams(location.search);
+const counties  = (qs.get('counties') || 'Los Angeles,Orange,San Diego')
+                    .split(',').map(s => s.trim()).filter(Boolean);
+
+document.getElementById('counties-label').textContent = counties.join(' · ');
+
+const escapeHtml = s => (s ?? '').toString()
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+const AREAS = [
+  ['sand', 'Sand'],
+  ['water', 'Water'],
+  ['picnic_area', 'Picnic'],
+  ['parking_lot', 'Parking'],
+  ['trails', 'Trails'],
+  ['campground', 'Campgr'],
+];
+
+function renderArea(value) {
+  const cls = value || 'null';
+  const txt = value || '—';
+  return `<span class="area-value ${cls}">${escapeHtml(txt)}</span>`;
+}
+
+function renderJsonList(arr) {
+  if (!arr || (Array.isArray(arr) && arr.length === 0)) {
+    return '<span class="empty">(none)</span>';
+  }
+  try {
+    return `<div class="json-list">${escapeHtml(JSON.stringify(arr, null, 2))}</div>`;
+  } catch {
+    return '<span class="empty">(invalid)</span>';
+  }
+}
+
+function renderCard(row) {
+  const ruleClass = `badge-${row.dogs_allowed || 'null'}`;
+  const ruleText  = row.dogs_allowed || '—';
+
+  const exceptionsHtml = renderJsonList(row.exceptions);
+  const timeHtml      = renderJsonList(row.time_windows);
+  const seasonalHtml  = renderJsonList(row.seasonal_rules);
+
+  const sourceUrl = row.url_used
+    ? `<a href="${escapeHtml(row.url_used)}" target="_blank" rel="noopener">${escapeHtml(row.url_used)}</a>`
+    : '<span class="empty">—</span>';
+
+  const conf = (row.extraction_confidence != null)
+    ? row.extraction_confidence.toFixed(2)
+    : '—';
+
+  return `
+  <div class="card" data-rule="${row.dogs_allowed || ''}" data-search="${escapeHtml(((row.unit_name||'')+' '+(row.agency_name||'')+' '+(row.source_quote||'')).toLowerCase())}">
+    <div class="card-header">
+      <span class="card-name">${escapeHtml(row.unit_name) || '—'}</span>
+      <span class="card-id">unit ${row.cpad_unit_id}</span>
+      <span class="card-agency">${escapeHtml(row.agency_name) || ''}</span>
+      <span class="badge ${ruleClass}">${escapeHtml(ruleText)}</span>
+    </div>
+
+    <div class="card-body">
+
+      <div class="section">
+        <div class="section-title">Source</div>
+        <dl class="field-grid">
+          <dt>URL</dt><dd>${sourceUrl}</dd>
+          <dt>URL kind</dt><dd>${escapeHtml(row.url_kind || '—')}</dd>
+          <dt>Model</dt><dd>${escapeHtml(row.extraction_model || '—')}</dd>
+          <dt>Confidence</dt><dd>${conf}</dd>
+          <dt>Scraped at</dt><dd>${escapeHtml((row.scraped_at || '').split('T')[0] || '—')}</dd>
+        </dl>
+      </div>
+
+      ${row.source_quote ? `
+      <div class="section">
+        <div class="section-title">Source quote</div>
+        <div class="quote">${escapeHtml(row.source_quote)}</div>
+      </div>` : ''}
+
+      <div class="section">
+        <div class="section-title">Default rule</div>
+        <dl class="field-grid">
+          <dt>dogs_allowed</dt><dd><span class="badge ${ruleClass}">${escapeHtml(ruleText)}</span></dd>
+          <dt>default_rule</dt><dd>${escapeHtml(row.default_rule || '—')}</dd>
+          <dt>leash_required</dt><dd>${row.leash_required === null || row.leash_required === undefined ? '—' : (row.leash_required ? 'true' : 'false')}</dd>
+        </dl>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Areas</div>
+        <div class="areas">
+          ${AREAS.map(([key, label]) => `
+            <div class="area">
+              <div class="area-label">${label}</div>
+              ${renderArea(row['area_' + key])}
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      ${(row.designated_dog_zones || row.prohibited_areas) ? `
+      <div class="section">
+        <div class="section-title">Named zones</div>
+        <dl class="field-grid">
+          <dt>designated</dt><dd>${row.designated_dog_zones ? `<span class="free-text">${escapeHtml(row.designated_dog_zones)}</span>` : '<span class="empty">—</span>'}</dd>
+          <dt>prohibited</dt><dd>${row.prohibited_areas ? `<span class="free-text">${escapeHtml(row.prohibited_areas)}</span>` : '<span class="empty">—</span>'}</dd>
+        </dl>
+      </div>` : ''}
+
+      <div class="section">
+        <div class="section-title">Exceptions</div>
+        ${exceptionsHtml}
+      </div>
+
+      <div class="section">
+        <div class="section-title">Time windows</div>
+        ${timeHtml}
+      </div>
+
+      <div class="section">
+        <div class="section-title">Seasonal rules</div>
+        ${seasonalHtml}
+      </div>
+
+      ${row.ordinance_ref ? `
+      <div class="section">
+        <div class="section-title">Ordinance</div>
+        <div class="field-grid">
+          <dt>ordinance_ref</dt><dd>${escapeHtml(row.ordinance_ref)}</dd>
+        </div>
+      </div>` : ''}
+
+    </div>
+  </div>`;
+}
+
+async function loadData() {
+  const cardsEl = document.getElementById('cards');
+  cardsEl.className = 'loading';
+  cardsEl.textContent = 'Loading…';
+
+  // Postgres function call: get rows for the CPAD units that intersect
+  // beach_locations within the chosen counties. Done via an inline RPC
+  // we'll add — for now just fetch the whole table and filter by a
+  // pre-computed list of unit_ids using a parameter.
+  //
+  // Simpler path: use a side-channel server-side function. Cleanest
+  // would be to expose a SQL view. For this viewer we hit cpad_unit_dogs_policy
+  // directly and let the page filter by a pre-built unit_id list passed
+  // via window.__UNIT_IDS__ from the URL or a fetch.
+
+  // First: call the LA/OC/SD scoped view via an inline filter — fetch
+  // the cpad_unit_dogs_policy rows that match counties via the
+  // cpad_units_in_counties() RPC if it exists, else fall back to
+  // fetching all and filtering by name match.
+
+  let rows;
+  try {
+    // Query everything in cpad_unit_dogs_policy (currently small)
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/cpad_unit_dogs_policy?select=*&order=unit_name.asc&limit=2000`,
+      { headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}` } });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    rows = await r.json();
+  } catch (e) {
+    cardsEl.className = 'error';
+    cardsEl.textContent = `error: ${e.message}`;
+    return;
+  }
+
+  // Filter to LA-OC-SD: do server-side via a separate fetch of unit_ids.
+  // Approach: call a dedicated RPC or join. Simplest available: the
+  // cpad_units table with an in() filter on agncy_name is too lossy.
+  // Instead, do a second fetch to get a pre-built list of LA-OC-SD
+  // unit_ids via the existing all_coastal_features_lite() — but that
+  // doesn't expose unit_ids.
+  //
+  // Pragmatic solution: filter client-side on rows whose agency_name
+  // suggests one of the 3 counties OR whose unit_name matches a
+  // known beach. For now we fetch everything and then filter via
+  // counties-from-server lookup using the cpad_units table.
+
+  // Pull a unit_id whitelist from cpad_units via a county-bounded query
+  let whitelist = null;
+  try {
+    // Use the RPC pattern: fetch CPAD units intersecting beach_locations
+    // in given counties. We call a function we expose — for now use a
+    // direct PostgREST query against a view if present, else accept all.
+    const rpc = await fetch(`${SUPABASE_URL}/rest/v1/rpc/cpad_units_in_counties_for_805`, {
+      method: 'POST',
+      headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_counties: counties })
+    });
+    if (rpc.ok) {
+      const ids = await rpc.json();
+      whitelist = new Set(ids.map(r => r.unit_id ?? r));
+    }
+  } catch (_) {}
+
+  const filtered = whitelist ? rows.filter(r => whitelist.has(r.cpad_unit_id)) : rows;
+
+  document.getElementById('summary').textContent = `${filtered.length} units`;
+
+  cardsEl.className = '';
+  cardsEl.innerHTML = filtered.map(renderCard).join('') || '<div class="empty">no rows</div>';
+
+  // Wire up filters
+  const textIn = document.getElementById('filter-text');
+  const ruleIn = document.getElementById('filter-rule');
+  function applyFilter() {
+    const q = textIn.value.toLowerCase().trim();
+    const ruleSel = ruleIn.value;
+    const cards = cardsEl.querySelectorAll('.card');
+    let shown = 0;
+    cards.forEach(c => {
+      const search = c.dataset.search || '';
+      const rule = c.dataset.rule || '';
+      const okText = !q || search.includes(q);
+      const okRule = !ruleSel || rule === ruleSel;
+      const visible = okText && okRule;
+      c.style.display = visible ? '' : 'none';
+      if (visible) shown++;
+    });
+    document.getElementById('summary').textContent = `${shown} of ${filtered.length} units`;
+  }
+  textIn.addEventListener('input', applyFilter);
+  ruleIn.addEventListener('change', applyFilter);
+}
+
+loadData();
+</script>
+</body>
+</html>

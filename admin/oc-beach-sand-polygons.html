@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<!--
+  admin/oc-beach-sand-polygons.html — Map of OSM beach + sand polygons
+  for one county. Default Orange; override via ?county=...
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>OSM Beach + Sand Polygons</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           font-size: 13px; display: flex; flex-direction: column; }
+    header {
+      background: #1e293b; color: #f1f5f9;
+      padding: 10px 18px;
+      display: flex; align-items: center; gap: 14px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+      z-index: 1000;
+    }
+    header h1 { font-size: 15px; font-weight: 600; }
+    header .county { color: #94a3b8; font-size: 12px; }
+    header #status { margin-left: auto; font-size: 12px; color: #cbd5e1; }
+    header #legend { display: flex; gap: 12px; font-size: 12px; }
+    header #legend .swatch {
+      display: inline-block; width: 12px; height: 12px;
+      vertical-align: middle; margin-right: 4px;
+      border: 1px solid rgba(255,255,255,0.3); border-radius: 2px;
+    }
+    #map { flex: 1; }
+
+    .leaflet-tooltip.poly-tip {
+      background: #fff; border: 1px solid #cbd5e1; border-radius: 6px;
+      padding: 8px 10px; font-size: 12px; max-width: 280px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15); pointer-events: none;
+    }
+    .leaflet-tooltip.poly-tip:before { display: none; }
+    .tip-name { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+    .tip-meta { font-size: 11px; color: #64748b; }
+    .tip-osm { margin-top: 4px; font-size: 10px; color: #94a3b8; font-family: ui-monospace, Menlo, monospace; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>OSM Beach + Sand Polygons</h1>
+  <span class="county" id="county-label">— loading —</span>
+  <span id="legend">
+    <span><span class="swatch" style="background:#fbbf24"></span>beach</span>
+    <span><span class="swatch" style="background:#fde68a"></span>sand</span>
+    <span><span class="swatch" style="background:#a78bfa"></span>dog_friendly_beach</span>
+  </span>
+  <span id="status"></span>
+</header>
+<div id="map"></div>
+
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+const qs = new URLSearchParams(location.search);
+const county = qs.get('county') || 'Orange';
+document.getElementById('county-label').textContent = county;
+
+const STYLES = {
+  beach:              { color: '#a16207', fill: '#fbbf24' },
+  sand:               { color: '#a16207', fill: '#fde68a' },
+  dog_friendly_beach: { color: '#5b21b6', fill: '#a78bfa' },
+};
+
+const escHtml = s => (s ?? '').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+const map = L.map('map', { preferCanvas: true });
+L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '&copy; OSM France'
+}).addTo(map);
+
+(async () => {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/osm_beach_sand_geojson`, {
+    method: 'POST',
+    headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_county: county }),
+  });
+  if (!r.ok) {
+    document.getElementById('status').textContent = `error: ${r.status}`;
+    return;
+  }
+  const rows = await r.json();
+  const tally = rows.reduce((acc, r) => { acc[r.feature_type] = (acc[r.feature_type] || 0) + 1; return acc; }, {});
+  const tStr = ['beach','sand','dog_friendly_beach'].filter(k=>tally[k]).map(k => `${tally[k]} ${k}`).join(' · ');
+  document.getElementById('status').textContent = `${rows.length} polygons — ${tStr}`;
+
+  const features = rows.filter(r => r.geom_json).map(r => ({
+    type: 'Feature', geometry: r.geom_json, properties: r,
+  }));
+
+  const layer = L.geoJSON(features, {
+    style: f => {
+      const s = STYLES[f.properties.feature_type] || { color: '#475569', fill: '#cbd5e1' };
+      return { color: s.color, weight: 1, fillColor: s.fill, fillOpacity: 0.55 };
+    },
+    onEachFeature: (f, lyr) => {
+      const p = f.properties;
+      lyr.bindTooltip(
+        `<div class="tip-name">${escHtml(p.name) || '<i>(no name)</i>'}</div>
+         <div class="tip-meta">${escHtml(p.feature_type)}</div>
+         <div class="tip-osm">${escHtml(p.osm_type)}/${escHtml(p.osm_id)}</div>`,
+        { sticky: true, className: 'poly-tip', direction: 'top', opacity: 1 }
+      );
+      lyr.on('mouseover', () => lyr.setStyle({ weight: 2.5, fillOpacity: 0.8 }));
+      lyr.on('mouseout',  () => lyr.setStyle({ weight: 1,   fillOpacity: 0.55 }));
+    },
+  }).addTo(map);
+
+  if (layer.getLayers().length) map.fitBounds(layer.getBounds(), { padding: [40, 40] });
+  else map.setView([33.6, -117.9], 10);
+})();
+</script>
+</body>
+</html>

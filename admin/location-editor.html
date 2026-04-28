@@ -1,0 +1,2113 @@
+<!DOCTYPE html>
+<!--
+  admin/location-editor.html — Combined map + edit workbench for
+  locations_stage. Editor on the left (60%), map on the right (40%);
+  shared search + status-filter bar above both panes drives both views.
+
+  Both panes read from the same live PostgREST query against
+  locations_stage. No static snapshots. Filter state is shared.
+
+  Click a map marker → loads that row in the editor pane.
+  Loaded row's marker pulses to keep it findable.
+  Map flies to a newly-loaded row only on first selection per session,
+  so it stays useful as an overview while editing nearby rows.
+
+  Writes go through admin-update-location (same security model as
+  beach-editor.html: x-admin-secret + per-IP rate limit).
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Location Workbench — Dog Beach Admin</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:         #f8fafc;
+      --panel:      #ffffff;
+      --border:     #e2e8f0;
+      --border-hov: #cbd5e1;
+      --text:       #0f172a;
+      --text-muted: #475569;
+      --text-dim:   #94a3b8;
+      --accent:     #3b82f6;
+      --accent-hov: #2563eb;
+      --green:      #15803d;
+      --green-bg:   #dcfce7;
+      --red:        #b91c1c;
+      --red-bg:     #fee2e2;
+      --amber:      #b45309;
+      --amber-bg:   #fef3c7;
+      --gray-bg:    #f1f5f9;
+      --dirty-bg:   #fffbeb;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg); color: var(--text);
+      font-size: 14px; line-height: 1.5;
+      height: 100vh; overflow: hidden; /* let panes scroll independently */
+    }
+
+    header {
+      background: #1e293b; color: #f1f5f9;
+      padding: 12px 20px;
+      display: flex; align-items: center; gap: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+      position: relative; z-index: 50;
+    }
+    header h1 { font-size: 16px; font-weight: 600; }
+    header .links { margin-left: auto; display: flex; gap: 14px; font-size: 13px; }
+    header a { color: #94a3b8; text-decoration: none; }
+    header a:hover { color: #f1f5f9; }
+
+    .search-bar {
+      background: var(--panel); border-bottom: 1px solid var(--border);
+      padding: 10px 20px;
+      position: relative; z-index: 40;
+    }
+    .search-bar-inner {
+      max-width: 1600px; margin: 0 auto;
+      position: relative; display: flex; gap: 8px; align-items: center;
+    }
+    .search-input {
+      flex: 1; padding: 9px 12px; font-size: 14px; font-family: inherit;
+      border: 1px solid var(--border); border-radius: 8px; outline: none;
+    }
+    .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #dbeafe; }
+    .filter-select {
+      padding: 9px 12px; font-size: 13px; font-family: inherit;
+      border: 1px solid var(--border); border-radius: 8px;
+      background: var(--panel); cursor: pointer; outline: none;
+    }
+    .filter-select:focus { border-color: var(--accent); }
+    .row-count { font-size: 12px; color: var(--text-muted); white-space: nowrap; padding: 0 4px; }
+    .search-results {
+      display: none; position: absolute; top: 100%; left: 0; right: 0;
+      margin-top: 4px; background: var(--panel);
+      border: 1px solid var(--border); border-radius: 8px;
+      max-height: 360px; overflow-y: auto;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 60;
+    }
+    .search-results.open { display: block; }
+    .search-result {
+      padding: 9px 14px; cursor: pointer;
+      border-bottom: 1px solid #f1f5f9; font-size: 13px;
+    }
+    .search-result:last-child { border: none; }
+    .search-result:hover { background: #eff6ff; }
+    .search-result-name { font-weight: 500; }
+    .search-result-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+    /* ── Workbench split ─────────────────────────────────────────────── */
+    .workbench {
+      display: grid;
+      grid-template-columns: 50% 50%;
+      height: calc(100vh - 48px - 53px); /* viewport minus header + search-bar */
+    }
+    .pane-editor {
+      overflow-y: auto;
+      border-right: 1px solid var(--border);
+      padding: 20px;
+    }
+    .pane-map {
+      position: relative;
+      background: var(--gray-bg);
+    }
+    #map { width: 100%; height: 100%; }
+
+    @media (max-width: 900px) {
+      body { overflow: auto; height: auto; }
+      .workbench { grid-template-columns: 1fr; height: auto; }
+      .pane-editor { border-right: none; border-bottom: 1px solid var(--border); }
+      .pane-map { height: 50vh; }
+    }
+
+    /* ── Editor pane ─────────────────────────────────────────────────── */
+    .empty-state { text-align: center; padding: 80px 20px; color: var(--text-muted); }
+    .empty-state-icon { font-size: 48px; margin-bottom: 12px; }
+
+    .row-header {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 18px; margin-bottom: 14px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .row-header-name { font-size: 19px; font-weight: 600; }
+    .row-header-id {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px; color: var(--text-muted);
+      background: var(--gray-bg); padding: 2px 8px; border-radius: 4px;
+    }
+    .status-badge {
+      margin-left: auto;
+      font-size: 12px; font-weight: 600;
+      padding: 3px 10px; border-radius: 999px;
+    }
+    .status-badge.active   { background: var(--green-bg); color: var(--green); }
+    .status-badge.inactive { background: var(--amber-bg); color: var(--amber); }
+    .status-badge.deleted  { background: var(--red-bg);   color: var(--red); }
+
+    .lifecycle-banner {
+      background: var(--gray-bg); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 14px;
+      font-size: 12px; color: var(--text-muted); margin-bottom: 14px;
+    }
+    .lifecycle-banner strong { color: var(--text); }
+
+    .section {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+      margin-bottom: 12px; overflow: hidden;
+    }
+    .section-header {
+      padding: 11px 18px; background: #f8fafc;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--text-muted); cursor: pointer; user-select: none;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .section-caret { transition: transform 0.15s; color: var(--text-dim); }
+    .section.collapsed .section-caret { transform: rotate(-90deg); }
+    .section-body { padding: 14px 18px; }
+    .section.collapsed .section-body { display: none; }
+
+    .field {
+      display: grid; grid-template-columns: 180px 1fr;
+      gap: 14px; align-items: start; padding: 7px 0;
+    }
+    .field + .field { border-top: 1px solid #f1f5f9; }
+    .field-label { font-size: 13px; color: var(--text-muted); padding-top: 7px; }
+    .field-label code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px; color: var(--text-dim);
+      display: block; margin-top: 2px;
+    }
+    .field-input {
+      width: 100%; padding: 6px 10px;
+      font-size: 13px; font-family: inherit;
+      border: 1px solid var(--border); border-radius: 6px;
+      background: var(--panel); outline: none;
+    }
+    .field-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px #dbeafe; }
+    .field-input.dirty { background: var(--dirty-bg); border-color: #fbbf24; }
+    textarea.field-input { min-height: 64px; resize: vertical; font-family: inherit; }
+    .field-hint { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+    .field-locked {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 13px; color: var(--text-muted);
+      padding: 7px 10px; background: var(--gray-bg); border-radius: 6px;
+      word-break: break-all;
+    }
+
+    .tri {
+      display: inline-flex; gap: 4px;
+      background: var(--gray-bg); padding: 3px; border-radius: 6px;
+    }
+    .tri button {
+      border: none; background: transparent;
+      font-family: inherit; font-size: 12px;
+      padding: 4px 10px; border-radius: 4px;
+      cursor: pointer; color: var(--text-muted);
+    }
+    .tri button.active { background: white; color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+    .tri.dirty { box-shadow: 0 0 0 2px #fbbf24; }
+
+    .actions-bar {
+      position: sticky; bottom: 0;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 16px;
+      margin: 14px 0 0;
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      box-shadow: 0 -2px 12px rgba(0,0,0,0.06);
+    }
+    .save-btn {
+      background: var(--accent); color: white;
+      padding: 7px 16px; border: none; border-radius: 6px;
+      font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit;
+    }
+    .save-btn:hover { background: var(--accent-hov); }
+    .save-btn:disabled { background: #cbd5e1; cursor: not-allowed; }
+    .dirty-count { font-size: 12px; color: var(--text-muted); }
+    .dirty-count strong { color: var(--amber); }
+
+    .lifecycle-actions { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+    .lc-btn {
+      padding: 7px 12px; border-radius: 6px;
+      font-size: 12px; font-family: inherit; cursor: pointer;
+    }
+    .lc-btn.restore { background: var(--green-bg); color: var(--green); border: 1px solid var(--green); }
+    .lc-btn.restore:hover { background: #bbf7d0; }
+    .lc-btn.inactive { background: white; color: var(--amber); border: 1px solid var(--amber); }
+    .lc-btn.inactive:hover { background: var(--amber-bg); }
+    .lc-btn.delete { background: white; color: var(--red); border: 1px solid var(--red); }
+    .lc-btn.delete:hover { background: var(--red-bg); }
+
+    /* ── Map pane ────────────────────────────────────────────────────── */
+    .map-legend {
+      background: #fff; padding: 8px 12px; border-radius: 6px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+      font-size: 12px; line-height: 1.6;
+    }
+    .map-legend h4 { margin: 0 0 4px 0; font-size: 12px; }
+    .map-legend .swatch {
+      display: inline-block; width: 11px; height: 11px; border-radius: 50%;
+      margin-right: 6px; vertical-align: middle; border: 1px solid rgba(0,0,0,0.3);
+    }
+    .map-legend .count { color: #888; margin-left: 4px; }
+    .label-marker {
+      background: rgba(255,255,255,0.92);
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 11px; white-space: nowrap;
+      border: 1px solid rgba(0,0,0,0.15);
+      pointer-events: none;
+    }
+
+    /* Gold-star icon for the curated off-leash beach layer */
+    .off-leash-star {
+      font-size: 28px;
+      line-height: 28px;
+      color: #facc15;
+      text-shadow:
+        -1px -1px 0 #1e293b,
+         1px -1px 0 #1e293b,
+        -1px  1px 0 #1e293b,
+         1px  1px 0 #1e293b;
+      cursor: grab;
+      user-select: none;
+    }
+    .leaflet-marker-draggable .off-leash-star { cursor: grab; }
+    .leaflet-marker-dragging  .off-leash-star { cursor: grabbing; }
+
+    /* Dot-style icon used for beach + CCC markers (drag-capable
+       L.marker replacement for circleMarker). */
+    .dot-marker {
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      border: 1.5px solid #0f172a;
+      box-sizing: border-box;
+      cursor: grab;
+    }
+    .dot-marker.beach        { background: rgba(59, 130, 246, 0.7); }
+    .dot-marker.ccc-yes      { background: rgba(22, 163, 74,  0.75); }
+    .dot-marker.ccc-no       { background: rgba(220, 38, 38,  0.75); }
+    .dot-marker.ccc-unknown  { background: rgba(156, 163, 175,0.75); }
+    .leaflet-marker-dragging .dot-marker { cursor: grabbing; }
+
+    /* OSM dog-feature markers — paw glyph in a colored circle. Color
+       discriminates feature_type so they're visually distinguishable
+       from the CCC layer (which uses smaller bordered dots). */
+    .osm-dog-feature {
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      color: #fff;
+      font-size: 12px;
+      line-height: 22px;
+      text-align: center;
+      cursor: pointer;
+      user-select: none;
+      box-shadow: 0 0 0 1px #0f172a;
+    }
+    .osm-dog-feature.dog_park           { background: rgba(22, 163, 74, 0.85); }   /* hunter green — dedicated */
+    .osm-dog-feature.dog_friendly_park  { background: rgba(132, 204, 22, 0.85); }  /* lime — explicitly dog-OK */
+    .osm-dog-feature.dog_friendly_beach { background: rgba(8, 145, 178, 0.9);  }   /* teal — beach context */
+    .osm-dog-feature.park               { background: rgba(100, 116, 139, 0.7); }  /* slate — generic park, dog policy unknown */
+    .osm-dog-feature.beach              { background: rgba(217, 119, 6,  0.8); }   /* sand — generic beach, dog policy unknown */
+
+    /* Pulse highlight for divIcon-based markers (overrides the SVG
+       stroke-pulse keyframes from earlier — same visual idea). */
+    @keyframes pulse-dot {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(15,23,42,0.65); }
+      50%      { box-shadow: 0 0 0 10px rgba(15,23,42,0); }
+    }
+    .marker-selected .dot-marker,
+    .marker-selected.off-leash-star,
+    .marker-selected .off-leash-star {
+      animation: pulse-dot 1.6s infinite;
+      border-width: 3px;
+    }
+    /* Pulse outline for the marker representing the loaded editor row. */
+    @keyframes pulse-marker {
+      0%   { stroke-width: 3; stroke-opacity: 0.9; }
+      50%  { stroke-width: 6; stroke-opacity: 0.4; }
+      100% { stroke-width: 3; stroke-opacity: 0.9; }
+    }
+    .marker-selected {
+      animation: pulse-marker 1.6s infinite;
+    }
+
+    /* CPAD layer toggle / radius control */
+    .cpad-control {
+      background: #fff; padding: 8px 10px; border-radius: 6px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.25); font-size: 12px;
+    }
+    .cpad-control label { display: block; margin: 2px 0; cursor: pointer; }
+    .cpad-control input[type="checkbox"] { margin-right: 6px; vertical-align: middle; }
+    .cpad-control input[type="number"] { width: 60px; padding: 2px 4px; font-size: 11px; }
+    .cpad-control .cpad-status { font-size: 11px; color: #666; margin-top: 4px; }
+
+    /* ── Toast ──────────────────────────────────────────────────────── */
+    #toast {
+      position: fixed; bottom: 20px; left: 50%;
+      transform: translateX(-50%);
+      padding: 12px 24px; border-radius: 8px;
+      font-size: 14px; z-index: 1100;
+      display: none; box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+    #toast.show { display: block; }
+    #toast.ok  { background: #1e293b; color: white; }
+    #toast.err { background: var(--red); color: white; }
+
+    /* ── Reason / confirm modal ─────────────────────────────────────── */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(15, 23, 42, 0.55); z-index: 1000;
+    }
+    .modal-overlay.open { display: block; }
+    .modal-sheet {
+      display: none; position: fixed;
+      top: 18vh; left: 50%; transform: translateX(-50%);
+      width: calc(100% - 32px); max-width: 480px;
+      background: var(--panel);
+      border: 1px solid var(--border); border-radius: 10px;
+      z-index: 1001; overflow: hidden;
+    }
+    .modal-sheet.open { display: block; }
+    .modal-header { padding: 16px 20px 8px; font-size: 15px; font-weight: 600; }
+    .modal-body { padding: 0 20px 16px; font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+    .modal-body textarea {
+      width: 100%; margin-top: 10px;
+      padding: 8px 12px; font-size: 13px; font-family: inherit;
+      border: 1px solid var(--border); border-radius: 6px;
+      min-height: 80px; resize: vertical; outline: none;
+    }
+    .modal-body textarea:focus { border-color: var(--accent); }
+    .modal-footer {
+      padding: 12px 20px; border-top: 1px solid var(--border);
+      background: #f8fafc; display: flex; gap: 8px; justify-content: flex-end;
+    }
+    .modal-btn {
+      padding: 7px 18px; border-radius: 6px;
+      font-size: 13px; font-weight: 500; font-family: inherit; cursor: pointer;
+    }
+    .modal-btn.confirm { background: var(--accent); color: white; border: 1px solid var(--accent); }
+    .modal-btn.confirm:hover { background: var(--accent-hov); }
+    .modal-btn.confirm.danger { background: var(--red); border-color: var(--red); }
+    .modal-btn.confirm.danger:hover { background: #991b1b; }
+    .modal-btn.cancel { background: white; color: var(--text); border: 1px solid var(--border); }
+    .modal-btn.cancel:hover { border-color: var(--border-hov); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Location Workbench</h1>
+  <div class="links">
+    <a href="beach-editor.html">Beach editor</a>
+    <a href="../index.html">Site home</a>
+  </div>
+</header>
+
+<div class="search-bar">
+  <div class="search-bar-inner">
+    <input id="search-input" class="search-input" type="text"
+           placeholder="Search by name, fid, governing body, place…" autocomplete="off" />
+    <select id="filter-status" class="filter-select" title="Lifecycle status">
+      <option value="active">Active</option>
+      <option value="inactive">Inactive</option>
+      <option value="deleted">Deleted</option>
+      <option value="all">All states</option>
+    </select>
+    <span id="row-count" class="row-count"></span>
+    <div id="search-results" class="search-results"></div>
+  </div>
+</div>
+
+<div class="workbench">
+  <div class="pane-editor" id="pane-editor">
+    <div id="empty" class="empty-state">
+      <div class="empty-state-icon">📍</div>
+      <div>Click a marker on the map, or search above, to start editing.</div>
+    </div>
+  </div>
+  <div class="pane-map">
+    <div id="map"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<div class="modal-overlay" id="modal-overlay"></div>
+<div class="modal-sheet" id="modal-sheet" role="dialog" aria-labelledby="modal-title" aria-modal="true">
+  <div class="modal-header" id="modal-title">Confirm</div>
+  <div class="modal-body">
+    <div id="modal-prompt"></div>
+    <textarea id="modal-reason" placeholder="Reason (required)"></textarea>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="modal-btn cancel"  id="modal-cancel">Cancel</button>
+    <button type="button" class="modal-btn confirm" id="modal-confirm">Confirm</button>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+// ── State ──────────────────────────────────────────────────────────────
+let allRows  = [];   // every row, all states. Filter applied at view time.
+let current  = null; // currently-loaded record (beach row, ccc point, or cpad unit)
+let currentType = null; // 'beach' | 'ccc' | 'cpad'
+let dirty    = {};   // field → new value (beach edits only)
+let map      = null;
+let markersByFid          = new Map(); // fid → beach circleMarker
+let cccMarkersByObjId     = new Map(); // ccc objectid → marker
+let offLeashMarkersById   = new Map(); // off_leash id → marker
+let beachLayer            = null;
+let offLeashLayer         = null;
+let selectedMarker        = null;      // currently-highlighted marker (any layer)
+let hasFlownToInitial     = false;
+
+// Reset a marker's highlight visual.
+function clearHighlight() {
+  if (!selectedMarker) return;
+  const el = selectedMarker.getElement && selectedMarker.getElement();
+  if (el) el.classList.remove('marker-selected');
+  if (selectedMarker.setZIndexOffset) selectedMarker.setZIndexOffset(0);
+  selectedMarker = null;
+}
+
+// Centralised drag handler: dispatch the lat/lng update to the right
+// admin edge function based on layer type.
+async function handleDragEnd(layerType, id, marker) {
+  const ll = marker.getLatLng();
+  const fields = { latitude: ll.lat, longitude: ll.lng };
+  let fn, body;
+  if (layerType === 'beach') {
+    fn = 'admin-update-location';   body = { fid: id,       fields };
+  } else if (layerType === 'ccc') {
+    fn = 'admin-update-ccc-point';  body = { objectid: id,  fields };
+  } else if (layerType === 'off_leash') {
+    fn = 'admin-update-off-leash-beach'; body = { id,       fields };
+  } else { return; }
+
+  const res = await edgeFn(fn, body);
+  if (res.error) { showToast(`Move failed: ${res.error}`, true); return; }
+  showToast(`Moved to ${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)}`);
+
+  // If this record is loaded in the editor, sync + re-render.
+  const matches = currentType === layerType && current && (
+       (layerType === 'beach'     && current.fid       === id)
+    || (layerType === 'ccc'       && current.objectid  === id)
+    || (layerType === 'off_leash' && current.id        === id));
+  if (matches) {
+    current.latitude  = ll.lat;
+    current.longitude = ll.lng;
+    if      (layerType === 'beach')     renderForm();
+    else if (layerType === 'ccc')       renderCccForm();
+    else                                renderOffLeashForm();
+  }
+}
+
+function highlightMarker(marker) {
+  clearHighlight();
+  if (!marker) return;
+  if (marker.bringToFront) marker.bringToFront();
+  if (marker.setZIndexOffset) marker.setZIndexOffset(1000);
+  const el = marker.getElement && marker.getElement();
+  if (el) el.classList.add('marker-selected');
+  selectedMarker = marker;
+}
+
+// Fit the map to a square box of `meters` half-width around (lat, lng).
+// 1 deg latitude ≈ 111,320 m; 1 deg longitude ≈ 111,320 * cos(lat) m.
+function flyToBox(lat, lng, meters = 1000) {
+  const dLat = meters / 111320;
+  const dLng = meters / (111320 * Math.cos(lat * Math.PI / 180));
+  map.flyToBounds(
+    [[lat - dLat, lng - dLng], [lat + dLat, lng + dLng]],
+    { duration: 0.6, maxZoom: 18 }
+  );
+}
+
+// Overlay layer state — global, loaded once at boot, toggleable
+let cpadLayer    = null;
+let placesLayer  = null;
+let cccLayer     = null;
+let osmDogFeatureLayer = null;
+let cpadFeatureLayers = [];   // every individual CPAD sub-layer (for pair-filter add/remove)
+
+// Composable CCC/CPAD filter state. Each filter sets its predicate set
+// (or null = filter off); refreshCccVisibility / refreshCpadVisibility
+// AND them together every time anything changes.
+let pairFilterCccSet  = null; // Set<objectid> | null
+let pairFilterCpadSet = null; // Set<unit_id>  | null
+let workingSetActive  = false;
+const workingSetObjIds = new Set();   // populated at CCC load time
+const CPAD_RADIUS_M = 200;
+const PLACES_COLOR = '#1e3a8a'; // navy — distinct from CPAD agency-level palette
+
+// ── Point-in-polygon helpers (ray casting) ─────────────────────────────
+// Used by click dispatch: when the user clicks a Places polygon, we
+// want a CPAD polygon at the same point to win. Markers already win
+// because they sit in a higher pane than either polygon layer.
+function pointInRing(p, ring) {
+  let x = p[0], y = p[1], inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    const hit = ((yi > y) !== (yj > y))
+              && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+    if (hit) inside = !inside;
+  }
+  return inside;
+}
+function pointInRings(p, rings) {
+  if (!pointInRing(p, rings[0])) return false;
+  for (let i = 1; i < rings.length; i++) {
+    if (pointInRing(p, rings[i])) return false; // inside a hole
+  }
+  return true;
+}
+function pointInGeometry(p, g) {
+  if (!g) return false;
+  if (g.type === 'Polygon')      return pointInRings(p, g.coordinates);
+  if (g.type === 'MultiPolygon') return g.coordinates.some(rings => pointInRings(p, rings));
+  return false;
+}
+function findFeatureAt(layer, latlng) {
+  if (!layer) return null;
+  const p = [latlng.lng, latlng.lat];
+  let hit = null;
+  layer.eachLayer(sub => {
+    if (hit) return;
+    if (pointInGeometry(p, sub.feature?.geometry)) hit = sub;
+  });
+  return hit;
+}
+
+// CPAD polygon palette by dogs_allowed (response_value from
+// geo_entity_response where entity_type='cpad'). Missing/null pops as lemon yellow so unfilled
+// CPADs are immediately scannable as gaps.
+const CPAD_DOG_COLORS = {
+  'yes':        '#16a34a',  // green
+  'no':         '#dc2626',  // red
+  'restricted': '#3b82f6',  // blue
+  'seasonal':   '#f59e0b',  // amber
+  'unknown':    '#9ca3af',  // gray (LLM said "unknown")
+};
+const CPAD_NULL_COLOR = '#fde047';  // lemon yellow — no answer on file
+
+// ── Marker palette — two distinct point types, semi-transparent so
+//     overlapping clusters and underlying polygons stay readable.
+const BEACH_COLOR = '#3b82f6'; // blue — locations_stage points
+
+// CCC marker color encodes the dog_friendly answer:
+//   Yes  → green (clear positive)
+//   No   → red   (clear negative)
+//   null / blank → gray (no info on file)
+function cccColor(v) {
+  const s = (v || '').trim();
+  if (s === 'Yes') return '#16a34a';
+  if (s === 'No')  return '#dc2626';
+  return '#9ca3af';
+}
+
+// ── Admin secret ───────────────────────────────────────────────────────
+const ADMIN_SECRET_KEY = 'db_admin_secret';
+function promptForAdminSecret(reason) {
+  const msg = reason
+    ? `${reason}\n\nAdmin secret (ADMIN_SECRET in Supabase):`
+    : 'Admin secret (ADMIN_SECRET in Supabase):';
+  while (true) {
+    const s = (prompt(msg) || '').trim();
+    if (s) { localStorage.setItem(ADMIN_SECRET_KEY, s); return s; }
+  }
+}
+function getAdminSecret() {
+  return localStorage.getItem(ADMIN_SECRET_KEY) || promptForAdminSecret();
+}
+function clearAdminSecret() { localStorage.removeItem(ADMIN_SECRET_KEY); }
+
+async function restGet(path) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
+  });
+  if (!r.ok) throw new Error(`REST ${r.status}: ${await r.text()}`);
+  return r.json();
+}
+
+// Paginated fetch — PostgREST caps at 1000 rows per response regardless
+// of the &limit= param. Loop until a partial page comes back.
+async function restGetAll(path, pageSize = 1000) {
+  const all = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const sep = path.includes('?') ? '&' : '?';
+    const batch = await restGet(`${path}${sep}offset=${offset}&limit=${pageSize}`);
+    all.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+  return all;
+}
+
+async function edgeFn(fn, body) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const secret = getAdminSecret();
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/${fn}`, {
+      method: 'POST',
+      headers: {
+        Authorization:    `Bearer ${ANON_KEY}`,
+        'Content-Type':   'application/json',
+        'x-admin-secret': secret,
+      },
+      body: JSON.stringify(body),
+    });
+    if (r.status === 401) {
+      clearAdminSecret();
+      if (attempt === 0) {
+        promptForAdminSecret('Admin secret rejected — try again:');
+        continue;
+      }
+      showToast('Admin secret rejected.', true);
+      return { error: 'Unauthorized (admin secret rejected)' };
+    }
+    if (r.status === 429) return { error: 'Admin rate limit exceeded — try again next hour.' };
+    return r.json();
+  }
+  return { error: 'Unauthorized' };
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────
+async function boot() {
+  getAdminSecret();
+  initMap();
+
+  try {
+    allRows = await restGet('locations_stage?select=*&order=display_name&limit=2000');
+  } catch (err) {
+    showToast('Failed to load locations_stage: ' + err.message, true);
+    return;
+  }
+
+  rebuildMarkers();
+  updateRowCount();
+  wireSearch();
+  loadCpadGlobalLayer();
+  loadPlacesGlobalLayer();
+  loadCccGlobalLayer();
+  loadOffLeashLayer();
+
+  const params = new URLSearchParams(location.search);
+  const fidStr = params.get('fid');
+  if (fidStr) {
+    const row = allRows.find(r => String(r.fid) === fidStr);
+    if (row) selectRow(row, { flyTo: true });
+    else     showToast(`No row with fid=${fidStr}`, true);
+  }
+}
+
+// ── State helpers ──────────────────────────────────────────────────────
+function rowState(r) {
+  if (r.deleted_at) return 'deleted';
+  if (!r.is_active) return 'inactive';
+  return 'active';
+}
+
+function rowsForCurrentFilter() {
+  const status = document.getElementById('filter-status').value;
+  return allRows.filter(r => status === 'all' || rowState(r) === status);
+}
+
+function searchMatches(rows, query) {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) return rows;
+  return rows.filter(r =>
+       (r.display_name         || '').toLowerCase().includes(q)
+    ||  String(r.fid).includes(q)
+    || (r.governing_body_name || '').toLowerCase().includes(q)
+    || (r.place_name          || '').toLowerCase().includes(q)
+  );
+}
+
+// ── Map ────────────────────────────────────────────────────────────────
+function initMap() {
+  map = L.map('map').setView([36.7783, -119.4179], 6);
+  L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+    maxZoom: 20,
+    attribution: '&copy; OpenStreetMap France | &copy; OpenStreetMap contributors',
+    subdomains: 'abc',
+  }).addTo(map);
+
+  // Pane z-stack (bottom → top):
+  //   tilePane (200) → cpadPane (540) → placesPane (550)
+  //   → markerPane (default 600) → cccPane (660)
+  //   → tooltipPane (650) → popupPane (700)
+  // CCC access points sit at the top of the SVG render stack — above
+  // every other map element, including beach markers. cccPane zIndex
+  // is set high enough that the pane itself stacks above markerPane.
+  map.createPane('cpadPane');
+  map.getPane('cpadPane').style.zIndex = '540';
+  map.getPane('cpadPane').style.pointerEvents = 'auto';
+  map.createPane('placesPane');
+  map.getPane('placesPane').style.zIndex = '550';
+  map.getPane('placesPane').style.pointerEvents = 'auto';
+  map.createPane('cccPane');
+  map.getPane('cccPane').style.zIndex = '660';
+  map.getPane('cccPane').style.pointerEvents = 'auto';
+
+  const legend = L.control({ position: 'bottomright' });
+  legend.onAdd = () => {
+    const div = L.DomUtil.create('div', 'map-legend');
+    div.id = 'map-legend';
+    div.innerHTML = '';
+    return div;
+  };
+  legend.addTo(map);
+
+  // Layer toggles + status (top-right)
+  const layersCtl = L.control({ position: 'topright' });
+  layersCtl.onAdd = () => {
+    const div = L.DomUtil.create('div', 'cpad-control');
+    div.innerHTML = `
+      <label><input type="checkbox" id="toggle-offleash" checked> ⭐ Off-leash beaches</label>
+      <label><input type="checkbox" id="toggle-beach"    checked> Beaches</label>
+      <label><input type="checkbox" id="toggle-ccc"      checked> CCC access points</label>
+      <label><input type="checkbox" id="toggle-cpad"     checked> CPAD polygons</label>
+      <label><input type="checkbox" id="toggle-places"   checked> Places (TIGER)</label>
+      <label><input type="checkbox" id="toggle-osm-dogs"> 🐾 OSM dog features</label>
+      <hr style="border:none;border-top:1px solid #e2e8f0;margin:4px 0;">
+      <label><input type="checkbox" id="toggle-pairs"> Pair filter (CCC ↔ CPAD &lt; 200m)</label>
+      <label><input type="checkbox" id="toggle-working-set"> 🦴 Working Set only</label>
+      <div class="cpad-status" id="offleash-status">loading…</div>
+      <div class="cpad-status" id="ccc-status">loading…</div>
+      <div class="cpad-status" id="cpad-status">loading…</div>
+      <div class="cpad-status" id="places-status">loading…</div>
+      <div class="cpad-status" id="osm-dogs-status"></div>
+      <div class="cpad-status" id="pair-status"></div>
+      <div class="cpad-status" id="working-set-status"></div>
+    `;
+    L.DomEvent.disableClickPropagation(div);
+    return div;
+  };
+  layersCtl.addTo(map);
+
+  setTimeout(() => {
+    document.getElementById('toggle-beach').addEventListener('change', e => {
+      if (!beachLayer) return;
+      if (e.target.checked) beachLayer.addTo(map);
+      else map.removeLayer(beachLayer);
+    });
+    document.getElementById('toggle-cpad').addEventListener('change', e => {
+      if (!cpadLayer) return;
+      if (e.target.checked) cpadLayer.addTo(map);
+      else map.removeLayer(cpadLayer);
+    });
+    document.getElementById('toggle-places').addEventListener('change', e => {
+      if (!placesLayer) return;
+      if (e.target.checked) placesLayer.addTo(map);
+      else map.removeLayer(placesLayer);
+    });
+    document.getElementById('toggle-ccc').addEventListener('change', e => {
+      if (!cccLayer) return;
+      if (e.target.checked) cccLayer.addTo(map);
+      else map.removeLayer(cccLayer);
+    });
+    document.getElementById('toggle-offleash').addEventListener('change', e => {
+      if (!offLeashLayer) return;
+      if (e.target.checked) offLeashLayer.addTo(map);
+      else map.removeLayer(offLeashLayer);
+    });
+    document.getElementById('toggle-pairs').addEventListener('change', e => {
+      if (e.target.checked) applyPairFilter();
+      else                  clearPairFilter();
+    });
+    document.getElementById('toggle-osm-dogs').addEventListener('change', e => {
+      if (e.target.checked) loadOsmDogFeaturesLayer();
+      else if (osmDogFeatureLayer) {
+        map.removeLayer(osmDogFeatureLayer);
+        osmDogFeatureLayer = null;
+        const status = document.getElementById('osm-dogs-status');
+        if (status) status.textContent = '';
+      }
+    });
+    document.getElementById('toggle-working-set').addEventListener('change', e => {
+      workingSetActive = e.target.checked;
+      refreshCccVisibility();
+      const status = document.getElementById('working-set-status');
+      if (status) status.textContent = workingSetActive
+        ? `Working Set: ${workingSetObjIds.size} CCC points`
+        : '';
+    });
+  }, 0);
+}
+
+// AND-compose pair filter + working set filter for CCC markers.
+function refreshCccVisibility() {
+  if (!cccLayer) return;
+  for (const [objId, m] of cccMarkersByObjId.entries()) {
+    const passPair = pairFilterCccSet === null || pairFilterCccSet.has(objId);
+    const passWS   = !workingSetActive || workingSetObjIds.has(objId);
+    if (passPair && passWS) cccLayer.addLayer(m);
+    else                    cccLayer.removeLayer(m);
+  }
+}
+
+// Pair filter is the only thing that hides CPAD polygons; kept symmetric
+// with refreshCccVisibility so future filters compose the same way.
+function refreshCpadVisibility() {
+  if (!cpadLayer) return;
+  for (const sub of cpadFeatureLayers) {
+    const uid = sub.feature?.properties?.unit_id;
+    const passPair = pairFilterCpadSet === null || pairFilterCpadSet.has(uid);
+    if (passPair) cpadLayer.addLayer(sub);
+    else          cpadLayer.removeLayer(sub);
+  }
+}
+
+async function applyPairFilter() {
+  const status = document.getElementById('pair-status');
+  if (status) status.textContent = 'pair filter: loading…';
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/paired_ccc_cpad`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_meters: 200 }),
+    });
+    if (!r.ok) throw new Error(`RPC ${r.status}: ${await r.text()}`);
+    const { ccc_ids, cpad_ids } = await r.json();
+    pairFilterCccSet  = new Set(ccc_ids  || []);
+    pairFilterCpadSet = new Set(cpad_ids || []);
+    refreshCccVisibility();
+    refreshCpadVisibility();
+    if (status) status.textContent =
+      `pair filter: ${pairFilterCccSet.size} CCC ↔ ${pairFilterCpadSet.size} CPAD`;
+  } catch (err) {
+    if (status) status.textContent = `pair filter error: ${err.message}`;
+    console.error(err);
+    document.getElementById('toggle-pairs').checked = false;
+  }
+}
+
+function clearPairFilter() {
+  pairFilterCccSet  = null;
+  pairFilterCpadSet = null;
+  refreshCccVisibility();
+  refreshCpadVisibility();
+  const status = document.getElementById('pair-status');
+  if (status) status.textContent = '';
+}
+
+async function loadOffLeashLayer() {
+  const status = document.getElementById('offleash-status');
+  if (status) status.textContent = '⭐ loading…';
+  try {
+    const points = await restGetAll(
+      'off_leash_dog_beaches?select=id,name,city,region,off_leash_legal,off_leash_de_facto,enforcement_risk,social_norm,confidence,latitude,longitude'
+      + '&latitude=not.is.null&longitude=not.is.null'
+    );
+    if (!points.length) { if (status) status.textContent = '⭐ none'; return; }
+
+    offLeashLayer = L.featureGroup().addTo(map);
+    offLeashMarkersById.clear();
+    for (const p of points) {
+      const icon = L.divIcon({
+        className:   '',
+        html:        `<div class="off-leash-star">★</div>`,
+        iconSize:    [28, 28],
+        iconAnchor:  [14, 14],
+      });
+      const m = L.marker([p.latitude, p.longitude], {
+        icon, draggable: true, autoPan: true,
+      });
+      m.bindTooltip(p.name, {
+        direction: 'top', offset: [0, -10], className: 'label-marker',
+      });
+      m.on('click', (e) => {
+        L.DomEvent.stopPropagation(e);
+        selectOffLeashPoint(p.id);
+      });
+      m.on('dragend', () => handleDragEnd('off_leash', p.id, m));
+      offLeashLayer.addLayer(m);
+      offLeashMarkersById.set(p.id, m);
+    }
+    if (status) status.textContent = `⭐ ${points.length} off-leash beaches`;
+  } catch (err) {
+    if (status) status.textContent = `⭐ error: ${err.message}`;
+    console.error(err);
+  }
+}
+
+async function loadOsmDogFeaturesLayer() {
+  const status = document.getElementById('osm-dogs-status');
+  if (status) status.textContent = '🐾 loading…';
+  try {
+    const points = await restGetAll(
+      'osm_features?select=osm_type,osm_id,feature_type,dog_status,name,latitude,longitude,city,fee,fence,surface,opening_hours,website'
+      + '&latitude=not.is.null&longitude=not.is.null'
+    );
+    if (!points.length) { if (status) status.textContent = '🐾 none'; return; }
+
+    osmDogFeatureLayer = L.featureGroup().addTo(map);
+    for (const p of points) {
+      const icon = L.divIcon({
+        className:  '',
+        html:       `<div class="osm-dog-feature ${p.feature_type}">🐾</div>`,
+        iconSize:   [22, 22],
+        iconAnchor: [11, 11],
+      });
+      const m = L.marker([p.latitude, p.longitude], { icon });
+      const label = (p.name || '(unnamed)') +
+                    (p.dog_status ? ` · ${p.dog_status}` : '');
+      m.bindTooltip(label, { direction: 'top', offset: [0, -10], className: 'label-marker' });
+      m.on('click', (e) => {
+        L.DomEvent.stopPropagation(e);
+        // Read-only inspection — open OSM in a new tab so the user can
+        // verify / fix bad tagging at the source.
+        window.open(`https://www.openstreetmap.org/${p.osm_type}/${p.osm_id}`, '_blank', 'noopener');
+      });
+      osmDogFeatureLayer.addLayer(m);
+    }
+
+    const counts = points.reduce((acc, p) => {
+      acc[p.feature_type] = (acc[p.feature_type] || 0) + 1;
+      return acc;
+    }, {});
+    if (status) status.textContent =
+      `🐾 ${points.length} OSM `
+      + `(${counts.dog_park || 0} dog-park / ${counts.dog_friendly_park || 0} dog-park-friendly / `
+      + `${counts.dog_friendly_beach || 0} dog-beach / ${counts.park || 0} park / `
+      + `${counts.beach || 0} beach)`;
+  } catch (err) {
+    if (status) status.textContent = `🐾 error: ${err.message}`;
+    console.error(err);
+  }
+}
+
+async function loadCpadGlobalLayer() {
+  const status = document.getElementById('cpad-status');
+  if (status) status.textContent = 'CPAD layer: loading…';
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/cpad_units_near_active_beaches`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_meters: CPAD_RADIUS_M }),
+    });
+    if (!r.ok) throw new Error(`RPC ${r.status}: ${await r.text()}`);
+    const rows = await r.json();
+    if (!rows.length) {
+      if (status) status.textContent = 'CPAD layer: no polygons';
+      return;
+    }
+
+    const features = rows.map(row => ({
+      type: 'Feature',
+      geometry: row.geom_geojson,
+      properties: {
+        unit_id:        row.unit_id,
+        unit_name:      row.unit_name,
+        mng_agncy:      row.mng_agncy,
+        mng_ag_lev:     row.mng_ag_lev,
+        park_url:       row.park_url,
+        dogs_allowed:   row.dogs_allowed,
+        dogs_confidence:row.dogs_confidence,
+      },
+    }));
+
+    cpadFeatureLayers = [];
+    cpadLayer = L.geoJSON(features, {
+      pane: 'cpadPane',
+      style: f => {
+        const da = (f.properties.dogs_allowed || '').trim();
+        const color = da
+          ? (CPAD_DOG_COLORS[da] || CPAD_NULL_COLOR)
+          : CPAD_NULL_COLOR;
+        return {
+          color,
+          weight: 1.5,
+          opacity: 0.9,
+          fillColor: color,
+          fillOpacity: 0.30,
+        };
+      },
+      onEachFeature: (f, layer) => {
+        const p = f.properties;
+        const dogLine = p.dogs_allowed
+          ? `<br>🐕 dogs: <b>${escHtml(p.dogs_allowed)}</b>` +
+            (p.dogs_confidence != null ? ` <small>(conf ${Number(p.dogs_confidence).toFixed(2)})</small>` : '')
+          : '';
+        layer.bindTooltip(
+          `<b>${escHtml(p.unit_name || '(no name)')}</b><br>` +
+          `${escHtml(p.mng_agncy || '')} <small>(${escHtml(p.mng_ag_lev || '?')})</small>` +
+          dogLine,
+          { sticky: true, className: 'label-marker' }
+        );
+        // Click loads the CPAD unit into the left pane. (Place-click
+        // priority dispatch in the Places handler still routes to
+        // CPAD when both overlap.)
+        layer.on('click', (e) => {
+          L.DomEvent.stopPropagation(e);
+          selectCpadUnit(p.unit_id);
+        });
+        cpadFeatureLayers.push(layer);
+      },
+    }).addTo(map);
+
+    if (status) status.textContent = `CPAD layer: ${rows.length} polygons`;
+  } catch (err) {
+    if (status) status.textContent = `CPAD layer error: ${err.message}`;
+    console.error(err);
+  }
+}
+
+async function loadPlacesGlobalLayer() {
+  const status = document.getElementById('places-status');
+  if (status) status.textContent = 'Places: loading…';
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/jurisdictions_near_active_beaches`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+    if (!r.ok) throw new Error(`RPC ${r.status}: ${await r.text()}`);
+    const rows = await r.json();
+    if (!rows.length) {
+      if (status) status.textContent = 'Places: none';
+      return;
+    }
+
+    const features = rows.map(row => ({
+      type: 'Feature',
+      geometry: row.geom_geojson,
+      properties: {
+        id:         row.id,
+        name:       row.name,
+        place_type: row.place_type,
+        county:     row.county,
+        state:      row.state,
+      },
+    }));
+
+    placesLayer = L.geoJSON(features, {
+      pane: 'placesPane',
+      style: f => {
+        const isC1 = f.properties.place_type === 'C1';
+        return {
+          color: PLACES_COLOR,
+          weight: 1.2,
+          opacity: 0.85,
+          fillColor: PLACES_COLOR,
+          fillOpacity: isC1 ? 0.10 : 0.05,    // incorporated cities a touch darker
+          dashArray: isC1 ? null : '4 3',     // CDPs / unincorporated dashed
+        };
+      },
+      onEachFeature: (f, layer) => {
+        const p = f.properties;
+        layer.bindTooltip(
+          `<b>${escHtml(p.name || '(no name)')}</b><br>` +
+          `${escHtml(p.county || '')} County <small>(${escHtml(p.place_type || '?')})</small>`,
+          { sticky: true, className: 'label-marker' }
+        );
+        const placePopupHtml =
+          `<b>${escHtml(p.name || '(no name)')}</b><br>` +
+          `${escHtml(p.county || '')} County (${escHtml(p.place_type || '?')})`;
+        // Click priority dispatch:
+        //   marker > CPAD > place
+        // Markers win automatically (higher pane). When a Place click
+        // fires, check for an overlapping CPAD at the click point; if
+        // present, open that CPAD's popup instead and suppress the
+        // place popup. Otherwise show the place popup.
+        layer.on('click', (e) => {
+          L.DomEvent.stopPropagation(e);
+          // Priority: CPAD over Place. If a CPAD overlaps the click
+          // point, dispatch to its unit; otherwise show the place
+          // popup (no current TIGER detail viewer).
+          const cpadHit = findFeatureAt(cpadLayer, e.latlng);
+          if (cpadHit) {
+            selectCpadUnit(cpadHit.feature.properties.unit_id);
+          } else {
+            L.popup({ className: 'leaflet-popup' })
+              .setLatLng(e.latlng).setContent(placePopupHtml).openOn(map);
+          }
+        });
+      },
+    }).addTo(map);
+
+    if (status) status.textContent = `Places: ${rows.length} polygons`;
+  } catch (err) {
+    if (status) status.textContent = `Places error: ${err.message}`;
+    console.error(err);
+  }
+}
+
+async function loadCccGlobalLayer() {
+  const status = document.getElementById('ccc-status');
+  if (status) status.textContent = 'CCC: loading…';
+  try {
+    // Direct REST query, same pattern as locations_stage. RLS is off
+    // on ccc_access_points so anon can read.
+    const points = await restGetAll(
+      'ccc_access_points'
+      + '?select=objectid,name,county,district,latitude,longitude,dog_friendly,parking,restrooms,fee,open_to_public,archived,sandy_beach,is_working_set,dogs_verdict,dogs_verdict_confidence'
+      + '&latitude=not.is.null&longitude=not.is.null'
+      + '&archived=not.eq.Yes'
+      + '&sandy_beach=eq.Yes'           // sandy-beach access points
+      + '&name=ilike.*beach*'           // name contains "beach"
+    );
+    if (!points.length) { if (status) status.textContent = 'CCC: none'; return; }
+    workingSetObjIds.clear();
+    for (const p of points) {
+      if (p.is_working_set) workingSetObjIds.add(p.objectid);
+    }
+
+    // Use the default markerPane (same as beach markers). Because
+    // CCC loads AFTER beaches in boot(), CCC SVG paths are appended
+    // last and naturally stack on top within the pane. No custom
+    // renderer / pane gymnastics — circleMarker's pane option is
+    // unreliable for getting paths into a custom pane.
+    cccLayer = L.featureGroup().addTo(map);
+    cccMarkersByObjId.clear();
+    for (const p of points) {
+      const v = (p.dog_friendly || '').trim();
+      const cls = v === 'Yes' ? 'ccc-yes' : v === 'No' ? 'ccc-no' : 'ccc-unknown';
+      const icon = L.divIcon({
+        className:  '',
+        html:       `<div class="dot-marker ${cls}"></div>`,
+        iconSize:   [16, 16],
+        iconAnchor: [8, 8],
+      });
+      const m = L.marker([p.latitude, p.longitude], {
+        icon, draggable: true, autoPan: true,
+      });
+      m.bindTooltip(p.name || '(unnamed)', {
+        direction: 'top', offset: [0, -10], className: 'label-marker',
+      });
+      m.on('click', (e) => {
+        L.DomEvent.stopPropagation(e);
+        selectCccPoint(p.objectid);
+      });
+      m.on('dragend', () => handleDragEnd('ccc', p.objectid, m));
+      cccLayer.addLayer(m);
+      cccMarkersByObjId.set(p.objectid, m);
+    }
+
+    if (status) status.textContent = `CCC: ${points.length} sandy beaches (name ilike "beach")`;
+  } catch (err) {
+    if (status) status.textContent = `CCC error: ${err.message}`;
+    console.error(err);
+  }
+}
+
+function rebuildMarkers() {
+  // Clear old markers + the wrapping featureGroup.
+  if (beachLayer) { map.removeLayer(beachLayer); beachLayer = null; }
+  markersByFid.clear();
+  selectedMarker = null;
+
+  const beachToggle = document.getElementById('toggle-beach');
+  const showBeaches = beachToggle ? beachToggle.checked : true;
+  beachLayer = L.featureGroup();
+
+  const visible = rowsForCurrentFilter();
+  for (const row of visible) {
+    if (row.latitude == null || row.longitude == null) continue;
+
+    const icon = L.divIcon({
+      className:  '',
+      html:       `<div class="dot-marker beach"></div>`,
+      iconSize:   [16, 16],
+      iconAnchor: [8, 8],
+    });
+    const marker = L.marker([row.latitude, row.longitude], {
+      icon, draggable: true, autoPan: true,
+    });
+
+    marker.bindTooltip(row.display_name || `(fid ${row.fid})`, {
+      permanent: false, direction: 'top', offset: [0, -10],
+      className: 'label-marker',
+    });
+
+    marker.on('click', () => {
+      const r = allRows.find(x => x.fid === row.fid) || row;
+      selectRow(r, { flyTo: false });
+    });
+    marker.on('dragend', () => handleDragEnd('beach', row.fid, marker));
+
+    beachLayer.addLayer(marker);
+    markersByFid.set(row.fid, marker);
+  }
+  if (showBeaches) beachLayer.addTo(map);
+
+  // If current edited row is still visible, restore its highlight.
+  if (currentType === 'beach' && current && markersByFid.has(current.fid)) {
+    highlightSelectedMarker(current.fid);
+  }
+
+  updateLegend(visible.length);
+}
+
+function updateLegend(_beachCount) {
+  // Cleared 2026-04-26 — legend will be re-built once the new layer
+  // semantics (Working Set, dogs_verdict, etc.) settle.
+  const el = document.getElementById('map-legend');
+  if (el) el.innerHTML = '';
+}
+
+function highlightSelectedMarker(fid) {
+  highlightMarker(markersByFid.get(fid));
+}
+
+function highlightSelectedCcc(objectid) {
+  highlightMarker(cccMarkersByObjId.get(objectid));
+}
+
+function highlightSelectedOffLeash(id) {
+  // Stars are L.marker (icon-based), not circleMarker — they don't
+  // respond to setStyle. Pulse via CSS class on the icon's div instead.
+  if (selectedMarker) {
+    const el = selectedMarker.getElement && selectedMarker.getElement();
+    if (el) el.classList.remove('marker-selected');
+    selectedMarker = null;
+  }
+  const m = offLeashMarkersById.get(id);
+  if (!m) return;
+  m.setZIndexOffset(1000);
+  const el = m.getElement && m.getElement();
+  if (el) el.classList.add('marker-selected');
+  selectedMarker = m;
+}
+
+// ── Search ─────────────────────────────────────────────────────────────
+function wireSearch() {
+  const input  = document.getElementById('search-input');
+  const filter = document.getElementById('filter-status');
+  const panel  = document.getElementById('search-results');
+
+  const renderResults = () => {
+    const filtered = searchMatches(rowsForCurrentFilter(), input.value);
+    if (filtered.length === 0 || !input.value.trim()) {
+      panel.classList.remove('open'); panel.innerHTML = '';
+      return;
+    }
+    panel.innerHTML = filtered.slice(0, 30).map(r => {
+      const st = rowState(r);
+      const stChip = `<span class="status-badge ${st}" style="font-size:10px; padding:1px 6px; margin-left:6px;">${st}</span>`;
+      const meta = [`fid ${r.fid}`, r.place_name, r.governing_body_name].filter(Boolean).join(' · ');
+      return `<div class="search-result" data-fid="${r.fid}">
+        <div class="search-result-name">${escHtml(r.display_name || '(no name)')} ${stChip}</div>
+        <div class="search-result-meta">${escHtml(meta)}</div>
+      </div>`;
+    }).join('') + (filtered.length > 30
+      ? `<div class="search-result" style="text-align:center;color:var(--text-dim);cursor:default;">${filtered.length - 30} more — narrow your search</div>`
+      : '');
+    panel.classList.add('open');
+    panel.querySelectorAll('.search-result[data-fid]').forEach(el => {
+      el.addEventListener('click', () => {
+        const r = allRows.find(x => String(x.fid) === el.dataset.fid);
+        if (r) {
+          selectRow(r, { flyTo: true });
+          input.value = r.display_name || '';
+          panel.classList.remove('open');
+        }
+      });
+    });
+  };
+
+  input.addEventListener('input', renderResults);
+  input.addEventListener('focus', renderResults);
+  filter.addEventListener('change', () => {
+    rebuildMarkers();
+    updateRowCount();
+    if (input.value.trim()) renderResults();
+  });
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.search-bar-inner')) panel.classList.remove('open');
+  });
+}
+
+function updateRowCount() {
+  const n = rowsForCurrentFilter().length;
+  document.getElementById('row-count').textContent = `${n.toLocaleString()} rows`;
+}
+
+// ── Select + render ────────────────────────────────────────────────────
+function selectRow(r, opts = {}) {
+  currentType = 'beach';
+  current = JSON.parse(JSON.stringify(r));
+  dirty   = {};
+  history.replaceState({}, '', `?fid=${current.fid}`);
+  highlightSelectedMarker(current.fid);
+  if (current.latitude != null && current.longitude != null) {
+    flyToBox(current.latitude, current.longitude, 1000);
+  }
+  renderForm();
+}
+
+async function selectOffLeashPoint(id) {
+  const status = document.getElementById('pane-editor');
+  status.innerHTML = `<div class="empty-state">Loading off-leash beach ${id}…</div>`;
+  try {
+    const rows = await restGet(`off_leash_dog_beaches?select=*&id=eq.${id}&limit=1`);
+    if (!rows.length) { status.innerHTML = `<div class="empty-state">Off-leash beach ${id} not found</div>`; return; }
+    currentType = 'off_leash';
+    current = rows[0];
+    dirty   = {};
+    highlightSelectedOffLeash(current.id);
+    if (current.latitude != null && current.longitude != null) {
+      flyToBox(current.latitude, current.longitude, 1000);
+    }
+    renderOffLeashForm();
+  } catch (err) {
+    status.innerHTML = `<div class="empty-state">Error loading off-leash beach: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function renderOffLeashForm() {
+  const main = document.getElementById('pane-editor');
+  const r = current;
+
+  main.innerHTML = `
+    <div class="row-header">
+      <div class="row-header-name">⭐ ${escHtml(r.name || '(unnamed)')}</div>
+      <div class="row-header-id">off-leash #${r.id}</div>
+      <div class="status-badge active" style="background:#facc15;color:#1e293b;">CURATED</div>
+    </div>
+    <div class="lifecycle-banner">
+      <strong>Curated off-leash beach.</strong> Hand-vetted reference data —
+      edits here are authoritative for the gold-standard list.
+    </div>
+
+    ${sectionHtml('Identity', false, [
+      lockedField('id', r.id, 'Synthetic primary key'),
+      textField('name',   'Name',   r.name),
+      textField('city',   'City',   r.city),
+      textField('region', 'Region', r.region),
+    ])}
+
+    ${sectionHtml('Coordinates', false, [
+      `<div class="field">
+        <div class="field-label">Latitude / Longitude</div>
+        <div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <input class="field-input" id="in-latitude"  data-field="latitude"  type="number" step="any" value="${r.latitude  ?? ''}" />
+            <input class="field-input" id="in-longitude" data-field="longitude" type="number" step="any" value="${r.longitude ?? ''}" />
+          </div>
+          <div class="field-hint">Save to move the gold star on the map.</div>
+        </div>
+      </div>`,
+    ])}
+
+    ${sectionHtml('Off-leash status', false, [
+      selectField('off_leash_legal', 'Legally off-leash', r.off_leash_legal,
+        ['', 'true', 'false', 'partial', 'partial/seasonal', 'partial/uncertain']),
+      `<div class="field">
+        <div class="field-label">De facto off-leash<code>off_leash_de_facto</code></div>
+        <div class="tri" id="in-off_leash_de_facto" data-field="off_leash_de_facto" data-type="tri">
+          <button type="button" data-val="true"  class="${r.off_leash_de_facto === true  ? 'active' : ''}">Yes</button>
+          <button type="button" data-val="false" class="${r.off_leash_de_facto === false ? 'active' : ''}">No</button>
+          <button type="button" data-val="null"  class="${r.off_leash_de_facto == null   ? 'active' : ''}">—</button>
+        </div>
+      </div>`,
+      selectField('enforcement_risk', 'Enforcement risk', r.enforcement_risk,
+        ['', 'very low', 'low', 'low-medium', 'medium', 'medium-high', 'high']),
+      selectField('social_norm', 'Social norm', r.social_norm,
+        ['', 'free', 'mixed/free', 'mixed', 'mostly leashed', 'leashed']),
+      selectField('confidence', 'Confidence', r.confidence,
+        ['', 'low', 'low-medium', 'medium', 'medium-high', 'high']),
+    ])}
+
+    ${sectionHtml('System', true, [
+      lockedField('created_at', r.created_at, ''),
+      lockedField('updated_at', r.updated_at, ''),
+    ])}
+
+    <div class="actions-bar">
+      <button class="save-btn" id="save-btn" onclick="save()" disabled>Save</button>
+      <span class="dirty-count" id="dirty-count">No changes</span>
+    </div>
+  `;
+
+  wireFormInteractions();
+  wireSectionCollapse();
+  document.getElementById('pane-editor').scrollTop = 0;
+}
+
+async function selectCccPoint(objectid) {
+  const status = document.getElementById('pane-editor');
+  status.innerHTML = `<div class="empty-state">Loading CCC point ${objectid}…</div>`;
+  try {
+    const rows = await restGet(`ccc_access_points?select=*&objectid=eq.${objectid}&limit=1`);
+    if (!rows.length) { status.innerHTML = `<div class="empty-state">CCC point ${objectid} not found</div>`; return; }
+    currentType = 'ccc';
+    current = rows[0];
+    dirty   = {};
+    highlightSelectedCcc(current.objectid);
+    if (current.latitude != null && current.longitude != null) {
+      flyToBox(current.latitude, current.longitude, 1000);
+    }
+    renderCccForm();
+  } catch (err) {
+    status.innerHTML = `<div class="empty-state">Error loading CCC: ${escHtml(err.message)}</div>`;
+  }
+}
+
+async function selectCpadUnit(unitId) {
+  const status = document.getElementById('pane-editor');
+  status.innerHTML = `<div class="empty-state">Loading CPAD unit ${unitId}…</div>`;
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/cpad_unit_detail`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_unit_id: unitId }),
+    });
+    if (!r.ok) throw new Error(`RPC ${r.status}: ${await r.text()}`);
+    const rows = await r.json();
+    if (!rows.length) { status.innerHTML = `<div class="empty-state">CPAD unit ${unitId} not found</div>`; return; }
+    currentType = 'cpad';
+    current = rows[0];
+    dirty   = {};
+    renderCpadView();
+  } catch (err) {
+    status.innerHTML = `<div class="empty-state">Error loading CPAD: ${escHtml(err.message)}</div>`;
+  }
+}
+
+// Pane dispatcher — all three select* funcs ultimately call one of:
+//   renderForm    — beach edit (full form, save, lifecycle actions)
+//   renderCccForm — editable CCC access point form (admin-update-ccc-point)
+//   renderCpadView — read-only CPAD unit summary
+// Edit support for CCC/CPAD is a phase-2 add (needs admin-update edge
+// functions for those tables).
+
+// CCC values are stored as free-text strings in the source data
+// ("Yes" / "No" / "Restricted" / blank). We expose them as select
+// dropdowns with the common vocabulary so admin edits stay consistent.
+const CCC_FLAG_OPTIONS = ['', 'Yes', 'No', 'Restricted', 'Seasonal', 'Unknown'];
+
+function selectRow_ccc(c) { return c; } // placeholder, kept for symmetry
+
+function renderCccForm() {
+  const main = document.getElementById('pane-editor');
+  const c = current;
+
+  // Helper: select dropdown for CCC's free-text flag fields
+  const flagField = (key, label) => selectField(key, label, c[key], CCC_FLAG_OPTIONS);
+
+  main.innerHTML = `
+    <div class="row-header">
+      <div class="row-header-name">${escHtml(c.name || '(unnamed)')}</div>
+      <div class="row-header-id">CCC #${c.objectid}</div>
+      <div class="status-badge active" style="background:${cccColor(c.dog_friendly)};color:white;">CCC</div>
+    </div>
+
+    ${sectionHtml('Identity', false, [
+      lockedField('objectid', c.objectid, 'CCC primary key — not editable'),
+      textField('name',        'Name',        c.name),
+      textField('location',    'Location',    c.location),
+      textareaField('description', 'Description', c.description),
+      textField('phone',       'Phone',       c.phone),
+    ])}
+
+    ${sectionHtml('Geography', false, [
+      textField('county',   'County',   c.county),
+      textField('district', 'District', c.district),
+      `<div class="field">
+        <div class="field-label">Latitude / Longitude</div>
+        <div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <input class="field-input" id="in-latitude"  data-field="latitude"  type="number" step="any" value="${c.latitude  ?? ''}" />
+            <input class="field-input" id="in-longitude" data-field="longitude" type="number" step="any" value="${c.longitude ?? ''}" />
+          </div>
+        </div>
+      </div>`,
+    ])}
+
+    ${sectionHtml('Dogs', false, [
+      flagField('dog_friendly', 'Dog friendly'),
+    ])}
+
+    ${sectionHtml('Access', false, [
+      flagField('open_to_public', 'Open to public'),
+      flagField('fee',            'Fee'),
+      textField('restrictions',   'Restrictions', c.restrictions),
+    ])}
+
+    ${sectionHtml('Amenities', false, [
+      flagField('parking',          'Parking'),
+      flagField('restrooms',        'Restrooms'),
+      flagField('showers',          'Showers'),
+      flagField('drinking_water',   'Drinking water'),
+      flagField('food',             'Food'),
+      flagField('picnic_area',      'Picnic area'),
+      flagField('fire_pits',        'Fire pits'),
+      flagField('lifeguard',        'Lifeguard'),
+      flagField('disabled_access',  'Disabled access'),
+      flagField('beach_wheelchair', 'Beach wheelchair'),
+      flagField('campground',       'Campground'),
+    ])}
+
+    ${sectionHtml('Beach features', true, [
+      flagField('sandy_beach',     'Sandy beach'),
+      flagField('dunes',           'Dunes'),
+      flagField('rocky_shore',     'Rocky shore'),
+      flagField('upland_beach',    'Upland beach'),
+      flagField('bluff',           'Bluff'),
+      flagField('bay_lagoon_lake', 'Bay/lagoon/lake'),
+      flagField('urban_waterfront','Urban waterfront'),
+      flagField('inland_area',     'Inland area'),
+      flagField('wetland',         'Wetland'),
+      flagField('stream_corridor', 'Stream corridor'),
+      flagField('offshore_reef',   'Offshore reef'),
+    ])}
+
+    ${sectionHtml('Trails / paths', true, [
+      flagField('stairs_to_beach',  'Stairs to beach'),
+      flagField('path_to_beach',    'Path to beach'),
+      flagField('boardwalk',        'Boardwalk'),
+      flagField('blufftop_trails',  'Blufftop trails'),
+      flagField('blufftop_park',    'Blufftop park'),
+      flagField('bike_path',        'Bike path'),
+      flagField('equestrian_trail', 'Equestrian trail'),
+      textField('cct_link',         'CCT link',         c.cct_link),
+      textField('cct_designation',  'CCT designation',  c.cct_designation),
+    ])}
+
+    ${sectionHtml('Activities', true, [
+      flagField('swimming',         'Swimming'),
+      flagField('diving',           'Diving'),
+      flagField('snorkeling',       'Snorkeling'),
+      flagField('surfing',          'Surfing'),
+      flagField('fishing',          'Fishing'),
+      flagField('boating',          'Boating'),
+      flagField('kayaking',         'Kayaking'),
+      flagField('tidepool',         'Tidepool'),
+      flagField('wildlife_viewing', 'Wildlife viewing'),
+      flagField('playground',       'Playground'),
+      flagField('sport_fields',     'Sport fields'),
+      flagField('volleyball',       'Volleyball'),
+      flagField('windsurf_kite',    'Windsurf/kite'),
+    ])}
+
+    ${sectionHtml('Landmarks', true, [
+      flagField('lighthouse',         'Lighthouse'),
+      flagField('pier',               'Pier'),
+      flagField('historic_structure', 'Historic structure'),
+      flagField('shipwrecks',         'Shipwrecks'),
+    ])}
+
+    ${sectionHtml('Map links', true, [
+      textField('google_maps_location', 'Google Maps URL', c.google_maps_location),
+      textField('apple_maps_location',  'Apple Maps URL',  c.apple_maps_location),
+    ])}
+
+    ${sectionHtml('System', true, [
+      textField('data_updated', 'Data updated', c.data_updated),
+      textField('archived',     'Archived (Yes/No)', c.archived),
+      lockedField('loaded_at',  c.loaded_at, ''),
+    ])}
+
+    <div class="actions-bar">
+      <button class="save-btn" id="save-btn" onclick="save()" disabled>Save</button>
+      <span class="dirty-count" id="dirty-count">No changes</span>
+      <div class="lifecycle-actions">
+        ${(c.archived === 'Yes')
+          ? `<button class="lc-btn restore" onclick="markCccArchived(false)">Restore (un-archive)</button>`
+          : `<button class="lc-btn delete"  onclick="markCccArchived(true)">Soft-delete (archive)…</button>`}
+      </div>
+    </div>
+  `;
+
+  wireFormInteractions();
+  wireSectionCollapse();
+  document.getElementById('pane-editor').scrollTop = 0;
+}
+
+async function markCccArchived(toArchived) {
+  if (currentType !== 'ccc' || !current) return;
+
+  if (!toArchived) {
+    // Restore — no reason needed.
+    const res = await edgeFn('admin-update-ccc-point', {
+      objectid: current.objectid,
+      fields:   { archived: null, archived_reason: null },
+    });
+    if (res.error) { showToast(`Restore failed: ${res.error}`, true); return; }
+    current = res.ccc;
+    showToast('CCC point restored.');
+    renderCccForm();
+    return;
+  }
+
+  // Soft-delete — open the same reason modal as beach lifecycle actions.
+  document.getElementById('modal-title').textContent  = 'Archive CCC point';
+  document.getElementById('modal-prompt').textContent =
+    `Archive "${current.name || '(unnamed)'}" (CCC #${current.objectid})? It will be excluded from maps and queries. Why?`;
+  const reasonInput = document.getElementById('modal-reason');
+  reasonInput.style.display = 'block';
+  reasonInput.value = '';
+  document.getElementById('modal-confirm').classList.add('danger');
+
+  openModal();
+
+  const onConfirm = async () => {
+    const reason = reasonInput.value.trim();
+    if (!reason) { reasonInput.focus(); return; }
+    closeModal();
+
+    const res = await edgeFn('admin-update-ccc-point', {
+      objectid: current.objectid,
+      fields:   { archived: 'Yes', archived_reason: reason },
+    });
+    if (res.error) { showToast(`Archive failed: ${res.error}`, true); return; }
+    current = res.ccc;
+    showToast('CCC point archived.');
+    renderCccForm();
+  };
+
+  // Replace handlers via cloneNode so listeners don't accumulate.
+  const confirmBtn = document.getElementById('modal-confirm');
+  const newConfirm = confirmBtn.cloneNode(true);
+  confirmBtn.parentNode.replaceChild(newConfirm, confirmBtn);
+  newConfirm.addEventListener('click', onConfirm);
+
+  const cancelBtn = document.getElementById('modal-cancel');
+  const newCancel = cancelBtn.cloneNode(true);
+  cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+  newCancel.addEventListener('click', closeModal);
+}
+
+function renderCpadView() {
+  const main = document.getElementById('pane-editor');
+  const c = current;
+  main.innerHTML = `
+    <div class="row-header">
+      <div class="row-header-name">${escHtml(c.unit_name || '(unnamed)')}</div>
+      <div class="row-header-id">CPAD unit ${c.unit_id}</div>
+      <div class="status-badge active">CPAD</div>
+    </div>
+    <div class="lifecycle-banner">
+      <strong>California Protected Areas Database polygon.</strong>
+      External data — read-only. Source data refreshes overwrite local edits, so we don't expose an editor for CPAD rows.
+    </div>
+
+    ${sectionHtml('Identity', false, [
+      lockedField('unit_id',    c.unit_id, ''),
+      lockedField('unit_name',  c.unit_name, ''),
+      lockedField('site_name',  c.site_name, ''),
+      lockedField('label_name', c.label_name, ''),
+    ])}
+    ${sectionHtml('Managing agency', false, [
+      lockedField('mng_agncy',  c.mng_agncy, 'managing agency (operator)'),
+      lockedField('mng_ag_lev', c.mng_ag_lev, 'agency level'),
+    ])}
+    ${sectionHtml('Owning agency', false, [
+      lockedField('agncy_name', c.agncy_name, 'owning agency'),
+      lockedField('agncy_lev',  c.agncy_lev, ''),
+      lockedField('agncy_typ',  c.agncy_typ, ''),
+    ])}
+    ${sectionHtml('URLs', false, [
+      lockedField('park_url',   c.park_url, 'page used by extraction pipeline'),
+      lockedField('agncy_web',  c.agncy_web, 'agency website (used for sitemap discovery)'),
+    ])}
+    ${sectionHtml('Other', true, [
+      lockedField('access_typ', c.access_typ, ''),
+      lockedField('area_sqkm',  c.area_sqkm, 'polygon area'),
+    ])}
+  `;
+  wireSectionCollapse();
+  document.getElementById('pane-editor').scrollTop = 0;
+}
+
+function renderForm() {
+  const main = document.getElementById('pane-editor');
+  const r = current;
+  const st = rowState(r);
+
+  const lifecycleNote = (() => {
+    if (st === 'deleted') {
+      return `<div class="lifecycle-banner"><strong>Deleted</strong> at ${escHtml(r.deleted_at || '')}. Reason: ${escHtml(r.deleted_reason || '(none)')}</div>`;
+    }
+    if (st === 'inactive') {
+      return `<div class="lifecycle-banner"><strong>Inactive.</strong> Reason: ${escHtml(r.inactive_reason || '(none)')}</div>`;
+    }
+    return '';
+  })();
+
+  main.innerHTML = `
+    <div class="row-header">
+      <div class="row-header-name">${escHtml(r.display_name || '(no name)')}</div>
+      <div class="row-header-id">fid ${r.fid}</div>
+      <div class="status-badge ${st}">${st}</div>
+    </div>
+
+    ${lifecycleNote}
+
+    ${sectionHtml('Identity', false, [
+      lockedField('fid', r.fid, 'Primary key — not editable'),
+      textField('display_name', 'Display name', r.display_name),
+      textField('timezone', 'Timezone', r.timezone, { placeholder: 'America/Los_Angeles' }),
+    ])}
+
+    ${sectionHtml('Location', false, [
+      `<div class="field">
+        <div class="field-label">Latitude / Longitude</div>
+        <div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <input class="field-input" id="in-latitude"  data-field="latitude"  type="number" step="any" value="${r.latitude ?? ''}" />
+            <input class="field-input" id="in-longitude" data-field="longitude" type="number" step="any" value="${r.longitude ?? ''}" />
+          </div>
+          <div class="field-hint">Save to move the map marker.</div>
+        </div>
+      </div>`,
+      textField('state_code',  'State code',  r.state_code, { placeholder: 'CA' }),
+      textField('county_name', 'County name', r.county_name),
+      textField('place_name',  'Place / city', r.place_name),
+      selectField('place_type', 'TIGER place type', r.place_type, ['', 'C1','C2','C3','C5','C6','C7','C8']),
+      textField('address_street', 'Street', r.address_street),
+      textField('address_city',   'City',   r.address_city),
+      textField('address_state',  'State',  r.address_state),
+      textField('address_zip',    'ZIP',    r.address_zip),
+      textField('address_county', 'County', r.address_county),
+      textField('raw_address',    'Raw address (legacy)', r.raw_address),
+    ])}
+
+    ${sectionHtml('Governance', false, [
+      textField('governing_body_name', 'Governing body name', r.governing_body_name),
+      selectField('governing_body_type', 'Governing body type', r.governing_body_type, [
+        '', 'federal', 'state', 'county', 'city', 'tribal', 'private', 'special_district',
+      ]),
+    ])}
+
+    ${sectionHtml('Access & description', false, [
+      selectField('access_status', 'Access status', r.access_status, [
+        '', 'public', 'restricted', 'private', 'closed', 'unknown',
+      ]),
+      textField('website',  'Website', r.website),
+      textareaField('description', 'Description', r.description),
+    ])}
+
+    ${sectionHtml('Dogs', false, [
+      selectField('dogs_allowed', 'Dogs allowed', r.dogs_allowed, [
+        '', 'yes', 'restricted', 'seasonal', 'no', 'unknown',
+      ]),
+      selectField('dogs_leash_required', 'Leash required', r.dogs_leash_required, [
+        '', 'required', 'optional', 'prohibited', 'unknown',
+      ]),
+      textField('dogs_restricted_hours', 'Restricted hours', r.dogs_restricted_hours),
+      textField('dogs_seasonal_rules',   'Seasonal rules',   r.dogs_seasonal_rules),
+      textareaField('dogs_zone_description', 'Zone description', r.dogs_zone_description),
+    ])}
+
+    ${sectionHtml('Hours', false, [
+      timeField('open_time',  'Open time',  r.open_time),
+      timeField('close_time', 'Close time', r.close_time),
+      textField('hours_text', 'Hours text', r.hours_text),
+    ])}
+
+    ${sectionHtml('Amenities', false, [
+      triField('has_parking',         'Parking'),
+      textField('parking_type',  'Parking type',  r.parking_type, { placeholder: 'lot / street / metered' }),
+      textareaField('parking_notes', 'Parking notes', r.parking_notes),
+      triField('has_restrooms',       'Restrooms'),
+      triField('has_showers',         'Showers'),
+      triField('has_drinking_water',  'Drinking water'),
+      triField('has_lifeguards',      'Lifeguards'),
+      triField('has_disabled_access', 'Disabled access'),
+      triField('has_food',            'Food'),
+      triField('has_fire_pits',       'Fire pits'),
+      triField('has_picnic_area',     'Picnic area'),
+    ])}
+
+    ${sectionHtml('NOAA station', true, [
+      textField('noaa_station_id',         'Station ID',          r.noaa_station_id),
+      textField('noaa_station_name',       'Station name',        r.noaa_station_name),
+      textField('noaa_station_distance_m', 'Distance (m)',        r.noaa_station_distance_m),
+    ])}
+
+    ${sectionHtml('Review flags', true, [
+      selectField('review_status', 'Review status', r.review_status, [
+        '', 'needs_review', 'reviewed', 'dismissed',
+      ]),
+      textareaField('review_notes', 'Review notes', r.review_notes),
+    ])}
+
+    ${sectionHtml('System (read-only)', true, [
+      lockedField('created_at',           r.created_at,           'Row inserted at'),
+      lockedField('updated_at',           r.updated_at,           'Last write'),
+      lockedField('pipeline_last_run_at', r.pipeline_last_run_at, 'Last populate_all run'),
+      lockedField('pipeline_version',     r.pipeline_version,     ''),
+      lockedField('duplicate_cluster_id', r.duplicate_cluster_id, ''),
+      lockedField('duplicate_status',     r.duplicate_status,     ''),
+      lockedField('inactive_reason',      r.inactive_reason,      'Set via lifecycle action'),
+      lockedField('deleted_at',           r.deleted_at,           'Set via lifecycle action'),
+      lockedField('deleted_reason',       r.deleted_reason,       'Set via lifecycle action'),
+    ])}
+
+    <div class="actions-bar">
+      <button class="save-btn" id="save-btn" onclick="save()" disabled>Save</button>
+      <span class="dirty-count" id="dirty-count">No changes</span>
+      <div class="lifecycle-actions">
+        ${st !== 'active'   ? `<button class="lc-btn restore"  onclick="markStatus('active')">Restore to active</button>` : ''}
+        ${st === 'active'   ? `<button class="lc-btn inactive" onclick="markStatus('inactive')">Mark inactive…</button>`   : ''}
+        ${st !== 'deleted'  ? `<button class="lc-btn delete"   onclick="markStatus('deleted')">Delete (soft)…</button>`    : ''}
+      </div>
+    </div>
+  `;
+
+  wireFormInteractions();
+  wireSectionCollapse();
+  // Scroll the editor pane back to top so the new row's header is visible.
+  document.getElementById('pane-editor').scrollTop = 0;
+}
+
+// ── Field builders ─────────────────────────────────────────────────────
+function sectionHtml(title, collapsed, bodies) {
+  return `<section class="section ${collapsed ? 'collapsed' : ''}">
+    <div class="section-header"><span class="section-caret">▾</span>${escHtml(title)}</div>
+    <div class="section-body">${bodies.join('')}</div>
+  </section>`;
+}
+
+function lockedField(key, value, hint) {
+  const v = value ?? '';
+  return `<div class="field">
+    <div class="field-label">${escHtml(key)}</div>
+    <div>
+      <div class="field-locked">${escHtml(v === '' ? '—' : String(v))}</div>
+      ${hint ? `<div class="field-hint">${escHtml(hint)}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function textField(key, label, value, opts = {}) {
+  const v = value ?? '';
+  return `<div class="field">
+    <div class="field-label">${escHtml(label)}<code>${key}</code></div>
+    <input class="field-input" id="in-${key}" data-field="${key}" type="text" value="${escAttr(v)}"
+           placeholder="${escAttr(opts.placeholder || '')}" />
+  </div>`;
+}
+
+function textareaField(key, label, value) {
+  const v = value ?? '';
+  return `<div class="field">
+    <div class="field-label">${escHtml(label)}<code>${key}</code></div>
+    <textarea class="field-input" id="in-${key}" data-field="${key}">${escHtml(v)}</textarea>
+  </div>`;
+}
+
+function selectField(key, label, value, options) {
+  const opts = options.map(o =>
+    `<option value="${escAttr(o)}" ${o === value ? 'selected' : ''}>${o || '— unset —'}</option>`
+  ).join('');
+  return `<div class="field">
+    <div class="field-label">${escHtml(label)}<code>${key}</code></div>
+    <select class="field-input" id="in-${key}" data-field="${key}">${opts}</select>
+  </div>`;
+}
+
+function timeField(key, label, value) {
+  const v = value ? String(value).slice(0, 5) : '';
+  return `<div class="field">
+    <div class="field-label">${escHtml(label)}<code>${key}</code></div>
+    <input class="field-input" id="in-${key}" data-field="${key}" type="time" value="${escAttr(v)}" />
+  </div>`;
+}
+
+function triField(key, label) {
+  const v = current[key];
+  return `<div class="field">
+    <div class="field-label">${escHtml(label)}<code>${key}</code></div>
+    <div class="tri" id="in-${key}" data-field="${key}" data-type="tri">
+      <button type="button" data-val="true"  class="${v === true  ? 'active' : ''}">Yes</button>
+      <button type="button" data-val="false" class="${v === false ? 'active' : ''}">No</button>
+      <button type="button" data-val="null"  class="${v == null   ? 'active' : ''}">—</button>
+    </div>
+  </div>`;
+}
+
+// ── Form interactions ──────────────────────────────────────────────────
+function wireFormInteractions() {
+  document.querySelectorAll('[data-field]').forEach(el => {
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+      el.addEventListener('input', () => onFieldChange(el));
+    } else if (el.dataset.type === 'tri') {
+      el.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          el.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          onFieldChange(el);
+        });
+      });
+    }
+  });
+}
+
+function readFieldValue(el) {
+  if (el.dataset.type === 'tri') {
+    const active = el.querySelector('button.active');
+    if (!active) return null;
+    if (active.dataset.val === 'true')  return true;
+    if (active.dataset.val === 'false') return false;
+    return null;
+  }
+  if (el.type === 'number') {
+    if (el.value === '') return null;
+    const n = Number(el.value);
+    return Number.isFinite(n) ? n : null;
+  }
+  if (el.type === 'time') return el.value ? `${el.value}:00` : null;
+  if (el.tagName === 'SELECT') return el.value === '' ? null : el.value;
+  return el.value === '' ? null : el.value;
+}
+
+function onFieldChange(el) {
+  const key  = el.dataset.field;
+  const val  = readFieldValue(el);
+  const orig = current[key] ?? null;
+  const now  = val ?? null;
+  const same = JSON.stringify(orig) === JSON.stringify(now);
+  if (same) { delete dirty[key]; el.classList.remove('dirty'); }
+  else      {        dirty[key] = now; el.classList.add('dirty'); }
+  refreshDirty();
+}
+
+function refreshDirty() {
+  const n = Object.keys(dirty).length;
+  document.getElementById('save-btn').disabled = n === 0;
+  document.getElementById('dirty-count').innerHTML = n === 0
+    ? 'No changes'
+    : `<strong>${n}</strong> field${n === 1 ? '' : 's'} changed`;
+}
+
+function wireSectionCollapse() {
+  document.querySelectorAll('.section-header').forEach(h => {
+    h.addEventListener('click', () => h.parentElement.classList.toggle('collapsed'));
+  });
+}
+
+// ── Save (dispatches by currentType) ──────────────────────────────────
+async function save() {
+  if (Object.keys(dirty).length === 0) return;
+  const btn = document.getElementById('save-btn');
+  btn.disabled = true;
+
+  if (currentType === 'beach') {
+    const res = await edgeFn('admin-update-location', { fid: current.fid, fields: dirty });
+    if (res.error) { showToast(`Save failed: ${res.error}`, true); btn.disabled = false; return; }
+    current = res.location;
+    const idx = allRows.findIndex(r => r.fid === current.fid);
+    if (idx >= 0) allRows[idx] = current;
+    dirty = {};
+    rebuildMarkers();
+    showToast(`Saved${res.rejected?.length ? ` (${res.rejected.length} rejected)` : ''}`);
+    renderForm();
+  } else if (currentType === 'ccc') {
+    const res = await edgeFn('admin-update-ccc-point',
+                             { objectid: current.objectid, fields: dirty });
+    if (res.error) { showToast(`Save failed: ${res.error}`, true); btn.disabled = false; return; }
+    current = res.ccc;
+    dirty = {};
+    showToast(`Saved${res.rejected?.length ? ` (${res.rejected.length} rejected)` : ''}`);
+    renderCccForm();
+  } else if (currentType === 'off_leash') {
+    const res = await edgeFn('admin-update-off-leash-beach',
+                             { id: current.id, fields: dirty });
+    if (res.error) { showToast(`Save failed: ${res.error}`, true); btn.disabled = false; return; }
+    current = res.off_leash;
+    dirty = {};
+    showToast(`Saved${res.rejected?.length ? ` (${res.rejected.length} rejected)` : ''}`);
+    renderOffLeashForm();
+  }
+}
+
+// ── Lifecycle transitions ──────────────────────────────────────────────
+function markStatus(to) {
+  const labels = {
+    active:   { title: 'Restore to active', body: 'Restore this location to active state? Reason fields will be cleared.', danger: false, requireReason: false },
+    inactive: { title: 'Mark inactive',     body: 'Mark this location inactive. Why?', danger: false, requireReason: true },
+    deleted:  { title: 'Soft-delete',       body: 'Soft-delete this location. The row stays in the table but is excluded going forward. Why?', danger: true, requireReason: true },
+  };
+  const cfg = labels[to];
+
+  document.getElementById('modal-title').textContent  = cfg.title;
+  document.getElementById('modal-prompt').textContent = cfg.body;
+  const reasonInput = document.getElementById('modal-reason');
+  reasonInput.style.display = cfg.requireReason ? 'block' : 'none';
+  reasonInput.value = '';
+  document.getElementById('modal-confirm').classList.toggle('danger', cfg.danger);
+
+  openModal();
+
+  const onConfirm = async () => {
+    const reason = reasonInput.value.trim();
+    if (cfg.requireReason && !reason) { reasonInput.focus(); return; }
+    closeModal();
+
+    const body = { fid: current.fid, status_change: { to } };
+    if (cfg.requireReason) body.status_change.reason = reason;
+
+    const res = await edgeFn('admin-update-location', body);
+    if (res.error) { showToast(`Status change failed: ${res.error}`, true); return; }
+
+    current = res.location;
+    const idx = allRows.findIndex(r => r.fid === current.fid);
+    if (idx >= 0) allRows[idx] = current;
+    rebuildMarkers();
+    updateRowCount();
+    showToast(`Marked ${to}.`);
+    renderForm();
+  };
+
+  // Replace handlers via cloneNode so listeners don't accumulate across opens.
+  const confirmBtn = document.getElementById('modal-confirm');
+  const newConfirm = confirmBtn.cloneNode(true);
+  confirmBtn.parentNode.replaceChild(newConfirm, confirmBtn);
+  newConfirm.addEventListener('click', onConfirm);
+
+  const cancelBtn = document.getElementById('modal-cancel');
+  const newCancel = cancelBtn.cloneNode(true);
+  cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+  newCancel.addEventListener('click', closeModal);
+}
+
+function openModal() {
+  document.getElementById('modal-overlay').classList.add('open');
+  document.getElementById('modal-sheet').classList.add('open');
+  setTimeout(() => document.getElementById('modal-reason').focus(), 50);
+}
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+  document.getElementById('modal-sheet').classList.remove('open');
+}
+
+// ── Toast + escaping ───────────────────────────────────────────────────
+let toastTimer = null;
+function showToast(msg, isErr) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `show ${isErr ? 'err' : 'ok'}`;
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.className = '', 3500);
+}
+function escHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+function escAttr(s) { return escHtml(s); }
+
+boot();
+</script>
+</body>
+</html>

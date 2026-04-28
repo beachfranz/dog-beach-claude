@@ -132,20 +132,40 @@ def call_llm(page_text: str, unit_name: str) -> dict:
     return {"default_rule":"unknown","confidence":0.0,"_max_retries":True}
 
 
-def fetch_target_units() -> list[dict]:
-    """CPAD units that intersect beach_locations and have a park_url."""
+def fetch_target_units(counties: list[str] | None = None) -> list[dict]:
+    """CPAD units that intersect beach_locations and have a park_url.
+    If counties supplied, scope to beach_locations within those counties."""
     import subprocess
-    sql = """
-      with hits as (
-        select distinct cu.unit_id, cu.unit_name, cu.agncy_name, cu.park_url
-        from beach_locations bl
-        join cpad_units cu on st_intersects(cu.geom, bl.geom)
-        where cu.park_url is not null and cu.park_url <> ''
-      )
-      select unit_id, unit_name, agncy_name, park_url
-      from hits
-      order by unit_id;
-    """
+    if counties:
+        county_list = ",".join(f"'{c}'" for c in counties)
+        sql = f"""
+          with bl_sc as (
+            select bl.geom from public.beach_locations bl
+            join public.counties c on st_intersects(c.geom, bl.geom)
+            where c.name in ({county_list})
+          ),
+          hits as (
+            select distinct cu.unit_id, cu.unit_name, cu.agncy_name, cu.park_url
+            from bl_sc bl
+            join public.cpad_units cu on st_intersects(cu.geom, bl.geom)
+            where cu.park_url is not null and cu.park_url <> ''
+          )
+          select unit_id, unit_name, agncy_name, park_url
+          from hits
+          order by unit_id;
+        """
+    else:
+        sql = """
+          with hits as (
+            select distinct cu.unit_id, cu.unit_name, cu.agncy_name, cu.park_url
+            from beach_locations bl
+            join cpad_units cu on st_intersects(cu.geom, bl.geom)
+            where cu.park_url is not null and cu.park_url <> ''
+          )
+          select unit_id, unit_name, agncy_name, park_url
+          from hits
+          order by unit_id;
+        """
     r = subprocess.run(
         ["supabase","db","query","--linked",sql],
         capture_output=True, text=True, timeout=60,
@@ -183,16 +203,27 @@ def db_upsert(rows: list[dict]) -> None:
     r = httpx.post(f"{SUPABASE_URL}/rest/v1/cpad_unit_dogs_policy",
                    headers=headers, json=rows, timeout=60,
                    params={"on_conflict": "cpad_unit_id"})
-    r.raise_for_status()
+    if r.status_code >= 400:
+        # Fall back to per-row upserts so one bad row doesn't kill batch
+        print(f"    batch upsert {r.status_code} — falling back per-row", file=sys.stderr)
+        for row in rows:
+            rr = httpx.post(f"{SUPABASE_URL}/rest/v1/cpad_unit_dogs_policy",
+                           headers=headers, json=[row], timeout=30,
+                           params={"on_conflict": "cpad_unit_id"})
+            if rr.status_code >= 400:
+                print(f"    SKIP unit {row.get('cpad_unit_id')}: {rr.status_code} {rr.text[:200]}", file=sys.stderr)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--refresh", action="store_true")
+    ap.add_argument("--counties", type=str, default=None,
+                    help="comma-separated, e.g. 'Los Angeles,Orange,San Diego'")
     args = ap.parse_args()
 
-    units = fetch_target_units()
+    counties = [c.strip() for c in args.counties.split(",")] if args.counties else None
+    units = fetch_target_units(counties=counties)
     print(f"Loaded {len(units)} CPAD units (805 ∩ has park_url)")
 
     if not args.refresh:

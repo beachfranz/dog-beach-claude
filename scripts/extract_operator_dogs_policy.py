@@ -39,18 +39,41 @@ CHROME_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
 
 
 # ── Operator data ────────────────────────────────────────────────────
-def fetch_top_operators(limit: int) -> list[dict]:
+def fetch_top_operators(limit: int, counties: list[str] | None = None) -> list[dict]:
     headers = {"apikey": SERVICE_KEY, "Authorization": f"Bearer {SERVICE_KEY}"}
-    # use postgrest with embedded count via subquery — easiest path is RPC
-    # but for one-shot we can use a custom select via a view-style query
-    sql = f"""
-      select op.id, op.slug, op.canonical_name, op.website, op.level, op.subtype,
-             (select count(*) from public.beach_locations bl where bl.operator_id = op.id) as beach_count
-      from public.operators op
-      where exists (select 1 from public.beach_locations bl where bl.operator_id = op.id)
-      order by beach_count desc nulls last
-      limit {limit};
-    """
+    if counties:
+        # Scope to operators that match a CPAD agency intersecting beach_locations
+        # in the given counties.
+        county_list = ",".join(f"'{c}'" for c in counties)
+        sql = f"""
+          with bl_sc as (
+            select bl.geom, bl.operator_id from public.beach_locations bl
+            join public.counties c on st_intersects(c.geom, bl.geom)
+            where c.name in ({county_list})
+          ),
+          target_ops as (
+            select distinct op.id, op.slug, op.canonical_name, op.website, op.level, op.subtype,
+                   (select count(*) from bl_sc where bl_sc.operator_id = op.id) as beach_count
+            from public.operators op
+            where exists (
+              select 1 from bl_sc bl
+              join public.cpad_units cu on st_intersects(cu.geom, bl.geom)
+              where similarity(op.canonical_name, cu.agncy_name) > 0.6
+            )
+          )
+          select * from target_ops
+          order by beach_count desc nulls last
+          limit {limit};
+        """
+    else:
+        sql = f"""
+          select op.id, op.slug, op.canonical_name, op.website, op.level, op.subtype,
+                 (select count(*) from public.beach_locations bl where bl.operator_id = op.id) as beach_count
+          from public.operators op
+          where exists (select 1 from public.beach_locations bl where bl.operator_id = op.id)
+          order by beach_count desc nulls last
+          limit {limit};
+        """
     # use direct supabase_db_query via a helper RPC? simpler: use rest with stored RPC
     # we don't have such an RPC; fall back to running the query via `supabase db query`
     import subprocess
@@ -473,9 +496,12 @@ def main():
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--skip-existing", action="store_true",
                    help="skip operators that already have any extraction row")
+    p.add_argument("--counties", type=str, default=None,
+                   help="comma-separated list, e.g. 'Los Angeles,Orange,San Diego'")
     args = p.parse_args()
 
-    operators = fetch_top_operators(args.limit)
+    counties = [c.strip() for c in args.counties.split(",")] if args.counties else None
+    operators = fetch_top_operators(args.limit, counties=counties)
     print(f"Loaded {len(operators)} operators")
 
     # Skip operators with existing extractions

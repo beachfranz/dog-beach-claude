@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<!--
+  admin/beach-operator-editor.html — Single-purpose editor for fixing
+  the operator_id field on a beach_locations row. Writes via the
+  set_beach_operator() RPC, which routes to us_beach_points or
+  ccc_access_points based on origin_key prefix and logs to admin_audit.
+
+  Search by name, pick a beach, choose an operator, save.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Beach Operator Editor</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f8fafc; color: #0f172a;
+      font-size: 14px; padding: 24px;
+      max-width: 720px; margin: 0 auto;
+    }
+    h1 { font-size: 18px; margin-bottom: 16px; }
+
+    .panel {
+      background: #fff; border: 1px solid #e2e8f0;
+      border-radius: 10px; padding: 16px 20px; margin-bottom: 14px;
+    }
+    label { display: block; font-size: 12px; color: #475569; margin-bottom: 6px; margin-top: 10px; }
+    label:first-child { margin-top: 0; }
+    input, select {
+      width: 100%; padding: 8px 12px; font-size: 14px; font-family: inherit;
+      border: 1px solid #e2e8f0; border-radius: 6px; outline: none;
+    }
+    input:focus, select:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px #dbeafe; }
+
+    .results {
+      margin-top: 8px; max-height: 220px; overflow-y: auto;
+      border: 1px solid #e2e8f0; border-radius: 6px; background: #fff;
+    }
+    .results.hidden { display: none; }
+    .result {
+      padding: 8px 12px; border-bottom: 1px solid #f1f5f9; cursor: pointer;
+      font-size: 13px;
+    }
+    .result:last-child { border: none; }
+    .result:hover { background: #eff6ff; }
+    .result-name { font-weight: 500; }
+    .result-meta { font-size: 11px; color: #64748b; margin-top: 2px; }
+
+    .selected-card { background: #eff6ff; border-color: #93c5fd; }
+    .field-grid { display: grid; grid-template-columns: 130px 1fr; gap: 6px 12px; font-size: 13px; }
+    .field-grid dt { color: #64748b; }
+    .field-grid dd { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+
+    button {
+      background: #3b82f6; color: white; border: none; padding: 8px 18px;
+      border-radius: 6px; font-family: inherit; font-size: 14px; font-weight: 500;
+      cursor: pointer; margin-top: 12px;
+    }
+    button:hover { background: #2563eb; }
+    button:disabled { background: #cbd5e1; cursor: not-allowed; }
+
+    .status { font-size: 12px; margin-top: 10px; }
+    .status.ok  { color: #15803d; }
+    .status.err { color: #b91c1c; }
+
+    .recent-edits {
+      font-size: 12px; color: #475569;
+      max-height: 240px; overflow-y: auto;
+    }
+    .recent-edits .row {
+      padding: 6px 0; border-bottom: 1px solid #f1f5f9;
+    }
+    .recent-edits .row:last-child { border: none; }
+    .recent-edits .when { color: #94a3b8; }
+  </style>
+</head>
+<body>
+
+<h1>Beach Operator Editor</h1>
+
+<div class="panel">
+  <label for="search">Find a beach</label>
+  <input id="search" type="text" placeholder="type a beach name (e.g. 'Huntington')" autocomplete="off">
+  <div id="results" class="results hidden"></div>
+</div>
+
+<div id="selected-panel" class="panel selected-card" style="display:none;">
+  <dl class="field-grid">
+    <dt>origin_key</dt><dd id="sel-key"></dd>
+    <dt>name</dt><dd id="sel-name"></dd>
+    <dt>current operator</dt><dd id="sel-op"></dd>
+  </dl>
+
+  <label for="op-select">New operator</label>
+  <input id="op-search" type="text" placeholder="type to filter operators (e.g. 'Huntington Beach')" autocomplete="off">
+  <select id="op-select" size="6" style="height: 160px;"></select>
+
+  <button id="save-btn" disabled>Save</button>
+  <div id="status" class="status"></div>
+</div>
+
+<div class="panel">
+  <h2 style="font-size: 14px; margin-bottom: 8px;">Recent operator edits</h2>
+  <div id="recent" class="recent-edits">loading…</div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+const headers = { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}` };
+const escHtml = s => (s ?? '').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+let allOperators = [];
+let selectedBeach = null;
+
+async function loadOperators() {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/operators?select=id,canonical_name,level&order=canonical_name.asc&limit=2000`, { headers });
+  allOperators = await r.json();
+}
+
+async function searchBeaches(q) {
+  if (!q || q.length < 2) return [];
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/beach_locations?select=origin_key,name,operator_id&name=ilike.*${encodeURIComponent(q)}*&limit=20`, { headers });
+  return r.json();
+}
+
+function renderResults(rows) {
+  const el = document.getElementById('results');
+  if (!rows.length) {
+    el.innerHTML = '<div class="result"><i>no matches</i></div>';
+  } else {
+    el.innerHTML = rows.map(r => {
+      const op = allOperators.find(o => o.id === r.operator_id);
+      const opLabel = op ? op.canonical_name : (r.operator_id ? `op #${r.operator_id}` : '(no operator)');
+      return `<div class="result" data-key="${escHtml(r.origin_key)}" data-name="${escHtml(r.name||'')}" data-op="${r.operator_id ?? ''}">
+        <div class="result-name">${escHtml(r.name) || '<i>(no name)</i>'}</div>
+        <div class="result-meta">${escHtml(r.origin_key)} · ${escHtml(opLabel)}</div>
+      </div>`;
+    }).join('');
+  }
+  el.classList.remove('hidden');
+  el.querySelectorAll('.result[data-key]').forEach(div => {
+    div.addEventListener('click', () => selectBeach({
+      origin_key: div.dataset.key,
+      name: div.dataset.name,
+      operator_id: div.dataset.op ? parseInt(div.dataset.op, 10) : null,
+    }));
+  });
+}
+
+function rebuildOperatorDropdown() {
+  const q = (document.getElementById('op-search').value || '').toLowerCase().trim();
+  const filtered = q ? allOperators.filter(o => (o.canonical_name||'').toLowerCase().includes(q)) : allOperators;
+  document.getElementById('op-select').innerHTML = filtered
+    .map(o => `<option value="${o.id}">${escHtml(o.canonical_name)} (${escHtml(o.level||'?')})</option>`).join('');
+}
+
+function selectBeach(b) {
+  selectedBeach = b;
+  document.getElementById('selected-panel').style.display = '';
+  document.getElementById('sel-key').textContent = b.origin_key;
+  document.getElementById('sel-name').textContent = b.name || '(no name)';
+  const op = allOperators.find(o => o.id === b.operator_id);
+  document.getElementById('sel-op').textContent = op ? `${op.canonical_name} (#${op.id})` : (b.operator_id ? `#${b.operator_id}` : '(none)');
+  document.getElementById('results').classList.add('hidden');
+  document.getElementById('search').value = b.name || '';
+  document.getElementById('op-search').value = '';
+  rebuildOperatorDropdown();
+  document.getElementById('op-select').value = b.operator_id ?? '';
+  document.getElementById('save-btn').disabled = false;
+  document.getElementById('status').textContent = '';
+}
+
+async function save() {
+  const newOp = parseInt(document.getElementById('op-select').value, 10);
+  if (!newOp || !selectedBeach) return;
+  const btn = document.getElementById('save-btn');
+  btn.disabled = true;
+  document.getElementById('status').textContent = 'saving…';
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/set_beach_operator`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_origin_key: selectedBeach.origin_key, p_operator_id: newOp }),
+  });
+  if (r.ok) {
+    const out = await r.json();
+    const newOpName = (allOperators.find(o => o.id === newOp) || {}).canonical_name || `#${newOp}`;
+    document.getElementById('status').className = 'status ok';
+    document.getElementById('status').textContent = `saved · operator → ${newOpName}`;
+    document.getElementById('sel-op').textContent = `${newOpName} (#${newOp})`;
+    selectedBeach.operator_id = newOp;
+    loadRecent();
+  } else {
+    const err = await r.text();
+    document.getElementById('status').className = 'status err';
+    document.getElementById('status').textContent = `error: ${err.slice(0,200)}`;
+  }
+  btn.disabled = false;
+}
+
+async function loadRecent() {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/admin_audit?select=created_at,location_id,before,after&function_name=eq.set_beach_operator&success=eq.true&order=created_at.desc&limit=15`, { headers });
+  const rows = await r.json();
+  if (!rows.length) {
+    document.getElementById('recent').innerHTML = '<i>no edits yet</i>';
+    return;
+  }
+  document.getElementById('recent').innerHTML = rows.map(r => {
+    const before = r.before?.operator_id;
+    const after  = r.after?.operator_id;
+    const beforeOp = (allOperators.find(o => o.id === before) || {}).canonical_name || `#${before}`;
+    const afterOp  = (allOperators.find(o => o.id === after)  || {}).canonical_name || `#${after}`;
+    const when = (r.created_at || '').replace('T',' ').split('.')[0];
+    return `<div class="row"><span class="when">${when}</span> · <code>${escHtml(r.location_id)}</code> · ${escHtml(beforeOp)} → <b>${escHtml(afterOp)}</b></div>`;
+  }).join('');
+}
+
+(async () => {
+  await loadOperators();
+  rebuildOperatorDropdown();
+  loadRecent();
+
+  let searchTimer = null;
+  document.getElementById('search').addEventListener('input', e => {
+    clearTimeout(searchTimer);
+    const q = e.target.value;
+    searchTimer = setTimeout(async () => {
+      if (q.length < 2) { document.getElementById('results').classList.add('hidden'); return; }
+      const rows = await searchBeaches(q);
+      renderResults(rows);
+    }, 200);
+  });
+
+  document.getElementById('op-search').addEventListener('input', rebuildOperatorDropdown);
+  document.getElementById('save-btn').addEventListener('click', save);
+})();
+</script>
+
+</body>
+</html>

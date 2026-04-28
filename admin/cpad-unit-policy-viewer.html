@@ -235,6 +235,11 @@
 
   <main>
     <div class="filter-bar">
+      <label for="type-select">Type:</label>
+      <select id="type-select" style="min-width: 180px;">
+        <option value="">— all —</option>
+      </select>
+
       <label for="op-select">Operator:</label>
       <select id="op-select" style="min-width: 240px;">
         <option value="">— all —</option>
@@ -432,24 +437,25 @@ async function loadData() {
   // known beach. For now we fetch everything and then filter via
   // counties-from-server lookup using the cpad_units table.
 
-  // Pull a unit_id whitelist from cpad_units via a county-bounded query
+  // Pull a unit_id whitelist + layer (CPAD operator-type) for the
+  // counties via the dedicated RPC.
   let whitelist = null;
+  let layerByUnit = new Map();
   try {
-    // Use the RPC pattern: fetch CPAD units intersecting beach_locations
-    // in given counties. We call a function we expose — for now use a
-    // direct PostgREST query against a view if present, else accept all.
     const rpc = await fetch(`${SUPABASE_URL}/rest/v1/rpc/cpad_units_in_counties_for_805`, {
       method: 'POST',
       headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ p_counties: counties })
     });
     if (rpc.ok) {
-      const ids = await rpc.json();
-      whitelist = new Set(ids.map(r => r.unit_id ?? r));
+      const list = await rpc.json();
+      whitelist = new Set(list.map(r => r.unit_id ?? r));
+      list.forEach(r => layerByUnit.set(r.unit_id ?? r, r.layer || '(no layer)'));
     }
   } catch (_) {}
 
-  const filtered = whitelist ? rows.filter(r => whitelist.has(r.cpad_unit_id)) : rows;
+  const filtered = (whitelist ? rows.filter(r => whitelist.has(r.cpad_unit_id)) : rows)
+    .map(r => ({ ...r, _layer: layerByUnit.get(r.cpad_unit_id) || '(no layer)' }));
 
   // Sort: classified rules first, then unknown/null; alphabetical within each
   const ruleOrder = { 'yes': 0, 'restricted': 1, 'no': 2, 'unknown': 3 };
@@ -470,30 +476,50 @@ async function loadData() {
     .map(k => `${tally[k]} ${k}`).join(' · ');
   document.getElementById('summary').textContent = `${filtered.length} units — ${tallyStr}`;
 
-  const sel = document.getElementById('unit-select');
-  const opSel = document.getElementById('op-select');
+  const sel    = document.getElementById('unit-select');
+  const opSel  = document.getElementById('op-select');
+  const typeSel= document.getElementById('type-select');
   const ruleEmoji = { yes: '✓', restricted: '~', no: '✗', unknown: '?' };
   const escOpt = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');
 
-  // Operator dropdown — distinct agency_name with counts
-  const opTally = filtered.reduce((acc, r) => {
-    const k = r.agency_name || '(no agency)';
+  // Type dropdown — CPAD layer values with counts
+  const typeTally = filtered.reduce((acc, r) => {
+    const k = r._layer;
     acc[k] = (acc[k] || 0) + 1;
     return acc;
   }, {});
-  const ops = Object.entries(opTally).sort((a, b) => b[1] - a[1]);
-  opSel.innerHTML = `<option value="">— all (${filtered.length}) —</option>` +
-    ops.map(([name, n]) => `<option value="${escOpt(name)}">${escOpt(name)} (${n})</option>`).join('');
+  const types = Object.entries(typeTally).sort((a, b) => b[1] - a[1]);
+  typeSel.innerHTML = `<option value="">— all (${filtered.length}) —</option>` +
+    types.map(([name, n]) => `<option value="${escOpt(name)}">${escOpt(name)} (${n})</option>`).join('');
 
-  // By id lookup for fast render
   const byId = new Map(filtered.map(r => [r.cpad_unit_id, r]));
   const host = document.getElementById('card-host');
 
+  function visibleAfterTypeAndOp() {
+    const typeFilter = typeSel.value;
+    const opFilter   = opSel.value;
+    return filtered.filter(r => {
+      if (typeFilter && r._layer !== typeFilter) return false;
+      if (opFilter && (r.agency_name || '(no agency)') !== opFilter) return false;
+      return true;
+    });
+  }
+
+  function rebuildOperatorDropdown() {
+    const typeFilter = typeSel.value;
+    const scope = typeFilter ? filtered.filter(r => r._layer === typeFilter) : filtered;
+    const opTally = scope.reduce((acc, r) => {
+      const k = r.agency_name || '(no agency)';
+      acc[k] = (acc[k] || 0) + 1;
+      return acc;
+    }, {});
+    const ops = Object.entries(opTally).sort((a, b) => b[1] - a[1]);
+    opSel.innerHTML = `<option value="">— all (${scope.length}) —</option>` +
+      ops.map(([name, n]) => `<option value="${escOpt(name)}">${escOpt(name)} (${n})</option>`).join('');
+  }
+
   function rebuildUnitDropdown() {
-    const opFilter = opSel.value;
-    const visible = opFilter
-      ? filtered.filter(r => (r.agency_name || '(no agency)') === opFilter)
-      : filtered;
+    const visible = visibleAfterTypeAndOp();
     sel.innerHTML = `<option value="">— pick a unit (${visible.length}) —</option>` +
       visible.map(r => {
         const tag = ruleEmoji[r.dogs_allowed] || '·';
@@ -519,8 +545,16 @@ async function loadData() {
     history.replaceState(null, '', `#${id}`);
   }
 
+  rebuildOperatorDropdown();
   rebuildUnitDropdown();
 
+  typeSel.addEventListener('change', () => {
+    opSel.value = '';
+    rebuildOperatorDropdown();
+    rebuildUnitDropdown();
+    sel.value = '';
+    showUnit('');
+  });
   opSel.addEventListener('change', () => {
     rebuildUnitDropdown();
     sel.value = '';

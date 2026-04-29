@@ -207,10 +207,18 @@ def fetch_playwright(url: str, timeout_ms: int = 20000) -> tuple[str, str, int]:
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
                 try:
-                    page.wait_for_load_state("networkidle", timeout=8000)
+                    page.wait_for_load_state("networkidle", timeout=20000)
                 except Exception:
                     pass
+                # Many CivicEngage / AEM / SharePoint pages populate content
+                # modules slightly after networkidle. Wait a beat, re-check
+                # if the body is still thin or missing the keyword, and wait
+                # again before giving up.
+                page.wait_for_timeout(2000)
                 text = page.evaluate("() => document.body ? document.body.innerText : ''") or ""
+                if len(text) < 500 or not _has_dog_keyword(text):
+                    page.wait_for_timeout(3000)
+                    text = page.evaluate("() => document.body ? document.body.innerText : ''") or ""
             finally:
                 ctx.close(); browser.close()
             text = re.sub(r"\n{3,}", "\n\n", text)[:12000]
@@ -231,7 +239,11 @@ def fetch_and_clean(url: str) -> tuple[str, str, int]:
     content but it lacks any dog/leash/pet keyword (often a JS-rendered
     page where the dog section loads client-side)."""
     status, text, chars = fetch_httpx(url)
-    if status == "ok" and _has_dog_keyword(text):
+    # Accept httpx only if it returned actual content. A navigation-only
+    # shell (typical CivicEngage / AEM JS page that hasn't rendered yet)
+    # often has 'Off-Leash Dog Areas' in the menu but no body, so a bare
+    # keyword check isn't enough — require ≥1500 chars too.
+    if status == "ok" and chars >= 1500 and _has_dog_keyword(text):
         return (status, text, chars)
     # Tavily fallback (existing logic)
     if status != "ok" and (status.startswith("http_403") or status.startswith("http_5")

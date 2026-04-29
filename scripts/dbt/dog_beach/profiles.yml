@@ -1,0 +1,28 @@
+# Local profiles for the dog_beach dbt project.
+# This file is committed; secrets come from env vars.
+#
+# Required env vars (set in scripts/pipeline/.env or your shell):
+#   SUPABASE_DB_HOST     e.g. db.xyzabc.supabase.co
+#   SUPABASE_DB_PORT     5432 (direct) or 6543 (pooler)
+#   SUPABASE_DB_USER     postgres (direct) or postgres.<ref> (pooler)
+#   SUPABASE_DB_PASSWORD service-role-equivalent password
+#   SUPABASE_DB_NAME     postgres
+#
+# Get these from Supabase Dashboard → Settings → Database → Connection string.
+# Direct-connection (port 5432) is recommended for dbt; the pooler can drop
+# long-running CREATE TABLE statements.
+
+dog_beach:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('SUPABASE_DB_HOST') }}"
+      port: "{{ env_var('SUPABASE_DB_PORT', '5432') | int }}"
+      user: "{{ env_var('SUPABASE_DB_USER') }}"
+      password: "{{ env_var('SUPABASE_DB_PASSWORD') }}"
+      dbname: "{{ env_var('SUPABASE_DB_NAME', 'postgres') }}"
+      schema: dbt
+      threads: 4
+      keepalives_idle: 0
+      sslmode: require

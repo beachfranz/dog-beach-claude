@@ -1,0 +1,51 @@
+# Source-table declarations. dbt won't transform these — they're declared
+# only so the lineage graph knows where data originates. Models in
+# staging/ + marts/ reference these via {{ source('public', '<table>') }}.
+#
+# Coverage: all tables/views in the 805 blast radius (Day 4 will add the
+# procedural-asset wraps via Dagster).
+
+version: 2
+
+sources:
+  - name: public
+    description: "All Dog Beach Scout tables live in the public schema of the linked Supabase project."
+    schema: public
+    tables:
+      # Identity layer (805 corpus + raw inputs)
+      - name: beach_locations
+        description: "Deduped 805 view: UBP spine + CCC orphans. The canonical beach corpus."
+      - name: us_beach_points
+        description: "Raw US beach points (~8K rows, CA filter applied at consumer time)."
+      - name: ccc_access_points
+        description: "California Coastal Commission access points (~1.6K active)."
+      - name: osm_features
+        description: "OpenStreetMap features filtered to beach / dog_friendly_beach types."
+
+      # Spatial overlays
+      - name: cpad_units
+        description: "California Protected Areas Database — protected-area polygons."
+      - name: counties
+        description: "California county polygons."
+
+      # Operator + policy
+      - name: operators
+        description: "Distinct operating agencies — owners and managers across all sources."
+      - name: operator_dogs_policy
+        description: "Per-operator dog policy — default_rule + exceptions[] + spatial_zones."
+      - name: operator_policy_extractions
+        description: "Evidence-layer per (operator_id, source_kind, source_url)."
+      - name: cpad_unit_dogs_policy
+        description: "Per-CPAD-unit dog policy from park_url and CDPR scrape."
+
+      # Verdict layer
+      - name: beach_verdicts
+        description: "Per-origin-key dog verdict + confidence + sources meta. Canonical."
+      - name: cpad_unit_for_beach
+        description: "Pre-resolved canonical CPAD unit per beach_locations row."
+      - name: geo_entity_response_current
+        description: "Legacy LLM-extracted CPAD unit / CCC responses (CCC tier dropped from active cascade)."
+
+      # Validation
+      - name: truth_external
+        description: "External truth-set rows from BringFido / DogTrekker / CaliforniaBeaches / websearch."

@@ -1,0 +1,32 @@
+name: 'dog_beach'
+version: '0.1.0'
+config-version: 2
+
+profile: 'dog_beach'
+
+# Paths
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# All dbt-managed objects land in the dbt schema (no collision with public/).
+# Materializations are declared per-folder.
+models:
+  dog_beach:
+    +schema: dbt
+    staging:
+      +materialized: view      # staging models = thin SELECT * passthroughs
+    marts:
+      +materialized: table     # marts get persisted; rebuild on `dbt run`
+
+# We point at Supabase's `public` schema for sources but never write to it.
+vars:
+  source_schema: 'public'

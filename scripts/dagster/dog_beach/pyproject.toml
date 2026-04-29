@@ -1,0 +1,32 @@
+[project]
+name = "dog-beach-dagster"
+version = "0.1.0"
+description = "Dagster orchestration for Dog Beach Scout"
+requires-python = ">=3.11"
+
+# Pinned to a 1.x line — Dagster has stable 1.x for several years.
+dependencies = [
+  "dagster>=1.9",
+  "dagster-webserver>=1.9",
+  "dagster-postgres>=0.25",
+  "dagster-dbt>=0.25",
+  "dbt-postgres>=1.8",
+  "dbt-core>=1.8",
+  "psycopg2-binary>=2.9",
+  "python-dotenv>=1.0",
+  "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "ruff>=0.6",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.dagster]
+module_name = "dog_beach.definitions"
+code_location_name = "dog_beach"

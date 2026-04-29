@@ -60,8 +60,9 @@
 const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
 const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
 const qs = new URLSearchParams(location.search);
-const county = qs.get('county') || 'Orange';
-document.getElementById('county-label').textContent = county;
+const counties = (qs.get('counties') || qs.get('county') || 'Orange,Los Angeles')
+                   .split(',').map(s => s.trim()).filter(Boolean);
+document.getElementById('county-label').textContent = counties.join(' · ');
 
 const STYLES = {
   beach:              { color: '#a16207', fill: '#fbbf24' },
@@ -77,16 +78,15 @@ L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
 }).addTo(map);
 
 (async () => {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/osm_beach_sand_geojson`, {
-    method: 'POST',
-    headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ p_county: county }),
-  });
-  if (!r.ok) {
-    document.getElementById('status').textContent = `error: ${r.status}`;
-    return;
-  }
-  const rows = await r.json();
+  // Fetch polygons for each county and concat
+  const polyResults = await Promise.all(counties.map(c =>
+    fetch(`${SUPABASE_URL}/rest/v1/rpc/osm_beach_sand_geojson`, {
+      method: 'POST',
+      headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_county: c }),
+    }).then(r => r.ok ? r.json() : [])
+  ));
+  const rows = polyResults.flat();
   const tally = rows.reduce((acc, r) => { acc[r.feature_type] = (acc[r.feature_type] || 0) + 1; return acc; }, {});
   const tStr = ['beach','sand','dog_friendly_beach'].filter(k=>tally[k]).map(k => `${tally[k]} ${k}`).join(' · ');
   document.getElementById('status').textContent = `${rows.length} polygons — ${tStr}`;
@@ -127,9 +127,10 @@ L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
   else map.setView([33.6, -117.9], 10);
 
   // ── CCC points layer ────────────────────────────────────────────────
+  const cccCountyList = counties.map(c => `"${c}"`).join(',');
   const cccUrl = `${SUPABASE_URL}/rest/v1/ccc_access_points`
     + `?select=objectid,name,latitude,longitude,inferred_type,sandy_beach,dogs_verdict,operator_id`
-    + `&county_name_tiger=eq.${encodeURIComponent(county)}`
+    + `&county_name_tiger=in.(${encodeURIComponent(cccCountyList)})`
     + `&latitude=not.is.null`
     + `&archived=not.eq.Yes`        // CCC stores ' ' (space) as not-archived sentinel
     + `&admin_inactive=not.is.true`

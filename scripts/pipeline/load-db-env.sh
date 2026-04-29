@@ -14,8 +14,22 @@
 #   SUPABASE_DB_NAME     from supabase/.temp/pooler-url
 #   SUPABASE_DB_PASSWORD from scripts/pipeline/.env
 
-# Find repo root (this script is at scripts/pipeline/, repo root is two levels up)
-_repo_root="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
+# Find repo root. Script lives at scripts/pipeline/load-db-env.sh; repo root
+# is two levels up. Resolve to absolute path so this works regardless of CWD.
+# On Git Bash/MSYS we also need a Windows-form path for native Python.
+_script_path="${BASH_SOURCE[0]}"
+case "$_script_path" in
+  /*) ;;
+  *)  _script_path="$PWD/$_script_path" ;;
+esac
+_repo_root="$( cd "$( dirname "$_script_path" )/../.." && pwd )"
+# Convert MSYS path → Windows form for Python (only on Git Bash; pwd -W exists there).
+if pwd -W >/dev/null 2>&1; then
+  _repo_root_py="$( cd "$_repo_root" && pwd -W )"
+else
+  _repo_root_py="$_repo_root"
+fi
+unset _script_path
 
 # Load .env (everything in it, including SUPABASE_DB_PASSWORD)
 if [ -f "$_repo_root/scripts/pipeline/.env" ]; then
@@ -26,11 +40,12 @@ else
   echo "warning: scripts/pipeline/.env not found" >&2
 fi
 
-# Parse host/user/port/db from pooler-url (this file is auto-maintained by `supabase link`)
+# Parse host/user/port/db from pooler-url (this file is auto-maintained by `supabase link`).
+# Use _repo_root_py (Windows-form on Git Bash) so native-Windows Python can open the file.
 if [ -f "$_repo_root/supabase/.temp/pooler-url" ]; then
   eval "$(python -c "
 import urllib.parse
-with open('$_repo_root/supabase/.temp/pooler-url') as f:
+with open(r'$_repo_root_py/supabase/.temp/pooler-url') as f:
     p = urllib.parse.urlparse(f.read().strip())
 print(f'export SUPABASE_DB_HOST={p.hostname}')
 print(f'export SUPABASE_DB_PORT={p.port}')
@@ -41,4 +56,4 @@ else
   echo "warning: supabase/.temp/pooler-url not found — run 'supabase link --project-ref <ref>' first" >&2
 fi
 
-unset _repo_root
+unset _repo_root _repo_root_py

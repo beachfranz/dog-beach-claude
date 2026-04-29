@@ -1,0 +1,67 @@
+version: 2
+models:
+- name: stg_beach_locations
+  description: "Deduped 805 corpus \xE2\u20AC\u201D UBP-spine + CCC-orphan canonical\
+    \ beach view."
+  columns:
+  - name: origin_key
+    tests:
+    - unique
+    - not_null
+- name: stg_us_beach_points
+  description: Raw US Beach Points dataset (state filter applied at consumer).
+  columns:
+  - name: fid
+    tests:
+    - unique
+    - not_null
+- name: stg_ccc_access_points
+  description: California Coastal Commission access points.
+  columns:
+  - name: objectid
+    tests:
+    - unique
+    - not_null
+- name: stg_osm_features
+  description: OSM features (filtered to beach / dog_friendly_beach types in marts).
+- name: stg_cpad_units
+  description: "California Protected Areas Database \xE2\u20AC\u201D protected-area\
+    \ polygons."
+  columns:
+  - name: unit_id
+    tests:
+    - not_null
+- name: stg_counties
+  description: California county polygons.
+- name: stg_operators
+  description: "Distinct operating agencies \xE2\u20AC\u201D owners and managers across\
+    \ all sources."
+  columns:
+  - name: id
+    tests:
+    - unique
+    - not_null
+- name: stg_operator_dogs_policy
+  description: Per-operator dog policy + exceptions[] + spatial_zones.
+  columns:
+  - name: operator_id
+    tests:
+    - unique
+    - not_null
+- name: stg_cpad_unit_dogs_policy
+  description: Per-CPAD-unit dog policy from park_url and CDPR scrape.
+  columns:
+  - name: cpad_unit_id
+    tests:
+    - unique
+    - not_null
+- name: stg_beach_verdicts
+  description: Per-origin-key dog verdict + confidence + sources meta.
+  columns:
+  - name: origin_key
+    tests:
+    - unique
+    - not_null
+- name: stg_truth_external
+  description: External comparison rows from BringFido / DogTrekker / CaliforniaBeaches
+    / websearch.

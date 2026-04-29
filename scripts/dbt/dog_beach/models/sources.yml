@@ -28,24 +28,46 @@ sources:
       - name: counties
         description: "California county polygons."
 
-      # Operator + policy
+      # Operator + policy — should be reasonably fresh; flagged if extraction
+      # hasn't run in a long time.
       - name: operators
         description: "Distinct operating agencies — owners and managers across all sources."
       - name: operator_dogs_policy
         description: "Per-operator dog policy — default_rule + exceptions[] + spatial_zones."
+        loaded_at_field: updated_at
+        freshness:
+          warn_after: {count: 90, period: day}
+          error_after: {count: 180, period: day}
       - name: operator_policy_extractions
         description: "Evidence-layer per (operator_id, source_kind, source_url)."
+        loaded_at_field: extracted_at
+        freshness:
+          warn_after: {count: 90, period: day}
       - name: cpad_unit_dogs_policy
         description: "Per-CPAD-unit dog policy from park_url and CDPR scrape."
+        loaded_at_field: scraped_at
+        freshness:
+          warn_after: {count: 90, period: day}
 
-      # Verdict layer
+      # Verdict layer — should refresh whenever any upstream input changes.
       - name: beach_verdicts
         description: "Per-origin-key dog verdict + confidence + sources meta. Canonical."
+        loaded_at_field: computed_at
+        freshness:
+          warn_after: {count: 7, period: day}
+          error_after: {count: 30, period: day}
       - name: cpad_unit_for_beach
         description: "Pre-resolved canonical CPAD unit per beach_locations row."
+        loaded_at_field: computed_at
+        freshness:
+          warn_after: {count: 30, period: day}
       - name: geo_entity_response_current
         description: "Legacy LLM-extracted CPAD unit / CCC responses (CCC tier dropped from active cascade)."
 
-      # Validation
+      # Validation — refreshes when scrapers run; should be flagged if stale.
       - name: truth_external
         description: "External truth-set rows from BringFido / DogTrekker / CaliforniaBeaches / websearch."
+        loaded_at_field: scraped_at
+        freshness:
+          warn_after: {count: 30, period: day}
+          error_after: {count: 90, period: day}

@@ -115,6 +115,7 @@ def operator_policy_extractions(context: AssetExecutionContext,
 
 
 @asset(
+    key=AssetKey(["public", "operator_dogs_policy"]),
     description="Canonical per-operator dog policy. Cheap observation: "
                 "SELECTs row counts; does NOT re-merge from extractions. "
                 "To actually re-merge, materialize operator_dogs_policy_run.",

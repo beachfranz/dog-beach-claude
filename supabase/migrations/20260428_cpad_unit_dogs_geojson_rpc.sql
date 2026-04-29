@@ -37,7 +37,9 @@ create or replace function public.cpad_unit_dogs_geojson(
     p.area_parking_lot, p.area_trails, p.area_campground,
     p.designated_dog_zones, p.prohibited_areas,
     p.source_quote, p.url_used, p.extraction_model, p.extraction_confidence,
-    st_asgeojson(st_simplify(cu.geom, 0.0005))::jsonb as geom_json
+    -- Tolerance ~10m. Lower than 0.0005 (~50m) which was collapsing
+    -- small city-beach polygons (Marine Park, Coronado Municipal, etc.)
+    st_asgeojson(st_simplifypreservetopology(cu.geom, 0.0001))::jsonb as geom_json
   from public.cpad_unit_dogs_policy p
   join public.cpad_units cu on cu.unit_id = p.cpad_unit_id
   where cu.county = any(p_counties);

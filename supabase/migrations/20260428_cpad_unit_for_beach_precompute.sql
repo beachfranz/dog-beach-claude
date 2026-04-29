@@ -20,22 +20,38 @@ create index cpad_unit_for_beach_unit_idx     on public.cpad_unit_for_beach (uni
 create index cpad_unit_for_beach_county_idx   on public.cpad_unit_for_beach (beach_county);
 
 -- Initial population (idempotent — re-run safely).
--- One row per beach_locations entry, with its containing county and
--- the smallest containing CPAD unit (if any).
+-- Source = beach_locations UNION all_coastal_features_lite() rows that
+-- represent named CCC sandy beaches but are dropped by the 805 dedupe
+-- (Rosie's, Huntington Beach Dog Beach, etc. are in CCC but not the
+-- deduped view because their same_beach partners take precedence).
+with universe as (
+  select bl.origin_key, bl.name, bl.geom from public.beach_locations bl
+  union
+  select 'ccc/' || c.objectid::text as origin_key,
+         c.name,
+         c.geom
+    from public.ccc_access_points c
+   where (c.archived is null or c.archived <> 'Yes')
+     and (c.admin_inactive is null or c.admin_inactive = false)
+     and c.latitude is not null
+     and c.sandy_beach = 'Yes'
+     and c.inferred_type = 'beach'
+     and 'ccc/' || c.objectid::text not in (select origin_key from public.beach_locations)
+)
 insert into public.cpad_unit_for_beach (origin_key, beach_name, beach_county, lat, lng, unit_id, unit_area_m2)
-  select bl.origin_key,
-         bl.name,
+  select u.origin_key,
+         u.name,
          (select c.name from public.counties c
-            where st_intersects(c.geom, bl.geom) limit 1) as beach_county,
-         st_y(bl.geom)::float8,
-         st_x(bl.geom)::float8,
+            where st_intersects(c.geom, u.geom) limit 1) as beach_county,
+         st_y(u.geom)::float8,
+         st_x(u.geom)::float8,
          cu.unit_id,
          cu.area_m2
-    from public.beach_locations bl
+    from universe u
     left join lateral (
       select cu2.unit_id, st_area(cu2.geom::geography) as area_m2
         from public.cpad_units cu2
-       where st_contains(cu2.geom, bl.geom)
+       where st_contains(cu2.geom, u.geom)
        order by st_area(cu2.geom) asc
        limit 1
     ) cu on true;

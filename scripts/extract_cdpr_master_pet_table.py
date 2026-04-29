@@ -91,31 +91,44 @@ def fetch_cdpr_units_in_805_la_oc_sd() -> list[dict]:
     return []
 
 
-def trigram_match(target_name: str, threshold: float = 0.6) -> dict | None:
-    """Pure-Python trigram-ish: name overlap. For best match against CPAD unit names."""
-    # Use Postgres trigram match via a quick query for accuracy
-    import subprocess
-    safe = target_name.replace("'","''")
-    sql = f"""
-      select unit_id, unit_name, similarity('{safe}', unit_name) as sim
-      from cpad_units
-      where agncy_name = 'California Department of Parks and Recreation'
-        and similarity('{safe}', unit_name) >= {threshold}
-      order by sim desc limit 1;
-    """
-    r = subprocess.run(["supabase","db","query","--linked",sql],
-                       capture_output=True, text=True, timeout=30,
-                       cwd=str(Path(__file__).parent.parent))
-    out = r.stdout
-    i = out.find('[', out.find('"rows"'))
-    depth = 0
-    for k in range(i, len(out)):
-        if out[k]=='[': depth+=1
-        elif out[k]==']':
-            depth-=1
-            if depth==0:
-                rows = json.loads(out[i:k+1])
-                return rows[0] if rows else None
+def normalize(s: str) -> str:
+    s = (s or "").lower().strip()
+    # Strip common CDPR-style suffixes/words for fuzzier match
+    for kill in [" state beach", " state park", " state recreation area",
+                 " state historic park", " state marine reserve",
+                 " state marine conservation area", " state natural reserve",
+                 " state vehicular recreation area", " state seashore",
+                 " - off-highway vehicle", " ohv"]:
+        s = s.replace(kill, "")
+    s = re.sub(r"[^a-z0-9 ]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def best_match_local(table_name: str, units: list[dict]) -> dict | None:
+    """In-memory match: normalized exact, then substring containment, then token-overlap."""
+    nt = normalize(table_name)
+    if not nt: return None
+    # exact normalized
+    for u in units:
+        if normalize(u["unit_name"]) == nt:
+            return {**u, "sim": 1.0}
+    # substring containment
+    for u in units:
+        nu = normalize(u["unit_name"])
+        if nt and (nt in nu or nu in nt):
+            return {**u, "sim": 0.85}
+    # token overlap
+    nt_tokens = set(nt.split())
+    best = None; best_score = 0.0
+    for u in units:
+        nu_tokens = set(normalize(u["unit_name"]).split())
+        if not nu_tokens or not nt_tokens: continue
+        overlap = len(nt_tokens & nu_tokens) / max(len(nt_tokens), len(nu_tokens))
+        if overlap > best_score:
+            best_score = overlap; best = u
+    if best and best_score >= 0.6:
+        return {**best, "sim": best_score}
     return None
 
 
@@ -151,16 +164,14 @@ def main():
 
     # Restrict to LA-OC-SD CDPR units (focus area for this run)
     target_units = fetch_cdpr_units_in_805_la_oc_sd()
-    target_names = {u["unit_name"] for u in target_units}
     print(f"\nTarget LA-OC-SD CDPR units: {len(target_units)}")
+    for u in target_units:
+        print(f"  - unit {u['unit_id']}: {u['unit_name']!r}")
 
     matched = []
     for tr in rows:
-        m = trigram_match(tr["name"])
+        m = best_match_local(tr["name"], target_units)
         if not m:
-            continue
-        # Only emit for units in our LA-OC-SD focus
-        if m["unit_name"] not in target_names:
             continue
         # Build the upsert row
         leash_required = None

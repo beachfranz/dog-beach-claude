@@ -52,6 +52,7 @@ _db_source_table_names = [
     "operators",
     "osm_features",
     "truth_external",
+    "dog_policy_exceptions",
 ]
 db_source_specs = [
     AssetSpec(

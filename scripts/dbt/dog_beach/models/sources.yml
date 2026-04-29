@@ -48,6 +48,8 @@ sources:
         loaded_at_field: scraped_at
         freshness:
           warn_after: {count: 90, period: day}
+      - name: dog_policy_exceptions
+        description: "Flattened view over operator_dogs_policy.exceptions[] + cpad_unit_dogs_policy.exceptions[] — one row per exception (source_kind, source_id, parent_name, rule, beach_name, source_quote, source_url)."
 
       # Verdict layer — should refresh whenever any upstream input changes.
       - name: beach_verdicts

@@ -93,6 +93,29 @@ def fetch_top_operators(limit: int, counties: list[str] | None = None) -> list[d
     return json.loads(m.group(1))
 
 
+def fetch_operators_by_ids(ids: list[int]) -> list[dict]:
+    id_list = ",".join(str(i) for i in ids)
+    sql = f"""
+      select op.id, op.slug, op.canonical_name, op.website, op.level, op.subtype,
+             (select count(*) from public.beach_locations bl where bl.operator_id = op.id) as beach_count
+        from public.operators op
+       where op.id in ({id_list})
+       order by beach_count desc nulls last;
+    """
+    import subprocess
+    r = subprocess.run(
+        ["supabase","db","query","--linked",sql],
+        capture_output=True, text=True, timeout=60,
+        cwd=str(Path(__file__).parent.parent)
+    )
+    if r.returncode != 0:
+        raise RuntimeError(f"db query failed: {r.stderr[:500]}")
+    m = re.search(r'"rows"\s*:\s*(\[.*?\])\s*[},]', r.stdout, re.DOTALL)
+    if not m:
+        raise RuntimeError(f"could not parse rows from CLI output:\n{r.stdout[:500]}")
+    return json.loads(m.group(1))
+
+
 def domain_of(url: str | None) -> str | None:
     if not url: return None
     try:
@@ -554,10 +577,16 @@ def main():
                    help="skip operators that already have any extraction row")
     p.add_argument("--counties", type=str, default=None,
                    help="comma-separated list, e.g. 'Los Angeles,Orange,San Diego'")
+    p.add_argument("--ids", type=str, default=None,
+                   help="comma-separated operator ids; overrides --limit and --counties")
     args = p.parse_args()
 
-    counties = [c.strip() for c in args.counties.split(",")] if args.counties else None
-    operators = fetch_top_operators(args.limit, counties=counties)
+    if args.ids:
+        ids = [int(x.strip()) for x in args.ids.split(",")]
+        operators = fetch_operators_by_ids(ids)
+    else:
+        counties = [c.strip() for c in args.counties.split(",")] if args.counties else None
+        operators = fetch_top_operators(args.limit, counties=counties)
     print(f"Loaded {len(operators)} operators")
 
     # Skip operators with existing extractions

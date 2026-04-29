@@ -164,20 +164,76 @@ def fetch_httpx(url: str) -> tuple[str, str, int]:
         return (f"fetch_error: {type(e).__name__}", "", 0)
 
 
+def fetch_playwright(url: str, timeout_ms: int = 20000) -> tuple[str, str, int]:
+    """Render a page with headless Chromium. Block heavy resources for
+    speed. Returns (status, text, chars)."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return ("playwright_unavailable", "", 0)
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(args=["--disable-blink-features=AutomationControlled"])
+            ctx = browser.new_context(
+                user_agent=CHROME_UA,
+                viewport={"width": 1280, "height": 800},
+            )
+            page = ctx.new_page()
+            page.route("**/*.{png,jpg,jpeg,gif,webp,svg,ico,woff,woff2,ttf,otf,mp4,webm}",
+                       lambda r: r.abort())
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                try:
+                    page.wait_for_load_state("networkidle", timeout=8000)
+                except Exception:
+                    pass
+                text = page.evaluate("() => document.body ? document.body.innerText : ''") or ""
+            finally:
+                ctx.close(); browser.close()
+            text = re.sub(r"\n{3,}", "\n\n", text)[:12000]
+            if len(text) < 100:
+                return ("playwright_thin", text, len(text))
+            return ("ok_playwright", text, len(text))
+    except Exception as e:
+        return (f"playwright_error:{type(e).__name__}", "", 0)
+
+
+def _has_dog_keyword(text: str) -> bool:
+    return bool(re.search(r"\b(dog|leash|pet)s?\b", (text or "")[:8000], re.I))
+
+
 def fetch_and_clean(url: str) -> tuple[str, str, int]:
-    """Try httpx first; fall back to Tavily extract on 403/timeout/PDF/5xx."""
+    """Three-tier fetch: httpx → Tavily extract → Playwright headless.
+    Playwright fires when (a) prior tiers failed, OR (b) Tavily returned
+    content but it lacks any dog/leash/pet keyword (often a JS-rendered
+    page where the dog section loads client-side)."""
     status, text, chars = fetch_httpx(url)
-    if status == "ok":
+    if status == "ok" and _has_dog_keyword(text):
         return (status, text, chars)
-    # Fallback to Tavily extract for blocked, slow, or PDF responses
-    if (status.startswith("http_403") or status.startswith("http_5")
-        or status == "timeout" or status == "pdf_route_to_tavily"):
+    # Tavily fallback (existing logic)
+    if status != "ok" and (status.startswith("http_403") or status.startswith("http_5")
+                            or status == "timeout" or status == "pdf_route_to_tavily"):
         ts, ttext, tchars = tavily_extract(url)
-        if ts.startswith("ok"):
+        if ts.startswith("ok") and _has_dog_keyword(ttext):
             return (ts, ttext, tchars)
-        # Tavily also failed — return original status with note
-        return (f"{status}+{ts}", "", 0)
-    return (status, text, chars)
+        # Hold tavily result; try Playwright
+        if ts.startswith("ok"):
+            tavily_kept = (ts, ttext, tchars)
+        else:
+            tavily_kept = (f"{status}+{ts}", "", 0)
+    else:
+        tavily_kept = None
+    # Playwright last — for httpx-ok-but-no-keywords or all prior failures
+    pw_status, pw_text, pw_chars = fetch_playwright(url)
+    if pw_status.startswith("ok") and _has_dog_keyword(pw_text):
+        return (pw_status, pw_text, pw_chars)
+    # Nothing yielded keywords. Return whatever has the most content.
+    candidates = [(status, text, chars)]
+    if tavily_kept:
+        candidates.append(tavily_kept)
+    candidates.append((pw_status, pw_text, pw_chars))
+    candidates.sort(key=lambda c: c[2], reverse=True)
+    return candidates[0]
 
 
 # ── LLM ──────────────────────────────────────────────────────────────

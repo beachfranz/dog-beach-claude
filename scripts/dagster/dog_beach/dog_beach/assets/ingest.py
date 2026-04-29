@@ -61,6 +61,7 @@ def _run_python(context: AssetExecutionContext, script: str, *args: str) -> str:
                 "re-scrape. To actually re-fetch, materialize "
                 "cpad_unit_dogs_policy_cdpr_run instead.",
     group_name="ingest",
+    kinds={"sql", "table"},
 )
 def cpad_unit_dogs_policy_cdpr(context: AssetExecutionContext,
                                 supabase_db: SupabaseDbResource):
@@ -91,6 +92,7 @@ def cpad_unit_dogs_policy_cdpr(context: AssetExecutionContext,
                 "does NOT call Tavily or Anthropic. To actually re-extract, "
                 "materialize operator_policy_extractions_run instead.",
     group_name="ingest",
+    kinds={"sql", "table"},
 )
 def operator_policy_extractions(context: AssetExecutionContext,
                                  supabase_db: SupabaseDbResource):
@@ -117,6 +119,7 @@ def operator_policy_extractions(context: AssetExecutionContext,
                 "SELECTs row counts; does NOT re-merge from extractions. "
                 "To actually re-merge, materialize operator_dogs_policy_run.",
     group_name="ingest",
+    kinds={"sql", "table"},
     deps=[operator_policy_extractions],
 )
 def operator_dogs_policy(context: AssetExecutionContext,
@@ -150,6 +153,7 @@ def operator_dogs_policy(context: AssetExecutionContext,
                 "when you want fresh CDPR data; then re-materialize the "
                 "cheap cpad_unit_dogs_policy_cdpr observation downstream.",
     group_name="ingest_heavy",
+    kinds={"python", "scrape"},
 )
 def cpad_unit_dogs_policy_cdpr_run(context: AssetExecutionContext,
                                     supabase_db: SupabaseDbResource):
@@ -175,6 +179,7 @@ def cpad_unit_dogs_policy_cdpr_run(context: AssetExecutionContext,
                 "scripts/extract_operator_dogs_policy.py --skip-existing. "
                 "Costs Anthropic + Tavily API credits.",
     group_name="ingest_heavy",
+    kinds={"python", "anthropic"},
 )
 def operator_policy_extractions_run(context: AssetExecutionContext,
                                      supabase_db: SupabaseDbResource):
@@ -199,6 +204,7 @@ def operator_policy_extractions_run(context: AssetExecutionContext,
                 "compared to the LLM extractor but still mutates the "
                 "canonical operator_dogs_policy table.",
     group_name="ingest_heavy",
+    kinds={"python", "sql"},
     deps=[AssetKey(["operator_policy_extractions_run"])],
 )
 def operator_dogs_policy_run(context: AssetExecutionContext,

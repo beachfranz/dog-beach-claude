@@ -40,6 +40,7 @@ from .ingest import operator_dogs_policy, cpad_unit_dogs_policy_cdpr
                 "public.beach_verdicts. Also syncs the legacy "
                 "ccc_access_points.dogs_verdict mirror.",
     group_name="verdicts",
+    kinds={"plpgsql", "table"},
     deps=[operator_dogs_policy, cpad_unit_dogs_policy_cdpr],
 )
 def beach_verdicts(context: AssetExecutionContext,
@@ -109,6 +110,7 @@ def beach_verdicts(context: AssetExecutionContext,
                 "catalog columns are reference-only for parity "
                 "review via dbt_dbt.consumer_beach_with_verdict.",
     group_name="consumer",
+    kinds={"sql", "table"},
     deps=[AssetKey(["beach_verdicts"]),
           AssetKey(["public", "beach_locations"])],
 )

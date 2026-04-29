@@ -369,12 +369,29 @@ def pass_a_user(t: dict, page_text: str, source_url: str) -> str:
 {page_text}
 </page>
 
-Extract ONLY four fields:
+Extract ONLY four fields about this operator's beach dog policy.
 
-1. policy_found (bool): does the page meaningfully address whether dogs are allowed on this operator's beaches?
-2. default_rule ("yes"|"no"|"restricted"|null): operator-wide default. "yes"=unrestricted; "no"=prohibited; "restricted"=allowed only with conditions (zone, time, leash, season).
+1. policy_found (bool): does the page meaningfully address whether dogs are allowed on this operator's beaches OR public spaces (parks, recreation areas, public property)?
+   Set true even if the policy is implicit — e.g., a general leash ordinance for all public spaces with no beach-specific exception is itself a policy.
+
+2. default_rule ("yes"|"no"|"restricted"|null): operator-wide default.
+   - "yes"        = dogs allowed without conditions
+   - "restricted" = dogs allowed but with conditions (leash, time window, season, designated zones)
+   - "no"         = dogs prohibited outright (no condition would let them in)
+   - null         = page is silent / not enough info
+
+   IMPORTANT — parse conditional clauses correctly:
+   * "No person shall bring a dog ... UNLESS on a leash" → "restricted"  (NOT "no")
+   * "Dogs are not allowed UNLESS in a designated off-leash area" → "restricted"
+   * "Dogs must be on a leash in all public spaces" with no beach-specific exclusion → "restricted"
+   * Only return "no" when the prohibition is unconditional (e.g., "No dogs are permitted on the beach at any time").
+
+   IMPORTANT — public-space leash laws usually apply to beaches:
+   If the page is a municipal/county code that requires dogs on leash in "public spaces" / "public property" / "city parks" with no beach-specific carve-out, treat the beach default as "restricted" (not null), since the leash law extends to beaches by default. Cite the leash-law quote in source_quotes.
+
 3. applies_to_all (bool|null): does the rule apply uniformly to every beach this operator manages?
-4. leash_required (bool|null): does the page say leashes are required?
+
+4. leash_required (bool|null): does the page say leashes are required when dogs are present?
 
 Return ONLY:
 {{

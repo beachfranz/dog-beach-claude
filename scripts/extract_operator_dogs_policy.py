@@ -215,6 +215,31 @@ def fetch_playwright(url: str, timeout_ms: int = 20000) -> tuple[str, str, int]:
                 # if the body is still thin or missing the keyword, and wait
                 # again before giving up.
                 page.wait_for_timeout(2000)
+                # Reveal collapsed/hidden content: <details>, accordion
+                # panels, anything aria-collapsed. innerText respects
+                # display:none, so without this many municipal FAQs answer
+                # the dog question inside a hidden panel that we'd never
+                # read. Surfaced on Oxnard parks-faq (custom accordion).
+                page.evaluate("""() => {
+                    document.querySelectorAll('details').forEach(d => d.open = true);
+                    document.querySelectorAll('[aria-expanded="false"]').forEach(b => {
+                        b.setAttribute('aria-expanded','true');
+                    });
+                    const sels = [
+                        '.accordion-block-panel', '.accordion-panel',
+                        '.accordion-content', '.accordion-body',
+                        '.collapse', '.panel-collapse',
+                        '[aria-hidden="true"]'
+                    ];
+                    document.querySelectorAll(sels.join(',')).forEach(el => {
+                        el.style.display = 'block';
+                        el.style.visibility = 'visible';
+                        el.style.height = 'auto';
+                        el.style.maxHeight = 'none';
+                        el.removeAttribute('hidden');
+                    });
+                }""")
+                page.wait_for_timeout(500)
                 text = page.evaluate("() => document.body ? document.body.innerText : ''") or ""
                 if len(text) < 500 or not _has_dog_keyword(text):
                     page.wait_for_timeout(3000)

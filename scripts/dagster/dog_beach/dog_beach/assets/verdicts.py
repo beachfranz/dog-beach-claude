@@ -8,10 +8,16 @@ flips/distribution as run metadata.
 Depends on the upstream ingest assets — the cascade reads
 operator_dogs_policy, cpad_unit_dogs_policy, and beach_locations.
 
+Also defines the consumer bridge — `consumer_beaches_sync` writes
+each cascade verdict back to `public.beaches.dog_verdict_catalog*`
+columns via the dbt_dbt.consumer_beach_with_verdict view's spatial
+match. HTML still reads `beaches.dogs_allowed` (curated); the new
+columns are reference-only for surfacing catalog-vs-consumer parity.
+
 NOTE: no `from __future__ import annotations` here — Dagster's runtime
 context-type validator doesn't resolve PEP 563 string annotations.
 """
-from dagster import asset, AssetExecutionContext, Output, MetadataValue
+from dagster import asset, AssetExecutionContext, AssetKey, Output, MetadataValue
 
 from ..resources import SupabaseDbResource
 from .ingest import operator_dogs_policy, cpad_unit_dogs_policy_cdpr
@@ -80,4 +86,69 @@ def beach_verdicts(context: AssetExecutionContext,
     )
 
 
-assets = [beach_verdicts]
+@asset(
+    description="Bridge: writes the cascade verdict back to "
+                "public.beaches.dog_verdict_catalog* via the spatial "
+                "match in dbt_dbt.consumer_beach_with_verdict. HTML "
+                "still reads beaches.dogs_allowed (curated); these "
+                "columns sit alongside it for parity review. "
+                "Reports rows-updated and parity distribution as "
+                "run metadata.",
+    group_name="verdicts",
+    deps=[AssetKey(["beach_verdicts"]),
+          AssetKey(["dbt", "consumer_beach_with_verdict"])],
+)
+def consumer_beaches_sync(context: AssetExecutionContext,
+                          supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            update public.beaches b
+               set dog_verdict_catalog            = m.catalog_verdict,
+                   dog_verdict_catalog_confidence = m.catalog_confidence,
+                   dog_verdict_catalog_computed_at = m.catalog_computed_at
+              from dbt_dbt.consumer_beach_with_verdict m
+             where m.location_id = b.location_id
+               and m.nearest_origin_key is not null
+        """)
+        rows_updated = cur.rowcount
+
+        cur.execute("""
+            select parity, count(*)
+              from dbt_dbt.consumer_beach_with_verdict
+             group by parity
+        """)
+        parity_dist = dict(cur.fetchall())
+
+        cur.execute("""
+            select location_id, display_name,
+                   consumer_dogs_allowed, catalog_verdict
+              from dbt_dbt.consumer_beach_with_verdict
+             where parity = 'disagree'
+             order by location_id
+        """)
+        disagreements = [
+            f"{lid} ({name}): consumer={cda} / catalog={cv}"
+            for lid, name, cda, cv in cur.fetchall()
+        ]
+        conn.commit()
+
+    return Output(
+        None,
+        metadata={
+            "rows_updated":         MetadataValue.int(rows_updated),
+            "parity_agree_yes":     MetadataValue.int(parity_dist.get("agree_yes", 0)),
+            "parity_agree_no":      MetadataValue.int(parity_dist.get("agree_no", 0)),
+            "parity_disagree":      MetadataValue.int(parity_dist.get("disagree", 0)),
+            "parity_catalog_missing": MetadataValue.int(parity_dist.get("catalog_missing", 0)),
+            "parity_consumer_missing": MetadataValue.int(parity_dist.get("consumer_missing", 0)),
+            "parity_catalog_null":  MetadataValue.int(parity_dist.get("catalog_null", 0)),
+            "parity_both_null":     MetadataValue.int(parity_dist.get("both_null", 0)),
+            "disagreements":        MetadataValue.md(
+                "\n".join(f"- {d}" for d in disagreements) if disagreements
+                else "_(none)_"
+            ),
+        },
+    )
+
+
+assets = [beach_verdicts, consumer_beaches_sync]

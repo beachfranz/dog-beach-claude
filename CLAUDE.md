@@ -99,6 +99,10 @@ Nine tables total. All have RLS enabled.
 ### `beaches`
 Static beach metadata. Key columns: `location_id` (PK, slug), `display_name`, `latitude`, `longitude`, `noaa_station_id`, `besttime_venue_id`, `timezone`, `open_time`, `close_time`, `is_active`, `address`, `website`, `description`, `parking_text`.
 
+Dog policy on this table is split across two parallel sets of columns:
+- **Curated** (HTML reads these): `dogs_allowed`, `leash_policy`, `off_leash_flag`, `dogs_prohibited_start/end`, `dogs_allowed_areas`, `access_rule`. Hand-curated; richer enum than the cascade (`yes`/`no`/`mixed`/`seasonal`/`restricted`/...).
+- **Cascade-computed** (reference only — added 2026-04-29): `dog_verdict_catalog`, `dog_verdict_catalog_confidence`, `dog_verdict_catalog_computed_at`. Written by the Dagster `consumer_beaches_sync` asset by spatial-joining each beach to the nearest `beach_locations` row within 500m and copying `beach_verdicts.dogs_verdict`. HTML does NOT read these — they're parity references for surfacing catalog vs. curated disagreements via `dbt_dbt.consumer_beach_with_verdict`.
+
 ### `scoring_config`
 All scoring weights, thresholds, and normalization parameters. Versioned — pipeline always loads the row where `is_active = true`. See **Scoring Model** section for all fields.
 

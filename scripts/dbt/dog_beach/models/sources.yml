@@ -71,3 +71,8 @@ sources:
         freshness:
           warn_after: {count: 30, period: day}
           error_after: {count: 90, period: day}
+
+      # Consumer-app static metadata — the 5 SoCal beaches the live HTML serves.
+      # Bridges from the catalog pipeline (Layers 1-5) to the user pixel (Layer 9).
+      - name: beaches
+        description: "Static metadata for the 5 consumer-app beaches: location_id (slug), display_name, lat/lng, NOAA station id, BestTime venue id, hours, address."

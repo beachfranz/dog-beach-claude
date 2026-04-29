@@ -65,3 +65,10 @@ models:
 - name: stg_truth_external
   description: External comparison rows from BringFido / DogTrekker / CaliforniaBeaches
     / websearch.
+- name: stg_beaches
+  description: Static metadata for the consumer-app beaches (5 SoCal + 5 OR).
+  columns:
+  - name: location_id
+    tests:
+    - unique
+    - not_null

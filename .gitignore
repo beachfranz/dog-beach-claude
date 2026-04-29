@@ -25,3 +25,4 @@ __pycache__/
 # Shared screenshots / external data dumps (workspace only)
 share/
 .venv-pipeline/
+.tmp_dagster_home_*/

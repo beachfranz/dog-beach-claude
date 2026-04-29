@@ -560,10 +560,37 @@ def upsert_extraction(operator_id: int, source_kind: str, source_url: str,
 
 
 # ── Per-operator orchestrator ────────────────────────────────────────
-def process_operator(t: dict, dry_run: bool = False) -> dict:
+def process_operator(t: dict, dry_run: bool = False, force_url: str | None = None) -> dict:
     counts = {"src_a": 0, "src_b": 0, "errors": 0}
     a_url = b_url = None
     a_query = b_query = None
+
+    # Manual URL override: skip both Tavily searches, run the 3 passes
+    # directly against the supplied URL. Tagged as direct_url.
+    if force_url:
+        print(f"   [override] forced URL: {force_url}")
+        a_url = force_url
+        a_query = "manual override"
+        if dry_run:
+            print(f"   A: {a_url}")
+            return counts
+        status, page_text, page_chars = fetch_and_clean(a_url)
+        if not status.startswith("ok"):
+            print(f"   [override] fetch failed: {status}")
+            try:
+                upsert_extraction(t["id"], "direct_url", a_url, a_query, status, page_chars, {})
+            except Exception as e:
+                print(f"   [override] upsert error: {e}")
+                counts["errors"] += 1
+            return counts
+        passes = run_three_passes(t, page_text, a_url)
+        try:
+            upsert_extraction(t["id"], "direct_url", a_url, a_query, status, page_chars, passes)
+            counts["src_a"] += 1
+        except Exception as e:
+            print(f"   [override] upsert error: {e}")
+            counts["errors"] += 1
+        return counts
 
     # Source A: site-restricted Tavily search → Haiku-picked URL
     if t.get("website"):
@@ -633,6 +660,9 @@ def main():
                    help="comma-separated list, e.g. 'Los Angeles,Orange,San Diego'")
     p.add_argument("--ids", type=str, default=None,
                    help="comma-separated operator ids; overrides --limit and --counties")
+    p.add_argument("--url", type=str, default=None,
+                   help="force a specific URL for extraction (skips Tavily search). "
+                        "Best with --ids targeting a single operator.")
     args = p.parse_args()
 
     if args.ids:
@@ -662,7 +692,7 @@ def main():
             continue
         print(f"\n[{i}/{len(operators)}] #{op['id']} {op['canonical_name']} ({op.get('beach_count')} beaches)")
         try:
-            counts = process_operator(op, dry_run=args.dry_run)
+            counts = process_operator(op, dry_run=args.dry_run, force_url=args.url)
             for k, v in counts.items():
                 totals[k] = totals.get(k, 0) + v
         except Exception as e:

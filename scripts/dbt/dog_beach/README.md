@@ -13,10 +13,14 @@ for procedural orchestration.
 
 ## Setup
 
-1. Install Python deps (uv recommended):
+1. **Use Python 3.12 or 3.13** — Dagster doesn't ship wheels for 3.14 yet,
+   so we standardize on a 3.12 venv for both projects. From the repo root:
    ```bash
-   uv pip install dbt-postgres
+   py -3.12 -m venv .venv-pipeline           # Windows
+   source .venv-pipeline/Scripts/activate    # Windows; macOS/Linux: source .venv-pipeline/bin/activate
+   pip install dbt-postgres
    ```
+   The venv is gitignored.
 
 2. Set DB connection env vars (from Supabase Dashboard → Settings → Database):
    ```

@@ -2,16 +2,19 @@
 name = "dog-beach-dagster"
 version = "0.1.0"
 description = "Dagster orchestration for Dog Beach Scout"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 
-# Pinned to a 1.x line — Dagster has stable 1.x for several years.
+# Dagster + dagster-dbt move in lockstep — version-skew between dagster
+# and dagster-dbt causes pip resolver to fail. Pinned to the matching
+# 1.13 / 0.29 line. Bump intentionally.
+# Python 3.14 lacks dagster wheels as of late-2026 — keep on 3.12 / 3.13.
 dependencies = [
-  "dagster>=1.9",
-  "dagster-webserver>=1.9",
-  "dagster-postgres>=0.25",
-  "dagster-dbt>=0.25",
-  "dbt-postgres>=1.8",
-  "dbt-core>=1.8",
+  "dagster>=1.13,<1.14",
+  "dagster-webserver>=1.13,<1.14",
+  "dagster-postgres>=0.29,<0.30",
+  "dagster-dbt>=0.29,<0.30",
+  "dbt-postgres>=1.10,<1.12",
+  "dbt-core>=1.11,<1.12",
   "psycopg2-binary>=2.9",
   "python-dotenv>=1.0",
   "httpx>=0.27",

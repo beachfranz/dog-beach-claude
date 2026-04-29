@@ -50,10 +50,7 @@
   <span id="legend">
     <span><span class="swatch" style="background:#fbbf24"></span>beach</span>
     <span><span class="swatch" style="background:#a78bfa"></span>dog_friendly_beach</span>
-    <span style="margin-left:14px;">CCC:</span>
-    <span><span class="swatch" style="background:#22c55e;border-radius:50%;"></span>yes</span>
-    <span><span class="swatch" style="background:#ef4444;border-radius:50%;"></span>no</span>
-    <span><span class="swatch" style="background:#94a3b8;border-radius:50%;"></span>unknown</span>
+    <span style="margin-left:14px;"><span class="swatch" style="background:#ef4444;border-radius:50%;"></span>CCC point</span>
   </span>
   <span id="status"></span>
 </header>
@@ -154,17 +151,11 @@ L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
         opMap = new Map(ops.map(o => [o.id, o.canonical_name]));
       }
     }
-    const RULE_FILL = {
-      'yes':     { color: '#15803d', fill: '#22c55e' },
-      'no':      { color: '#b91c1c', fill: '#ef4444' },
-      'unknown': { color: '#475569', fill: '#94a3b8' },
-    };
     const cccLayer = L.featureGroup();
     ccc.forEach(c => {
       const rule = c.dogs_verdict || 'unknown';
-      const s = RULE_FILL[rule] || RULE_FILL.unknown;
       const m = L.circleMarker([c.latitude, c.longitude], {
-        radius: 5, color: s.color, weight: 1.5, fillColor: s.fill, fillOpacity: 0.9,
+        radius: 5, color: '#b91c1c', weight: 1.5, fillColor: '#ef4444', fillOpacity: 0.9,
       });
       const op = opMap.get(c.operator_id) || (c.operator_id ? `op #${c.operator_id}` : '(no operator)');
       m.bindTooltip(

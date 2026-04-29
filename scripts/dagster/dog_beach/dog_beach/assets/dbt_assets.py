@@ -8,11 +8,18 @@ Materializing a Dagster asset that maps to a dbt model invokes
 `dbt build --select <model>`, which runs both the model and its
 column-level tests. So one click in Dagit = build + test.
 
+The `db_source_specs` below declare explicit AssetSpec entries for
+every public.* table dbt reads as a source, with group_name set to
+`db_sources`. Sharing the same AssetKey as the dbt source merges
+them into a single graph node — same pattern as `public/beaches`.
+Sources that ARE owned by another Dagster asset (e.g. public/beaches
+in `consumer` group) keep their owning group; we just don't list
+them here.
+
 NOTE: no `from __future__ import annotations` here — Dagster's runtime
 context-type validator doesn't resolve PEP 563 string annotations.
 """
-from pathlib import Path
-from dagster import AssetExecutionContext
+from dagster import AssetExecutionContext, AssetSpec, AssetKey
 from dagster_dbt import DbtCliResource, dbt_assets, DbtProject
 
 from ..resources import DBT_PROJECT_DIR
@@ -27,5 +34,37 @@ def dbt_models(context: AssetExecutionContext, dbt: DbtCliResource):
     yield from dbt.cli(["build"], context=context).stream()
 
 
+# Group the public.* dbt source assets together. Excludes only
+# public.beaches — owned by the Dagster `beaches` asset (group `consumer`)
+# which writes the dog_verdict_catalog* columns. The other public.*
+# tables here are sourced/written upstream of Dagster (cascade SQL
+# function, ingest observations, manual migrations) — Dagster sees
+# them as external sources for the dbt staging layer.
+_db_source_table_names = [
+    "beach_locations",
+    "us_beach_points",
+    "ccc_access_points",
+    "cpad_units",
+    "cpad_unit_dogs_policy",
+    "counties",
+    "operators",
+    "operator_dogs_policy",
+    "osm_features",
+    "truth_external",
+    "beach_verdicts",
+]
+db_source_specs = [
+    AssetSpec(
+        key=AssetKey(["public", t]),
+        description=f"Database source — public.{t}. Read by dbt staging "
+                    f"models; not materialized from Dagster (loaded by "
+                    f"upstream pipelines or migration scripts).",
+        group_name="db_sources",
+        kinds={"sql", "table"},
+    )
+    for t in _db_source_table_names
+]
+
+
 # Convenience export for assets/__init__.py
-dbt_models_assets_list = [dbt_models]
+dbt_models_assets_list = [dbt_models, *db_source_specs]

@@ -173,29 +173,44 @@ def merge_one_operator(rows: list[dict]) -> dict:
     notes = "; ".join(notes_parts) if notes_parts else None
 
     return {
-        "operator_id":         op_id,
-        "source_url":          primary_url,
-        "verified_by":         "llm",
-        "policy_found":        policy_found,
-        "default_rule":        default_rule,
-        "applies_to_all":      applies_all,
-        "leash_required":      leash_req,
-        "pass_a_confidence":   round(pass_a_conf, 3) if pass_a_conf is not None else None,
-        "pass_a_quotes":       pass_a_quotes,
-        "pass_a_at":           pass_a_at,
-        "time_windows":        time_windows or None,
-        "seasonal_closures":   seasonal_closures or None,
-        "spatial_zones":       spatial_zones,
-        "pass_b_confidence":   round(pass_b_conf, 3) if pass_b_conf is not None else None,
-        "pass_b_quotes":       pass_b_quotes,
-        "pass_b_at":           pass_b_at,
-        "exceptions":          exceptions or None,
-        "ordinance_reference": ordinance,
-        "summary":             summary,
-        "pass_c_confidence":   round(pass_c_conf, 3) if pass_c_conf is not None else None,
-        "pass_c_quotes":       pass_c_quotes,
-        "pass_c_at":           pass_c_at,
-        "notes":               notes,
+        "row": {
+            "operator_id":         op_id,
+            "source_url":          primary_url,
+            "verified_by":         "llm",
+            "policy_found":        policy_found,
+            "default_rule":        default_rule,
+            "applies_to_all":      applies_all,
+            "leash_required":      leash_req,
+            "pass_a_confidence":   round(pass_a_conf, 3) if pass_a_conf is not None else None,
+            "pass_a_quotes":       pass_a_quotes,
+            "pass_a_at":           pass_a_at,
+            "time_windows":        time_windows or None,
+            "seasonal_closures":   seasonal_closures or None,
+            "spatial_zones":       spatial_zones,
+            "pass_b_confidence":   round(pass_b_conf, 3) if pass_b_conf is not None else None,
+            "pass_b_quotes":       pass_b_quotes,
+            "pass_b_at":           pass_b_at,
+            "ordinance_reference": ordinance,
+            "summary":             summary,
+            "pass_c_confidence":   round(pass_c_conf, 3) if pass_c_conf is not None else None,
+            "pass_c_quotes":       pass_c_quotes,
+            "pass_c_at":           pass_c_at,
+            "notes":               notes,
+        },
+        # Phase B (2026-04-29): exceptions live in their own table now;
+        # write each as a separate row keyed by (source_kind, source_id, beach_name).
+        "exception_rows": [
+            {
+                "source_kind":  "operator",
+                "source_id":    op_id,
+                "rule":         e.get("rule"),
+                "beach_name":   (e.get("beach_name") or "").strip(),
+                "source_quote": e.get("source_quote"),
+                "source_url":   e.get("source_url"),
+            }
+            for e in (exceptions or [])
+            if (e.get("beach_name") or "").strip()
+        ],
     }
 
 
@@ -211,15 +226,27 @@ def main():
 
     merged = [merge_one_operator(group) for group in by_op.values()]
     # Filter: only emit rows where we have at least one of the headline fields
-    merged = [m for m in merged if m["policy_found"] or m["default_rule"] or m["summary"]]
+    merged = [m for m in merged if m["row"]["policy_found"] or m["row"]["default_rule"] or m["row"]["summary"]]
     print(f"Merging {len(merged)} operators into operator_dogs_policy "
           f"(skipping {len(by_op) - len(merged)} with nothing useful)")
 
-    # UPSERT in batches of 25 to keep PostgREST happy
-    for i in range(0, len(merged), 25):
-        batch = merged[i:i+25]
+    # UPSERT operator_dogs_policy rows in batches of 25 to keep PostgREST happy
+    operator_rows = [m["row"] for m in merged]
+    for i in range(0, len(operator_rows), 25):
+        batch = operator_rows[i:i+25]
         db_upsert("operator_dogs_policy", batch, on_conflict="operator_id")
-        print(f"  upserted {i+len(batch)}/{len(merged)}")
+        print(f"  upserted {i+len(batch)}/{len(operator_rows)} operator rows")
+
+    # UPSERT exceptions into dog_policy_exceptions (Phase B). Manual pin
+    # rows are preserved because the unique key is (source_kind, source_id,
+    # beach_name) and merge skips beach_names not in the LLM extraction set.
+    exception_rows = [e for m in merged for e in m["exception_rows"]]
+    print(f"Upserting {len(exception_rows)} exception rows into dog_policy_exceptions")
+    for i in range(0, len(exception_rows), 50):
+        batch = exception_rows[i:i+50]
+        db_upsert("dog_policy_exceptions", batch,
+                  on_conflict="source_kind,source_id,beach_name")
+        print(f"  upserted {i+len(batch)}/{len(exception_rows)} exception rows")
 
     print("Done.")
 

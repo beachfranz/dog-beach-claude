@@ -34,12 +34,13 @@ def dbt_models(context: AssetExecutionContext, dbt: DbtCliResource):
     yield from dbt.cli(["build"], context=context).stream()
 
 
-# Group the public.* dbt source assets together. Excludes only
-# public.beaches — owned by the Dagster `beaches` asset (group `consumer`)
-# which writes the dog_verdict_catalog* columns. The other public.*
-# tables here are sourced/written upstream of Dagster (cascade SQL
-# function, ingest observations, manual migrations) — Dagster sees
-# them as external sources for the dbt staging layer.
+# Group the public.* dbt source assets together. Excludes:
+#   - public.beaches — owned by Dagster `beaches` asset (group `consumer`)
+#   - public.beach_verdicts — owned by Dagster `beach_verdicts` asset
+#     (group `verdicts`) which runs the cascade
+# The remaining tables here are sourced upstream of Dagster (manual
+# migrations, ingest observations, db views) — Dagster sees them as
+# pure external sources for the dbt staging layer.
 _db_source_table_names = [
     "beach_locations",
     "us_beach_points",
@@ -51,7 +52,6 @@ _db_source_table_names = [
     "operator_dogs_policy",
     "osm_features",
     "truth_external",
-    "beach_verdicts",
 ]
 db_source_specs = [
     AssetSpec(

@@ -32,6 +32,7 @@ from .ingest import operator_dogs_policy, cpad_unit_dogs_policy_cdpr
 
 
 @asset(
+    key=AssetKey(["public", "beach_verdicts"]),
     description="Per-origin-key dog verdict + confidence + sources. "
                 "Materializing this asset invokes "
                 "public.recompute_all_dogs_verdicts_by_origin() which "
@@ -111,7 +112,7 @@ def beach_verdicts(context: AssetExecutionContext,
                 "review via dbt_dbt.consumer_beach_with_verdict.",
     group_name="consumer",
     kinds={"sql", "table"},
-    deps=[AssetKey(["beach_verdicts"]),
+    deps=[AssetKey(["public", "beach_verdicts"]),
           AssetKey(["public", "beach_locations"])],
 )
 def beaches(context: AssetExecutionContext,

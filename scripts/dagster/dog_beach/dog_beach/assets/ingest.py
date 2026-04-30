@@ -365,6 +365,7 @@ def cpad_units(context: AssetExecutionContext,
                 "observation only.",
     group_name="ingest",
     kinds={"sql", "table"},
+    deps=[AssetKey(["external", "osm_overpass"])],
 )
 def osm_features(context: AssetExecutionContext,
                   supabase_db: SupabaseDbResource):
@@ -393,6 +394,7 @@ def osm_features(context: AssetExecutionContext,
                 "wrapper. Cheap observation only.",
     group_name="ingest",
     kinds={"sql", "table"},
+    deps=[AssetKey(["external", "ccc_data_portal"])],
 )
 def ccc_access_points(context: AssetExecutionContext,
                        supabase_db: SupabaseDbResource):
@@ -422,6 +424,7 @@ def ccc_access_points(context: AssetExecutionContext,
                 "scripts/load_us_beach_points.py. Long-running.",
     group_name="ingest_heavy",
     kinds={"python", "csv"},
+    deps=[AssetKey(["external", "us_beaches_csv"])],
 )
 def us_beach_points_run(context: AssetExecutionContext,
                          supabase_db: SupabaseDbResource):
@@ -444,6 +447,7 @@ def us_beach_points_run(context: AssetExecutionContext,
                 "scripts/load_cpad_shapefile.py. Long-running.",
     group_name="ingest_heavy",
     kinds={"python", "shapefile"},
+    deps=[AssetKey(["external", "cpad_shapefile"])],
 )
 def cpad_units_run(context: AssetExecutionContext,
                     supabase_db: SupabaseDbResource):

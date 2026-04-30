@@ -672,6 +672,48 @@ def osm_beach_polygons_run(context: AssetExecutionContext,
 
 
 @asset(
+    description="Re-runs the 5-pass operator-resolution cascade on every "
+                "beach source row with operator_id IS NULL. Wraps the SQL "
+                "function public.resolve_all_operator_ids(). Idempotent.\n\n"
+                "Passes (first match wins):\n"
+                "  1. CPAD point-in-polygon — smallest containing CPAD's mng_agncy\n"
+                "  2. OSM operator tag — osm_features.tags->>'operator' (osm_features only)\n"
+                "  3. TIGER place strict containment — incorporated city/CDP\n"
+                "  3b. TIGER place ST_DWithin 200m — beaches just seaward of city boundary\n"
+                "  4. TIGER county fallback — unincorporated coastal stretches\n\n"
+                "Updates us_beach_points + ccc_access_points + osm_features. "
+                "Refreshes denormalized counts on operators table.",
+    group_name="ingest_heavy",
+    kinds={"plpgsql", "cascade"},
+    deps=[AssetKey(["public", "cpad_units"]),
+          AssetKey(["public", "osm_features"]),
+          AssetKey(["public", "operators"]),
+          AssetKey(["public", "counties"])],
+)
+def operator_id_resolve_run(context: AssetExecutionContext,
+                              supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("select public.resolve_all_operator_ids()")
+        summary = cur.fetchone()[0]  # jsonb dict
+    # Format pass-by-pass deltas + final distribution
+    delta_lines = []
+    for pass_name in ('pass1_cpad', 'pass2_osm_tag', 'pass3_tiger_c1',
+                      'pass3b_tiger_buffered', 'pass4_tiger_county'):
+        d = summary.get(pass_name, {}) or {}
+        cells = ", ".join(f"{k}={v}" for k, v in sorted(d.items()))
+        delta_lines.append(f"- **{pass_name}** — {cells}")
+    final = summary.get('final_source_distribution', {}) or {}
+    final_md = "\n".join(f"- {k}: {v}" for k, v in sorted(final.items()))
+    return Output(
+        None,
+        metadata={
+            "passes":             MetadataValue.md("\n".join(delta_lines)),
+            "final_distribution": MetadataValue.md(final_md),
+        },
+    )
+
+
+@asset(
     description="EXPENSIVE — runs Tavily extract + Sonnet classification "
                 "for each CPAD unit with a park_url that intersects "
                 "beach_locations. Writes public.cpad_unit_dogs_policy "
@@ -724,4 +766,5 @@ assets = [
     ccc_access_points_run,
     osm_beach_polygons_run,
     cpad_unit_dog_policy_extract_run,
+    operator_id_resolve_run,
 ]

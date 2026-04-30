@@ -1,41 +1,5 @@
 version: 2
 models:
-- name: cpad_unit_for_beach
-  description: "Per-beach canonical CPAD unit lookup. For each beach_locations row,\n\
-    finds the smallest containing CPAD polygon under the same overlay-demote\n\xE2\
-    \u2020\u2019 match_beach_name \xE2\u2020\u2019 \"Beach\"-in-name \xE2\u2020\u2019\
-    \ smallest-area ranking that\ncompute_dogs_verdict_core uses inline.\n\nMirrors\
-    \ public.cpad_unit_for_beach but managed by dbt. Marts in the\ndbt schema; the\
-    \ public table is still maintained by the migration\npipeline (and stays the source\
-    \ of truth for the cascade today).\n"
-  config:
-    materialized: table
-  columns:
-  - name: origin_key
-    tests:
-    - unique
-    - not_null
-  - name: beach_name
-  - name: beach_county
-  - name: unit_id
-- name: beach_with_verdict
-  description: "The consumer-facing 805 \xE2\u20AC\u201D every beach_locations row\
-    \ joined to its\ncurrent dog verdict + confidence + sources metadata. Most app\
-    \ code\nshould query this rather than reaching into beach_verdicts directly.\n\
-    LEFT JOIN \xE2\u20AC\u201D beaches without a computed verdict still appear with\n\
-    nulls in the verdict columns.\n"
-  columns:
-  - name: origin_key
-    tests:
-    - unique
-    - not_null
-  - name: dogs_verdict
-    tests:
-    - accepted_values:
-        values:
-        - 'yes'
-        - 'no'
-        quote: true
 - name: truth_comparison
   description: 'Compares our dogs_verdict against external truth-set sources
 

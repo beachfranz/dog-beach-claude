@@ -429,6 +429,60 @@ def osm_features(context: AssetExecutionContext,
 
 
 @asset(
+    key=AssetKey(["public", "beach_access_source"]),
+    description="Per-UBP-point classification VIEW. For each "
+                "us_beach_points row, joins against cpad_units / "
+                "ccc_access_points / csp_parks / tribal_lands / "
+                "private_land_zones to decide an access_bucket "
+                "(cpad_named / ccc_named / csp / tribal / plz / "
+                "orphan / reclaim_*) and pulls the matched name "
+                "+ distance. 8,039 rows (1:1 with us_beach_points). "
+                "Upstream of beach_locations dedupe.\n\n"
+                "SLOW: runs spatial joins live; observation takes "
+                "~70s. View isn't materialized in Postgres.",
+    group_name="ingest",
+    kinds={"sql", "view", "slow"},
+    deps=[AssetKey(["public", "us_beach_points"]),
+          AssetKey(["public", "cpad_units"]),
+          AssetKey(["public", "ccc_access_points"])],
+)
+def beach_access_source(context: AssetExecutionContext,
+                         supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            select count(*),
+                   count(*) filter (where access_bucket = 'orphan'),
+                   count(*) filter (where is_canonical_pinned)
+              from public.beach_access_source
+        """)
+        total, orphans, pinned = cur.fetchone()
+        cur.execute("""
+            select access_bucket, count(*)
+              from public.beach_access_source
+             group by 1 order by 2 desc
+        """)
+        bucket_dist = ", ".join(f"{k}={v}" for k, v in cur.fetchall())
+        preview = md_table(cur, """
+            select fid, beach_name, state, county_name,
+                   access_bucket, match_name, match_distance_m
+              from public.beach_access_source
+             where state = 'CA' and access_bucket != 'orphan'
+             order by fid
+             limit 10
+        """, max_col_chars=25)
+    return Output(
+        None,
+        metadata={
+            "total_rows":         MetadataValue.int(total),
+            "orphans":            MetadataValue.int(orphans),
+            "canonical_pinned":   MetadataValue.int(pinned),
+            "bucket_distribution": MetadataValue.text(bucket_dist),
+            "preview":            MetadataValue.md(preview),
+        },
+    )
+
+
+@asset(
     key=AssetKey(["public", "beach_locations"]),
     description="Catalog spine — derived VIEW that combines public.us_beach_points "
                 "(UBP), public.osm_features (OSM beach polys), and active "
@@ -659,6 +713,7 @@ assets = [
     cpad_units,
     osm_features,
     ccc_access_points,
+    beach_access_source,
     beach_locations,
     # expensive runs (manual-only)
     cpad_unit_dogs_policy_cdpr_run,

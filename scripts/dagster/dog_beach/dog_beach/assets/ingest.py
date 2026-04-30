@@ -528,6 +528,86 @@ def beach_locations(context: AssetExecutionContext,
 
 
 @asset(
+    description="Re-classifies every public.osm_features row as "
+                "clean / dropped / needs_review based on cleaning "
+                "rules. Wraps SQL function "
+                "public.classify_osm_features_cleanliness(). "
+                "Idempotent. Updates cleaning_status + cleaning_reason "
+                "in place. Surfaces public.osm_features_clean view.",
+    group_name="ingest_heavy",
+    kinds={"plpgsql", "data_quality"},
+    deps=[AssetKey(["public", "osm_features"])],
+)
+def osm_features_classify_run(context: AssetExecutionContext,
+                                supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("select public.classify_osm_features_cleanliness()")
+        summary = cur.fetchone()[0]
+    md_lines = [f"- **{k}**: {v}" for k, v in sorted(summary.items())]
+    return Output(
+        None,
+        metadata={
+            "total":             MetadataValue.int(summary.get("total", 0)),
+            "clean":             MetadataValue.int(summary.get("clean", 0)),
+            "dropped_inactive":  MetadataValue.int(summary.get("dropped_inactive", 0)),
+            "dropped_tiny":      MetadataValue.int(summary.get("dropped_tiny_unnamed", 0)),
+            "needs_review":      MetadataValue.int(summary.get("needs_review_centroid", 0)),
+            "summary":           MetadataValue.md("\n".join(md_lines)),
+        },
+    )
+
+
+@asset(
+    key=AssetKey(["public", "osm_features_clean"]),
+    description="View over public.osm_features filtered to "
+                "cleaning_status='clean'. Use this in downstream "
+                "joins to skip noise (admin_inactive, tiny unnamed, "
+                "centroid-only). Cleaning rules + classifier in "
+                "supabase/migrations/20260429_osm_features_cleaning.sql.",
+    group_name="ingest",
+    kinds={"sql", "view", "data_quality"},
+    deps=[AssetKey(["public", "osm_features"])],
+)
+def osm_features_clean(context: AssetExecutionContext,
+                        supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            select count(*),
+                   count(*) filter (where (tags->>'natural') = 'beach'),
+                   count(*) filter (where (tags->>'leisure') = 'park'),
+                   count(*) filter (where (tags->>'leisure') = 'dog_park')
+              from public.osm_features_clean
+        """)
+        total, beaches, parks, dog_parks = cur.fetchone()
+        cur.execute("""
+            select cleaning_status, count(*)
+              from public.osm_features
+             group by 1 order by 2 desc
+        """)
+        status_dist = ", ".join(f"{k}={v}" for k, v in cur.fetchall())
+        preview = md_table(cur, """
+            select osm_type, osm_id, name,
+                   tags->>'natural' as natural_tag,
+                   tags->>'leisure' as leisure_tag,
+                   cleaning_status
+              from public.osm_features
+             order by random()
+             limit 10
+        """, max_col_chars=25)
+    return Output(
+        None,
+        metadata={
+            "clean_total":   MetadataValue.int(total),
+            "clean_beaches": MetadataValue.int(beaches),
+            "clean_parks":   MetadataValue.int(parks),
+            "clean_dog_parks": MetadataValue.int(dog_parks),
+            "status_distribution": MetadataValue.text(status_dist),
+            "preview":       MetadataValue.md(preview),
+        },
+    )
+
+
+@asset(
     key=AssetKey(["public", "ccc_access_points"]),
     description="California Coastal Commission access points. ~1.6K active. "
                 "Refreshed by ccc_access_points_run (POSTs to admin-load-ccc "
@@ -754,6 +834,7 @@ assets = [
     us_beach_points,
     cpad_units,
     osm_features,
+    osm_features_clean,
     ccc_access_points,
     beach_access_source,
     beach_locations,
@@ -767,4 +848,5 @@ assets = [
     osm_beach_polygons_run,
     cpad_unit_dog_policy_extract_run,
     operator_id_resolve_run,
+    osm_features_classify_run,
 ]

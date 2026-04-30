@@ -390,11 +390,12 @@ def osm_features(context: AssetExecutionContext,
 @asset(
     key=AssetKey(["public", "ccc_access_points"]),
     description="California Coastal Commission access points. ~1.6K active. "
-                "Loaded via public.load_ccc_batch() SQL function — no Python "
-                "wrapper. Cheap observation only.",
+                "Refreshed by ccc_access_points_run (POSTs to admin-load-ccc "
+                "edge function, which fetches CCC's ArcGIS FeatureServer and "
+                "upserts via load_ccc_batch RPC). Cheap observation only.",
     group_name="ingest",
     kinds={"sql", "table"},
-    deps=[AssetKey(["external", "ccc_data_portal"])],
+    deps=[AssetKey(["external", "ccc_arcgis_featureserver"])],
 )
 def ccc_access_points(context: AssetExecutionContext,
                        supabase_db: SupabaseDbResource):
@@ -464,6 +465,32 @@ def cpad_units_run(context: AssetExecutionContext,
     )
 
 
+@asset(
+    description="EXPENSIVE — POSTs to the admin-load-ccc edge function. "
+                "Fetches ~1,631 features from CCC's ArcGIS FeatureServer "
+                "and upserts via load_ccc_batch RPC (idempotent). Admin-"
+                "secret gated.",
+    group_name="ingest_heavy",
+    kinds={"edge_function", "deno", "arcgis"},
+    deps=[AssetKey(["external", "ccc_arcgis_featureserver"])],
+)
+def ccc_access_points_run(context: AssetExecutionContext,
+                            supabase_db: SupabaseDbResource):
+    # Lazy import to avoid circular concern between ingest + consumer_pipeline
+    from .consumer_pipeline import _post_edge_function
+    body = _post_edge_function(context, "admin-load-ccc", admin_gated=True)
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) from public.ccc_access_points")
+        total = cur.fetchone()[0]
+    return Output(
+        None,
+        metadata={
+            "total_rows":    MetadataValue.int(total),
+            "response_tail": MetadataValue.text(body),
+        },
+    )
+
+
 assets = [
     # cheap observations (default in Materialize-All)
     cpad_unit_dogs_policy,
@@ -482,4 +509,5 @@ assets = [
     operator_dogs_policy_run,
     us_beach_points_run,
     cpad_units_run,
+    ccc_access_points_run,
 ]

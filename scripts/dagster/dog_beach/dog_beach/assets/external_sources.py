@@ -55,14 +55,16 @@ osm_overpass = AssetSpec(
     kinds={"openstreetmap", "external_api"},
 )
 
-ccc_data_portal = AssetSpec(
-    key=AssetKey(["external", "ccc_data_portal"]),
-    description="California Coastal Commission public access database. "
-                "Source of public.ccc_access_points (~1.6K active points). "
-                "Loaded historically via public.load_ccc_batch() SQL function; "
-                "no Python loader in repo today.",
+ccc_arcgis_featureserver = AssetSpec(
+    key=AssetKey(["external", "ccc_arcgis_featureserver"]),
+    description="California Coastal Commission Public Access Points ArcGIS "
+                "FeatureServer. ~1,631 features. Endpoint: "
+                "https://services9.arcgis.com/wwVnNW92ZHUIr0V0/arcgis/rest/"
+                "services/AccessPoints/FeatureServer/0/query. Fetched and "
+                "upserted by the admin-load-ccc edge function (one-shot, "
+                "admin-secret gated, idempotent).",
     group_name="external_sources",
-    kinds={"ca_state", "external_api"},
+    kinds={"arcgis", "external_api"},
 )
 
 
@@ -71,5 +73,5 @@ assets = [
     cpad_shapefile,
     cpad_arcgis_featureserver,
     osm_overpass,
-    ccc_data_portal,
+    ccc_arcgis_featureserver,
 ]

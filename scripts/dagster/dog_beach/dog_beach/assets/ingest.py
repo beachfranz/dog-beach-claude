@@ -860,6 +860,40 @@ def operator_id_resolve_run(context: AssetExecutionContext,
 
 
 @asset(
+    description="Borrows names for unnamed OSM beach polygons from "
+                "nearby authoritative sources. Wraps SQL function "
+                "public.reborrow_osm_feature_names(). Idempotent.\n\n"
+                "Cascade:\n"
+                "  Pass 1: nearest us_beach_points within 200m\n"
+                "  Pass 2: nearest ccc_access_points within 200m, only "
+                "if its name carries a beach-y word (beach|cove|shore|"
+                "sand)\n\n"
+                "Updates osm_features.name + name_source. Original-OSM "
+                "names (name_source='osm') and manual overrides are "
+                "never touched. Re-runs reset prior borrows then re-pick.",
+    group_name="ingest_heavy",
+    kinds={"plpgsql", "borrow"},
+    deps=[AssetKey(["public", "osm_features"]),
+          AssetKey(["public", "us_beach_points"]),
+          AssetKey(["public", "ccc_access_points"])],
+)
+def osm_reborrow_names_run(context: AssetExecutionContext,
+                            supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("select public.reborrow_osm_feature_names()")
+        summary = cur.fetchone()[0]
+    return Output(
+        None,
+        metadata={
+            "reset_prior_borrows": MetadataValue.int(summary.get("reset_prior_borrows", 0)),
+            "borrowed_from_ubp":   MetadataValue.int(summary.get("borrowed_from_ubp", 0)),
+            "borrowed_from_ccc":   MetadataValue.int(summary.get("borrowed_from_ccc", 0)),
+            "still_unnamed":       MetadataValue.int(summary.get("still_unnamed", 0)),
+        },
+    )
+
+
+@asset(
     description="EXPENSIVE — runs Tavily extract + Sonnet classification "
                 "for each CPAD unit with a park_url that intersects "
                 "beach_locations. Writes public.cpad_unit_dogs_policy "
@@ -917,4 +951,5 @@ assets = [
     operator_id_resolve_run,
     osm_features_classify_run,
     osm_features_promote_run,
+    osm_reborrow_names_run,
 ]

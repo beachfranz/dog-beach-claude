@@ -34,8 +34,16 @@ from ..resources import SupabaseDbResource
 def _post_edge_function(context: AssetExecutionContext,
                         function_name: str,
                         json_body: dict | None = None,
+                        admin_gated: bool = False,
                         timeout_s: float = 600.0) -> str:
-    """POST to a Supabase edge function. Returns response text (truncated)."""
+    """POST to a Supabase edge function. Returns response text (truncated).
+
+    admin_gated=True adds the x-admin-secret header (required by functions
+    that wrap the requireAdmin() guard from _shared/admin-auth.ts —
+    daily-beach-refresh and the admin-* functions). The secret is read
+    from ADMIN_SECRET env var; the value is also hardcoded as a default
+    in scripts/load_cpad.py if you need to look it up.
+    """
     base = os.environ.get("SUPABASE_URL", "").rstrip("/")
     key = os.environ.get("SUPABASE_SERVICE_KEY", "")
     if not base or not key:
@@ -48,6 +56,15 @@ def _post_edge_function(context: AssetExecutionContext,
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
     }
+    if admin_gated:
+        admin_secret = os.environ.get("ADMIN_SECRET", "")
+        if not admin_secret:
+            raise RuntimeError(
+                f"{function_name} requires ADMIN_SECRET env var. Add "
+                "ADMIN_SECRET=<value> to scripts/pipeline/.env. The value "
+                "is hardcoded as a default in scripts/load_cpad.py."
+            )
+        headers["x-admin-secret"] = admin_secret
     context.log.info(f"POST {url}")
     resp = httpx.post(url, headers=headers, json=json_body or {},
                       timeout=timeout_s)
@@ -141,7 +158,8 @@ def beach_day_recommendations(context: AssetExecutionContext,
 )
 def daily_beach_refresh_run(context: AssetExecutionContext,
                               supabase_db: SupabaseDbResource):
-    body = _post_edge_function(context, "daily-beach-refresh")
+    body = _post_edge_function(context, "daily-beach-refresh",
+                               admin_gated=True)
     with supabase_db.connect() as conn, conn.cursor() as cur:
         cur.execute("""
             select count(*), max(generated_at)

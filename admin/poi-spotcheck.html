@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>POI Spot-check — name-quality rows</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root {
+    --bg: #0b1020;
+    --panel: #131a2e;
+    --panel-2: #1b2340;
+    --border: #2a3658;
+    --text: #e6ecff;
+    --muted: #9aa5c8;
+    --accent: #4ade80;
+    --accent-2: #38bdf8;
+    --warn: #f59e0b;
+    --bad: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  header {
+    padding: 14px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    position: sticky; top: 0; z-index: 5;
+  }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header .stats { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  header button {
+    background: var(--accent);
+    color: #062012;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  header button:disabled { opacity: 0.4; cursor: not-allowed; }
+  header button.secondary {
+    background: transparent; color: var(--text);
+    border: 1px solid var(--border);
+  }
+  main { padding: 16px 20px 80px; max-width: 1100px; margin: 0 auto; }
+  .grid { display: grid; gap: 12px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    align-items: center;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .card.toggled-inactive {
+    background: #2a1a1a;
+    border-color: var(--bad);
+  }
+  .card .name { font-size: 17px; font-weight: 600; }
+  .card .meta { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .card .meta .pill {
+    display: inline-block;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 1px 8px;
+    margin-right: 6px;
+    font-size: 12px;
+  }
+  .card .links { font-size: 12px; margin-top: 6px; }
+  .card .links a {
+    color: var(--accent-2);
+    text-decoration: none;
+    margin-right: 12px;
+  }
+  .card .links a:hover { text-decoration: underline; }
+  .card .actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+  .toggle {
+    background: var(--accent);
+    color: #062012;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 13px;
+    min-width: 130px;
+  }
+  .toggle.inactive { background: var(--bad); color: #fff; }
+  .reason-input {
+    margin-top: 4px;
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 12px;
+    width: 130px;
+    display: none;
+  }
+  .card.toggled-inactive .reason-input { display: block; }
+
+  /* Save modal */
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 100;
+    align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 20px;
+    max-width: 700px;
+    width: 100%;
+    max-height: 80vh;
+    display: flex; flex-direction: column;
+  }
+  .modal h2 { margin: 0 0 8px; font-size: 16px; }
+  .modal p { margin: 0 0 10px; color: var(--muted); font-size: 13px; }
+  .modal textarea {
+    flex: 1;
+    min-height: 240px;
+    background: #0a0f1f;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    resize: vertical;
+  }
+  .modal .row { display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end; }
+  .modal button {
+    background: var(--accent-2);
+    color: #062430;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .modal button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: var(--accent); color: #062012;
+    padding: 10px 18px; border-radius: 6px; font-weight: 600; font-size: 13px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+    opacity: 0; pointer-events: none; transition: opacity 0.2s;
+    z-index: 200;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>POI Spot-check</h1>
+  <span class="stats" id="stats">— rows loaded</span>
+  <span class="spacer"></span>
+  <button class="secondary" onclick="resetAll()">Reset</button>
+  <button id="save-btn" onclick="openSaveModal()" disabled>Save (0)</button>
+</header>
+
+<main>
+  <div class="grid" id="grid"></div>
+</main>
+
+<div class="modal-overlay" id="modal" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <h2>SQL to apply</h2>
+    <p>Paste this into the Supabase SQL editor. Will mark the toggled rows inactive in <code>poi_landing</code>; the AFTER UPDATE trigger will sync <code>arena</code>.</p>
+    <textarea id="sql-out" readonly></textarea>
+    <div class="row">
+      <button class="secondary" onclick="closeModal()">Close</button>
+      <button onclick="copySql()">Copy to clipboard</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── Data — currently-active poi_landing rows whose names lack coastal-vocabulary ──
+// Pulled fresh from DB. Regex: beach|cove|shore|cliff|reef|jetty|sand|dune|
+// harbor|bay|point|head|landing|inlet|lagoon|pier|surf|wash|cay|key|isle|island
+const ROWS = [
+  { fid: 11336248, name: "Beaches & Harbors Los Angeles County", display_name: "Beaches & Harbors Los Angeles County", county: "Los Angeles", address: "23038 Pacific Coast Hwy, Malibu, CA 90265, USA", lat: 34.0366, lon: -118.6777, addr_source: "reverse_geocode" },
+  { fid: 10583660, name: "Bird Rock", display_name: "Bird Rock", county: "Monterey", address: "17 Mile Dr, Pebble Beach, CA 93953", lat: 36.5916, lon: -121.9646, addr_source: "csv" },
+  { fid: 15520741, name: "California Beaches", display_name: "California Beaches", county: "San Diego", address: "4837 Bermuda Ave, San Diego, CA 92107, USA", lat: 32.7376, lon: -117.2552, addr_source: "reverse_geocode" },
+  { fid: 16840202, name: "California National Seashore", display_name: "California National Seashore", county: "San Diego", address: "Ocean Front Walk, San Diego, CA 92109", lat: 32.7727, lon: -117.253, addr_source: "csv" },
+  { fid: 11872891, name: "Carlsbad Tide Pools", display_name: "Carlsbad Tide Pools", county: "San Diego", address: "5327 Carlsbad Blvd, Carlsbad, CA 92008", lat: 33.1289, lon: -117.334, addr_source: "csv" },
+  { fid: 19490720, name: "Carnelian West", display_name: "Carnelian West", county: "Placer", address: "5074 N Lake Blvd, Carnelian Bay, CA 96140", lat: 39.2256, lon: -120.0825, addr_source: "csv" },
+  { fid: 6668540, name: "China Rock", display_name: "China Rock", county: "Monterey", address: "850 17 Mile Dr, Pacific Grove, CA 93950", lat: 36.6169, lon: -121.9321, addr_source: "csv" },
+  { fid: 3086299, name: "Del Mar Beaches", display_name: "Del Mar Beaches", county: "San Diego", address: "1728 Ocean Front, Del Mar, CA 92014, USA", lat: 32.9628, lon: -117.2686, addr_source: "reverse_geocode" },
+  { fid: 16074877, name: "Elkhorn Slough State Marine Reserve", display_name: "Elkhorn Slough State Marine Reserve", county: "Monterey", address: "7532 Sandholdt Rd, Moss Landing, CA 95039, USA", lat: 36.8044, lon: -121.7869, addr_source: "reverse_geocode" },
+  { fid: 15626772, name: "Executive Surfing Club", display_name: "Executive Surfing Club", county: "San Diego", address: "827 Tolita Ave, Coronado, CA 92118", lat: 32.6836, lon: -117.1838, addr_source: "csv" },
+  { fid: 6813170, name: "Fort Funston", display_name: "Fort Funston", county: "San Francisco", address: "Fort Funston, Sunset Trail, San Francisco, CA 94132, USA", lat: 37.7192, lon: -122.5051, addr_source: "reverse_geocode" },
+  { fid: 18860366, name: "Greyhound Rock", display_name: "Greyhound Rock", county: "Santa Cruz", address: "1551 CA-1, Davenport, CA 95017, USA", lat: 37.0788, lon: -122.2672, addr_source: "reverse_geocode" },
+  { fid: 19915849, name: "Hearn Gulch", display_name: "Hearn Gulch", county: "Mendocino", address: "29950 CA-1, Gualala, CA 95445", lat: 38.8515, lon: -123.6487, addr_source: "csv" },
+  { fid: 18479434, name: "Huntington Lake", display_name: "Huntington Lake", county: "Fresno", address: "58515 Dowville W, Lakeshore, CA 93634, USA", lat: 37.2275, lon: -119.2359, addr_source: "reverse_geocode" },
+  { fid: 8899788, name: "Isla Vista County Park", display_name: "Isla Vista County Park", county: "Santa Barbara", address: "6769 Del Playa Dr, Goleta, CA 93117", lat: 34.4089, lon: -119.8679, addr_source: "csv" },
+  { fid: 4841255, name: "Italian Gardens", display_name: "Italian Gardens", county: "Los Angeles", address: "Santa Catalina Island, Santa Catalina Island, CA 90704", lat: 33.4097, lon: -118.3818, addr_source: "csv" },
+  { fid: 13771496, name: "La Jolla Tide Pools", display_name: "La Jolla Tide Pools", county: "San Diego", address: "274 Coast Blvd, La Jolla, CA 92037, USA", lat: 32.8412, lon: -117.2817, addr_source: "reverse_geocode" },
+  { fid: 8720817, name: "Labrynth", display_name: "Labrynth", county: "San Francisco", address: "Mile Rock Lookout Trail, San Francisco, CA 94121", lat: 37.7879, lon: -122.5057, addr_source: "csv" },
+  { fid: 4598113, name: "Lake Anza", display_name: "Lake Anza", county: "Contra Costa", address: "1005 Wildcat Canyon Rd, Berkeley, CA 94708, USA", lat: 37.8955, lon: -122.251, addr_source: "reverse_geocode" },
+  { fid: 16437822, name: "Lasuen", display_name: "Lasuen", county: "Orange", address: "2006 Calle de Los Alamos, San Clemente, CA 92672", lat: 33.4097, lon: -117.611, addr_source: "csv" },
+  { fid: 5079, name: "Leucadia", display_name: "Leucadia", county: "San Diego", address: "1448 Neptune Ave, Encinitas, CA 92024", lat: 33.0722, lon: -117.3086, addr_source: "csv" },
+  { fid: 4507218, name: "Lost coast", display_name: "Lost coast", county: "Humboldt", address: "17213–17469 Mattole Rd, Ferndale, CA 95536", lat: 40.4157, lon: -124.3972, addr_source: "csv" },
+  { fid: 6919647, name: "Malibu Beaches", display_name: "Malibu Beaches", county: "Los Angeles", address: "23825 Stuart Ranch Road, Malibu, CA 90265-4861", lat: 34.0029, lon: -118.8049, addr_source: "csv" },
+  { fid: 4467278, name: "Maritime Rocks Accessway", display_name: "Maritime Rocks Accessway", county: "Los Angeles", address: "20466 Pacific Coast Hwy, Malibu, CA 90265", lat: 34.0378, lon: -118.6213, addr_source: "csv" },
+  { fid: 1972165, name: "North Bird Rock", display_name: "North Bird Rock", county: "San Diego", address: "403 Sea Ridge Dr, La Jolla, CA 92037", lat: 32.8081, lon: -117.2656, addr_source: "csv" },
+  { fid: 6257700, name: "Oceanside Habor", display_name: "Oceanside Habor", county: "San Diego", address: "I-5 S, Oceanside, CA 92054", lat: 33.1804, lon: -117.3541, addr_source: "csv" },
+  { fid: 12341782, name: "Pacifica Esplanade", display_name: "Pacifica Esplanade", county: "San Mateo", address: "224 Palmetto Ave, Pacifica, CA 94044", lat: 37.6547, lon: -122.4932, addr_source: "csv" },
+  { fid: 18194230, name: "Pine Mountain Lake Lodge", display_name: "Pine Mountain Lake Lodge", county: "Tuolumne", address: "20270 Pine Mountain Dr, Groveland, CA 95321, USA", lat: 37.8497, lon: -120.1903, addr_source: "reverse_geocode" },
+  { fid: 14461322, name: "Playa Del Rey Psychic", display_name: "Playa Del Rey Psychic", county: "Fresno", address: "1252 W Shaw Ave, Fresno, CA 93711", lat: 36.8087, lon: -119.8141, addr_source: "csv" },
+  { fid: 14001478, name: "Playa Pacifica", display_name: "Playa Pacifica", county: "San Diego", address: "Parking lot, 1775 E Mission Bay Dr., San Diego, CA 92109, USA", lat: 32.7806, lon: -117.2123, addr_source: "reverse_geocode" },
+  { fid: 10202995, name: "Playa Redondo", display_name: "Playa Redondo", county: "Los Angeles", address: "1718 Esplanade, Redondo Beach, CA 90277", lat: 33.8176, lon: -118.3906, addr_source: "csv" },
+  { fid: 3276472, name: "Playa San Juan Leighton", display_name: "Playa San Juan Leighton", county: "Los Angeles", address: "32422 Pacific Coast Hwy, Malibu, CA 90265", lat: 34.0383, lon: -118.8817, addr_source: "csv" },
+  { fid: 20063838, name: "Playa Tortuga", display_name: "Playa Tortuga", county: "San Diego", address: "4151 Mission Blvd, San Diego, CA 92109", lat: 32.7912, lon: -117.2554, addr_source: "csv" },
+  { fid: 14284168, name: "Rock Cave", display_name: "Rock Cave", county: "Orange", address: "Dana Point Headland, Dana Point, CA 92629", lat: 33.4628, lon: -117.7149, addr_source: "csv" },
+  { fid: 1387065, name: "San Mateo Coast State Beaches", display_name: "San Mateo Coast State Beaches", county: "San Mateo", address: "Cabrillo Hwy S, San Gregorio, CA 94074", lat: 37.2966, lon: -122.4068, addr_source: "csv" },
+  { fid: 18106983, name: "Sandee", display_name: "Sandee", county: "Orange", address: "34445 Ensenada Pl, Dana Point, CA 92629, USA", lat: 33.4629, lon: -117.7049, addr_source: "reverse_geocode" },
+  { fid: 15110317, name: "Seal Rock Picnic Area", display_name: "Seal Rock Picnic Area", county: "Monterey", address: "17 Mile Dr, Pebble Beach, CA 93953", lat: 36.5896, lon: -121.9633, addr_source: "csv" },
+  { fid: 19639784, name: "South Laguna", display_name: "South Laguna", county: "Orange", address: "31715 Seacliff Dr, Laguna Beach, CA 92651", lat: 33.5007, lon: -117.745, addr_source: "csv" },
+  { fid: 10319330, name: "South Spit", display_name: "South Spit", county: "Humboldt", address: "PPGW+V8 Humboldt Hill, CA, USA", lat: 40.7272, lon: -124.2542, addr_source: "reverse_geocode" },
+  { fid: 18729018, name: "Strands", display_name: "Strands (34212 Street of the Viol)", county: "Orange", address: "34212 Street of the Violet Lantern, Dana Point, CA 92629", lat: 33.4663, lon: -117.7, addr_source: "csv" },
+  { fid: 18852327, name: "Strands", display_name: "Strands (27 Strand Beach Dr)", county: "Orange", address: "27 Strand Beach Dr, Dana Point, CA 92629, USA", lat: 33.4665, lon: -117.7164, addr_source: "reverse_geocode" },
+  { fid: 18748312, name: "Tallac Shoreline", display_name: "Tallac Shoreline", county: "El Dorado", address: "Tallac Bicycle Loop, South Lake Tahoe, CA 96150", lat: 38.9397, lon: -120.0457, addr_source: "csv" },
+  { fid: 2732905, name: "The Esplanade Public Coastal Access", display_name: "The Esplanade Public Coastal Access", county: "San Diego", address: "4461 N Harbor Dr, San Diego, CA 92101", lat: 32.7286, lon: -117.21, addr_source: "csv" },
+  { fid: 3984285, name: "The Wall", display_name: "The Wall", county: "San Luis Obispo", address: "101–199 Front St, Pismo Beach, CA 93424", lat: 35.178, lon: -120.7315, addr_source: "csv" },
+  { fid: 3220163, name: "The Wedge", display_name: "The Wedge", county: "Orange", address: "West Jetty, Newport Beach, CA, USA", lat: 33.5933, lon: -117.8812, addr_source: "reverse_geocode" },
+  { fid: 5610069, name: "Tide Pools", display_name: "Tide Pools (11360 Cabrillo Hwy)", county: "San Mateo", address: "11360 Cabrillo Hwy, Pescadero, CA 94060, USA", lat: 37.2315, lon: -122.4121, addr_source: "reverse_geocode" },
+  { fid: 11496136, name: "Tide Pools", display_name: "Tide Pools (3712 Ocean Blvd)", county: "Orange", address: "3712 Ocean Blvd, Corona Del Mar, CA 92625", lat: 33.5903, lon: -117.8704, addr_source: "csv" },
+  { fid: 12219118, name: "Tourmaline Surfing Park", display_name: "Tourmaline Surfing Park", county: "San Diego", address: "600 Tourmaline St, San Diego, CA 92109", lat: 32.8054, lon: -117.2624, addr_source: "csv" },
+  { fid: 12040353, name: "Two Beaches", display_name: "Two Beaches", county: "San Bernardino", address: "128–142 Marina Dr, Needles, CA 92363", lat: 34.8473, lon: -114.6018, addr_source: "csv" },
+  { fid: 8161840, name: "Two Harbors-the Isthmus of Catalina", display_name: "Two Harbors-the Isthmus of Catalina", county: "Los Angeles", address: "Little Harbor Rd, Avalon, CA 90704", lat: 33.44, lon: -118.4983, addr_source: "csv" },
+  { fid: 1783598, name: "Venice", display_name: "Venice", county: "Los Angeles", address: "The Strand Marvin Braude Bike Trail-Santa Monica-Venice Beach, Santa Monica, CA 90405", lat: 33.9801, lon: -118.4692, addr_source: "csv" },
+  { fid: 13964477, name: "Venice Breakwater", display_name: "Venice Breakwater", county: "Los Angeles", address: "1800 Ocean Front Walk, Venice, CA 90291, USA", lat: 33.9852, lon: -118.4744, addr_source: "reverse_geocode" }
+];
+
+// ── State ─────────────────────────────────────────────────────────────────
+// fid → { active: bool, reason: string }
+const state = {};
+for (const r of ROWS) state[r.fid] = { active: true, reason: 'not_a_beach' };
+
+// ── Render ────────────────────────────────────────────────────────────────
+function render() {
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  for (const r of ROWS) {
+    const s = state[r.fid];
+    const card = document.createElement('div');
+    card.className = 'card' + (s.active ? '' : ' toggled-inactive');
+    card.id = `card-${r.fid}`;
+
+    const left = document.createElement('div');
+    left.innerHTML = `
+      <div class="name">${escapeHtml(r.display_name || r.name)}</div>
+      <div class="meta">
+        <span class="pill">${escapeHtml(r.county)}</span>
+        <span class="pill">${escapeHtml(r.addr_source)}</span>
+        <span>${escapeHtml(r.address)}</span>
+      </div>
+      <div class="links">
+        <a href="https://www.google.com/maps/place/${r.lat},${r.lon}/@${r.lat},${r.lon},18z" target="_blank" rel="noopener">Google Maps</a>
+        <a href="https://www.google.com/maps/@${r.lat},${r.lon},90m/data=!3m1!1e3" target="_blank" rel="noopener">Satellite</a>
+        <span style="color:var(--muted)">${r.lat.toFixed(5)}, ${r.lon.toFixed(5)}</span>
+      </div>
+    `;
+
+    const right = document.createElement('div');
+    right.className = 'actions';
+    const btn = document.createElement('button');
+    btn.className = 'toggle' + (s.active ? '' : ' inactive');
+    btn.textContent = s.active ? 'ACTIVE — keep' : 'INACTIVE — drop';
+    btn.onclick = () => toggle(r.fid);
+    const reasonInput = document.createElement('input');
+    reasonInput.className = 'reason-input';
+    reasonInput.value = s.reason;
+    reasonInput.placeholder = 'reason';
+    reasonInput.oninput = (e) => { state[r.fid].reason = e.target.value; updateSaveBtn(); };
+    right.appendChild(btn);
+    right.appendChild(reasonInput);
+
+    card.appendChild(left);
+    card.appendChild(right);
+    grid.appendChild(card);
+  }
+  document.getElementById('stats').textContent = `${ROWS.length} rows loaded`;
+  updateSaveBtn();
+}
+
+function toggle(fid) {
+  state[fid].active = !state[fid].active;
+  render();
+}
+
+function resetAll() {
+  for (const fid in state) { state[fid].active = true; state[fid].reason = 'not_a_beach'; }
+  render();
+}
+
+function updateSaveBtn() {
+  const toggled = ROWS.filter(r => !state[r.fid].active).length;
+  const btn = document.getElementById('save-btn');
+  btn.textContent = `Save (${toggled})`;
+  btn.disabled = toggled === 0;
+}
+
+// ── Save → SQL output ─────────────────────────────────────────────────────
+function buildSql() {
+  const toggled = ROWS.filter(r => !state[r.fid].active);
+  if (toggled.length === 0) return '-- no rows toggled\n';
+  const lines = [];
+  lines.push('-- Mark spot-checked POIs as inactive.');
+  lines.push('-- Generated by admin/poi-spotcheck.html');
+  lines.push('-- ' + new Date().toISOString());
+  lines.push('');
+  lines.push('begin;');
+  lines.push('');
+  for (const r of toggled) {
+    const reason = state[r.fid].reason.replace(/'/g, "''");
+    const name = r.name.replace(/'/g, "''");
+    lines.push(`-- ${name}  (${r.county})`);
+    lines.push(`update public.poi_landing`);
+    lines.push(`   set is_active = false,`);
+    lines.push(`       inactive_reason = '${reason}'`);
+    lines.push(` where fid = ${r.fid};`);
+    lines.push('');
+  }
+  lines.push('-- Verify');
+  const fids = toggled.map(r => r.fid).join(', ');
+  lines.push(`select fid, name, is_active, inactive_reason`);
+  lines.push(`  from public.poi_landing`);
+  lines.push(` where fid in (${fids})`);
+  lines.push(` order by name;`);
+  lines.push('');
+  lines.push('commit;');
+  return lines.join('\n');
+}
+
+function openSaveModal() {
+  document.getElementById('sql-out').value = buildSql();
+  document.getElementById('modal').classList.add('show');
+}
+function closeModal() {
+  document.getElementById('modal').classList.remove('show');
+}
+
+async function copySql() {
+  const sql = document.getElementById('sql-out').value;
+  try {
+    await navigator.clipboard.writeText(sql);
+    showToast('Copied to clipboard');
+  } catch {
+    document.getElementById('sql-out').select();
+    document.execCommand('copy');
+    showToast('Copied');
+  }
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1800);
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+render();
+</script>
+</body>
+</html>

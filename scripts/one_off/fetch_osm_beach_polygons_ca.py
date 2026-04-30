@@ -125,9 +125,14 @@ def land_row(el: dict, geom_full_wkt: str | None) -> bool:
     if type_ == "node":
         body["lat"] = el.get("lat")
         body["lon"] = el.get("lon")
-    else:
-        # ways / relations carry their own coord arrays; persist as jsonb
-        body["geometry"] = el.get("geometry") or el.get("members")
+    elif type_ == "way":
+        body["geometry"] = el.get("geometry")
+        if geom_full_wkt:
+            body["geom_full"] = geom_full_wkt
+    elif type_ == "relation":
+        # Relations carry a `members` array (each with role/ref/type/geometry)
+        # — store it in the dedicated members column. Leave geometry null.
+        body["members"] = el.get("members")
         if geom_full_wkt:
             body["geom_full"] = geom_full_wkt
     url = f"{SUPABASE_URL}/rest/v1/osm_landing"

@@ -41,6 +41,7 @@ def dbt_models(context: AssetExecutionContext, dbt: DbtCliResource):
 #   - public.beach_verdicts              -> verdicts (cascade asset)
 #   - public.operator_dogs_policy        -> ingest
 #   - public.operator_policy_exceptions  -> ingest
+#   - public.cpad_unit_dogs_policy       -> ingest
 #   - public.cpad_unit_policy_exceptions -> ingest
 # The remaining tables here are sourced upstream of Dagster (manual
 # migrations, db views, no Dagster owner).
@@ -49,7 +50,6 @@ _db_source_table_names = [
     "us_beach_points",
     "ccc_access_points",
     "cpad_units",
-    "cpad_unit_dogs_policy",
     "counties",
     "operators",
     "osm_features",

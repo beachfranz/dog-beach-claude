@@ -28,7 +28,7 @@ context-type validator doesn't resolve PEP 563 string annotations.
 from dagster import asset, AssetExecutionContext, AssetKey, Output, MetadataValue
 
 from ..resources import SupabaseDbResource
-from .ingest import (operator_dogs_policy, cpad_unit_dogs_policy_cdpr,
+from .ingest import (operator_dogs_policy, cpad_unit_dogs_policy,
                       operator_policy_exceptions, cpad_unit_policy_exceptions)
 
 
@@ -43,7 +43,7 @@ from .ingest import (operator_dogs_policy, cpad_unit_dogs_policy_cdpr,
                 "ccc_access_points.dogs_verdict mirror.",
     group_name="verdicts",
     kinds={"plpgsql", "table"},
-    deps=[operator_dogs_policy, cpad_unit_dogs_policy_cdpr,
+    deps=[operator_dogs_policy, cpad_unit_dogs_policy,
           operator_policy_exceptions, cpad_unit_policy_exceptions],
 )
 def beach_verdicts(context: AssetExecutionContext,

@@ -56,32 +56,35 @@ def _run_python(context: AssetExecutionContext, script: str, *args: str) -> str:
 # ----- observed-only (cheap, default in Materialize-All) -------------------
 
 @asset(
-    description="Per-CPAD-unit dog policy from parks.ca.gov pages. "
-                "Cheap observation: SELECTs current row counts; does NOT "
-                "re-scrape. To actually re-fetch, materialize "
-                "cpad_unit_dogs_policy_cdpr_run instead.",
+    key=AssetKey(["public", "cpad_unit_dogs_policy"]),
+    description="Canonical per-CPAD-unit dog policy across ALL sources "
+                "(parks.ca.gov scrape, manual extracts, ad-hoc pins). "
+                "Cheap observation: SELECTs row counts and rule "
+                "distribution. To re-scrape CDPR units specifically, "
+                "materialize cpad_unit_dogs_policy_cdpr_run.",
     group_name="ingest",
     kinds={"sql", "table"},
 )
-def cpad_unit_dogs_policy_cdpr(context: AssetExecutionContext,
-                                supabase_db: SupabaseDbResource):
+def cpad_unit_dogs_policy(context: AssetExecutionContext,
+                           supabase_db: SupabaseDbResource):
     with supabase_db.connect() as conn, conn.cursor() as cur:
         cur.execute("""
             select count(*),
                    count(*) filter (where default_rule = 'restricted'),
                    count(*) filter (where default_rule = 'no'),
+                   count(*) filter (where url_used like '%parks.ca.gov%'),
                    max(scraped_at)
               from public.cpad_unit_dogs_policy
-             where url_used like '%parks.ca.gov%'
         """)
-        total, yes_ish, no_, max_ts = cur.fetchone()
+        total, yes_ish, no_, cdpr_subset, max_ts = cur.fetchone()
     return Output(
         None,
         metadata={
-            "total_cdpr_units": MetadataValue.int(total),
-            "default_yes_ish":  MetadataValue.int(yes_ish),
-            "default_no":       MetadataValue.int(no_),
-            "last_scraped_at":  MetadataValue.text(str(max_ts)),
+            "total_units":         MetadataValue.int(total),
+            "default_yes_ish":     MetadataValue.int(yes_ish),
+            "default_no":          MetadataValue.int(no_),
+            "from_cdpr_scrape":    MetadataValue.int(cdpr_subset),
+            "last_scraped_at":     MetadataValue.text(str(max_ts)),
         },
     )
 
@@ -294,7 +297,7 @@ def operator_dogs_policy_run(context: AssetExecutionContext,
 
 assets = [
     # cheap observations (default in Materialize-All)
-    cpad_unit_dogs_policy_cdpr,
+    cpad_unit_dogs_policy,
     operator_policy_extractions,
     operator_dogs_policy,
     operator_policy_exceptions,

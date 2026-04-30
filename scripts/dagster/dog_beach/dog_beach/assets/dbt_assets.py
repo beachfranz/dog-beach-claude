@@ -43,15 +43,15 @@ def dbt_models(context: AssetExecutionContext, dbt: DbtCliResource):
 #   - public.operator_policy_exceptions  -> ingest
 #   - public.cpad_unit_dogs_policy       -> ingest
 #   - public.cpad_unit_policy_exceptions -> ingest
+#   - public.us_beach_points             -> ingest (805 spine)
+#   - public.cpad_units                  -> ingest (805 spine)
+#   - public.osm_features                -> ingest (805 spine)
+#   - public.ccc_access_points           -> ingest (805 spine)
 # The remaining tables here are sourced upstream of Dagster (manual
 # migrations, db views, no Dagster owner).
 _db_source_table_names = [
-    "us_beach_points",
-    "ccc_access_points",
-    "cpad_units",
     "counties",
     "operators",
-    "osm_features",
     "truth_external",
 ]
 db_source_specs = [

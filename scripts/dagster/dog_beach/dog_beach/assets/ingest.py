@@ -295,6 +295,171 @@ def operator_dogs_policy_run(context: AssetExecutionContext,
     )
 
 
+# --- 805 spine sources ----------------------------------------------------
+# Cheap observations + heavy _run variants for the four sources that feed
+# public.beach_locations: UBP, CPAD, OSM, CCC. Only UBP and CPAD have
+# Python loaders we can wrap; OSM and CCC currently load via external
+# sync / migration paths and are observation-only here.
+
+@asset(
+    key=AssetKey(["public", "us_beach_points"]),
+    description="UBP — US national beach points inventory. ~8K rows "
+                "(CA filter applied at consumer time). Cheap observation "
+                "of row counts + state distribution. To re-load from CSV, "
+                "materialize us_beach_points_run.",
+    group_name="ingest",
+    kinds={"sql", "table"},
+)
+def us_beach_points(context: AssetExecutionContext,
+                     supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            select count(*),
+                   count(distinct state),
+                   count(*) filter (where state = 'CA')
+              from public.us_beach_points
+        """)
+        total, distinct_states, ca_rows = cur.fetchone()
+    return Output(
+        None,
+        metadata={
+            "total_rows":   MetadataValue.int(total),
+            "states":       MetadataValue.int(distinct_states),
+            "ca_rows":      MetadataValue.int(ca_rows),
+        },
+    )
+
+
+@asset(
+    key=AssetKey(["public", "cpad_units"]),
+    description="CPAD Units — California Protected Areas Database polygons. "
+                "~17K rows. Cheap observation. To re-load from shapefile, "
+                "materialize cpad_units_run.",
+    group_name="ingest",
+    kinds={"sql", "table"},
+)
+def cpad_units(context: AssetExecutionContext,
+                supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            select count(*),
+                   count(distinct unit_name),
+                   count(distinct agncy_name)
+              from public.cpad_units
+        """)
+        total, distinct_names, distinct_agencies = cur.fetchone()
+    return Output(
+        None,
+        metadata={
+            "total_polygons":   MetadataValue.int(total),
+            "distinct_units":   MetadataValue.int(distinct_names),
+            "distinct_agencies": MetadataValue.int(distinct_agencies),
+        },
+    )
+
+
+@asset(
+    key=AssetKey(["public", "osm_features"]),
+    description="OSM features filtered to beach polys + dog-related tags. "
+                "Loaded via external sync (no Python wrapper here). Cheap "
+                "observation only.",
+    group_name="ingest",
+    kinds={"sql", "table"},
+)
+def osm_features(context: AssetExecutionContext,
+                  supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            select count(*),
+                   count(*) filter (where (tags->>'natural') = 'beach'),
+                   count(*) filter (where admin_inactive = false)
+              from public.osm_features
+        """)
+        total, beach_polys, active = cur.fetchone()
+    return Output(
+        None,
+        metadata={
+            "total_features":  MetadataValue.int(total),
+            "beach_polygons":  MetadataValue.int(beach_polys),
+            "active":          MetadataValue.int(active),
+        },
+    )
+
+
+@asset(
+    key=AssetKey(["public", "ccc_access_points"]),
+    description="California Coastal Commission access points. ~1.6K active. "
+                "Loaded via public.load_ccc_batch() SQL function — no Python "
+                "wrapper. Cheap observation only.",
+    group_name="ingest",
+    kinds={"sql", "table"},
+)
+def ccc_access_points(context: AssetExecutionContext,
+                       supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            select count(*),
+                   count(*) filter (where (archived is null or archived <> 'Yes')),
+                   count(*) filter (where admin_inactive = false)
+              from public.ccc_access_points
+        """)
+        total, not_archived, active = cur.fetchone()
+    return Output(
+        None,
+        metadata={
+            "total":         MetadataValue.int(total),
+            "not_archived":  MetadataValue.int(not_archived),
+            "active":        MetadataValue.int(active),
+        },
+    )
+
+
+# --- 805 spine heavy _run variants (manual-only) --------------------------
+
+@asset(
+    description="EXPENSIVE — re-loads US_beaches_with_state.csv (~8K rows) "
+                "into public.us_beach_points via chunked SQL files. Wraps "
+                "scripts/load_us_beach_points.py. Long-running.",
+    group_name="ingest_heavy",
+    kinds={"python", "csv"},
+)
+def us_beach_points_run(context: AssetExecutionContext,
+                         supabase_db: SupabaseDbResource):
+    out = _run_python(context, "scripts/load_us_beach_points.py")
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) from public.us_beach_points")
+        total = cur.fetchone()[0]
+    return Output(
+        None,
+        metadata={
+            "total_rows":  MetadataValue.int(total),
+            "stdout_tail": MetadataValue.text(out),
+        },
+    )
+
+
+@asset(
+    description="EXPENSIVE — re-loads CPAD Units shapefile (~17K polygons) "
+                "into public.cpad_units. Wraps "
+                "scripts/load_cpad_shapefile.py. Long-running.",
+    group_name="ingest_heavy",
+    kinds={"python", "shapefile"},
+)
+def cpad_units_run(context: AssetExecutionContext,
+                    supabase_db: SupabaseDbResource):
+    out = _run_python(context, "scripts/load_cpad_shapefile.py")
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) from public.cpad_units")
+        total = cur.fetchone()[0]
+    return Output(
+        None,
+        metadata={
+            "total_polygons": MetadataValue.int(total),
+            "stdout_tail":    MetadataValue.text(out),
+        },
+    )
+
+
 assets = [
     # cheap observations (default in Materialize-All)
     cpad_unit_dogs_policy,
@@ -302,8 +467,15 @@ assets = [
     operator_dogs_policy,
     operator_policy_exceptions,
     cpad_unit_policy_exceptions,
+    # 805 spine sources (cheap obs)
+    us_beach_points,
+    cpad_units,
+    osm_features,
+    ccc_access_points,
     # expensive runs (manual-only)
     cpad_unit_dogs_policy_cdpr_run,
     operator_policy_extractions_run,
     operator_dogs_policy_run,
+    us_beach_points_run,
+    cpad_units_run,
 ]

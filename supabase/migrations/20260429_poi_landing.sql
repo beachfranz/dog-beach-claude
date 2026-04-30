@@ -100,26 +100,7 @@ create trigger trg_poi_landing_enrich
   for each row execute function public._poi_landing_enrich_trigger();
 
 
--- ── Backfill from current us_beach_points ───────────────────────────
--- Synthesizes one landing row per existing us_beach_points row using
--- whatever the table has (raw_wkt, name, addresses, cat_mod, state).
-
-insert into public.poi_landing
-  (fetched_at, fetched_by, fid, raw_wkt, name, country,
-   addr1, addr2, addr3, addr4, addr5, cat_mod, geom,
-   state, county_geoid, county_name)
-select
-  coalesce(loaded_at, '2026-04-23'::timestamptz) as fetched_at,
-  'backfill_from_us_beach_points' as fetched_by,
-  fid,
-  raw_wkt,
-  name,
-  country,
-  addr1, addr2, addr3, addr4, addr5,
-  cat_mod,
-  geom,
-  state,
-  county_fips_tiger as county_geoid,
-  county_name_tiger as county_name
-  from public.us_beach_points
-on conflict (fid, fetched_at) do nothing;
+-- No backfill: poi_landing starts empty. The CSV loader (refactored to
+-- write here in a follow-up) will populate it from share/Dog_Beaches/
+-- US_beaches.csv directly. Keeping landing parallel to us_beach_points
+-- on purpose; integration is a later step.

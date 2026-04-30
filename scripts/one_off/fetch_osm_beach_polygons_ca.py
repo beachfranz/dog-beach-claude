@@ -1,13 +1,13 @@
 """
 fetch_osm_beach_polygons_ca.py
 ------------------------------
-Refetch CA natural=beach features from Overpass with `out geom` so we
-get the actual polygon geometry (not just centroids). Updates
-`osm_features.geom_full` for matching osm_type+osm_id rows.
+Refetch CA natural=beach features from Overpass with `out geom`.
 
-Run once to upgrade existing centroid-only data to full polygons.
-Doesn't touch geom (the centroid stays as our display point until
-Phase 3 snap moves it).
+Updated 2026-04-29: writes to public.osm_landing instead of UPDATE-ing
+public.osm_features directly. The promote_osm_features_from_landing()
+function then merges into osm_features, preserving downstream
+enrichment (operator_id, admin_inactive, cleaning_status). One Overpass
+fetch -> N landing rows -> 1 promote call -> osm_features.
 
 Usage:
   python scripts/one_off/fetch_osm_beach_polygons_ca.py
@@ -105,18 +105,53 @@ def relation_to_wkt(rel: dict) -> str | None:
     return f"SRID=4326;MULTIPOLYGON({','.join(rings)})"
 
 
-def update_row(osm_type: str, osm_id: int, wkt: str) -> bool:
-    """PATCH one row's geom_full via PostgREST."""
-    url = (f"{SUPABASE_URL}/rest/v1/osm_features"
-           f"?osm_type=eq.{osm_type}&osm_id=eq.{osm_id}")
+FETCHED_BY = "fetch_osm_beach_polygons_ca"
+
+
+def land_row(el: dict, geom_full_wkt: str | None) -> bool:
+    """INSERT one Overpass element into public.osm_landing.
+    osm_landing has primary key (type, id, fetched_at) so re-fetches
+    accumulate rows; promote function picks the latest per (type, id)."""
+    type_ = el.get("type")
+    id_   = el.get("id")
+    if type_ not in ("node", "way", "relation") or id_ is None:
+        return False
+    body = {
+        "type":       type_,
+        "id":         id_,
+        "fetched_by": FETCHED_BY,
+        "tags":       el.get("tags") or {},
+    }
+    if type_ == "node":
+        body["lat"] = el.get("lat")
+        body["lon"] = el.get("lon")
+    else:
+        # ways / relations carry their own coord arrays; persist as jsonb
+        body["geometry"] = el.get("geometry") or el.get("members")
+        if geom_full_wkt:
+            body["geom_full"] = geom_full_wkt
+    url = f"{SUPABASE_URL}/rest/v1/osm_landing"
     headers = {
         "apikey":        SERVICE_KEY,
         "Authorization": f"Bearer {SERVICE_KEY}",
         "Content-Type":  "application/json",
-        "Prefer":        "return=minimal",
+        "Prefer":        "return=minimal,resolution=ignore-duplicates",
     }
-    r = httpx.patch(url, headers=headers, json={"geom_full": wkt}, timeout=30.0)
+    r = httpx.post(url, headers=headers, json=body, timeout=30.0)
     return r.is_success
+
+
+def call_promote() -> dict:
+    """Invoke public.promote_osm_features_from_landing() via PostgREST RPC."""
+    url = f"{SUPABASE_URL}/rest/v1/rpc/promote_osm_features_from_landing"
+    headers = {
+        "apikey":        SERVICE_KEY,
+        "Authorization": f"Bearer {SERVICE_KEY}",
+        "Content-Type":  "application/json",
+    }
+    r = httpx.post(url, headers=headers, json={}, timeout=120.0)
+    r.raise_for_status()
+    return r.json()
 
 
 def main() -> int:
@@ -151,28 +186,28 @@ def main() -> int:
     OUTPUT_FILE.write_text(json.dumps({"elements": all_elements}, indent=2), encoding="utf-8")
     print(f"\n  total {len(all_elements)} unique elements; raw saved to {OUTPUT_FILE}")
 
-    print("\nUpdating osm_features.geom_full…")
-    written = 0; skipped = 0; failed = 0
+    print("\nWriting to public.osm_landing…")
+    landed = 0; failed = 0
     for e in all_elements:
         t = e.get("type")
-        i = e.get("id")
         if t == "way":
             wkt = way_to_wkt(e)
         elif t == "relation":
             wkt = relation_to_wkt(e)
         else:
             wkt = None
-        if not wkt:
-            skipped += 1
-            continue
-        if update_row(t, i, wkt):
-            written += 1
+        if land_row(e, wkt):
+            landed += 1
         else:
             failed += 1
-        if written % 200 == 0 and written > 0:
-            print(f"  {written} updated…")
+        if landed % 200 == 0 and landed > 0:
+            print(f"  {landed} landed…")
 
-    print(f"\nDone: {written} updated, {skipped} skipped (no parseable geom), {failed} failed.")
+    print(f"\nLanded: {landed}, failed: {failed}")
+    if landed > 0:
+        print("\nPromoting to public.osm_features…")
+        result = call_promote()
+        print(f"  inserted: {result.get('inserted', 0)}, updated: {result.get('updated', 0)}")
     return 0 if failed == 0 else 1
 
 

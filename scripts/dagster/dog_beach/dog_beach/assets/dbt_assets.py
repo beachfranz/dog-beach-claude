@@ -37,9 +37,11 @@ def dbt_models(context: AssetExecutionContext, dbt: DbtCliResource):
 # Group the public.* dbt source assets together. Excludes tables that
 # already have a Dagster asset claiming the key (those keep their
 # owning asset's group):
-#   - public.beaches              -> consumer (write-back asset)
-#   - public.beach_verdicts       -> verdicts (cascade asset)
-#   - public.operator_dogs_policy -> ingest (observation asset)
+#   - public.beaches                     -> consumer (write-back asset)
+#   - public.beach_verdicts              -> verdicts (cascade asset)
+#   - public.operator_dogs_policy        -> ingest
+#   - public.operator_policy_exceptions  -> ingest
+#   - public.cpad_unit_policy_exceptions -> ingest
 # The remaining tables here are sourced upstream of Dagster (manual
 # migrations, db views, no Dagster owner).
 _db_source_table_names = [
@@ -52,8 +54,6 @@ _db_source_table_names = [
     "operators",
     "osm_features",
     "truth_external",
-    "operator_policy_exceptions",
-    "cpad_unit_policy_exceptions",
 ]
 db_source_specs = [
     AssetSpec(

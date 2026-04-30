@@ -115,10 +115,79 @@ def operator_policy_extractions(context: AssetExecutionContext,
 
 
 @asset(
+    key=AssetKey(["public", "operator_policy_exceptions"]),
+    description="Per-beach overrides to operator default_rule. Cheap "
+                "observation: SELECTs row counts and rule distribution. "
+                "To rebuild, materialize operator_dogs_policy_run "
+                "(the merge step writes here).",
+    group_name="ingest",
+    kinds={"sql", "table"},
+    deps=[operator_policy_extractions],
+)
+def operator_policy_exceptions(context: AssetExecutionContext,
+                                supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            select count(*),
+                   count(distinct operator_id),
+                   count(*) filter (where rule in ('off_leash','allowed','yes','restricted')),
+                   count(*) filter (where rule in ('prohibited','no')),
+                   max(updated_at)
+              from public.operator_policy_exceptions
+        """)
+        total, distinct_ops, yes_ish, no_, max_ts = cur.fetchone()
+    return Output(
+        None,
+        metadata={
+            "total":              MetadataValue.int(total),
+            "distinct_operators": MetadataValue.int(distinct_ops),
+            "rule_yes_ish":       MetadataValue.int(yes_ish),
+            "rule_no":            MetadataValue.int(no_),
+            "last_updated_at":    MetadataValue.text(str(max_ts)),
+        },
+    )
+
+
+@asset(
+    key=AssetKey(["public", "cpad_unit_policy_exceptions"]),
+    description="Per-sub-area overrides within CPAD units. Cheap "
+                "observation: SELECTs row counts and rule distribution. "
+                "Source-of-truth: scripts/extract_cpad_unit_dog_policy.py "
+                "and pin migrations.",
+    group_name="ingest",
+    kinds={"sql", "table"},
+    deps=[AssetKey(["public", "cpad_unit_dogs_policy"])],
+)
+def cpad_unit_policy_exceptions(context: AssetExecutionContext,
+                                 supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            select count(*),
+                   count(distinct cpad_unit_id),
+                   count(*) filter (where rule in ('off_leash','allowed','yes','restricted')),
+                   count(*) filter (where rule in ('prohibited','no')),
+                   max(updated_at)
+              from public.cpad_unit_policy_exceptions
+        """)
+        total, distinct_units, yes_ish, no_, max_ts = cur.fetchone()
+    return Output(
+        None,
+        metadata={
+            "total":              MetadataValue.int(total),
+            "distinct_units":     MetadataValue.int(distinct_units),
+            "rule_yes_ish":       MetadataValue.int(yes_ish),
+            "rule_no":            MetadataValue.int(no_),
+            "last_updated_at":    MetadataValue.text(str(max_ts)),
+        },
+    )
+
+
+@asset(
     key=AssetKey(["public", "operator_dogs_policy"]),
-    description="Canonical per-operator dog policy. Cheap observation: "
-                "SELECTs row counts; does NOT re-merge from extractions. "
-                "To actually re-merge, materialize operator_dogs_policy_run.",
+    description="Canonical per-operator dog policy (default_rule + "
+                "leash + summary; exceptions live in their own table). "
+                "Cheap observation: SELECTs row counts. To rebuild, "
+                "materialize operator_dogs_policy_run.",
     group_name="ingest",
     kinds={"sql", "table"},
     deps=[operator_policy_extractions],
@@ -228,6 +297,8 @@ assets = [
     cpad_unit_dogs_policy_cdpr,
     operator_policy_extractions,
     operator_dogs_policy,
+    operator_policy_exceptions,
+    cpad_unit_policy_exceptions,
     # expensive runs (manual-only)
     cpad_unit_dogs_policy_cdpr_run,
     operator_policy_extractions_run,

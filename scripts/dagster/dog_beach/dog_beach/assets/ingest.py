@@ -125,7 +125,8 @@ def operator_policy_extractions(context: AssetExecutionContext,
                 "(the merge step writes here).",
     group_name="ingest",
     kinds={"sql", "table"},
-    deps=[operator_policy_extractions],
+    deps=[operator_policy_extractions,
+          AssetKey(["operator_dogs_policy_run"])],
 )
 def operator_policy_exceptions(context: AssetExecutionContext,
                                 supabase_db: SupabaseDbResource):
@@ -491,6 +492,67 @@ def ccc_access_points_run(context: AssetExecutionContext,
     )
 
 
+@asset(
+    description="EXPENSIVE — fetches CA natural=beach features from "
+                "Overpass with full polygon geometry, updates "
+                "public.osm_features.geom_full. Wraps "
+                "scripts/one_off/fetch_osm_beach_polygons_ca.py. Hits "
+                "the Kumi Systems Overpass mirror; long-running.",
+    group_name="ingest_heavy",
+    kinds={"python", "openstreetmap"},
+    deps=[AssetKey(["external", "osm_overpass"])],
+)
+def osm_beach_polygons_run(context: AssetExecutionContext,
+                            supabase_db: SupabaseDbResource):
+    out = _run_python(context,
+                      "scripts/one_off/fetch_osm_beach_polygons_ca.py")
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            select count(*),
+                   count(*) filter (where (tags->>'natural') = 'beach')
+              from public.osm_features
+        """)
+        total, beach_polys = cur.fetchone()
+    return Output(
+        None,
+        metadata={
+            "total_features":  MetadataValue.int(total),
+            "beach_polygons":  MetadataValue.int(beach_polys),
+            "stdout_tail":     MetadataValue.text(out),
+        },
+    )
+
+
+@asset(
+    description="EXPENSIVE — runs Tavily extract + Sonnet classification "
+                "for each CPAD unit with a park_url that intersects "
+                "beach_locations. Writes public.cpad_unit_dogs_policy "
+                "(default_rule + exceptions). Wraps "
+                "scripts/extract_cpad_unit_dog_policy.py. Costs Tavily + "
+                "Anthropic API credits.",
+    group_name="ingest_heavy",
+    kinds={"python", "anthropic", "tavily"},
+)
+def cpad_unit_dog_policy_extract_run(context: AssetExecutionContext,
+                                       supabase_db: SupabaseDbResource):
+    out = _run_python(context, "scripts/extract_cpad_unit_dog_policy.py")
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            select count(*),
+                   count(*) filter (where default_rule is not null)
+              from public.cpad_unit_dogs_policy
+        """)
+        total, with_rule = cur.fetchone()
+    return Output(
+        None,
+        metadata={
+            "total_units":    MetadataValue.int(total),
+            "units_with_rule": MetadataValue.int(with_rule),
+            "stdout_tail":    MetadataValue.text(out),
+        },
+    )
+
+
 assets = [
     # cheap observations (default in Materialize-All)
     cpad_unit_dogs_policy,
@@ -510,4 +572,6 @@ assets = [
     us_beach_points_run,
     cpad_units_run,
     ccc_access_points_run,
+    osm_beach_polygons_run,
+    cpad_unit_dog_policy_extract_run,
 ]

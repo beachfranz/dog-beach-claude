@@ -197,12 +197,12 @@ def merge_one_operator(rows: list[dict]) -> dict:
             "pass_c_at":           pass_c_at,
             "notes":               notes,
         },
-        # Phase B (2026-04-29): exceptions live in their own table now;
-        # write each as a separate row keyed by (source_kind, source_id, beach_name).
+        # Phase B (2026-04-29): exceptions live in operator_policy_exceptions
+        # (split from the combined dog_policy_exceptions table; FK-enforced
+        # against operators.id). Keyed by (operator_id, beach_name).
         "exception_rows": [
             {
-                "source_kind":  "operator",
-                "source_id":    op_id,
+                "operator_id":  op_id,
                 "rule":         e.get("rule"),
                 "beach_name":   (e.get("beach_name") or "").strip(),
                 "source_quote": e.get("source_quote"),
@@ -237,15 +237,16 @@ def main():
         db_upsert("operator_dogs_policy", batch, on_conflict="operator_id")
         print(f"  upserted {i+len(batch)}/{len(operator_rows)} operator rows")
 
-    # UPSERT exceptions into dog_policy_exceptions (Phase B). Manual pin
-    # rows are preserved because the unique key is (source_kind, source_id,
-    # beach_name) and merge skips beach_names not in the LLM extraction set.
+    # UPSERT exceptions into operator_policy_exceptions. Manual pin rows
+    # (added via INSERT migrations) are preserved because the unique key
+    # is (operator_id, beach_name) — merge only touches LLM-derived
+    # (operator_id, beach_name) tuples, not the manual ones.
     exception_rows = [e for m in merged for e in m["exception_rows"]]
-    print(f"Upserting {len(exception_rows)} exception rows into dog_policy_exceptions")
+    print(f"Upserting {len(exception_rows)} exception rows into operator_policy_exceptions")
     for i in range(0, len(exception_rows), 50):
         batch = exception_rows[i:i+50]
-        db_upsert("dog_policy_exceptions", batch,
-                  on_conflict="source_kind,source_id,beach_name")
+        db_upsert("operator_policy_exceptions", batch,
+                  on_conflict="operator_id,beach_name")
         print(f"  upserted {i+len(batch)}/{len(exception_rows)} exception rows")
 
     print("Done.")

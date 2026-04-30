@@ -48,8 +48,10 @@ sources:
         loaded_at_field: scraped_at
         freshness:
           warn_after: {count: 90, period: day}
-      - name: dog_policy_exceptions
-        description: "Flattened view over operator_dogs_policy.exceptions[] + cpad_unit_dogs_policy.exceptions[] — one row per exception (source_kind, source_id, parent_name, rule, beach_name, source_quote, source_url)."
+      - name: operator_policy_exceptions
+        description: "Per-beach overrides to an operator's default_rule. FK to operators.id ON DELETE CASCADE. One row per (operator_id, beach_name)."
+      - name: cpad_unit_policy_exceptions
+        description: "Per-sub-area overrides within a single CPAD unit. FK to cpad_units.unit_id ON DELETE CASCADE. One row per (cpad_unit_id, beach_name)."
 
       # Verdict layer — should refresh whenever any upstream input changes.
       - name: beach_verdicts

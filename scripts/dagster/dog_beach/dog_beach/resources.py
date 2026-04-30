@@ -57,3 +57,29 @@ def make_dbt_resource() -> DbtCliResource:
         project_dir=str(DBT_PROJECT_DIR),
         profiles_dir=str(DBT_PROJECT_DIR),  # profiles.yml lives in the project
     )
+
+
+def md_table(cur, sql: str, max_col_chars: int = 60) -> str:
+    """Render a SELECT result as a markdown table. Returns '' on no rows.
+    Used in asset materialization metadata so a small preview of the
+    underlying rows shows up next to the row counts.
+
+    Truncates each cell to max_col_chars to keep the rendered table sane.
+    """
+    cur.execute(sql)
+    cols = [c.name for c in cur.description]
+    rows = cur.fetchall()
+    if not rows:
+        return "_(no rows)_"
+
+    def _fmt(v):
+        s = "" if v is None else str(v)
+        s = s.replace("|", "\\|").replace("\n", " ")
+        if len(s) > max_col_chars:
+            s = s[: max_col_chars - 1] + "…"
+        return s
+
+    header = "| " + " | ".join(cols) + " |"
+    sep    = "|" + "|".join("---" for _ in cols) + "|"
+    body   = ["| " + " | ".join(_fmt(v) for v in r) + " |" for r in rows]
+    return "\n".join([header, sep, *body])

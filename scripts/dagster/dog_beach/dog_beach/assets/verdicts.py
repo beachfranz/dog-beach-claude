@@ -27,7 +27,7 @@ context-type validator doesn't resolve PEP 563 string annotations.
 """
 from dagster import asset, AssetExecutionContext, AssetKey, Output, MetadataValue
 
-from ..resources import SupabaseDbResource
+from ..resources import SupabaseDbResource, md_table
 from .ingest import (operator_dogs_policy, cpad_unit_dogs_policy,
                       operator_policy_exceptions, cpad_unit_policy_exceptions)
 
@@ -79,6 +79,15 @@ def beach_verdicts(context: AssetExecutionContext,
         """)
         truth_dist = dict(cur.fetchall())
 
+        preview = md_table(cur, """
+            select origin_key, dogs_verdict, dogs_verdict_confidence,
+                   dogs_verdict_meta -> 'sources' as sources
+              from public.beach_verdicts
+             where dogs_verdict is not null
+             order by computed_at desc
+             limit 10
+        """)
+
     return Output(
         None,
         metadata={
@@ -94,6 +103,7 @@ def beach_verdicts(context: AssetExecutionContext,
                                    MetadataValue.int(truth_dist.get("LIKELY_OUR_ERROR_no", 0)),
             "truth_LIKELY_OUR_ERROR_yes":
                                    MetadataValue.int(truth_dist.get("LIKELY_OUR_ERROR_yes", 0)),
+            "preview":            MetadataValue.md(preview),
         },
     )
 
@@ -173,6 +183,14 @@ def beaches(context: AssetExecutionContext,
             f"{lid} ({name}): consumer={cda} / catalog={cv}"
             for lid, name, cda, cv in cur.fetchall()
         ]
+        preview = md_table(cur, """
+            select location_id, dogs_allowed,
+                   dog_verdict_catalog,
+                   dog_verdict_catalog_confidence as catalog_conf,
+                   left(coalesce(dog_verdict_catalog_computed_at::text,''),19) as computed_at
+              from public.beaches
+             order by location_id
+        """, max_col_chars=30)
         conn.commit()
 
     return Output(
@@ -190,6 +208,7 @@ def beaches(context: AssetExecutionContext,
                 "\n".join(f"- {d}" for d in disagreements) if disagreements
                 else "_(none)_"
             ),
+            "preview":                MetadataValue.md(preview),
         },
     )
 

@@ -39,7 +39,7 @@ import subprocess
 import sys
 from dagster import asset, AssetExecutionContext, AssetKey, Output, MetadataValue
 
-from ..resources import REPO_ROOT, SupabaseDbResource
+from ..resources import REPO_ROOT, SupabaseDbResource, md_table
 
 
 def _run_python(context: AssetExecutionContext, script: str, *args: str) -> str:
@@ -140,6 +140,12 @@ def operator_policy_exceptions(context: AssetExecutionContext,
               from public.operator_policy_exceptions
         """)
         total, distinct_ops, yes_ish, no_, max_ts = cur.fetchone()
+        preview = md_table(cur, """
+            select operator_id, beach_name, rule, left(source_quote, 80) as source_quote
+              from public.operator_policy_exceptions
+             order by updated_at desc nulls last
+             limit 10
+        """)
     return Output(
         None,
         metadata={
@@ -148,6 +154,7 @@ def operator_policy_exceptions(context: AssetExecutionContext,
             "rule_yes_ish":       MetadataValue.int(yes_ish),
             "rule_no":            MetadataValue.int(no_),
             "last_updated_at":    MetadataValue.text(str(max_ts)),
+            "preview":            MetadataValue.md(preview),
         },
     )
 
@@ -174,6 +181,12 @@ def cpad_unit_policy_exceptions(context: AssetExecutionContext,
               from public.cpad_unit_policy_exceptions
         """)
         total, distinct_units, yes_ish, no_, max_ts = cur.fetchone()
+        preview = md_table(cur, """
+            select unit_name, beach_name, rule, left(source_quote, 80) as source_quote
+              from public.cpad_unit_policy_exceptions
+             order by updated_at desc nulls last
+             limit 10
+        """)
     return Output(
         None,
         metadata={
@@ -182,6 +195,7 @@ def cpad_unit_policy_exceptions(context: AssetExecutionContext,
             "rule_yes_ish":       MetadataValue.int(yes_ish),
             "rule_no":            MetadataValue.int(no_),
             "last_updated_at":    MetadataValue.text(str(max_ts)),
+            "preview":            MetadataValue.md(preview),
         },
     )
 

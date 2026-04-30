@@ -19,8 +19,13 @@ from dagster import AssetSpec, AssetKey
 us_beaches_csv = AssetSpec(
     key=AssetKey(["external", "us_beaches_csv"]),
     description="share/Dog_Beaches/US_beaches_with_state.csv (8,041 rows). "
-                "National beach inventory CSV, originally compiled from NOAA + "
-                "DBEACH datasets. Loaded by scripts/load_us_beach_points.py.",
+                "Schema: WKT, fid, COUNTRY, NAME, ADDR1..5, CAT_MOD. The "
+                "CAT_MOD values (e.g. travel_and_leisure.beach) match the "
+                "Geoapify Places taxonomy, suggesting the raw CSV (US_beaches.csv) "
+                "came from Geoapify's worldwide POI dataset, but the original "
+                "fetch path isn't documented in the repo. STATE column was "
+                "added 2026-04-23 by scripts/add_state_to_csv.py. Loaded into "
+                "public.us_beach_points by scripts/load_us_beach_points.py.",
     group_name="external_sources",
     kinds={"csv", "file"},
 )
@@ -47,10 +52,16 @@ cpad_arcgis_featureserver = AssetSpec(
 
 osm_overpass = AssetSpec(
     key=AssetKey(["external", "osm_overpass"]),
-    description="OpenStreetMap Overpass API. Source of public.osm_features "
-                "(beach polygons + dog-related tags). Synced manually; no "
-                "Python loader in repo. Refresh by re-running the Overpass "
-                "query and bulk-loading via SQL.",
+    description="OpenStreetMap data via the Overpass API. Active fetchers "
+                "use the Kumi Systems mirror at "
+                "https://overpass.kumi.systems/api/interpreter (faster + more "
+                "permissive than the main overpass-api.de). Per-feature "
+                "scripts: scripts/one_off/fetch_osm_beach_polygons_ca.py "
+                "(natural=beach polygons), fetch_osm_dog_features_ca.py "
+                "(leisure=dog_park + dog tags), fetch_osm_dog_parks_ca.py, "
+                "fetch_osm_coastline_oc.py, fetch_osm_sand_shingle_laguna.py. "
+                "No single canonical loader — these scripts each refresh a "
+                "different slice of public.osm_features.",
     group_name="external_sources",
     kinds={"openstreetmap", "external_api"},
 )

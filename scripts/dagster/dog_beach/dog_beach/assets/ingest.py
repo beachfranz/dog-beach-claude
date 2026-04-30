@@ -335,12 +335,20 @@ def us_beach_points(context: AssetExecutionContext,
               from public.us_beach_points
         """)
         total, distinct_states, ca_rows = cur.fetchone()
+        preview = md_table(cur, """
+            select fid, name, state, addr1, addr2
+              from public.us_beach_points
+             where state in ('CA','OR','WA','HI','FL')
+             order by state, name
+             limit 10
+        """, max_col_chars=30)
     return Output(
         None,
         metadata={
             "total_rows":   MetadataValue.int(total),
             "states":       MetadataValue.int(distinct_states),
             "ca_rows":      MetadataValue.int(ca_rows),
+            "preview":      MetadataValue.md(preview),
         },
     )
 
@@ -363,12 +371,20 @@ def cpad_units(context: AssetExecutionContext,
               from public.cpad_units
         """)
         total, distinct_names, distinct_agencies = cur.fetchone()
+        preview = md_table(cur, """
+            select unit_name, agncy_name, mng_agncy, layer
+              from public.cpad_units
+             where unit_name ~* 'beach'
+             order by unit_name
+             limit 10
+        """, max_col_chars=35)
     return Output(
         None,
         metadata={
             "total_polygons":   MetadataValue.int(total),
             "distinct_units":   MetadataValue.int(distinct_names),
             "distinct_agencies": MetadataValue.int(distinct_agencies),
+            "preview":          MetadataValue.md(preview),
         },
     )
 
@@ -392,12 +408,67 @@ def osm_features(context: AssetExecutionContext,
               from public.osm_features
         """)
         total, beach_polys, active = cur.fetchone()
+        preview = md_table(cur, """
+            select osm_type, osm_id, name,
+                   tags->>'natural' as natural_tag,
+                   tags->>'leisure' as leisure_tag
+              from public.osm_features
+             where (tags->>'natural') = 'beach' and name is not null
+             order by name
+             limit 10
+        """, max_col_chars=30)
     return Output(
         None,
         metadata={
             "total_features":  MetadataValue.int(total),
             "beach_polygons":  MetadataValue.int(beach_polys),
             "active":          MetadataValue.int(active),
+            "preview":         MetadataValue.md(preview),
+        },
+    )
+
+
+@asset(
+    key=AssetKey(["public", "beach_locations"]),
+    description="Catalog spine — derived VIEW that combines public.us_beach_points "
+                "(UBP), public.osm_features (OSM beach polys), and active "
+                "public.ccc_access_points (CCC orphans). Deduped, ~1,639 rows. "
+                "Each row carries an origin_key like ubp/<fid>, osm/<type>/<id>, "
+                "ccc/<id>. Cheap observation: counts by origin_source + preview.",
+    group_name="ingest",
+    kinds={"sql", "view"},
+    deps=[AssetKey(["public", "us_beach_points"]),
+          AssetKey(["public", "osm_features"]),
+          AssetKey(["public", "ccc_access_points"])],
+)
+def beach_locations(context: AssetExecutionContext,
+                     supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            select count(*),
+                   count(*) filter (where origin_source = 'ubp'),
+                   count(*) filter (where origin_source = 'osm'),
+                   count(*) filter (where origin_source = 'ccc'),
+                   count(distinct address_state)
+              from public.beach_locations
+        """)
+        total, ubp_, osm_, ccc_, distinct_states = cur.fetchone()
+        preview = md_table(cur, """
+            select origin_key, name, address_state, address_city, feature_type
+              from public.beach_locations
+             where address_state in ('CA','OR')
+             order by address_state desc, name
+             limit 10
+        """, max_col_chars=30)
+    return Output(
+        None,
+        metadata={
+            "total_rows":       MetadataValue.int(total),
+            "from_ubp":         MetadataValue.int(ubp_),
+            "from_osm":         MetadataValue.int(osm_),
+            "from_ccc":         MetadataValue.int(ccc_),
+            "distinct_states":  MetadataValue.int(distinct_states),
+            "preview":          MetadataValue.md(preview),
         },
     )
 
@@ -422,12 +493,21 @@ def ccc_access_points(context: AssetExecutionContext,
               from public.ccc_access_points
         """)
         total, not_archived, active = cur.fetchone()
+        preview = md_table(cur, """
+            select objectid, name, county, district, dog_friendly
+              from public.ccc_access_points
+             where (archived is null or archived <> 'Yes')
+               and admin_inactive = false
+             order by objectid
+             limit 10
+        """, max_col_chars=30)
     return Output(
         None,
         metadata={
             "total":         MetadataValue.int(total),
             "not_archived":  MetadataValue.int(not_archived),
             "active":        MetadataValue.int(active),
+            "preview":       MetadataValue.md(preview),
         },
     )
 
@@ -579,6 +659,7 @@ assets = [
     cpad_units,
     osm_features,
     ccc_access_points,
+    beach_locations,
     # expensive runs (manual-only)
     cpad_unit_dogs_policy_cdpr_run,
     operator_policy_extractions_run,

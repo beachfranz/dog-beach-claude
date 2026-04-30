@@ -66,25 +66,9 @@ db_source_specs = [
     for t in _db_source_table_names
 ]
 
-# beach_locations is a derived VIEW (UBP spine + OSM beach polys +
-# CCC orphans, deduped). Declared with explicit deps so the lineage
-# graph shows where its rows actually come from.
-db_source_specs.append(AssetSpec(
-    key=AssetKey(["public", "beach_locations"]),
-    description="Derived VIEW: deduped beach inventory (the catalog "
-                "layer / 805). Combines public.us_beach_points (UBP "
-                "spine), public.osm_features filtered to beach polys, "
-                "and public.ccc_access_points (CCC orphans). ~1,639 rows. "
-                "Each row carries an origin_key like ubp/<fid>, "
-                "osm/<type>/<id>, or ccc/<id>.",
-    group_name="db_sources",
-    kinds={"sql", "view"},
-    deps=[
-        AssetKey(["public", "us_beach_points"]),
-        AssetKey(["public", "osm_features"]),
-        AssetKey(["public", "ccc_access_points"]),
-    ],
-))
+# public.beach_locations is owned by the Dagster cheap-obs asset in
+# the ingest group (see assets/ingest.py). It claims the same AssetKey
+# so dagster-dbt's source merges into the executable node.
 
 
 # Convenience export for assets/__init__.py

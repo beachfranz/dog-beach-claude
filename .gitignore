@@ -3,6 +3,10 @@ scripts/pipeline/.env
 **/.env
 **/.env.local
 
+# Plain-text secrets at repo root (passwords / API keys someone dropped in).
+# Real home is ~/secrets/. This catches accidental `git add .`.
+/*.txt
+
 # Pipeline scratch — regenerable from source
 scripts/pipeline/checkpoints/
 scripts/pipeline/*.csv

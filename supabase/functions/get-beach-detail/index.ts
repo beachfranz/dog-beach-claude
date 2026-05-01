@@ -20,9 +20,10 @@ Deno.serve(async (req: Request) => {
     new Response(JSON.stringify(body), { status, headers: cors });
 
   try {
-    const url        = new URL(req.url);
-    const locationId = url.searchParams.get("location_id") ?? "huntington-dog-beach";
-    const date       = url.searchParams.get("date");
+    const url               = new URL(req.url);
+    const locationIdParam   = url.searchParams.get("location_id");
+    const arenaGroupIdParam = url.searchParams.get("arena_group_id") ?? url.searchParams.get("fid");
+    const date              = url.searchParams.get("date");
 
     if (!date) {
       return json({ error: "date parameter required (YYYY-MM-DD)" }, 400);
@@ -31,16 +32,24 @@ Deno.serve(async (req: Request) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
     const nowUtc   = new Date();
 
-    // Beach metadata
-    const { data: beach, error: beachErr } = await supabase
-      .from("beaches")
+    // Beach metadata — resolve by either key (path 3b dual-input).
+    let beachQuery = supabase.from("beaches")
       .select("location_id, display_name, timezone, address, website, arena_group_id")
-      .eq("location_id", locationId)
-      .single();
+      .limit(1);
+    if (arenaGroupIdParam) {
+      const fid = parseInt(arenaGroupIdParam, 10);
+      if (!Number.isFinite(fid)) return json({ error: "Invalid arena_group_id" }, 400);
+      beachQuery = beachQuery.eq("arena_group_id", fid);
+    } else {
+      beachQuery = beachQuery.eq("location_id", locationIdParam ?? "huntington-dog-beach");
+    }
+    const { data: beachRows, error: beachErr } = await beachQuery;
+    const beach = beachRows?.[0];
 
     if (beachErr || !beach) {
       return json({ error: "Beach not found" }, 404);
     }
+    const locationId = beach.location_id;  // canonical key used downstream
 
     // Derive today's local date + hour from beach timezone (never use UTC date)
     const localParts = new Intl.DateTimeFormat("en-US", {

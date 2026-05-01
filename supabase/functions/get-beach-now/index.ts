@@ -29,23 +29,44 @@ Deno.serve(async (req: Request) => {
   const runAt    = new Date();
 
   // ── Which beaches to refresh ─────────────────────────────────────────────────
-  let locationIds: string[] | null = null;
+  // Accepts either location_id (text slug, legacy) or arena_group_id (bigint,
+  // new spine). Path 3b dual-input — both work; 3c will drop location_id.
+  let locationIds:    string[] | null = null;
+  let arenaGroupIds:  number[] | null = null;
 
   if (req.method === "GET") {
-    const id = new URL(req.url).searchParams.get("location_id");
-    if (id) locationIds = [id];
+    const params = new URL(req.url).searchParams;
+    const loc = params.get("location_id");
+    const fid = params.get("arena_group_id") ?? params.get("fid");
+    if (loc) locationIds = [loc];
+    if (fid) arenaGroupIds = [parseInt(fid, 10)].filter(Number.isFinite);
   } else if (req.method === "POST") {
     const body = await req.json().catch(() => ({}));
     if (Array.isArray(body?.location_ids) && body.location_ids.length > 0) {
       locationIds = body.location_ids;
     }
+    if (Array.isArray(body?.arena_group_ids) && body.arena_group_ids.length > 0) {
+      arenaGroupIds = body.arena_group_ids
+        .map((x: unknown) => typeof x === "number" ? x : parseInt(String(x), 10))
+        .filter(Number.isFinite);
+    }
   }
 
   // ── Load beaches + scoring config in parallel ────────────────────────────────
+  let beachQuery = supabase.from("beaches").select("*").eq("is_active", true);
+  if (arenaGroupIds?.length && locationIds?.length) {
+    // Both keys provided — OR them. Rare; keeps the BC layer permissive.
+    beachQuery = beachQuery.or(
+      `location_id.in.(${locationIds.join(",")}),arena_group_id.in.(${arenaGroupIds.join(",")})`
+    );
+  } else if (arenaGroupIds?.length) {
+    beachQuery = beachQuery.in("arena_group_id", arenaGroupIds);
+  } else if (locationIds?.length) {
+    beachQuery = beachQuery.in("location_id", locationIds);
+  }
+
   const [beachRes, configRes] = await Promise.all([
-    locationIds?.length
-      ? supabase.from("beaches").select("*").eq("is_active", true).in("location_id", locationIds)
-      : supabase.from("beaches").select("*").eq("is_active", true),
+    beachQuery,
     supabase.from("scoring_config")
       .select("*")
       .eq("is_active", true)
@@ -66,7 +87,7 @@ Deno.serve(async (req: Request) => {
   );
 
   // Single-beach GET: return the NOW row directly (frontend call)
-  if (req.method === "GET" && locationIds?.length === 1) {
+  if (req.method === "GET" && results.length === 1) {
     const r = results[0];
     if (!r.ok) return json({ error: r.error }, 500);
     return json(r.row);

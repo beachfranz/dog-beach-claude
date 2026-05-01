@@ -24,10 +24,11 @@ Deno.serve(async (req: Request) => {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-  // All active beaches
+  // All active beaches — include arena_group_id so callers can use the
+  // new spine key in URLs (path 3b).
   const { data: beaches, error: beachErr } = await supabase
     .from("beaches")
-    .select("location_id, display_name, latitude, longitude")
+    .select("location_id, arena_group_id, display_name, latitude, longitude")
     .eq("is_active", true)
     .order("display_name");
 
@@ -93,6 +94,7 @@ Deno.serve(async (req: Request) => {
     const scores = scoresByLocation[beach.location_id];
     return {
       location_id:       beach.location_id,
+      arena_group_id:    beach.arena_group_id ?? null,
       display_name:      beach.display_name,
       latitude:          beach.latitude,
       longitude:         beach.longitude,

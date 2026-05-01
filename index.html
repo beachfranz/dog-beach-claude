@@ -452,9 +452,15 @@
   const VISIBLE_NEARBY = 5;
 
   // ── State ─────────────────────────────────────────────────────────
-  const urlLocation  = new URLSearchParams(window.location.search).get('location');
+  // Path 3b: prefer ?fid=<bigint> (arena_group_id) over the legacy
+  // ?location=<slug>. Either works; edge functions resolve both.
+  const urlParams     = new URLSearchParams(window.location.search);
+  const urlFidRaw     = urlParams.get('fid') ?? urlParams.get('arena_group_id');
+  const urlFid        = urlFidRaw ? parseInt(urlFidRaw, 10) : null;
+  const urlLocation   = urlParams.get('location');
   const savedLocation = (() => { try { return localStorage.getItem(LAST_PICK_KEY); } catch { return null; } })();
-  let currentLocation = urlLocation ?? savedLocation ?? DEFAULT_LOCATION;
+  let currentArenaGroupId = Number.isFinite(urlFid) ? urlFid : null;
+  let currentLocation     = urlLocation ?? (currentArenaGroupId ? null : (savedLocation ?? DEFAULT_LOCATION));
 
   // Resolved user coords; may be updated asynchronously by geolocation.
   let userLat = DEFAULT_LAT;
@@ -516,14 +522,23 @@
   }
 
   // ── Boot ──────────────────────────────────────────────────────────
-  // Forecast + NOW + blurb load immediately against the resolved
-  // currentLocation (URL > localStorage > Huntington). In parallel, we
-  // request geolocation; whichever coords resolve (real or default) drive
-  // the nearest-N switcher.
+  // Forecast + NOW load immediately against whichever key we have
+  // (?fid=, ?location=, localStorage, or default Huntington). Scout
+  // blurb is gated on having a location_id; if only fid was supplied,
+  // we hydrate currentLocation from the first API response and then
+  // kick off the blurb.
   loadSummary(currentLocation);
   loadNowCard(currentLocation);
-  loadScoutBlurb(currentLocation);
+  if (currentLocation) loadScoutBlurb(currentLocation);
   resolveGeolocation();
+
+  // Helper: build the right query string fragment for an API call.
+  // Prefers arena_group_id; falls back to location_id.
+  function beachKeyQs(locationId) {
+    return currentArenaGroupId
+      ? `arena_group_id=${currentArenaGroupId}`
+      : `location_id=${locationId}`;
+  }
 
   function resolveGeolocation() {
     if (!navigator.geolocation) { loadNearbyBeaches(); return; }
@@ -682,11 +697,16 @@
     container.innerHTML = '<div class="skeleton"></div>';
     try {
       const res = await fetch(
-        `${SUPABASE_URL}/functions/v1/get-beach-now?location_id=${locationId}`,
+        `${SUPABASE_URL}/functions/v1/get-beach-now?${beachKeyQs(locationId)}`,
         { headers: { 'Authorization': `Bearer ${ANON_KEY}` } }
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
+      // Hydrate locationId for chat etc. when caller arrived via ?fid=
+      if (!currentLocation && d.location_id) {
+        currentLocation = d.location_id;
+        loadScoutBlurb(currentLocation);
+      }
       if (!d.is_daylight) { container.innerHTML = ''; return; }
       container.innerHTML = buildDayCard(nowToDay(d), -1);
     } catch {
@@ -738,11 +758,15 @@
     showSkeletons();
     try {
       const res = await fetch(
-        `${SUPABASE_URL}/functions/v1/get-beach-summary?location_id=${locationId}`,
+        `${SUPABASE_URL}/functions/v1/get-beach-summary?${beachKeyQs(locationId)}`,
         { headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' } }
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+      // Hydrate locationId from API response if caller arrived via ?fid=
+      if (!currentLocation && data?.beach?.location_id) {
+        currentLocation = data.beach.location_id;
+      }
       render(data);
     } catch (err) {
       showError(err.message);
@@ -910,7 +934,11 @@
 
   // ── Detail navigation ─────────────────────────────────────────────
   function openDetail(locationId, date) {
-    window.location.href = `detail.html?location=${locationId}&date=${date}`;
+    // Prefer fid-keyed URL when we know the arena_group_id for this beach.
+    const qs = currentArenaGroupId
+      ? `fid=${currentArenaGroupId}&date=${date}`
+      : `location=${locationId}&date=${date}`;
+    window.location.href = `detail.html?${qs}`;
   }
 
   // ── UI states ─────────────────────────────────────────────────────

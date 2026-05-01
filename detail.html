@@ -456,21 +456,32 @@
   }
 
   // ── Params ────────────────────────────────────────────────────────
-  const params     = new URLSearchParams(window.location.search);
-  const locationId = params.get('location') ?? 'huntington-dog-beach';
-  const today      = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-  const date       = params.get('date') ?? today;
+  // Accept either ?fid=<bigint> (path 3b, preferred) or ?location=<slug>
+  // (legacy). Edge function resolves either; we keep both in scope so the
+  // close button + chat call can use whichever the caller had.
+  const params         = new URLSearchParams(window.location.search);
+  const fidParam       = params.get('fid') ?? params.get('arena_group_id');
+  const arenaGroupId   = fidParam ? parseInt(fidParam, 10) : null;
+  // `let` so render() can fill in the slug after the API response when
+  // caller only passed ?fid= (chat etc. still need a string slug).
+  let   locationId     = params.get('location') ?? (arenaGroupId ? null : 'huntington-dog-beach');
+  const today          = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const date           = params.get('date') ?? today;
 
-  // Fix close button to preserve location
-  document.getElementById('close-btn').href = `index.html?location=${locationId}`;
+  // Close button preserves whichever key the user came in with
+  const backQs = arenaGroupId ? `fid=${arenaGroupId}` : `location=${locationId}`;
+  document.getElementById('close-btn').href = `index.html?${backQs}`;
 
-  loadDetail(locationId, date);
+  loadDetail(arenaGroupId, locationId, date);
 
   // ── Fetch ─────────────────────────────────────────────────────────
-  async function loadDetail(locationId, date) {
+  async function loadDetail(arenaGroupId, locationId, date) {
     try {
+      const qs = arenaGroupId
+        ? `arena_group_id=${arenaGroupId}&date=${date}`
+        : `location_id=${locationId}&date=${date}`;
       const res = await fetch(
-        `${SUPABASE_URL}/functions/v1/get-beach-detail?location_id=${locationId}&date=${date}`,
+        `${SUPABASE_URL}/functions/v1/get-beach-detail?${qs}`,
         { headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' } }
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -521,7 +532,10 @@
       document.getElementById('header-left').appendChild(badgeRow);
     }
 
-    loadScoutBlurb(locationId, date, day, hours);
+    // Hydrate the outer locationId from the API response so chat (which
+    // only knows location_id) keeps working when the caller passed ?fid=.
+    if (!locationId) locationId = beach.location_id;
+    loadScoutBlurb(beach.location_id, date, day, hours);
 
     if (hours.length === 0) {
       showError('No hourly data available for this date.');

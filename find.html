@@ -618,13 +618,15 @@
       // client-side haversine path.
       const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
       const beachList = (await loadBeachesForDate(todayISO))
-        .map(b => ({ location_id: b.location_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule, distance_m: b.distance_m }));
+        .map(b => ({ location_id: b.location_id, arena_group_id: b.arena_group_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule, distance_m: b.distance_m }));
 
       const filteredBeachList = beachList.filter(b => matchesLeashFilter(b));
 
       const results = await Promise.all(
         filteredBeachList.map(b =>
-          fetch(`${SUPABASE_URL}/functions/v1/get-beach-now?location_id=${b.location_id}`,
+          // Prefer arena_group_id (path 3b); fall back to location_id for any
+          // legacy rows that haven't been bridged yet.
+          fetch(`${SUPABASE_URL}/functions/v1/get-beach-now?${b.arena_group_id ? 'arena_group_id=' + b.arena_group_id : 'location_id=' + b.location_id}`,
             { headers: { 'Authorization': `Bearer ${ANON_KEY}` } })
             .then(r => r.json())
             .then(d => ({ beach: b, day: nowToDay(d) }))
@@ -660,6 +662,7 @@
     return {
       is_now:             true,
       location_id:        d.location_id,
+      arena_group_id:     d.arena_group_id,
       local_date:         d.local_date,
       day_status:         d.hour_status,
       best_window_label:  'Right now',
@@ -909,7 +912,7 @@
     const chips = buildChips(day, distance);
 
     return `
-      <div class="day-card status-${status}" data-location-id="${beach.location_id}" onclick="window.location.href='detail.html?location=${beach.location_id}&date=${selectedDate}'">
+      <div class="day-card status-${status}" data-location-id="${beach.location_id}" onclick="window.location.href='detail.html?${beach.arena_group_id ? 'fid=' + beach.arena_group_id : 'location=' + beach.location_id}&date=${selectedDate}'">
         <div class="day-left">
           <div class="rank-label">#${rank}</div>
           ${scoreHtml}

@@ -1,26 +1,29 @@
 """
-sync_beaches_gold_to_beaches.py — Phase A dry-run.
-
-Plans the auto-promotion of beaches_gold rows into public.beaches so the
-scoring pipeline (daily-beach-refresh) covers every catalog beach.
+sync_beaches_gold_to_beaches.py — promote beaches_gold rows into
+public.beaches so the scoring pipeline covers every catalog beach.
 
 Scope:
-  - State hardcoded to 'CA' (matches the populator pattern; copy this
-    file per state when expanding)
+  - State hardcoded to 'CA' (copy this file per state when expanding)
   - For each beaches_gold row (CA, is_active), produce a candidate
-    public.beaches row.
-  - Skip if an existing public.beaches row sits within 100m AND has a
-    similar display_name (the 14 hand-curated beaches stay untouched).
+    public.beaches row. Skip if an existing public.beaches row sits
+    within 200m, OR within 2km AND name similarity ≥ 0.4 (the 14
+    hand-curated beaches stay untouched).
   - Auto-fill: location_id (slug + county/fid suffix for collisions),
-    display_name, latitude, longitude, nearest NOAA tide station,
-    timezone (America/Los_Angeles for CA), open_time, close_time,
-    is_active=true, besttime_venue_id=NULL (path 1: skip crowd).
-  - Default mode: write _sync_preview.json + summary, NO DB changes.
-  - --apply: actually INSERT (Phase B; not used yet).
+    display_name, latitude, longitude, nearest NOAA reference tide
+    station, timezone (America/Los_Angeles for CA), open_time,
+    close_time, is_active=true, besttime_venue_id=NULL (path 1: skip
+    crowd scoring entirely).
+
+Modes:
+  Default        — preview JSON + summary, NO DB changes.
+  --apply        — INSERT new rows (chunked).
+  --apply --score — also POST to get-beach-now in batches to populate
+                    NOW row scoring on every newly inserted beach.
 
 Usage:
-  python scripts/sync_beaches_gold_to_beaches.py            # dry-run
-  python scripts/sync_beaches_gold_to_beaches.py --apply    # Phase B
+  python scripts/sync_beaches_gold_to_beaches.py
+  python scripts/sync_beaches_gold_to_beaches.py --apply
+  python scripts/sync_beaches_gold_to_beaches.py --apply --score
 """
 from __future__ import annotations
 import json
@@ -48,25 +51,18 @@ TIMEZONE      = "America/Los_Angeles"
 DEFAULT_OPEN  = "05:00:00"
 DEFAULT_CLOSE = "22:00:00"
 
-# Active CA NOAA CO-OPS tide stations. Hand-picked subset; expand if a
-# beach falls > 50km from all of these (would surface in the dry-run).
-NOAA_CA_STATIONS = [
-    ("9419750", "Crescent City",      41.7456, -124.1844),
-    ("9418767", "North Spit",         40.7669, -124.2172),
-    ("9416841", "Arena Cove",         38.9145, -123.7110),
-    ("9415020", "Point Reyes",        37.9942, -122.9736),
-    ("9414750", "Alameda",            37.7717, -122.3000),
-    ("9414290", "San Francisco",      37.8063, -122.4659),
-    ("9413450", "Monterey",           36.6053, -121.8884),
-    ("9412110", "Port San Luis",      35.1681, -120.7553),
-    ("9411340", "Santa Barbara",      34.4080, -119.6857),
-    ("9410840", "Santa Monica",       34.0083, -118.5000),
-    ("9410660", "Los Angeles",        33.7197, -118.2728),
-    ("9410647", "Long Beach",         33.7660, -118.1900),
-    ("9410580", "Newport Harbor",     33.6033, -117.8833),
-    ("9410230", "La Jolla",           32.8669, -117.2575),
-    ("9410170", "San Diego",          32.7142, -117.1736),
-]
+# CA NOAA CO-OPS reference (harmonic) tide stations. Loaded from
+# scripts/data/ca_noaa_stations.json — fetched 2026-05-01 from
+# https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=tidepredictions
+# Filtered to type='R' (reference / actual tide gauges). 64 stations.
+# Subordinate (type='S') stations are predicted from references with
+# offsets; we prefer the source data.
+NOAA_STATIONS_PATH = ROOT / "scripts" / "data" / "ca_noaa_stations.json"
+def _load_noaa():
+    raw = json.loads(NOAA_STATIONS_PATH.read_text(encoding="utf-8"))
+    return [(s["id"], s["name"], s["lat"], s["lng"])
+            for s in raw if s.get("type") == "R"]
+NOAA_CA_STATIONS = _load_noaa()
 
 EARTH_KM = 6371.0
 # Match against existing public.beaches by (close OR (medium-close + similar name))
@@ -161,11 +157,72 @@ def find_existing_match(gold_row, existing):
     return best[0] if best else None
 
 
+def insert_batch(cur, rows: list[dict]) -> int:
+    """INSERT one chunk; returns rows inserted."""
+    if not rows:
+        return 0
+    cols = ["location_id", "display_name", "latitude", "longitude",
+            "noaa_station_id", "besttime_venue_id", "timezone",
+            "open_time", "close_time", "is_active", "arena_group_id"]
+    template = "(" + ",".join(["%s"] * len(cols)) + ")"
+    values_sql = ",".join([template] * len(rows))
+    flat: list = []
+    for r in rows:
+        flat += [
+            r["proposed_slug"], r["name"],
+            r["lat"], r["lon"],
+            r["noaa_id"], r["besttime_venue_id"],
+            r["timezone"], r["open_time"], r["close_time"],
+            r["is_active"], r["arena_fid"],
+        ]
+    sql = f"""
+        INSERT INTO public.beaches ({", ".join(cols)})
+        VALUES {values_sql}
+        ON CONFLICT (location_id) DO NOTHING
+    """
+    cur.execute(sql, flat)
+    return cur.rowcount
+
+
+def trigger_scoring(location_ids: list[str], chunk: int = 30) -> dict:
+    """POST to get-beach-now in chunks. Returns summary {ok, errored}."""
+    url = (os.environ.get("SUPABASE_URL") or "").rstrip("/") + "/functions/v1/get-beach-now"
+    key = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
+    if not url or not key:
+        print("  WARN: SUPABASE_URL or service/anon key missing; skipping --score")
+        return {"ok": 0, "errored": 0, "skipped": True}
+
+    import urllib.request
+    ok_total, err_total = 0, 0
+    for i in range(0, len(location_ids), chunk):
+        batch = location_ids[i:i + chunk]
+        body = json.dumps({"location_ids": batch}).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=body, method="POST",
+            headers={
+                "Content-Type":  "application/json",
+                "Authorization": f"Bearer {key}",
+                "apikey":        key,
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                resp_data = json.loads(resp.read())
+                results = resp_data.get("results", [])
+                ok = sum(1 for r in results if r.get("ok"))
+                err = sum(1 for r in results if not r.get("ok"))
+                ok_total += ok
+                err_total += err
+                print(f"    chunk {i//chunk + 1}: {ok}/{len(batch)} ok")
+        except Exception as e:
+            err_total += len(batch)
+            print(f"    chunk {i//chunk + 1}: HTTP error {e}")
+    return {"ok": ok_total, "errored": err_total}
+
+
 def main() -> int:
     apply = "--apply" in sys.argv
-    if apply:
-        print("--apply not implemented in Phase A; aborting.")
-        return 2
+    score = "--score" in sys.argv
 
     conn = psycopg2.connect(**PG)
     conn.set_client_encoding("UTF8")
@@ -292,6 +349,33 @@ def main() -> int:
 
     OUT_PATH.write_text(json.dumps(candidates, indent=2, default=str), encoding="utf-8")
     print(f"\n  full preview → {OUT_PATH}")
+
+    if not apply:
+        print("\n(dry-run; rerun with --apply to INSERT, --apply --score to also "
+              "trigger get-beach-now scoring)")
+        return 0
+
+    # ── Apply ──────────────────────────────────────────────────────
+    print(f"\n─── Applying ({len(inserts)} rows) ─────────────")
+    CHUNK = 100
+    inserted_total = 0
+    for i in range(0, len(inserts), CHUNK):
+        batch = inserts[i:i + CHUNK]
+        n = insert_batch(cur, batch)
+        inserted_total += n
+        print(f"  batch {i//CHUNK + 1}: {n} inserted ({inserted_total}/{len(inserts)} total)")
+    conn.commit()
+    print(f"COMMIT — {inserted_total} rows inserted into public.beaches.")
+
+    if score and inserted_total > 0:
+        print(f"\n─── Triggering get-beach-now ─────────────────")
+        loc_ids = [c["proposed_slug"] for c in inserts][:inserted_total]
+        result = trigger_scoring(loc_ids)
+        print(f"  scored: {result['ok']} ok, {result['errored']} errored "
+              f"(of {len(loc_ids)} requested)")
+    elif inserted_total > 0:
+        print(f"\n(skipped --score; rerun with --apply --score, or wait for next "
+              f"daily-beach-refresh to populate scores)")
     return 0
 
 

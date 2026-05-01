@@ -77,6 +77,32 @@ ORPHANS = [
     },
 ]
 
+# 8 active consumer dog/CA beaches (Gap B run, 2026-05-01).
+# arena_fid here is the canonical arena entity for the beach
+# (singleton group_id after the dog-beach un-merges from Bolsa Chica/Coronado/Belmont Shore).
+GAP_B_BEACHES = [
+    {"arena_fid": 8606, "name": "Bolsa Chica State Beach", "city": "Huntington Beach",
+     "url": "https://www.parks.ca.gov/bolsachica/"},
+    {"arena_fid": 6202, "name": "Coronado Dog Beach", "city": "Coronado",
+     "url": "https://www.coronado.ca.us/757/Dogs"},
+    {"arena_fid": 8560, "name": "Del Mar Dog Beach", "city": "Del Mar",
+     "url": "https://www.delmar.ca.us/206/Dog-Friendly-Beaches"},
+    {"arena_fid": 6212, "name": "Huntington Dog Beach", "city": "Huntington Beach",
+     "url": "https://www.dogbeach.org/faq"},
+    {"arena_fid": 8901, "name": "Huntington City Beach", "city": "Huntington Beach",
+     "url": "https://www.surfcityusa.com/things-to-do/beaches/huntington-city-beach/"},
+    {"arena_fid": 8453, "name": "Huntington State Beach", "city": "Huntington Beach",
+     "url": "https://www.parks.ca.gov/huntington/"},
+    {"arena_fid": 8358, "name": "Ocean Beach Dog Beach", "city": "San Diego",
+     "url": "https://www.sandiego.gov/park-and-recreation/parks/dogs/bchdog"},
+    {"arena_fid": 6411, "name": "Rosie's Dog Beach", "city": "Long Beach",
+     "url": "https://www.longbeach.gov/park/park-and-facilities/directory/rosies-dog-beach"},
+]
+
+# Pick which set to run via env var; default to the original 3
+if os.environ.get("EXTRACT_SET") == "gap_b":
+    ORPHANS = GAP_B_BEACHES
+
 
 def fetch_html(url: str, timeout: int = 20) -> str | None:
     try:
@@ -106,18 +132,32 @@ def bs4_strip_loose(html: str) -> str:
 
 
 def lookup_legacy_fid_and_group(arena_fid: int) -> tuple[int | None, int | None]:
-    """For an arena POI fid, return (us_beach_points_fid, arena_group_id).
-    Source_id = 'poi/<legacy_fid>' for poi rows."""
+    """Return (us_beach_points_fid, arena_group_id) for a given arena_fid.
+    POI-anchored: parse fid from source_id 'poi/<fid>'.
+    OSM-anchored: borrow a sibling POI's fid from the same group."""
     rows = run_sql(f"""
-        select source_id, group_id
-          from public.arena
-         where fid = {arena_fid} and source_code = 'poi';
+        select source_code, source_id, group_id
+          from public.arena where fid = {arena_fid};
     """)
     if not rows:
         return None, None
-    src = rows[0]["source_id"] or ""
-    legacy = int(src.split("/", 1)[1]) if src.startswith("poi/") else None
-    return legacy, rows[0]["group_id"]
+    src_code, src_id, gid = rows[0]["source_code"], rows[0]["source_id"] or "", rows[0]["group_id"]
+
+    if src_code == "poi" and src_id.startswith("poi/"):
+        return int(src_id.split("/", 1)[1]), gid
+
+    # OSM-anchored: find any POI in the same group, take its fid
+    sib = run_sql(f"""
+        select source_id from public.arena
+         where group_id = {gid} and source_code = 'poi'
+         order by fid asc limit 1;
+    """)
+    if sib and sib[0]["source_id"].startswith("poi/"):
+        return int(sib[0]["source_id"].split("/", 1)[1]), gid
+
+    # No POI in group — synthesize a value from arena_fid (negative to avoid
+    # collision with real us_beach_points.fid). Schema mod alternative.
+    return -arena_fid, gid
 
 
 def insert_extractions(rows: list[dict], run_id: str):

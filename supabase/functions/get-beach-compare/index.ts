@@ -2,6 +2,11 @@
 // Returns all active beaches ranked by score for a given date.
 // GET ?date=2026-04-15
 // Returns: { date, beaches: RankedBeach[] }
+//
+// Path 3b-3: spine swap — reads from beaches_gold (758+ rows) instead
+// of public.beaches (14 rows). Beaches without scoring data render as
+// "no_data" cards on the frontend; the catalog is the source of truth
+// for what exists.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
@@ -24,46 +29,60 @@ Deno.serve(async (req: Request) => {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-  // All active beaches — include arena_group_id so callers can use the
-  // new spine key in URLs (path 3b).
+  // All active beaches from the catalog spine (beaches_gold).
   const { data: beaches, error: beachErr } = await supabase
-    .from("beaches")
-    .select("location_id, arena_group_id, display_name, latitude, longitude")
+    .from("beaches_gold")
+    .select("fid, name, display_name_override, lat, lon")
     .eq("is_active", true)
-    .order("display_name");
+    .order("name");
 
   if (beachErr || !beaches) return json({ error: "Failed to load beaches" }, 500);
 
-  // Day recommendations for all beaches on this date
+  // Legacy location_id slugs for the small set of beaches that still have
+  // a public.beaches row — kept on the response for BC with old frontend
+  // bookmarks. Goes away when public.beaches is dropped.
+  const fids = beaches.map(b => b.fid);
+  const { data: legacyRows } = await supabase
+    .from("beaches")
+    .select("arena_group_id, location_id")
+    .in("arena_group_id", fids);
+  const legacySlug: Record<number, string> = {};
+  for (const r of legacyRows ?? []) {
+    if (r.arena_group_id) legacySlug[r.arena_group_id] = r.location_id;
+  }
+
+  // Day recommendations for these beaches on this date — keyed on arena_group_id
   const { data: days, error: daysErr } = await supabase
     .from("beach_day_recommendations")
-    .select("location_id, day_status, best_window_label, go_hours_count, avg_wind, avg_tide_height, busyness_category, summary_weather")
-    .in("location_id", beaches.map(b => b.location_id))
+    .select("arena_group_id, day_status, best_window_label, go_hours_count, avg_wind, avg_tide_height, busyness_category, summary_weather")
+    .in("arena_group_id", fids)
     .eq("local_date", date);
 
   if (daysErr) return json({ error: daysErr.message }, 500);
 
-  // Hourly scores for best window hours only — for component score averaging
+  // Hourly scores for best window hours — keyed on arena_group_id
   const { data: hours, error: hoursErr } = await supabase
     .from("beach_day_hourly_scores")
-    .select("location_id, hour_score, explainability, hour_status")
-    .in("location_id", beaches.map(b => b.location_id))
+    .select("arena_group_id, hour_score, explainability, hour_status")
+    .in("arena_group_id", fids)
     .eq("local_date", date)
     .eq("is_in_best_window", true);
 
   if (hoursErr) return json({ error: hoursErr.message }, 500);
 
   // Build per-beach averaged component scores from best window hours
-  const scoresByLocation: Record<string, {
+  const scoresByFid: Record<number, {
     hours: number; tide: number; wind: number; crowd: number; rain: number; temp: number; composite: number;
   }> = {};
 
   for (const h of hours ?? []) {
+    const fid = h.arena_group_id as number;
+    if (!fid) continue;
     const ex = h.explainability as Record<string, number> ?? {};
-    if (!scoresByLocation[h.location_id]) {
-      scoresByLocation[h.location_id] = { hours: 0, tide: 0, wind: 0, crowd: 0, rain: 0, temp: 0, composite: 0 };
+    if (!scoresByFid[fid]) {
+      scoresByFid[fid] = { hours: 0, tide: 0, wind: 0, crowd: 0, rain: 0, temp: 0, composite: 0 };
     }
-    const s = scoresByLocation[h.location_id];
+    const s = scoresByFid[fid];
     s.hours++;
     s.tide      += ex.tide_score  ?? 0;
     s.wind      += ex.wind_score  ?? 0;
@@ -74,8 +93,8 @@ Deno.serve(async (req: Request) => {
   }
 
   // Average them
-  for (const loc in scoresByLocation) {
-    const s = scoresByLocation[loc];
+  for (const fid in scoresByFid) {
+    const s = scoresByFid[fid];
     if (s.hours > 0) {
       s.tide      = s.tide      / s.hours;
       s.wind      = s.wind      / s.hours;
@@ -87,17 +106,17 @@ Deno.serve(async (req: Request) => {
   }
 
   // Assemble ranked results
-  const dayMap = Object.fromEntries((days ?? []).map(d => [d.location_id, d]));
+  const dayMap = Object.fromEntries((days ?? []).map(d => [d.arena_group_id, d]));
 
   const ranked = beaches.map(beach => {
-    const day    = dayMap[beach.location_id];
-    const scores = scoresByLocation[beach.location_id];
+    const day    = dayMap[beach.fid];
+    const scores = scoresByFid[beach.fid];
     return {
-      location_id:       beach.location_id,
-      arena_group_id:    beach.arena_group_id ?? null,
-      display_name:      beach.display_name,
-      latitude:          beach.latitude,
-      longitude:         beach.longitude,
+      location_id:       legacySlug[beach.fid] ?? null,
+      arena_group_id:    beach.fid,
+      display_name:      beach.display_name_override ?? beach.name,
+      latitude:          beach.lat,
+      longitude:         beach.lon,
       day_status:        day?.day_status ?? "no_data",
       best_window_label: day?.best_window_label ?? null,
       go_hours_count:    day?.go_hours_count ?? 0,

@@ -32,24 +32,47 @@ Deno.serve(async (req: Request) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
     const nowUtc   = new Date();
 
-    // Beach metadata — resolve by either key (path 3b dual-input).
-    let beachQuery = supabase.from("beaches")
-      .select("location_id, display_name, timezone, address, website, arena_group_id")
-      .limit(1);
+    // Resolve to fid (arena_group_id is the spine PK).
+    let fid: number | null = null;
     if (arenaGroupIdParam) {
-      const fid = parseInt(arenaGroupIdParam, 10);
-      if (!Number.isFinite(fid)) return json({ error: "Invalid arena_group_id" }, 400);
-      beachQuery = beachQuery.eq("arena_group_id", fid);
+      const parsed = parseInt(arenaGroupIdParam, 10);
+      if (!Number.isFinite(parsed)) return json({ error: "Invalid arena_group_id" }, 400);
+      fid = parsed;
     } else {
-      beachQuery = beachQuery.eq("location_id", locationIdParam ?? "huntington-dog-beach");
+      const slug = locationIdParam ?? "huntington-dog-beach";
+      const { data: legacyRow } = await supabase
+        .from("beaches")
+        .select("arena_group_id")
+        .eq("location_id", slug)
+        .limit(1);
+      fid = legacyRow?.[0]?.arena_group_id ?? null;
+      if (!fid) return json({ error: "Beach not found (no arena mapping for slug)" }, 404);
     }
-    const { data: beachRows, error: beachErr } = await beachQuery;
-    const beach = beachRows?.[0];
 
-    if (beachErr || !beach) {
-      return json({ error: "Beach not found" }, 404);
-    }
-    const locationId = beach.location_id;  // canonical key used downstream
+    // Beach metadata from the spine; website pulled from public.beaches
+    // when available (legacy curated beaches only).
+    const [{ data: goldRows, error: goldErr }, { data: legacyMetaRows }] = await Promise.all([
+      supabase.from("beaches_gold")
+        .select("fid, name, display_name_override, timezone, address")
+        .eq("fid", fid)
+        .limit(1),
+      supabase.from("beaches")
+        .select("location_id, website, arena_group_id")
+        .eq("arena_group_id", fid)
+        .limit(1),
+    ]);
+    const gold = goldRows?.[0];
+    if (goldErr || !gold) return json({ error: "Beach not found" }, 404);
+    const legacyMeta = legacyMetaRows?.[0];
+    const beach = {
+      location_id:     legacyMeta?.location_id ?? null,
+      arena_group_id:  gold.fid,
+      display_name:    gold.display_name_override ?? gold.name,
+      timezone:        gold.timezone ?? "America/Los_Angeles",
+      address:         gold.address ?? null,
+      website:         legacyMeta?.website ?? null,
+    };
+    const locationId = beach.location_id;  // may be null for non-curated
 
     // Derive today's local date + hour from beach timezone (never use UTC date)
     const localParts = new Intl.DateTimeFormat("en-US", {
@@ -62,14 +85,14 @@ Deno.serve(async (req: Request) => {
     const isToday        = date === today;
     const currentLocalHour = isToday ? parseInt(getPart("hour")) % 24 : 0;
 
-    // Daily recommendation + hourly scores in parallel
+    // Daily recommendation + hourly scores in parallel (keyed on arena_group_id)
     const [{ data: day, error: dayErr }, { data: hours, error: hoursErr }] = await Promise.all([
       supabase
         .from("beach_day_recommendations")
         .select("*")
-        .eq("location_id", locationId)
+        .eq("arena_group_id", fid)
         .eq("local_date", date)
-        .single(),
+        .maybeSingle(),
       supabase
         .from("beach_day_hourly_scores")
         .select(
@@ -80,14 +103,16 @@ Deno.serve(async (req: Request) => {
           "tide_status, wind_status, crowd_status, rain_status, temp_status, uv_status, " +
           "temp_cold_status, temp_hot_status, sand_temp, asphalt_temp, sand_status, asphalt_status"
         )
-        .eq("location_id", locationId)
+        .eq("arena_group_id", fid)
         .eq("local_date", date)
         .eq("is_daylight", true)
         .order("local_hour", { ascending: true }),
     ]);
 
-    if (dayErr || !day) return json({ error: "No recommendation found for this date" }, 404);
+    if (dayErr) return json({ error: dayErr.message }, 500);
     if (hoursErr)        return json({ error: hoursErr.message }, 500);
+    // day may be null for non-curated beaches with no scoring data; let
+    // frontend render the metadata-only state.
 
     // LLM-extracted policy/amenity metadata via the arena bridge.
     // Best-effort: if no arena_group_id (e.g., OR beach), or no extraction

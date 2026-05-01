@@ -618,19 +618,24 @@
       // client-side haversine path.
       const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
       const beachList = (await loadBeachesForDate(todayISO))
-        .map(b => ({ location_id: b.location_id, arena_group_id: b.arena_group_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule, distance_m: b.distance_m }));
+        .map(b => ({ location_id: b.location_id, arena_group_id: b.arena_group_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule, distance_m: b.distance_m, day_status: b.day_status, composite_score: b.composite_score }));
 
       const filteredBeachList = beachList.filter(b => matchesLeashFilter(b));
 
+      // Only fetch live NOW data for beaches that have scoring (curated set).
+      // For unscored beaches in the catalog (gold-only, no daily-beach-refresh
+      // run yet), skip the get-beach-now call — the card renders from
+      // composite_score directly.
+      const hasScoring = b => b.day_status && b.day_status !== 'no_data';
       const results = await Promise.all(
         filteredBeachList.map(b =>
-          // Prefer arena_group_id (path 3b); fall back to location_id for any
-          // legacy rows that haven't been bridged yet.
-          fetch(`${SUPABASE_URL}/functions/v1/get-beach-now?${b.arena_group_id ? 'arena_group_id=' + b.arena_group_id : 'location_id=' + b.location_id}`,
-            { headers: { 'Authorization': `Bearer ${ANON_KEY}` } })
-            .then(r => r.json())
-            .then(d => ({ beach: b, day: nowToDay(d) }))
-            .catch(() => ({ beach: b, day: null }))
+          hasScoring(b)
+            ? fetch(`${SUPABASE_URL}/functions/v1/get-beach-now?${b.arena_group_id ? 'arena_group_id=' + b.arena_group_id : 'location_id=' + b.location_id}`,
+                { headers: { 'Authorization': `Bearer ${ANON_KEY}` } })
+                .then(r => r.json())
+                .then(d => ({ beach: b, day: nowToDay(d) }))
+                .catch(() => ({ beach: b, day: null }))
+            : Promise.resolve({ beach: b, day: null })
         )
       );
       nowBeaches = results;

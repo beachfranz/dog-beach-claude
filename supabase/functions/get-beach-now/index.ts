@@ -187,12 +187,13 @@ async function refreshNow(
 
 function buildNowRow(
   h: ScoredHour,
-  beach: { location_id: string; timezone: string },
+  beach: { location_id: string; timezone: string; arena_group_id?: number | null },
   config: { scoring_version: string },
   runAt: Date,
 ) {
   return {
     location_id:           beach.location_id,
+    arena_group_id:        beach.arena_group_id ?? null,
     local_date:            h.localDate,
     forecast_ts:           h.forecastTs,
     local_hour:            h.localHour,

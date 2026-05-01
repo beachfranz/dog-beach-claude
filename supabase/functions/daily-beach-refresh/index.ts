@@ -27,6 +27,7 @@ type BacteriaRisk     = "none" | "low" | "moderate" | "high";
 
 interface Beach {
   location_id: string;
+  arena_group_id: number | null;   // path 3a dual-key bridge to beaches_gold
   display_name: string;
   latitude: number;
   longitude: number;
@@ -450,6 +451,7 @@ function buildHourlyRow(
 ) {
   return {
     location_id:           beach.location_id,
+    arena_group_id:        beach.arena_group_id ?? null,
     local_date:            h.localDate,
     forecast_ts:           h.forecastTs,
     local_hour:            h.localHour,
@@ -550,6 +552,7 @@ function buildDailyRow(
 
   return {
     location_id:           beach.location_id,
+    arena_group_id:        beach.arena_group_id ?? null,
     local_date:            date,
     day_status:            dayStatus,
     best_window_start_ts:  window?.startTs ?? null,

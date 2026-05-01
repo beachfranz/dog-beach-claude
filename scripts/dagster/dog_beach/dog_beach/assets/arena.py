@@ -512,7 +512,7 @@ def poi_landing_load_run(context: AssetExecutionContext,
                 "Idempotent: only updates rows where address_source "
                 "is null/csv and validation isn't 'ok'.",
     group_name="ingest_arena_heavy",
-    kinds={"python", "google_maps", "$"},
+    kinds={"python", "google_maps", "paid_api"},
     deps=[AssetKey(["public", "poi_landing"])],
 )
 def poi_landing_reverse_geocode_run(context: AssetExecutionContext,
@@ -621,7 +621,7 @@ def arena_audit_run(context: AssetExecutionContext,
                 "EXTRACT_SET=gap_b env var to run on the 8 active CA "
                 "consumer beaches instead of the original 3 orphans.",
     group_name="ingest_metadata_heavy",
-    kinds={"python", "anthropic", "$"},
+    kinds={"python", "anthropic", "paid_api"},
     deps=[
         AssetKey(["public", "beach_policy_extractions"]),
         AssetKey(["public", "extraction_prompt_variants"]),

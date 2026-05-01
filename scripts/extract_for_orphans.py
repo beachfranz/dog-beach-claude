@@ -99,13 +99,82 @@ GAP_B_BEACHES = [
      "url": "https://www.longbeach.gov/park/park-and-facilities/directory/rosies-dog-beach"},
 ]
 
+# Tier 2 picks (2026-05-01). 26 beaches from admin/_tier2_picklist.md.
+# URLs sourced from park_url_extractions where available; manually filled
+# (marked MANUAL) for the 4 with no/wrong DB hits. Run with EXTRACT_SET=tier2
+# (just these 26) or EXTRACT_SET=tier1 (all 37 = orphans + Gap B + Tier 2).
+TIER2_BEACHES = [
+    # NPS / federal (4)
+    {"arena_fid": 8865, "name": "Limantour Beach", "city": "Marin (Point Reyes NS)",
+     "url": "http://www.nps.gov/pore/index.htm"},
+    {"arena_fid": 8758, "name": "Fort Funston", "city": "San Francisco (GGNRA)",
+     "url": "http://www.nps.gov/goga/index.htm"},
+    {"arena_fid": 8536, "name": "Tennessee Beach", "city": "Marin (GGNRA)",
+     "url": "http://www.nps.gov/goga/index.htm"},
+    {"arena_fid": 5946, "name": "Cuyler Harbor Beach Landing", "city": "Channel Islands NP",
+     "url": "http://www.nps.gov/chis/index.htm"},
+    # LA basin (4)
+    {"arena_fid": 8472, "name": "Will Rogers State Beach", "city": "Pacific Palisades",
+     "url": "https://www.parks.ca.gov/?page_id=625"},
+    {"arena_fid": 8246, "name": "Santa Monica State Beach", "city": "Santa Monica",
+     "url": "https://www.smgov.net/portals/beach/"},
+    {"arena_fid": 8247, "name": "Venice Beach", "city": "Los Angeles",
+     "url": "https://beaches.lacounty.gov/venice-beach/"},  # MANUAL
+    {"arena_fid": 8475, "name": "Malibu Lagoon State Beach", "city": "Malibu",
+     "url": "https://www.parks.ca.gov/?page_id=835"},
+    # SD city beaches (4)
+    {"arena_fid": 8359, "name": "Ocean Beach", "city": "San Diego",
+     "url": "https://www.sandiego.gov/lifeguards/beaches/ob"},  # MANUAL
+    {"arena_fid": 8347, "name": "La Jolla Shores", "city": "San Diego",
+     "url": "https://www.sandiego.gov/park-and-recreation/parks/regional/shoreline/kelloggpark"},
+    {"arena_fid": 8348, "name": "La Jolla Cove", "city": "San Diego",
+     "url": "https://www.sandiego.gov/park-and-recreation/parks/regional/shoreline/ebscripps"},
+    {"arena_fid": 8341, "name": "Cardiff State Beach", "city": "Encinitas",
+     "url": "https://www.parks.ca.gov/?page_id=662"},
+    # SF Bay urban / Marin (3)
+    {"arena_fid": 8260, "name": "Baker Beach", "city": "San Francisco (Presidio)",
+     "url": "http://www.nps.gov/prsf/planyourvisit/baker-beach.htm"},
+    {"arena_fid": 8226, "name": "Seal Rocks Beach", "city": "San Francisco (GGNRA Lands End)",
+     "url": "http://www.nps.gov/goga/index.htm"},
+    {"arena_fid": 8236, "name": "Stinson Beach", "city": "Marin (GGNRA)",
+     "url": "http://www.nps.gov/goga/index.htm"},  # GGNRA generic (initial guess 404'd)
+    # Central Coast state-park spectrum (5)
+    {"arena_fid": 9302, "name": "Asilomar State Beach", "city": "Pacific Grove",
+     "url": "https://www.parks.ca.gov/?page_id=566"},
+    {"arena_fid": 8287, "name": "Carmel River State Beach", "city": "Carmel",
+     "url": "https://www.parks.ca.gov/?page_id=567"},
+    {"arena_fid": 8480, "name": "Montara State Beach", "city": "Montara",
+     "url": "https://www.parks.ca.gov/?page_id=532"},
+    {"arena_fid": 8607, "name": "Pacifica State Beach", "city": "Pacifica",
+     "url": "https://www.parks.ca.gov/?page_id=524"},
+    {"arena_fid": 8394, "name": "Pismo State Beach", "city": "Pismo Beach",
+     "url": "https://www.parks.ca.gov/?page_id=595"},
+    # Santa Cruz (3)
+    {"arena_fid": 8300, "name": "Cowell Beach", "city": "Santa Cruz",
+     "url": "https://www.santacruz.org/beaches/cowell-beach/"},  # tourism site (city site 403'd)
+    {"arena_fid": 8210, "name": "Natural Bridges State Beach", "city": "Santa Cruz",
+     "url": "https://www.parks.ca.gov/?page_id=541"},
+    {"arena_fid": 8243, "name": "New Brighton State Beach", "city": "Capitola",
+     "url": "https://www.parks.ca.gov/?page_id=543"},
+    # SB / Ventura state parks (3)
+    {"arena_fid": 8673, "name": "Carpinteria State Beach", "city": "Carpinteria",
+     "url": "https://www.parks.ca.gov/?page_id=599"},
+    {"arena_fid": 5939, "name": "Refugio State Beach", "city": "Goleta",
+     "url": "https://www.parks.ca.gov/?page_id=603"},
+    {"arena_fid": 8490, "name": "San Buenaventura State Beach", "city": "Ventura",
+     "url": "https://www.parks.ca.gov/?page_id=600"},
+]
+
 # Pick which set to run via env var; default to the original 3
 _set = os.environ.get("EXTRACT_SET")
 if _set == "gap_b":
     ORPHANS = GAP_B_BEACHES
 elif _set == "tier1":
-    # Original 3 orphans + 8 Gap B = 11 active gold-set beaches
-    ORPHANS = list(ORPHANS) + list(GAP_B_BEACHES)
+    # Original 3 orphans + 8 Gap B + 26 Tier 2 = 37 gold-set beaches
+    ORPHANS = list(ORPHANS) + list(GAP_B_BEACHES) + list(TIER2_BEACHES)
+elif _set == "tier2":
+    # Just the 26 new Tier 2 picks (skip already-extracted Tier 1)
+    ORPHANS = TIER2_BEACHES
 
 # Optional single-beach filter for one-off retries
 _only = os.environ.get("ONLY_ARENA_FID")
@@ -164,9 +233,10 @@ def lookup_legacy_fid_and_group(arena_fid: int) -> tuple[int | None, int | None]
     if sib and sib[0]["source_id"].startswith("poi/"):
         return int(sib[0]["source_id"].split("/", 1)[1]), gid
 
-    # No POI in group — synthesize a value from arena_fid (negative to avoid
-    # collision with real us_beach_points.fid). Schema mod alternative.
-    return -arena_fid, gid
+    # No POI in group — return None to skip; the FK to us_beach_points would
+    # reject any synthesized value. (Stinson 8236 hits this; needs manual
+    # placeholder row in us_beach_points or schema relaxation to extract.)
+    return None, gid
 
 
 def insert_extractions(rows: list[dict], run_id: str):

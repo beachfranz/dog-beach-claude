@@ -679,8 +679,14 @@
 
   function selectLocation(locationId) {
     currentLocation = locationId;
+    // Clear stale arena_group_id (caller landed via ?fid= but is now
+    // switching to a different beach by slug). The next API response
+    // will re-hydrate it for THIS beach.
+    currentArenaGroupId = null;
     try { localStorage.setItem(LAST_PICK_KEY, locationId); } catch { /* storage may be blocked */ }
     const url = new URL(window.location);
+    url.searchParams.delete('fid');
+    url.searchParams.delete('arena_group_id');
     url.searchParams.set('location', currentLocation);
     window.history.pushState({}, '', url);
     document.getElementById('location-menu').style.display = 'none';
@@ -702,10 +708,14 @@
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
-      // Hydrate locationId for chat etc. when caller arrived via ?fid=
+      // Hydrate the missing key after API resolves so subsequent
+      // calls + outbound links use the new spine consistently.
       if (!currentLocation && d.location_id) {
         currentLocation = d.location_id;
         loadScoutBlurb(currentLocation);
+      }
+      if (!currentArenaGroupId && d.arena_group_id) {
+        currentArenaGroupId = d.arena_group_id;
       }
       if (!d.is_daylight) { container.innerHTML = ''; return; }
       container.innerHTML = buildDayCard(nowToDay(d), -1);
@@ -763,9 +773,13 @@
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      // Hydrate locationId from API response if caller arrived via ?fid=
+      // Hydrate either missing key from the API response so subsequent
+      // calls + outbound links use the new spine consistently.
       if (!currentLocation && data?.beach?.location_id) {
         currentLocation = data.beach.location_id;
+      }
+      if (!currentArenaGroupId && data?.beach?.arena_group_id) {
+        currentArenaGroupId = data.beach.arena_group_id;
       }
       render(data);
     } catch (err) {

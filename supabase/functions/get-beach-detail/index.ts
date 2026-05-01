@@ -91,7 +91,8 @@ Deno.serve(async (req: Request) => {
           "dogs_allowed, dogs_leash_required, dogs_off_leash_area, " +
           "dogs_seasonal_restrictions, dogs_time_restrictions, " +
           "dogs_policy_notes, dogs_allowed_areas, " +
-          "hours_text, has_parking, parking_type, has_drinking_water, " +
+          "hours_text, public_access, access_text, " +
+          "parking_type, " +
           "extracted_address, best_address"
         )
         .eq("arena_group_id", beach.arena_group_id)

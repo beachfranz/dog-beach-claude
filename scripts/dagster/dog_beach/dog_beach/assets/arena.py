@@ -204,21 +204,24 @@ def arena_beach_metadata(context: AssetExecutionContext,
             select count(*) total,
                    count(*) filter (where dogs_allowed is not null) has_dogs,
                    count(*) filter (where hours_text is not null) has_hours,
-                   count(*) filter (where has_parking is not null) has_park,
+                   count(*) filter (where parking_type is not null) has_parking,
+                   count(*) filter (where public_access is not null) has_access,
                    count(*) filter (where extracted_address is not null) has_addr,
                    count(*) filter (where dogs_allowed is not null
                                  or hours_text is not null
-                                 or has_parking is not null) any_meta
+                                 or parking_type is not null
+                                 or public_access is not null) any_meta
               from public.arena_beach_metadata
         """)
         r = cur.fetchone()
     return Output(None, metadata={
-        "total_beaches":   MetadataValue.int(r[0]),
-        "with_dogs_field": MetadataValue.int(r[1]),
-        "with_hours":      MetadataValue.int(r[2]),
-        "with_parking":    MetadataValue.int(r[3]),
-        "with_extracted_address": MetadataValue.int(r[4]),
-        "any_metadata":    MetadataValue.int(r[5]),
+        "total_beaches":           MetadataValue.int(r[0]),
+        "with_dogs_field":         MetadataValue.int(r[1]),
+        "with_hours":              MetadataValue.int(r[2]),
+        "with_parking":            MetadataValue.int(r[3]),
+        "with_public_access":      MetadataValue.int(r[4]),
+        "with_extracted_address":  MetadataValue.int(r[5]),
+        "any_metadata":            MetadataValue.int(r[6]),
     })
 
 
@@ -318,12 +321,14 @@ def city_policy_sources(context: AssetExecutionContext,
                 "(beach, field, variant, run). Carries fid (legacy "
                 "us_beach_points) AND arena_group_id (canonical beach "
                 "identity, backfilled 2026-05-01). raw_response, "
-                "parsed_value, evidence_quote, tokens, latency.",
+                "parsed_value, evidence_quote, tokens, latency. "
+                "Produced by extract_for_orphans_run; consumed by "
+                "arena_beach_metadata view → get-beach-detail edge "
+                "function → detail.html.",
     group_name="ingest_metadata",
     kinds={"sql", "table"},
     deps=[
-        AssetKey(["public", "extraction_prompt_variants"]),
-        AssetKey(["public", "city_policy_sources"]),
+        AssetKey(["extract_for_orphans_run"]),
     ],
 )
 def beach_policy_extractions(context: AssetExecutionContext,
@@ -614,17 +619,19 @@ def arena_audit_run(context: AssetExecutionContext,
 
 
 @asset(
-    description="Run scripts/extract_for_orphans.py — surgical per-orphan "
-                "LLM extraction. Hits Anthropic API (~$0.40 per beach × "
-                "42 variants). Use --apply to write to "
-                "beach_policy_extractions; default is dry-run. Set "
-                "EXTRACT_SET=gap_b env var to run on the 8 active CA "
-                "consumer beaches instead of the original 3 orphans.",
+    description="Run scripts/extract_for_orphans.py — LLM extraction "
+                "against active prompt variants × beach URLs. Hits "
+                "Anthropic API. Writes to beach_policy_extractions. "
+                "Env vars: EXTRACT_SET=gap_b (8 consumer beaches), "
+                "EXTRACT_SET=tier1 (all 11 gold-set beaches), unset = "
+                "the original 3 orphans. FIELD_NAMES=a,b,c restricts "
+                "to a subset of fields (e.g. for redesign re-runs).",
     group_name="ingest_metadata_heavy",
     kinds={"python", "anthropic", "paid_api"},
     deps=[
-        AssetKey(["public", "beach_policy_extractions"]),
         AssetKey(["public", "extraction_prompt_variants"]),
+        AssetKey(["public", "city_policy_sources"]),
+        AssetKey(["public", "arena"]),
     ],
 )
 def extract_for_orphans_run(context: AssetExecutionContext,

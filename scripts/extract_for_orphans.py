@@ -100,8 +100,17 @@ GAP_B_BEACHES = [
 ]
 
 # Pick which set to run via env var; default to the original 3
-if os.environ.get("EXTRACT_SET") == "gap_b":
+_set = os.environ.get("EXTRACT_SET")
+if _set == "gap_b":
     ORPHANS = GAP_B_BEACHES
+elif _set == "tier1":
+    # Original 3 orphans + 8 Gap B = 11 active gold-set beaches
+    ORPHANS = list(ORPHANS) + list(GAP_B_BEACHES)
+
+# Optional single-beach filter for one-off retries
+_only = os.environ.get("ONLY_ARENA_FID")
+if _only:
+    ORPHANS = [o for o in ORPHANS if str(o["arena_fid"]) == _only]
 
 
 def fetch_html(url: str, timeout: int = 20) -> str | None:
@@ -228,14 +237,27 @@ def main() -> int:
         sys.exit("ANTHROPIC_API_KEY missing")
     client = Anthropic(api_key=api_key)
 
-    variants = run_sql("""
-        select id, field_name, variant_key, prompt_template,
-               expected_shape, target_model
-        from public.extraction_prompt_variants
-        where active = true
-        order by target_model, field_name, variant_key;
-    """)
-    print(f"loaded {len(variants)} active variants")
+    field_filter = os.environ.get("FIELD_NAMES")  # comma-separated; restricts to these field_names if set
+    if field_filter:
+        names = [n.strip() for n in field_filter.split(",") if n.strip()]
+        in_clause = ",".join(sql_literal(n) for n in names)
+        variants = run_sql(f"""
+            select id, field_name, variant_key, prompt_template,
+                   expected_shape, target_model
+            from public.extraction_prompt_variants
+            where active = true and field_name in ({in_clause})
+            order by target_model, field_name, variant_key;
+        """)
+        print(f"loaded {len(variants)} active variants (filtered to {names})")
+    else:
+        variants = run_sql("""
+            select id, field_name, variant_key, prompt_template,
+                   expected_shape, target_model
+            from public.extraction_prompt_variants
+            where active = true
+            order by target_model, field_name, variant_key;
+        """)
+        print(f"loaded {len(variants)} active variants")
 
     run_id = f"orphan-{uuid.uuid4().hex[:8]}"
     print(f"run_id = {run_id}\n")

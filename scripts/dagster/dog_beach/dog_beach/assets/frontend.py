@@ -40,13 +40,17 @@ get_beach_detail = AssetSpec(
     key=AssetKey(["edge", "get_beach_detail"]),
     description="GET /functions/v1/get-beach-detail?location_id=<id>"
                 "&date=<YYYY-MM-DD>. Returns hour-by-hour scoring for "
-                "one beach on one day, plus the beach metadata and "
-                "day-level rollup.",
+                "one beach on one day, the day-level rollup, AND "
+                "LLM-extracted policy/amenity metadata via the "
+                "beaches.arena_group_id → arena_beach_metadata bridge "
+                "(dogs_*, public_access, parking_type, hours_text, "
+                "raw_address).",
     group_name="consumer_api",
     kinds={"edge_function", "deno"},
     deps=[AssetKey(["public", "beaches"]),
           AssetKey(["beach_day_hourly_scores"]),
-          AssetKey(["beach_day_recommendations"])],
+          AssetKey(["beach_day_recommendations"]),
+          AssetKey(["public", "arena_beach_metadata"])],
 )
 
 get_beach_compare = AssetSpec(
@@ -63,13 +67,17 @@ get_beach_compare = AssetSpec(
 
 beach_chat = AssetSpec(
     key=AssetKey(["edge", "beach_chat"]),
-    description="POST /functions/v1/beach-chat. Anthropic-backed chat "
-                "endpoint with beach + day context injected into the "
-                "system prompt. Rate-limited via chat_rate_limits.",
+    description="POST /functions/v1/beach-chat. Anthropic-backed Scout "
+                "chat endpoint with beach + day context AND LLM-extracted "
+                "dog policy injected into the system prompt as hard "
+                "constraints (e.g. 'don't suggest off-leash where "
+                "dogs_leash_required=required'). Rate-limited via "
+                "chat_rate_limits.",
     group_name="consumer_api",
     kinds={"edge_function", "deno", "anthropic"},
     deps=[AssetKey(["public", "beaches"]),
-          AssetKey(["beach_day_recommendations"])],
+          AssetKey(["beach_day_recommendations"]),
+          AssetKey(["public", "arena_beach_metadata"])],
 )
 
 

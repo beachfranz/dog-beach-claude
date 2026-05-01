@@ -67,7 +67,13 @@
     background: #2a1a1a;
     border-color: var(--bad);
   }
+  .card.viewed { border-left: 3px solid var(--accent); }
   .card .name { font-size: 17px; font-weight: 600; }
+  .card .name .checkmark {
+    color: var(--accent); margin-left: 8px; font-weight: 700;
+    opacity: 0; transition: opacity 0.15s;
+  }
+  .card.viewed .name .checkmark { opacity: 1; }
   .card .meta { color: var(--muted); font-size: 13px; margin-top: 4px; }
   .card .meta .pill {
     display: inline-block;
@@ -256,9 +262,19 @@ const ROWS = [
 ];
 
 // ── State ─────────────────────────────────────────────────────────────────
-// fid → { active: bool, reason: string }
+// fid → { active: bool, reason: string, viewed: bool }
+const VIEWED_KEY = 'poi_spotcheck_viewed';
+const viewedSet = new Set(JSON.parse(localStorage.getItem(VIEWED_KEY) || '[]'));
 const state = {};
-for (const r of ROWS) state[r.fid] = { active: true, reason: 'not_a_beach' };
+for (const r of ROWS) state[r.fid] = { active: true, reason: 'not_a_beach', viewed: viewedSet.has(r.fid) };
+
+function markViewed(fid) {
+  state[fid].viewed = true;
+  viewedSet.add(fid);
+  localStorage.setItem(VIEWED_KEY, JSON.stringify([...viewedSet]));
+  document.getElementById(`card-${fid}`)?.classList.add('viewed');
+  updateSaveBtn();
+}
 
 // ── Render ────────────────────────────────────────────────────────────────
 function render() {
@@ -267,20 +283,23 @@ function render() {
   for (const r of ROWS) {
     const s = state[r.fid];
     const card = document.createElement('div');
-    card.className = 'card' + (s.active ? '' : ' toggled-inactive');
+    let cls = 'card';
+    if (!s.active) cls += ' toggled-inactive';
+    if (s.viewed) cls += ' viewed';
+    card.className = cls;
     card.id = `card-${r.fid}`;
 
     const left = document.createElement('div');
     left.innerHTML = `
-      <div class="name">${escapeHtml(r.display_name || r.name)}</div>
+      <div class="name">${escapeHtml(r.display_name || r.name)}<span class="checkmark">✓</span></div>
       <div class="meta">
         <span class="pill">${escapeHtml(r.county)}</span>
         <span class="pill">${escapeHtml(r.addr_source)}</span>
         <span>${escapeHtml(r.address)}</span>
       </div>
       <div class="links">
-        <a href="https://www.google.com/maps/place/${r.lat},${r.lon}/@${r.lat},${r.lon},18z" target="_blank" rel="noopener">Google Maps</a>
-        <a href="https://www.google.com/maps/@${r.lat},${r.lon},90m/data=!3m1!1e3" target="_blank" rel="noopener">Satellite</a>
+        <a href="https://www.google.com/maps/place/${r.lat},${r.lon}/@${r.lat},${r.lon},18z" target="_blank" rel="noopener" onclick="markViewed(${r.fid})">Google Maps</a>
+        <a href="https://www.google.com/maps/@${r.lat},${r.lon},90m/data=!3m1!1e3" target="_blank" rel="noopener" onclick="markViewed(${r.fid})">Satellite</a>
         <span style="color:var(--muted)">${r.lat.toFixed(5)}, ${r.lon.toFixed(5)}</span>
       </div>
     `;
@@ -313,15 +332,19 @@ function toggle(fid) {
 }
 
 function resetAll() {
-  for (const fid in state) { state[fid].active = true; state[fid].reason = 'not_a_beach'; }
+  for (const fid in state) { state[fid].active = true; state[fid].reason = 'not_a_beach'; state[fid].viewed = false; }
+  viewedSet.clear();
+  localStorage.removeItem(VIEWED_KEY);
   render();
 }
 
 function updateSaveBtn() {
   const toggled = ROWS.filter(r => !state[r.fid].active).length;
+  const viewed  = ROWS.filter(r =>  state[r.fid].viewed ).length;
   const btn = document.getElementById('save-btn');
   btn.textContent = `Save (${toggled})`;
   btn.disabled = toggled === 0;
+  document.getElementById('stats').textContent = `${ROWS.length} rows · ${viewed} viewed · ${toggled} toggled`;
 }
 
 // ── Save → SQL output ─────────────────────────────────────────────────────

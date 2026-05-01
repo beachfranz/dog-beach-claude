@@ -303,6 +303,29 @@
     }
     .product-chip:hover { color: var(--blue); text-decoration: underline; }
 
+    /* Policy badges — leash policy + hours sourced from LLM extractions
+       via arena_beach_metadata. Color-coded by leash strictness. */
+    .policy-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .policy-badge {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 3px 9px;
+      border-radius: 999px;
+      border: 1px solid currentColor;
+      white-space: nowrap;
+    }
+    .policy-badge.leash-required  { color: #2563eb; background: rgba(37,99,235,0.08); }
+    .policy-badge.leash-mixed     { color: #f59e0b; background: rgba(245,158,11,0.08); }
+    .policy-badge.leash-off       { color: #16a34a; background: rgba(22,163,74,0.08); }
+    .policy-badge.leash-no-dogs   { color: #ef4444; background: rgba(239,68,68,0.08); }
+    .policy-badge.hours           { color: var(--text-muted); background: rgba(0,0,0,0.04); border-color: var(--text-muted); }
+
     /* ── Tooltip ─────────────────────────────────────────────────── */
     .bar-col { position: relative; }
 
@@ -459,7 +482,7 @@
   }
 
   // ── Render ────────────────────────────────────────────────────────
-  function render({ beach, day, hours }) {
+  function render({ beach, day, hours, metadata }) {
     // Header
     const dateObj  = new Date(date + 'T12:00:00');
     const dayName  = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
@@ -487,6 +510,16 @@
     chipStrip.className = 'product-chips';
     chipStrip.innerHTML = buildChipStripHtml(day, hours);
     document.getElementById('header-left').appendChild(chipStrip);
+
+    // LLM-extracted policy badges (leash + hours). Only renders if
+    // arena_beach_metadata had a non-null value for the field.
+    const policyBadges = buildPolicyBadgesHtml(metadata);
+    if (policyBadges) {
+      const badgeRow = document.createElement('div');
+      badgeRow.className = 'policy-badges';
+      badgeRow.innerHTML = policyBadges;
+      document.getElementById('header-left').appendChild(badgeRow);
+    }
 
     loadScoutBlurb(locationId, date, day, hours);
 
@@ -971,6 +1004,46 @@
 
   function chipHtml(def) {
     return `<a class="product-chip" href="${def.href}" target="_blank" rel="noopener noreferrer">[ ${def.icon} ${def.label} ]</a>`;
+  }
+
+  // ── Policy badges (LLM-extracted) ──────────────────────────────────
+  // Reads metadata.dogs_leash_required + metadata.hours_text from the
+  // arena_beach_metadata view. Returns '' if nothing meaningful to show.
+  function buildPolicyBadgesHtml(metadata) {
+    if (!metadata) return '';
+    const badges = [];
+
+    // Leash badge — color coded by strictness
+    const leash = (metadata.dogs_leash_required || '').toLowerCase();
+    const dogs  = (metadata.dogs_allowed || '').toLowerCase();
+    if (dogs === 'no') {
+      badges.push(`<span class="policy-badge leash-no-dogs">🚫 No Dogs</span>`);
+    } else if (leash === 'required') {
+      badges.push(`<span class="policy-badge leash-required" title="${escAttr(metadata.dogs_policy_notes)}">🐾 Leashed</span>`);
+    } else if (leash === 'optional' || leash === 'off_leash' || leash === 'off-leash') {
+      badges.push(`<span class="policy-badge leash-off" title="${escAttr(metadata.dogs_policy_notes)}">🐾 Off-Leash</span>`);
+    } else if (leash === 'mixed_by_zone') {
+      badges.push(`<span class="policy-badge leash-mixed" title="${escAttr(metadata.dogs_policy_notes)}">🐾 Mixed by Zone</span>`);
+    } else if (leash === 'varies_by_time') {
+      badges.push(`<span class="policy-badge leash-mixed" title="${escAttr(metadata.dogs_policy_notes)}">🐾 Varies by Time</span>`);
+    }
+
+    // Hours badge — show if we have a reasonable text, suppress if it's
+    // long prose (LLM occasionally returns sentences instead of a window)
+    const hours = metadata.hours_text;
+    if (hours && hours.length > 0 && hours.length <= 30 && /\d/.test(hours)) {
+      badges.push(`<span class="policy-badge hours">🕒 ${escHtml(hours)}</span>`);
+    }
+
+    return badges.join('');
+  }
+  function escHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+  }
+  function escAttr(s) {
+    return escHtml(s).slice(0, 400);  // tooltip cap
   }
 
   function buildChipStripHtml(day, hours) {

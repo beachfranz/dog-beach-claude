@@ -34,7 +34,7 @@ Deno.serve(async (req: Request) => {
     // Beach metadata
     const { data: beach, error: beachErr } = await supabase
       .from("beaches")
-      .select("location_id, display_name, timezone, address, website")
+      .select("location_id, display_name, timezone, address, website, arena_group_id")
       .eq("location_id", locationId)
       .single();
 
@@ -80,6 +80,25 @@ Deno.serve(async (req: Request) => {
     if (dayErr || !day) return json({ error: "No recommendation found for this date" }, 404);
     if (hoursErr)        return json({ error: hoursErr.message }, 500);
 
+    // LLM-extracted policy/amenity metadata via the arena bridge.
+    // Best-effort: if no arena_group_id (e.g., OR beach), or no extraction
+    // yet, fields are simply null.
+    let metadata: Record<string, unknown> | null = null;
+    if (beach.arena_group_id) {
+      const { data: meta } = await supabase
+        .from("arena_beach_metadata")
+        .select(
+          "dogs_allowed, dogs_leash_required, dogs_off_leash_area, " +
+          "dogs_seasonal_restrictions, dogs_time_restrictions, " +
+          "dogs_policy_notes, dogs_allowed_areas, " +
+          "hours_text, has_parking, parking_type, has_drinking_water, " +
+          "extracted_address, best_address"
+        )
+        .eq("arena_group_id", beach.arena_group_id)
+        .maybeSingle();
+      metadata = meta ?? null;
+    }
+
     // For today: find best remaining window and override is_in_best_window + day label
     let finalDay   = day;
     let finalHours = hours ?? [];
@@ -105,7 +124,7 @@ Deno.serve(async (req: Request) => {
       };
     }
 
-    return json({ beach, day: finalDay, hours: finalHours });
+    return json({ beach, day: finalDay, hours: finalHours, metadata });
 
   } catch (err) {
     return json({ error: String(err) }, 500);

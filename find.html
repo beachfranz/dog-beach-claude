@@ -512,6 +512,11 @@
         <option value="mixed">Mixed</option>
         <option value="on_leash">Required</option>
       </select>
+      <span class="sort-label">Show</span>
+      <select class="sort-select compact" id="catalog-select" onchange="onCatalogModeChange(this.value)">
+        <option value="scored">Scored only</option>
+        <option value="all">Full catalog</option>
+      </select>
     </div>
     <div class="loc-row" id="loc-row">
       <span class="location-label" id="location-label">📍 Detecting location…</span>
@@ -557,6 +562,13 @@
   let userLng     = null;
   let currentSort = 'conditions';
   let leashFilter = 'any';
+  // 'scored' → only beaches with scoring data (default; today's 14)
+  // 'all'    → full beaches_gold catalog (763 active rows; most no_data)
+  const CATALOG_KEY = 'find.catalogMode';
+  let catalogMode = (() => {
+    try { return localStorage.getItem(CATALOG_KEY) || 'scored'; }
+    catch { return 'scored'; }
+  })();
 
   // Server-bounded nearest-N set. Client filters/sorts within this set.
   // GIST index on beaches.location makes the server query O(log N) at
@@ -707,19 +719,23 @@
   // server returns only the nearest NEAREST_LIMIT beaches (GIST-indexed
   // KNN). Without coords, returns the full active set for score sorting.
   async function loadBeachesForDate(date) {
-    if (beachCache[date]) return beachCache[date];
+    // Cache key includes catalogMode so toggling Scored/All re-fetches
+    // instead of returning the prior result.
+    const cacheKey = `${date}::${catalogMode}`;
+    if (beachCache[cacheKey]) return beachCache[cacheKey];
     const params = new URLSearchParams({ date });
     if (userLat !== null && userLng !== null) {
       params.set('lat',   String(userLat));
       params.set('lng',   String(userLng));
       params.set('limit', String(NEAREST_LIMIT));
     }
+    if (catalogMode === 'all') params.set('scored', 'false');
     const res  = await fetch(
       `${SUPABASE_URL}/functions/v1/get-beaches-find?${params}`,
       { headers: { 'Authorization': `Bearer ${ANON_KEY}` } }
     );
     const data = await res.json();
-    if (Array.isArray(data.beaches)) beachCache[date] = data.beaches;
+    if (Array.isArray(data.beaches)) beachCache[cacheKey] = data.beaches;
     return data.beaches ?? [];
   }
 
@@ -1141,6 +1157,13 @@
     sortAndRender();
   }
 
+  function onCatalogModeChange(val) {
+    catalogMode = val;
+    try { localStorage.setItem(CATALOG_KEY, val); } catch { /* storage may be blocked */ }
+    nowBeaches = null;     // reset so the wider/narrower set takes effect
+    sortAndRender();
+  }
+
   function matchesLeashFilter(beach) {
     if (leashFilter === 'any') return true;
     return (beach.access_rule ?? 'off_leash') === leashFilter;
@@ -1291,6 +1314,9 @@
   }
 
   // ── Boot ───────────────────────────────────────────────────────────
+  // Sync the catalog-mode dropdown to whatever was persisted last visit
+  const _catalogSelect = document.getElementById('catalog-select');
+  if (_catalogSelect) _catalogSelect.value = catalogMode;
   requestGeolocation();
   // Pre-fetch today so TDY pill is instant; warms beach list for NOW mode
   const _todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });

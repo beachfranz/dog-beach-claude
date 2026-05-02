@@ -774,9 +774,12 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       // Hydrate either missing key from the API response so subsequent
-      // calls + outbound links use the new spine consistently.
+      // calls + outbound links use the new spine consistently. Kick off
+      // the Scout blurb here too — boot only fires it when currentLocation
+      // is already set, and ?fid= callers don't have it until now.
       if (!currentLocation && data?.beach?.location_id) {
         currentLocation = data.beach.location_id;
+        loadScoutBlurb(currentLocation);
       }
       if (!currentArenaGroupId && data?.beach?.arena_group_id) {
         currentArenaGroupId = data.beach.arena_group_id;

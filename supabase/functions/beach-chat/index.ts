@@ -46,17 +46,31 @@ Deno.serve(async (req: Request) => {
       .lt("hour", new Date(Date.now() - 86_400_000).toISOString());
   }
 
-  let body: { location_id?: string; question?: string; conversation_history?: ConversationTurn[]; local_date?: string };
+  let body: { location_id?: string; arena_group_id?: number; question?: string; conversation_history?: ConversationTurn[]; local_date?: string };
   try {
     body = await req.json();
   } catch {
     return json({ error: "Invalid JSON body" }, 400);
   }
 
-  const { location_id, question, conversation_history = [], local_date } = body;
+  let { location_id, arena_group_id, question, conversation_history = [], local_date } = body;
 
-  if (!location_id || !question) {
-    return json({ error: "location_id and question are required" }, 400);
+  if (!question || (!location_id && !arena_group_id)) {
+    return json({ error: "question and (location_id or arena_group_id) are required" }, 400);
+  }
+
+  // Resolve to location_id (still the slug used by scoring-table queries
+  // until those tables drop their location_id PK).
+  if (!location_id && arena_group_id) {
+    const { data: row } = await supabase
+      .from("beaches")
+      .select("location_id")
+      .eq("arena_group_id", arena_group_id)
+      .limit(1);
+    location_id = row?.[0]?.location_id ?? undefined;
+    if (!location_id) {
+      return json({ error: `No legacy slug found for arena_group_id=${arena_group_id}` }, 404);
+    }
   }
   try {
     let systemPrompt: string;
@@ -70,10 +84,15 @@ Deno.serve(async (req: Request) => {
       // All beaches are in California — use Pacific time for "today"
       const todayPacific = localDateForTimezone(new Date(), "America/Los_Angeles");
 
-      const [{ data: beaches }, { data: allDays }] = await Promise.all([
+      // Path 3b-3.3: read beaches_gold + JOIN slug for cross-beach mode.
+      // Filter to scoreable so the prompt context is the curated set,
+      // not all 763.
+      const [{ data: beachesRaw }, { data: allDays }] = await Promise.all([
         supabase
-          .from("beaches")
-          .select("location_id, display_name, timezone"),
+          .from("beaches_gold")
+          .select("fid, name, display_name_override, timezone, beaches!inner(location_id)")
+          .eq("is_scoreable", true)
+          .eq("is_active", true),
         supabase
           .from("beach_day_recommendations")
           .select("location_id, local_date, day_status, best_window_label, best_window_text, avg_temp, avg_wind, avg_uv, avg_tide_height, lowest_tide_height, busyness_category, go_hours_count, caution_hours_count, no_go_hours_count, caution_text, risk_reason_codes, positive_reason_codes, summary_weather, bacteria_risk, precip_72h_mm")
@@ -83,19 +102,58 @@ Deno.serve(async (req: Request) => {
           .limit(50),
       ]);
 
-      systemPrompt = buildCrossBeachPrompt(beaches ?? [], allDays ?? []);
+      // Reshape gold rows into the legacy {location_id, display_name, timezone}
+      // shape that buildCrossBeachPrompt expects.
+      const beaches = (beachesRaw ?? []).map((g: { fid: number; name: string; display_name_override: string | null; timezone: string; beaches: { location_id: string } | { location_id: string }[] }) => {
+        const pb = Array.isArray(g.beaches) ? g.beaches[0] : g.beaches;
+        return {
+          location_id:  pb?.location_id ?? null,
+          display_name: g.display_name_override ?? g.name,
+          timezone:     g.timezone ?? "America/Los_Angeles",
+        };
+      });
+      systemPrompt = buildCrossBeachPrompt(beaches, allDays ?? []);
 
     } else {
       // ── Single-beach mode: full detail for current beach ─────────────
-      const { data: beach, error: beachErr } = await supabase
-        .from("beaches")
-        .select("location_id, display_name, address, timezone, open_time, close_time, description, website, arena_group_id")
-        .eq("location_id", location_id)
-        .single();
+      // Path 3b-3.3: read beaches_gold (identity + scoring metadata) +
+      // INNER JOIN public.beaches for legacy slug + curated marketing
+      // text (address, website, description) the chat prompt uses.
+      const { data: goldRows, error: beachErr } = await supabase
+        .from("beaches_gold")
+        .select(`
+          fid,
+          name,
+          display_name_override,
+          timezone,
+          open_time,
+          close_time,
+          beaches!inner(location_id, address, website, description)
+        `)
+        .eq("beaches.location_id", location_id)
+        .limit(1);
 
-      if (beachErr || !beach) {
+      if (beachErr || !goldRows?.length) {
         return json({ error: `Beach not found: ${location_id}` }, 404);
       }
+      const g = goldRows[0] as { fid: number; name: string; display_name_override: string | null;
+                                  timezone: string; open_time: string | null; close_time: string | null;
+                                  beaches: { location_id: string; address: string | null;
+                                             website: string | null; description: string | null }
+                                           | { location_id: string; address: string | null;
+                                               website: string | null; description: string | null }[] };
+      const pb = Array.isArray(g.beaches) ? g.beaches[0] : g.beaches;
+      const beach = {
+        location_id:    pb.location_id,
+        arena_group_id: g.fid,
+        display_name:   g.display_name_override ?? g.name,
+        timezone:       g.timezone ?? "America/Los_Angeles",
+        open_time:      g.open_time,
+        close_time:     g.close_time,
+        address:        pb.address,
+        website:        pb.website,
+        description:    pb.description,
+      };
 
       // LLM-extracted policy metadata for this beach (leash rules, dog
       // zones, hours, etc.). Drives Scout's activity advice — Scout must

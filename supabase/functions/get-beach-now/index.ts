@@ -52,20 +52,52 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // ── Load beaches + scoring config in parallel ────────────────────────────────
-  let beachQuery = supabase.from("beaches").select("*").eq("is_active", true);
-  if (arenaGroupIds?.length && locationIds?.length) {
-    // Both keys provided — OR them. Rare; keeps the BC layer permissive.
-    beachQuery = beachQuery.or(
-      `location_id.in.(${locationIds.join(",")}),arena_group_id.in.(${arenaGroupIds.join(",")})`
-    );
-  } else if (arenaGroupIds?.length) {
-    beachQuery = beachQuery.in("arena_group_id", arenaGroupIds);
-  } else if (locationIds?.length) {
-    beachQuery = beachQuery.in("location_id", locationIds);
+  // ── Resolve all input keys to a single set of arena_group_ids ───────────────
+  // Path 3b-3.2: beaches_gold is the spine. Any location_id input gets
+  // mapped to arena_group_id via public.beaches; once mapped, all reads
+  // come from beaches_gold + beach_dog_policy + (joined for slug) beaches.
+  const fidSet = new Set<number>(arenaGroupIds ?? []);
+  if (locationIds?.length) {
+    const { data: legacyRows } = await supabase
+      .from("beaches")
+      .select("arena_group_id")
+      .in("location_id", locationIds)
+      .not("arena_group_id", "is", null);
+    for (const r of legacyRows ?? []) {
+      if (r.arena_group_id) fidSet.add(r.arena_group_id);
+    }
   }
 
-  const [beachRes, configRes] = await Promise.all([
+  // Build the gold query. INNER JOIN beaches because the scoring tables
+  // still PK on location_id NOT NULL (until that migration). Without a
+  // joined slug we can't upsert.
+  let beachQuery = supabase.from("beaches_gold")
+    .select(`
+      fid,
+      name,
+      display_name_override,
+      lat,
+      lon,
+      noaa_station_id,
+      besttime_venue_id,
+      timezone,
+      open_time,
+      close_time,
+      is_active,
+      beaches!inner(location_id, address, website, description, parking_text, location_numb, created_at, is_active),
+      beach_dog_policy(dogs_prohibited_start, dogs_prohibited_end)
+    `)
+    .eq("is_active", true);
+  if (fidSet.size > 0) {
+    beachQuery = beachQuery.in("fid", [...fidSet]);
+  }
+  // If neither key was provided, fall through to "all active scoreable
+  // beaches" — same semantic as the hourly cron call (POST {} → batch).
+  if (!locationIds?.length && !arenaGroupIds?.length) {
+    beachQuery = beachQuery.eq("is_scoreable", true);
+  }
+
+  const [goldRes, configRes] = await Promise.all([
     beachQuery,
     supabase.from("scoring_config")
       .select("*")
@@ -75,11 +107,48 @@ Deno.serve(async (req: Request) => {
       .single(),
   ]);
 
-  if (beachRes.error || !beachRes.data?.length) return json({ error: "No beaches found" }, 404);
-  if (configRes.error || !configRes.data)        return json({ error: "Scoring config not found" }, 500);
+  if (goldRes.error || !goldRes.data?.length) return json({ error: "No beaches found" }, 404);
+  if (configRes.error || !configRes.data)     return json({ error: "Scoring config not found" }, 500);
 
-  const beaches = beachRes.data;
-  const config  = configRes.data;
+  // Reshape gold rows into the existing beach shape so refreshNow doesn't change.
+  type GoldRow = {
+    fid: number; name: string; display_name_override: string | null;
+    lat: number; lon: number;
+    noaa_station_id: string | null; besttime_venue_id: string | null;
+    timezone: string; open_time: string | null; close_time: string | null;
+    is_active: boolean;
+    beaches: { location_id: string; address: string | null; website: string | null;
+               description: string | null; parking_text: string | null;
+               location_numb: number | null; created_at: string;
+               is_active: boolean } | { location_id: string }[];
+    beach_dog_policy: { dogs_prohibited_start: string | null; dogs_prohibited_end: string | null }
+                      | null
+                      | { dogs_prohibited_start: string | null; dogs_prohibited_end: string | null }[];
+  };
+  const beaches = (goldRes.data as GoldRow[]).map(g => {
+    const pb = Array.isArray(g.beaches) ? g.beaches[0] : g.beaches;
+    const dp = Array.isArray(g.beach_dog_policy) ? g.beach_dog_policy[0] : g.beach_dog_policy;
+    return {
+      location_id:    (pb as { location_id: string }).location_id,
+      arena_group_id: g.fid,
+      display_name:   g.display_name_override ?? g.name,
+      latitude:       g.lat,
+      longitude:      g.lon,
+      noaa_station_id: g.noaa_station_id,
+      besttime_venue_id: g.besttime_venue_id,
+      is_active:      g.is_active,
+      timezone:       g.timezone ?? "America/Los_Angeles",
+      open_time:      g.open_time,
+      close_time:     g.close_time,
+      dogs_prohibited_start: dp?.dogs_prohibited_start ?? null,
+      dogs_prohibited_end:   dp?.dogs_prohibited_end   ?? null,
+      address:        (pb as { address?: string }).address ?? null,
+      website:        (pb as { website?: string }).website ?? null,
+      description:    (pb as { description?: string }).description ?? null,
+      parking_text:   (pb as { parking_text?: string }).parking_text ?? null,
+    };
+  });
+  const config = configRes.data;
 
   // ── Process each beach ───────────────────────────────────────────────────────
   const results = await Promise.all(

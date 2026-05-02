@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Gold Set Curator v3 — Dog Beach Scout</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root {
+    --bg: #0b1020; --panel: #131a2e; --panel2: #1b2340;
+    --border: #2a3658; --text: #e6ecff; --muted: #9aa5c8;
+    --accent: #4ade80; --blue: #38bdf8; --warn: #f59e0b; --bad: #ef4444;
+    --section: #5b21b6; --feature: #1e40af; --amenity: #b45309;
+    --identity: #0d9488;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased; }
+
+  header {
+    position: sticky; top: 0; z-index: 5;
+    padding: 12px 20px; background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  .stats { color: var(--muted); font-size: 12px; }
+  .spacer { flex: 1; }
+
+  select, button, input {
+    background: var(--panel2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 10px; font-size: 13px; cursor: pointer;
+    font-family: inherit;
+  }
+
+  .mode-tabs { display: flex; gap: 4px; }
+  .mode-tabs button { border-radius: 999px; padding: 5px 14px; }
+  .mode-tabs button.active { background: var(--blue); color: #062430; border-color: var(--blue); font-weight: 600; }
+
+  /* By-Field view — calibration card */
+  .field-header {
+    background: var(--panel); border: 1px solid var(--blue);
+    border-radius: 6px; padding: 12px 16px; margin: 4px 0 14px;
+    position: sticky; top: 56px; z-index: 4;
+  }
+  .field-header.field-done {
+    background: linear-gradient(rgba(56,189,248,0.10), rgba(56,189,248,0.10)), var(--panel);
+    border-color: var(--blue); border-width: 2px;
+  }
+  .field-header h2 { margin: 0; font-size: 15px; color: var(--blue); }
+  .field-header.field-done h2::before { content: "✓ "; color: var(--blue); }
+  .field-header .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .field-header .summary { color: var(--muted); font-size: 11px; margin-top: 6px; font-family: ui-monospace, Menlo, monospace; }
+  .field-header .head-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .field-header .head-row .spacer { flex: 1; }
+  .field-header .submit-btn {
+    background: var(--accent); color: #062012; border: none; font-weight: 600;
+    padding: 8px 16px; font-size: 13px; border-radius: 6px; cursor: pointer;
+  }
+  .field-header.field-done .submit-btn {
+    background: var(--blue); color: #062430;
+  }
+  .field-header .progress-pill {
+    font-size: 11px; padding: 4px 10px; border-radius: 999px;
+    background: var(--panel2); border: 1px solid var(--border); color: var(--muted);
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .field-header.field-done .progress-pill {
+    background: rgba(56,189,248,0.18); color: var(--blue); border-color: var(--blue);
+  }
+  /* Field-picker dropdown — grey out done fields */
+  #field-picker option.done { color: var(--muted); }
+
+  .field-row {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; margin: 8px 0;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .field-row.dirty { border-color: var(--warn); }
+  .field-row.saved { border-color: var(--accent); }
+  /* Rows excluded from the field universe (no source extractions). Muted so
+     Franz can see at a glance which rows count toward the field-done denominator. */
+  .field-row.no-sources { opacity: 0.55; }
+  .field-row.no-sources .row-head .name::after {
+    content: " — no source"; font-size: 11px; color: var(--muted); font-style: italic; font-weight: normal;
+  }
+  /* Beach-level completion (independent of the per-cell .saved flash). Tracks
+     "is this beach finished across all curatable fields?" — green when partially
+     done (eye-catching), blue when complete (fall back, low-priority). */
+  .field-row.beach-progress { border-color: #4ade80; border-width: 2px; }
+  .field-row.beach-done     { border-color: #38bdf8; border-width: 2px; }
+  .field-row .beach-completion {
+    font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    background: rgba(0,0,0,0.2); color: var(--muted);
+  }
+  .field-row.beach-progress .beach-completion { background: rgba(74,222,128,0.2); color: var(--accent); }
+  .field-row.beach-done     .beach-completion { background: rgba(56,189,248,0.2); color: var(--blue); font-weight: 600; }
+
+  .field-row .row-head {
+    padding: 8px 14px; background: var(--panel2);
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+  }
+  .field-row .row-head .name { font-weight: 600; font-size: 14px; }
+  .field-row .row-head .meta { color: var(--muted); font-size: 11px; }
+  .field-row .row-head .arch {
+    font-size: 10px; padding: 1px 7px; border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--border); color: var(--muted);
+  }
+  .field-row .row-head .truth-status { margin-left: auto; font-size: 11px; }
+  .field-row.saved .truth-status { color: var(--accent); }
+  .field-row.dirty .truth-status { color: var(--warn); }
+  .field-row .row-head .truth-status.empty { color: var(--muted); font-style: italic; }
+  .field-row .row-head .src-count { color: var(--muted); font-size: 11px; }
+  .field-row .row-head a.detail-link { color: var(--blue); font-size: 11px; text-decoration: none; }
+  .field-row .row-head a.detail-link:hover { text-decoration: underline; }
+
+  .field-row .row-body {
+    padding: 10px 14px;
+    display: grid; grid-template-columns: 1fr 280px; gap: 16px;
+  }
+
+  .src-list { display: flex; flex-direction: column; gap: 4px; }
+  .src-row {
+    display: grid; grid-template-columns: 86px 1fr auto; gap: 10px; align-items: center;
+    padding: 6px 10px; border-radius: 6px;
+    background: rgba(0,0,0,0.20); border: 1px solid transparent;
+    cursor: pointer; font-size: 12px;
+    border-left: 3px solid var(--border);
+  }
+  .src-row:hover { background: rgba(255,255,255,0.04); border-color: var(--blue); }
+  .src-row .badge {
+    font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    color: white; text-align: center;
+  }
+  .src-row[data-src="park_url"] { border-left-color: #3b82f6; }
+  .src-row[data-src="park_url"] .badge { background: #3b82f6; }
+  .src-row[data-src="cpad_unit"] { border-left-color: #6366f1; }
+  .src-row[data-src="cpad_unit"] .badge { background: #6366f1; }
+  .src-row[data-src="cpad_unit_exc"] { border-left-color: #6366f1; }
+  .src-row[data-src="cpad_unit_exc"] .badge { background: #6366f1; opacity: 0.7; }
+  .src-row[data-src="operator"] { border-left-color: #10b981; }
+  .src-row[data-src="operator"] .badge { background: #10b981; }
+  .src-row[data-src="operator_exc"] { border-left-color: #10b981; }
+  .src-row[data-src="operator_exc"] .badge { background: #10b981; opacity: 0.7; }
+  .src-row[data-src="research"] { border-left-color: #a855f7; }
+  .src-row[data-src="research"] .badge { background: #a855f7; }
+  .src-row[data-src="v3_llm"] { border-left-color: #ec4899; }
+  .src-row[data-src="v3_llm"] .badge { background: #ec4899; }
+
+  .src-row .value {
+    font-family: ui-monospace, Menlo, monospace; word-break: break-word;
+    color: var(--text);
+  }
+  .src-row .src-meta {
+    font-size: 10px; color: var(--muted); display: flex; align-items: center; gap: 8px;
+    flex-shrink: 0;
+  }
+  .src-row .src-meta a { color: var(--muted); text-decoration: none; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
+  .src-row .src-meta a:hover { color: var(--blue); text-decoration: underline; }
+  .src-row .use-btn {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--muted); padding: 2px 8px; font-size: 10px; border-radius: 4px;
+    cursor: pointer; flex-shrink: 0;
+  }
+  .src-row:hover .use-btn { color: var(--blue); border-color: var(--blue); }
+  .no-sources { color: var(--muted); font-size: 12px; font-style: italic; padding: 8px 12px;
+    background: rgba(0,0,0,0.15); border-radius: 6px; text-align: center; }
+
+  .truth-col {
+    background: rgba(74,222,128,0.04); border: 1px solid rgba(74,222,128,0.2);
+    border-radius: 6px; padding: 10px 12px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .truth-col label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); font-weight: 700; }
+  .truth-col input, .truth-col select, .truth-col textarea {
+    width: 100%; padding: 6px 8px; font-size: 12px;
+    background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .truth-col textarea { font-family: inherit; min-height: 50px; resize: vertical; }
+  .truth-col button { padding: 8px 12px; font-size: 12px; }
+  .truth-col .ts-meta { font-size: 10px; color: var(--muted); }
+  .field-row.unsupported { padding: 14px; color: var(--muted); text-align: center; font-style: italic; }
+  input[type=text], input[type=password] { cursor: text; }
+  button.primary { background: var(--accent); color: #062012; border: none; font-weight: 600; }
+  button.primary:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.ghost { background: transparent; }
+  button.danger { color: var(--bad); border-color: var(--bad); background: transparent; }
+
+  main { padding: 14px 20px 80px; max-width: 1100px; margin: 0 auto; }
+
+  .auth-prompt {
+    max-width: 380px; margin: 80px auto; padding: 24px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .auth-prompt h2 { margin: 0 0 8px; font-size: 16px; }
+  .auth-prompt p { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+  .auth-prompt input { width: 100%; margin-bottom: 10px; padding: 8px 10px; }
+
+  .archetype-section { margin: 18px 0 10px; }
+  .archetype-section h2 {
+    margin: 0; padding: 6px 12px; font-size: 13px; font-weight: 600;
+    color: var(--blue); background: var(--panel); border: 1px solid var(--border);
+    border-radius: 6px; display: inline-block;
+  }
+  .archetype-section .count {
+    color: var(--muted); margin-left: 6px; font-weight: 400;
+  }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px 16px; margin: 10px 0;
+  }
+  .card.saved-flash { border-color: var(--accent); transition: border-color 0.6s; }
+
+  .card-head {
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .card-head .name { font-size: 16px; font-weight: 600; }
+  .card-head .meta { color: var(--muted); font-size: 12px; }
+  .card-head .arch-tag {
+    font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    background: var(--panel2); border: 1px solid var(--border); color: var(--muted);
+  }
+  .card-head .right { margin-left: auto; display: flex; gap: 6px; }
+
+  .sources {
+    display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 10px;
+    font-size: 12px;
+  }
+  .sources a {
+    color: var(--blue); padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--panel2);
+    text-decoration: none; max-width: 360px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; display: inline-block;
+  }
+  .sources a:hover { background: var(--panel); }
+
+  details.extractions {
+    margin: 8px 0; padding: 0; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--panel2);
+  }
+  details.extractions[open] { padding-bottom: 6px; }
+  details.extractions summary {
+    padding: 8px 12px; cursor: pointer; font-size: 12px; color: var(--muted);
+    list-style: none;
+  }
+  details.extractions summary::-webkit-details-marker { display: none; }
+  details.extractions summary:hover { color: var(--text); }
+  .ext-field {
+    margin: 4px 12px; padding: 6px 0; border-top: 1px solid var(--border);
+  }
+  .ext-field:first-of-type { border-top: none; }
+  .ext-field-name {
+    font-size: 11px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.05em; margin-bottom: 4px;
+  }
+  .ext-variant {
+    background: rgba(0,0,0,0.18); padding: 6px 8px; margin: 3px 0;
+    border-radius: 4px; font-size: 12px; cursor: pointer;
+    border: 1px solid transparent; word-break: break-word;
+  }
+  .ext-variant:hover { border-color: var(--blue); }
+  .ext-variant.canon { border-left: 2px solid var(--accent); padding-left: 6px; }
+  .ext-variant .vk { color: var(--muted); font-size: 11px; margin-right: 6px; }
+
+  /* category panels */
+  details.cat {
+    margin: 8px 0; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--panel2);
+  }
+  details.cat[open] { padding-bottom: 8px; }
+  details.cat > summary {
+    padding: 8px 12px; cursor: pointer; font-size: 13px; font-weight: 600;
+    color: var(--text); list-style: none;
+    display: flex; align-items: center; gap: 8px;
+    border-radius: 6px;
+  }
+  details.cat > summary::-webkit-details-marker { display: none; }
+  details.cat > summary:hover { background: rgba(255,255,255,0.02); }
+  details.cat .cat-tag {
+    font-size: 10px; padding: 2px 6px; border-radius: 999px;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  details.cat[data-cat="identity"]  .cat-tag { background: var(--identity); color: white; }
+  details.cat[data-cat="dogs"]      .cat-tag { background: var(--section);  color: white; }
+  details.cat[data-cat="amenities"] .cat-tag { background: var(--amenity);  color: white; }
+  details.cat[data-cat="provenance"].cat-tag { background: var(--feature);  color: white; }
+  details.cat .cat-progress { color: var(--muted); font-size: 11px; font-weight: 400; margin-left: auto; }
+
+  .cat-body { padding: 6px 12px; }
+
+  /* truth field rows */
+  .truth-row { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; }
+  .truth-row > label { width: 130px; flex-shrink: 0; font-size: 12px; color: var(--muted); padding-top: 6px; }
+  .truth-row > .control { flex: 1; }
+  .truth-row select, .truth-row input, .truth-row textarea {
+    width: 100%; padding: 6px 8px; font-size: 13px;
+    background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+  }
+  .truth-row textarea { min-height: 50px; font-family: inherit; resize: vertical; }
+  .truth-row .save-btn { width: 64px; flex-shrink: 0; padding: 6px 4px; font-size: 11px; }
+  .truth-row.dirty > .control > * { border-color: var(--warn); }
+  .truth-row.saved > .control > * { border-color: var(--accent); }
+
+  /* sections / feature_zones */
+  .has-sections-toggle { display: flex; gap: 8px; align-items: center; margin: 6px 0 10px; flex-wrap: wrap; }
+  .has-sections-toggle button { padding: 6px 14px; font-size: 12px; font-weight: 500; }
+  .has-sections-toggle button.active { background: var(--section); color: white; border-color: var(--section); }
+
+  .feature-zones {
+    display: grid; grid-template-columns: 140px 1fr;
+    gap: 4px 10px; margin: 6px 0; align-items: center;
+    background: rgba(30,64,175,0.06); padding: 8px 10px; border-radius: 6px;
+    border-left: 3px solid var(--feature);
+  }
+  .feature-zones .feat-label { font-size: 12px; color: var(--muted); }
+  .feature-zones select { padding: 4px 8px; font-size: 12px; }
+
+  .section-block {
+    margin: 8px 0; padding: 10px 12px;
+    background: rgba(91,33,182,0.08); border-left: 3px solid var(--section);
+    border-radius: 6px;
+  }
+  .section-block-head { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+  .section-block-head .num { font-weight: 600; color: var(--section); }
+  .section-block-head .remove {
+    margin-left: auto; font-size: 11px; color: var(--bad);
+    background: transparent; border: 1px solid var(--bad); padding: 3px 8px;
+  }
+  .add-section-btn { margin-top: 8px; width: 100%; padding: 6px; font-size: 12px; border-style: dashed; }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    padding: 10px 18px; border-radius: 6px; font-weight: 600; font-size: 13px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.5); z-index: 200;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s;
+  }
+  .toast.show { opacity: 1; }
+  .toast.ok { background: var(--accent); color: #062012; }
+  .toast.err { background: var(--bad); color: white; }
+</style>
+</head>
+<body>
+
+<div id="auth-screen" class="auth-prompt" style="display:none">
+  <h2>Admin secret required</h2>
+  <p>Curator writes to <code>beach_policy_gold_set</code> via admin endpoints. Stashed in localStorage on this device.</p>
+  <input type="password" id="auth-input" placeholder="x-admin-secret" autocomplete="off" />
+  <button class="primary" onclick="setSecret()">Continue</button>
+</div>
+
+<header id="header" style="display:none">
+  <h1>Gold Set Curator <span style="color:var(--muted);font-weight:400">v3</span></h1>
+  <span class="stats" id="stats"></span>
+  <select id="field-picker" onchange="renderAll()"></select>
+  <span class="spacer"></span>
+  <select id="set-picker" onchange="loadSet()">
+    <option value="v3"  selected>v3  — first 25</option>
+    <option value="v3b">v3b — second 25 (validation)</option>
+  </select>
+  <button class="ghost" onclick="forgetSecret()">Forget secret</button>
+</header>
+
+<main id="main" style="display:none">
+  <div id="grid"></div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SUPABASE_URL = "https://ehlzbwtrsxaaukurekau.supabase.co";
+const ANON = "sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk";
+
+// Schema config — single source of truth for the card layout
+const FEATURE_TYPES = [
+  ["sand",             "Sand / open beach"],
+  ["parking_lot",      "Parking lot"],
+  ["trails_boardwalk", "Trails / boardwalk"],
+  ["picnic_areas",     "Picnic areas"],
+  ["campgrounds",      "Campgrounds"],
+  ["water_swim",       "Water / swim zones"],
+  ["food_concession",  "Food / concession"],
+];
+const FEATURE_STATUSES = ["off_leash","on_leash","not_allowed","seasonal","unknown"];
+const LEASH_VALUES     = ["off_leash","on_leash","leash_optional","varies_by_time","not_allowed","unknown"];
+const CONFIDENCE_VALUES= ["high","medium","low","none"];
+
+// Field definitions per category. Each entry tells the renderer how to draw
+// the row + which save handler to use. Scalar fields → saveScalar; structured
+// fields (sections, feature_zones) have custom save handlers.
+const CATEGORIES = [
+  {
+    key: "identity", label: "Identity & Access", tag: "5",
+    fields: [
+      { name: "raw_address",   label: "Raw address",   shape: "text",
+        hint: 'Street address from the official source page.' },
+      { name: "hours_text",    label: "Hours",         shape: "text",
+        hint: 'Canonical: 5am-10pm / 5:30am-10pm / 24h / unclear (lowercase, no spaces, hyphen)' },
+      { name: "access_text",   label: "Access prose",  shape: "textarea",
+        hint: 'How a visitor reaches the beach + any barriers (boat-only, hike-in, gated).' },
+      { name: "public_access", label: "Public access", shape: "enum",
+        enum: ["yes","no","restricted","unclear"] },
+      { name: "parking_type",  label: "Parking",       shape: "enum",
+        enum: ["lot","street","both","none","unclear"] },
+    ],
+  },
+  {
+    key: "dogs", label: "Dogs", tag: "8",
+    fields: [
+      // The has_sections trigger + branching is rendered inline below
+      // (custom UI, not a generic row).
+      // After the trigger UI, we render two more legacy text fields:
+      { name: "dogs_off_leash_area", label: "Off-leash area",  shape: "textarea",
+        hint: 'Description of any off-leash area (or "none").' },
+      { name: "dogs_policy_notes",   label: "Policy notes",    shape: "textarea",
+        hint: 'Free-form summary of the dog policy. Cite the source.' },
+    ],
+  },
+  {
+    key: "amenities", label: "Amenities", tag: "3",
+    fields: [
+      { name: "lifeguard",       label: "Lifeguard",       shape: "enum",
+        enum: ["full_time","seasonal","none","unknown"] },
+      { name: "restrooms",       label: "Restrooms",       shape: "enum",
+        enum: ["yes","seasonal","none","unknown"] },
+      { name: "outdoor_showers", label: "Outdoor showers", shape: "enum",
+        enum: ["yes","seasonal","none","unknown"],
+        hint: 'Cold-water rinse stations at the access point — useful for rinsing dogs.' },
+    ],
+  },
+  {
+    key: "provenance", label: "Provenance", tag: "2",
+    fields: [
+      { name: "evidence_quote", label: "Evidence quote", shape: "textarea",
+        hint: 'Exact quote from the source page (no paraphrasing).' },
+      { name: "confidence",     label: "Confidence",     shape: "enum",
+        enum: CONFIDENCE_VALUES },
+    ],
+  },
+];
+
+let CANDIDATES = [];
+// MODE removed 2026-05-02 — By Field is the only mode. By Beach was deprecated
+// per Franz: "we should use [By Field] for all gold set curation."
+
+// Scalar fields curatable in By Field mode (excludes structured: sections,
+// feature_zones, has_sections-trigger which is per-beach branched)
+const FIELD_PICKER_LIST = [
+  ["raw_address",          "Raw address"],
+  ["hours_text",           "Hours"],
+  ["access_text",          "Access prose"],
+  ["public_access",        "Public access"],
+  ["parking_type",         "Parking type"],
+  ["leash_policy",         "Leash policy"],
+  ["temporal_restrictions","Temporal restrictions"],
+  ["dogs_off_leash_area",  "Off-leash area"],
+  ["dogs_policy_notes",    "Policy notes"],
+  ["lifeguard",            "Lifeguard"],
+  ["restrooms",            "Restrooms"],
+  ["outdoor_showers",      "Outdoor showers"],
+  ["evidence_quote",       "Evidence quote"],
+  ["confidence",           "Confidence"],
+];
+
+// Lookup field schema by name (so renderByField can build the right control).
+function fieldSchema(name) {
+  for (const cat of CATEGORIES) {
+    for (const f of cat.fields) {
+      if (f.name === name) return f;
+    }
+  }
+  // Fields rendered inline inside the dogs trigger UI but not in CATEGORIES.fields:
+  if (name === "leash_policy")          return { name, label: "Leash policy",          shape: "enum",     enum: LEASH_VALUES };
+  if (name === "temporal_restrictions") return { name, label: "Temporal restrictions", shape: "textarea" };
+  return null;
+}
+
+// ---- Auth ----
+function getSecret() { return localStorage.getItem("admin_secret") || ""; }
+function setSecret() {
+  const v = document.getElementById("auth-input").value.trim();
+  if (!v) return;
+  localStorage.setItem("admin_secret", v);
+  initAuthorized();
+}
+function forgetSecret() { localStorage.removeItem("admin_secret"); showAuth(); }
+function showAuth() {
+  document.getElementById("auth-screen").style.display = "block";
+  document.getElementById("header").style.display = "none";
+  document.getElementById("main").style.display = "none";
+}
+function initAuthorized() {
+  document.getElementById("auth-screen").style.display = "none";
+  document.getElementById("header").style.display = "flex";
+  document.getElementById("main").style.display = "block";
+  ensureFieldPickerPopulated();
+  loadSet();
+}
+
+// ---- API ----
+function authHeaders() {
+  return {
+    "Authorization": `Bearer ${ANON}`,
+    "apikey": ANON,
+    "x-admin-secret": getSecret(),
+    "Content-Type": "application/json",
+  };
+}
+async function apiGet(path) {
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/${path}`, { headers: authHeaders() });
+  if (r.status === 401 || r.status === 403) { forgetSecret(); throw new Error("auth failed"); }
+  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+  return r.json();
+}
+async function apiPost(path, body) {
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/${path}`, {
+    method: "POST", headers: authHeaders(), body: JSON.stringify(body),
+  });
+  if (r.status === 401 || r.status === 403) { forgetSecret(); throw new Error("auth failed"); }
+  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+  return r.json();
+}
+
+// ---- Toast ----
+function toast(msg, kind = "ok") {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.className = `toast ${kind} show`;
+  setTimeout(() => t.classList.remove("show"), 2000);
+}
+
+// ---- Field picker ----
+function ensureFieldPickerPopulated() {
+  const fp = document.getElementById("field-picker");
+  if (fp.options.length) return;
+  for (const [val, label] of FIELD_PICKER_LIST) {
+    const o = document.createElement("option");
+    o.value = val; o.textContent = label;
+    fp.appendChild(o);
+  }
+}
+
+// ---- Load + render ----
+async function loadSet() {
+  const setName = document.getElementById("set-picker").value;
+  document.getElementById("stats").textContent = "loading...";
+  try {
+    const data = await apiGet(`admin-list-gold-candidates?set_name=${encodeURIComponent(setName)}`);
+    CANDIDATES = data.candidates || [];
+    document.getElementById("stats").textContent = `${data.count} candidates`;
+    renderAll();
+  } catch (e) {
+    toast(`Load failed: ${e.message}`, "err");
+    document.getElementById("stats").textContent = "load failed";
+  }
+}
+
+function renderAll() {
+  return renderByField();
+}
+
+// ---- Utilities ----
+function escapeHtml(s) {
+  return String(s ?? "").replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                        .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function prettyUrl(u) {
+  try { const x = new URL(u); return x.hostname + (x.pathname.length > 1 ? x.pathname : ''); }
+  catch { return u; }
+}
+function modelShort(m) {
+  if (!m) return '';
+  const s = String(m).toLowerCase();
+  if (s.includes('sonnet')) return 'sonnet';
+  if (s.includes('haiku'))  return 'haiku';
+  if (s.includes('opus'))   return 'opus';
+  return s.split('-')[0];
+}
+function classifySource(variantKey) {
+  if (variantKey === "park_url")          return { family: "park_url",      label: "PARK_URL" };
+  if (variantKey === "research")          return { family: "research",      label: "RESEARCH" };
+  if (variantKey === "cpad_unit")         return { family: "cpad_unit",     label: "CPAD" };
+  if (variantKey === "cpad_unit_exc")     return { family: "cpad_unit_exc", label: "CPAD-EXC" };
+  if (variantKey === "operator")          return { family: "operator",      label: "OPERATOR" };
+  if (variantKey === "operator_exc")      return { family: "operator_exc",  label: "OPER-EXC" };
+  return { family: "v3_llm", label: "V3-LLM" };
+}
+
+// ---- Completion calculators ----
+const BEACH_TRUTH_TARGET = 14;
+
+function fieldCompletion(fname) {
+  const skipped = [];
+  const missing = [];
+  let done = 0;
+  const validConfidence = new Set(["high", "medium", "low"]);
+  for (const c of CANDIDATES) {
+    const hasSources = (c.extractions?.[fname] || []).length > 0;
+    if (!hasSources) { skipped.push({ fid: c.fid, name: c.display_name || c.name }); continue; }
+    const t = c.truth?.[fname];
+    const hasTruth = t && (
+      (t.verified_value && String(t.verified_value).trim() !== "") ||
+      (t.truth_value_json && Object.keys(t.truth_value_json).length > 0)
+    );
+    const hasConfidence = t && validConfidence.has(t.curator_confidence);
+    if (hasTruth && hasConfidence) {
+      done++;
+    } else {
+      const reason = !hasTruth ? "no truth" : "no confidence";
+      missing.push({ fid: c.fid, name: c.display_name || c.name, reason });
+    }
+  }
+  const total = done + missing.length;
+  return { total, done, missing, skipped, complete: missing.length === 0 && total > 0 };
+}
+
+function beachCompletion(c) {
+  const truth = c.truth || {};
+  const n = Object.values(truth).filter(t =>
+    (t.verified_value && String(t.verified_value).trim() !== "") ||
+    (t.truth_value_json && Object.keys(t.truth_value_json).length > 0)
+  ).length;
+  return {
+    n, target: BEACH_TRUTH_TARGET,
+    state: n === 0 ? "empty" : n >= BEACH_TRUTH_TARGET ? "done" : "progress",
+  };
+}
+
+// ---- Render ----
+function renderByField() {
+  const grid = document.getElementById("grid");
+  grid.innerHTML = "";
+  const fname = document.getElementById("field-picker").value || FIELD_PICKER_LIST[0][0];
+  document.getElementById("field-picker").value = fname;
+  const f = fieldSchema(fname);
+  const fc = fieldCompletion(fname);
+
+  const srcCount = {};
+  for (const c of CANDIDATES) {
+    for (const v of (c.extractions?.[fname] || [])) {
+      const fam = classifySource(v.variant_key).family;
+      srcCount[fam] = (srcCount[fam] || 0) + 1;
+    }
+  }
+  const summary = Object.entries(srcCount).sort((a,b) => b[1]-a[1])
+    .map(([fam, n]) => `${fam}=${n}`).join("  ");
+
+  const head = document.createElement("div");
+  head.className = "field-header";
+  if (fc.complete) head.classList.add("field-done");
+  head.innerHTML = `
+    <div class="head-row">
+      <h2>${escapeHtml(f ? f.label : fname)}</h2>
+      <span class="progress-pill" title="${fc.skipped.length} beaches have no source extraction for this field and are excluded">
+        ${fc.done}/${fc.total} truthed${fc.skipped.length ? ` · ${fc.skipped.length} no-source` : ''}
+      </span>
+      <span class="spacer"></span>
+      <button class="submit-btn" onclick="submitField()" title="Validate that every candidate WITH SOURCES has a saved truth + confidence for this field">
+        ${fc.complete ? "✓ Field done — re-check" : "Submit field"}
+      </button>
+    </div>
+    ${f?.hint ? `<div class="hint">${escapeHtml(f.hint)}</div>` : ''}
+    <div class="summary">sources across all beaches: ${summary || '(none yet)'}</div>
+  `;
+  grid.appendChild(head);
+  applyDoneStylesToPicker();
+
+  for (const c of CANDIDATES) grid.appendChild(buildFieldOnlyRow(c, fname, f));
+}
+
+function buildFieldOnlyRow(c, fname, f) {
+  const row = document.createElement("div");
+  row.className = "field-row";
+  row.dataset.fid = c.fid;
+  row.dataset.field = fname;
+
+  const truth = c.truth?.[fname];
+  const val = truth?.verified_value ?? "";
+  const filled = !!val;
+  if (filled) row.classList.add("saved");
+
+  const bc = beachCompletion(c);
+  if (bc.state === "progress") row.classList.add("beach-progress");
+  else if (bc.state === "done") row.classList.add("beach-done");
+
+  const variants = c.extractions?.[fname] || [];
+  if (variants.length === 0) row.classList.add("no-sources");
+
+  const familyPriority = { cpad_unit:1, operator:2, park_url:3, research:4, cpad_unit_exc:5, operator_exc:6, v3_llm:0 };
+  const sortedVariants = [...variants].sort((a, b) => {
+    const fa = classifySource(a.variant_key).family;
+    const fb = classifySource(b.variant_key).family;
+    if (a.is_canon !== b.is_canon) return a.is_canon ? -1 : 1;
+    return (familyPriority[fa] ?? 99) - (familyPriority[fb] ?? 99);
+  });
+
+  const id = `t-${fname}-${c.fid}`;
+  let control = "";
+  if (!f) {
+    control = `<textarea id="${id}" placeholder="JSON or text">${escapeHtml(val)}</textarea>`;
+  } else if (f.shape === "enum") {
+    control = `<select id="${id}">
+      <option value="">—</option>
+      ${f.enum.map(o => `<option value="${o}" ${val === o ? 'selected' : ''}>${o}</option>`).join('')}
+    </select>`;
+  } else if (f.shape === "textarea") {
+    control = `<textarea id="${id}" placeholder="${escapeHtml(f.hint || '')}">${escapeHtml(val)}</textarea>`;
+  } else {
+    control = `<input type="text" id="${id}" placeholder="${escapeHtml(f.hint || '')}" value="${escapeHtml(val)}" />`;
+  }
+
+  const validConfidence = ["high","medium","low"].includes(truth?.curator_confidence);
+  let truthStatus;
+  if (filled && validConfidence) {
+    truthStatus = `<span class="truth-status">✓ truth: ${escapeHtml(val.slice(0,40))} · conf ${escapeHtml(truth.curator_confidence)}</span>`;
+  } else if (filled) {
+    truthStatus = `<span class="truth-status" style="color:var(--warn)">⚠ truth set — needs confidence</span>`;
+  } else {
+    truthStatus = `<span class="truth-status empty">truth not set</span>`;
+  }
+
+  let srcListHtml;
+  if (sortedVariants.length === 0) {
+    srcListHtml = `<div class="no-sources">No source extractions for this field on this beach.</div>`;
+  } else {
+    srcListHtml = `<div class="src-list">
+      ${sortedVariants.map((v, idx) => {
+        const cls = classifySource(v.variant_key);
+        const displayVal = (v.parsed_value ?? v.raw_response ?? '').toString().slice(0, 280);
+        const srcUrl = v.source_url || '';
+        const variantKey = v.variant_key + (v.is_canon ? ' (canon)' : '');
+        const badgeText = cls.family === 'v3_llm' && v.model_name
+          ? `${cls.label} · ${modelShort(v.model_name)}`
+          : cls.label;
+        return `<div class="src-row" data-src="${cls.family}" data-fid="${c.fid}"
+                     data-field="${escapeHtml(fname)}" data-idx="${idx}"
+                     onclick="useSourceVariant(this)">
+          <span class="badge" title="${escapeHtml(v.model_name || '')}">${escapeHtml(badgeText)}</span>
+          <div><div class="value">${escapeHtml(displayVal)}</div></div>
+          <div class="src-meta">
+            <span title="${escapeHtml(variantKey)}" style="font-size:10px">${escapeHtml(v.variant_key)}</span>
+            ${srcUrl ? `<a href="${escapeHtml(srcUrl)}" target="_blank" onclick="event.stopPropagation()">${escapeHtml(prettyUrl(srcUrl))}</a>` : ''}
+            <span class="use-btn">Use →</span>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  row._variants = sortedVariants;
+
+  row.innerHTML = `
+    <div class="row-head">
+      <span class="name">${escapeHtml(c.display_name || c.name)}</span>
+      <span class="meta">fid <b>${c.fid}</b> · ${escapeHtml(c.county || '—')}</span>
+      <span class="arch">${escapeHtml(c.archetype)}</span>
+      <span class="beach-completion" title="Truthed fields across this beach (target: ${bc.target})">
+        ${bc.state === 'done' ? `✓ done ${bc.n}/${bc.target}` : `${bc.n}/${bc.target} truthed`}
+      </span>
+      <span class="src-count">${sortedVariants.length} source${sortedVariants.length===1?'':'s'}</span>
+      <a class="detail-link" href="../detail.html?fid=${c.fid}" target="_blank">detail</a>
+      ${truthStatus}
+      <button class="ghost" style="padding:3px 8px;font-size:11px;color:var(--bad);border-color:var(--bad)"
+              title="Exclude this beach from the gold set" onclick="excludeBeach(${c.fid}, this)">
+        ✕ exclude
+      </button>
+    </div>
+    <div class="row-body">
+      <div>${srcListHtml}</div>
+      <div class="truth-col">
+        <label>YOUR TRUTH for ${escapeHtml(f ? f.label : fname)}</label>
+        ${control}
+        <div style="display:flex;gap:6px;align-items:center">
+          <select id="cc-${fname}-${c.fid}" title="Your confidence in this truth"
+                  style="flex:0 0 110px;padding:6px 4px;font-size:11px">
+            <option value="">conf —</option>
+            <option value="high"   ${truth?.curator_confidence==='high'?'selected':''}>conf high</option>
+            <option value="medium" ${truth?.curator_confidence==='medium'?'selected':''}>conf medium</option>
+            <option value="low"    ${truth?.curator_confidence==='low'?'selected':''}>conf low</option>
+          </select>
+          <button class="primary" style="flex:1" onclick="saveScalarFromField(${c.fid}, '${fname}')">Save truth</button>
+        </div>
+        ${truth?.verified_at ? `<div class="ts-meta">last saved ${escapeHtml(truth.verified_at.slice(0,16))} by ${escapeHtml(truth.verified_by || '?')}${truth.curator_confidence ? ` · conf ${escapeHtml(truth.curator_confidence)}` : ''}</div>` : ''}
+      </div>
+    </div>
+  `;
+  return row;
+}
+
+function useSourceVariant(srcEl) {
+  const row = srcEl.closest(".field-row");
+  if (!row || !row._variants) return;
+  const idx = Number(srcEl.dataset.idx);
+  const fid = srcEl.dataset.fid;
+  const fname = srcEl.dataset.field;
+  const v = row._variants[idx];
+  if (!v) return;
+  const target = document.getElementById(`t-${fname}-${fid}`);
+  if (!target) return;
+  const value = (v.parsed_value ?? v.raw_response ?? '').toString();
+  if (target.tagName === "SELECT") {
+    const opts = Array.from(target.options).map(o => o.value);
+    if (opts.includes(value)) target.value = value;
+    else target.value = value.split("\n")[0].trim();
+  } else {
+    target.value = value.slice(0, 2000);
+  }
+  row.classList.remove("saved");
+  row.classList.add("dirty");
+}
+
+function replaceRowsForBeach(fid, savedField) {
+  const cand = CANDIDATES.find(c => c.fid === fid);
+  if (!cand) return;
+  document.querySelectorAll(`.field-row[data-fid="${fid}"]`).forEach(row => {
+    const fname = row.dataset.field;
+    const fSchema = fieldSchema(fname);
+    const newRow = buildFieldOnlyRow(cand, fname, fSchema);
+    if (fname === savedField) newRow.classList.add("saved");
+    row.parentNode.replaceChild(newRow, row);
+  });
+}
+
+async function excludeBeach(fid, btn) {
+  if (!confirm("Exclude this beach from the gold set? You can re-include it later in SQL.")) return;
+  try {
+    await apiPost("admin-set-gold-exclude", {
+      set_name: document.getElementById("set-picker").value,
+      fid, excluded: true,
+    });
+    toast(`excluded fid ${fid}`);
+    CANDIDATES = CANDIDATES.filter(c => c.fid !== fid);
+    renderAll();
+  } catch (e) { toast(`exclude failed: ${e.message}`, "err"); }
+}
+
+function submitField() {
+  const fname = document.getElementById("field-picker").value;
+  const fc = fieldCompletion(fname);
+  if (fc.complete) {
+    toast(`✓ ${fname}: all ${fc.total} truthed`);
+    renderByField();
+    return;
+  }
+  const firstMissingFid = fc.missing[0]?.fid;
+  const row = firstMissingFid != null
+    ? document.querySelector(`.field-row[data-fid="${firstMissingFid}"][data-field="${fname}"]`)
+    : null;
+  if (row) {
+    row.scrollIntoView({ behavior: "smooth", block: "center" });
+    row.style.outline = "2px solid var(--warn)";
+    setTimeout(() => { row.style.outline = ""; }, 2000);
+  }
+  const noTruth = fc.missing.filter(m => m.reason === "no truth");
+  const noConf  = fc.missing.filter(m => m.reason === "no confidence");
+  const parts = [];
+  if (noTruth.length) {
+    const names = noTruth.slice(0, 4).map(m => m.name).join(", ");
+    const more  = noTruth.length > 4 ? ` (+${noTruth.length-4})` : "";
+    parts.push(`${noTruth.length} no-truth: ${names}${more}`);
+  }
+  if (noConf.length) {
+    const names = noConf.slice(0, 4).map(m => m.name).join(", ");
+    const more  = noConf.length > 4 ? ` (+${noConf.length-4})` : "";
+    parts.push(`${noConf.length} no-confidence: ${names}${more}`);
+  }
+  toast(`${fc.done}/${fc.total} done — ${parts.join("  ·  ")}`, "err");
+}
+
+function refreshFieldHeader() {
+  const head = document.querySelector(".field-header");
+  if (!head) return;
+  const fname = document.getElementById("field-picker").value;
+  const fc = fieldCompletion(fname);
+  head.classList.toggle("field-done", fc.complete);
+  const pill = head.querySelector(".progress-pill");
+  if (pill) {
+    pill.textContent = `${fc.done}/${fc.total} truthed${fc.skipped.length ? ` · ${fc.skipped.length} no-source` : ''}`;
+    pill.title = fc.skipped.length
+      ? `${fc.skipped.length} beaches have no source extraction for this field and are excluded from the count`
+      : "every candidate has at least one source extraction";
+  }
+  const btn = head.querySelector(".submit-btn");
+  if (btn) btn.textContent = fc.complete ? "✓ Field done — re-check" : "Submit field";
+  applyDoneStylesToPicker();
+}
+
+function applyDoneStylesToPicker() {
+  const picker = document.getElementById("field-picker");
+  if (!picker) return;
+  for (const opt of picker.options) {
+    const fc = fieldCompletion(opt.value);
+    if (fc.complete) {
+      opt.classList.add("done");
+      if (!opt.textContent.startsWith("✓ ")) opt.textContent = "✓ " + opt.textContent;
+    } else {
+      opt.classList.remove("done");
+      opt.textContent = opt.textContent.replace(/^✓ /, "");
+    }
+  }
+}
+
+async function saveScalarFromField(fid, fname) {
+  const el = document.getElementById(`t-${fname}-${fid}`);
+  if (!el) return;
+  const v = el.value;
+  if (!v || !v.trim()) { toast(`${fname}: empty, not saving`, "err"); return; }
+  const ccEl = document.getElementById(`cc-${fname}-${fid}`);
+  const cc = ccEl?.value || null;
+  const fSchema = fieldSchema(fname);
+  // Structured fields: parse JSON for truth_value_json. Scalar: verified_value.
+  const body = { fid, field_name: fname, curator_confidence: cc };
+  const isStructured = fSchema?.shape === "structured_json";
+  if (isStructured) {
+    try { body.truth_value_json = JSON.parse(v); }
+    catch (err) { toast(`invalid JSON in ${fname}`, "err"); return; }
+  } else {
+    body.verified_value = v;
+  }
+  console.debug("[curator] saving truth", body);
+  try {
+    const resp = await apiPost("admin-save-gold-truth", body);
+    console.debug("[curator] save success", resp);
+    const cand = CANDIDATES.find(c => c.fid === fid);
+    if (cand) {
+      cand.truth = cand.truth || {};
+      cand.truth[fname] = resp.row || {
+        field_name: fname, verified_value: body.verified_value || null,
+        truth_value_json: body.truth_value_json || null,
+        curator_confidence: cc, verified_at: new Date().toISOString(),
+        verified_by: "curator",
+      };
+      replaceRowsForBeach(fid, fname);
+    }
+    const bc = cand ? beachCompletion(cand) : { n: '?', target: BEACH_TRUTH_TARGET };
+    toast(`saved ${fname} for fid ${fid}${cc ? ' (conf ' + cc + ')' : ''} — ${bc.n}/${BEACH_TRUTH_TARGET}`);
+    refreshFieldHeader();
+  } catch (e) {
+    console.warn("[curator] save failed", e);
+    toast(`save failed: ${e.message}`, "err");
+  }
+}
+
+// ---- Boot ----
+if (getSecret()) initAuthorized();
+else showAuth();
+</script>
+</body>
+</html>

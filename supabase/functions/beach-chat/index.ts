@@ -59,18 +59,27 @@ Deno.serve(async (req: Request) => {
     return json({ error: "question and (location_id or arena_group_id) are required" }, 400);
   }
 
-  // Resolve to location_id (still the slug used by scoring-table queries
-  // until those tables drop their location_id PK).
+  // Resolve location_id ↔ arena_group_id via the spine. Scoring-table
+  // queries use arena_group_id (now the PK); the legacy slug is just
+  // here to keep input flexible.
+  if (!arena_group_id && location_id) {
+    const { data: row } = await supabase
+      .from("beaches_gold")
+      .select("fid")
+      .eq("location_id", location_id)
+      .limit(1);
+    arena_group_id = row?.[0]?.fid ?? undefined;
+  }
   if (!location_id && arena_group_id) {
     const { data: row } = await supabase
-      .from("beaches")
+      .from("beaches_gold")
       .select("location_id")
-      .eq("arena_group_id", arena_group_id)
+      .eq("fid", arena_group_id)
       .limit(1);
     location_id = row?.[0]?.location_id ?? undefined;
-    if (!location_id) {
-      return json({ error: `No legacy slug found for arena_group_id=${arena_group_id}` }, 404);
-    }
+  }
+  if (!arena_group_id) {
+    return json({ error: `Beach not found in spine for input` }, 404);
   }
   try {
     let systemPrompt: string;
@@ -84,13 +93,11 @@ Deno.serve(async (req: Request) => {
       // All beaches are in California — use Pacific time for "today"
       const todayPacific = localDateForTimezone(new Date(), "America/Los_Angeles");
 
-      // Path 3b-3.3: read beaches_gold + JOIN slug for cross-beach mode.
-      // Filter to scoreable so the prompt context is the curated set,
-      // not all 763.
+      // Cross-beach mode: scoreable set, all from the spine.
       const [{ data: beachesRaw }, { data: allDays }] = await Promise.all([
         supabase
           .from("beaches_gold")
-          .select("fid, name, display_name_override, timezone, beaches!inner(location_id)")
+          .select("fid, location_id, name, display_name_override, timezone")
           .eq("is_scoreable", true)
           .eq("is_active", true),
         supabase
@@ -102,26 +109,23 @@ Deno.serve(async (req: Request) => {
           .limit(50),
       ]);
 
-      // Reshape gold rows into the legacy {location_id, display_name, timezone}
+      // Reshape gold rows into the {location_id, display_name, timezone}
       // shape that buildCrossBeachPrompt expects.
-      const beaches = (beachesRaw ?? []).map((g: { fid: number; name: string; display_name_override: string | null; timezone: string; beaches: { location_id: string } | { location_id: string }[] }) => {
-        const pb = Array.isArray(g.beaches) ? g.beaches[0] : g.beaches;
-        return {
-          location_id:  pb?.location_id ?? null,
-          display_name: g.display_name_override ?? g.name,
-          timezone:     g.timezone ?? "America/Los_Angeles",
-        };
-      });
+      const beaches = (beachesRaw ?? []).map((g: { fid: number; location_id: string | null; name: string; display_name_override: string | null; timezone: string }) => ({
+        location_id:  g.location_id ?? null,
+        display_name: g.display_name_override ?? g.name,
+        timezone:     g.timezone ?? "America/Los_Angeles",
+      }));
       systemPrompt = buildCrossBeachPrompt(beaches, allDays ?? []);
 
     } else {
       // ── Single-beach mode: full detail for current beach ─────────────
-      // Path 3b-3.3: read beaches_gold (identity + marketing text) +
-      // INNER JOIN public.beaches only for the legacy slug.
+      // Single-beach mode: all on the spine.
       const { data: goldRows, error: beachErr } = await supabase
         .from("beaches_gold")
         .select(`
           fid,
+          location_id,
           name,
           display_name_override,
           timezone,
@@ -129,23 +133,20 @@ Deno.serve(async (req: Request) => {
           close_time,
           address,
           website,
-          description,
-          beaches!inner(location_id)
+          description
         `)
-        .eq("beaches.location_id", location_id)
+        .eq("fid", arena_group_id)
         .limit(1);
 
       if (beachErr || !goldRows?.length) {
-        return json({ error: `Beach not found: ${location_id}` }, 404);
+        return json({ error: `Beach not found in spine: arena_group_id=${arena_group_id}` }, 404);
       }
-      const g = goldRows[0] as { fid: number; name: string; display_name_override: string | null;
+      const g = goldRows[0] as { fid: number; location_id: string | null; name: string;
+                                  display_name_override: string | null;
                                   timezone: string; open_time: string | null; close_time: string | null;
-                                  address: string | null; website: string | null; description: string | null;
-                                  beaches: { location_id: string }
-                                           | { location_id: string }[] };
-      const pb = Array.isArray(g.beaches) ? g.beaches[0] : g.beaches;
+                                  address: string | null; website: string | null; description: string | null };
       const beach = {
-        location_id:    pb.location_id,
+        location_id:    g.location_id,
         arena_group_id: g.fid,
         display_name:   g.display_name_override ?? g.name,
         timezone:       g.timezone ?? "America/Los_Angeles",

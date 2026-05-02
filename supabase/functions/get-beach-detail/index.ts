@@ -32,7 +32,7 @@ Deno.serve(async (req: Request) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
     const nowUtc   = new Date();
 
-    // Resolve to fid (arena_group_id is the spine PK).
+    // Resolve to fid via either input. Legacy slug lives on beaches_gold now.
     let fid: number | null = null;
     if (arenaGroupIdParam) {
       const parsed = parseInt(arenaGroupIdParam, 10);
@@ -40,33 +40,24 @@ Deno.serve(async (req: Request) => {
       fid = parsed;
     } else {
       const slug = locationIdParam ?? "huntington-dog-beach";
-      const { data: legacyRow } = await supabase
-        .from("beaches")
-        .select("arena_group_id")
+      const { data: row } = await supabase
+        .from("beaches_gold")
+        .select("fid")
         .eq("location_id", slug)
         .limit(1);
-      fid = legacyRow?.[0]?.arena_group_id ?? null;
-      if (!fid) return json({ error: "Beach not found (no arena mapping for slug)" }, 404);
+      fid = row?.[0]?.fid ?? null;
+      if (!fid) return json({ error: "Beach not found (slug not in spine)" }, 404);
     }
 
-    // Beach metadata from the spine. Website + marketing text live on
-    // beaches_gold now (3b-3 migration). public.beaches is read only
-    // for the legacy slug.
-    const [{ data: goldRows, error: goldErr }, { data: legacyMetaRows }] = await Promise.all([
-      supabase.from("beaches_gold")
-        .select("fid, name, display_name_override, timezone, address, website")
-        .eq("fid", fid)
-        .limit(1),
-      supabase.from("beaches")
-        .select("location_id, arena_group_id")
-        .eq("arena_group_id", fid)
-        .limit(1),
-    ]);
+    const { data: goldRows, error: goldErr } = await supabase
+      .from("beaches_gold")
+      .select("fid, location_id, name, display_name_override, timezone, address, website")
+      .eq("fid", fid)
+      .limit(1);
     const gold = goldRows?.[0];
     if (goldErr || !gold) return json({ error: "Beach not found" }, 404);
-    const legacyMeta = legacyMetaRows?.[0];
     const beach = {
-      location_id:     legacyMeta?.location_id ?? null,
+      location_id:     gold.location_id ?? null,
       arena_group_id:  gold.fid,
       display_name:    gold.display_name_override ?? gold.name,
       timezone:        gold.timezone ?? "America/Los_Angeles",

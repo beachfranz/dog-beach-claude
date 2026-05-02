@@ -53,27 +53,24 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── Resolve all input keys to a single set of arena_group_ids ───────────────
-  // Path 3b-3.2: beaches_gold is the spine. Any location_id input gets
-  // mapped to arena_group_id via public.beaches; once mapped, all reads
-  // come from beaches_gold + beach_dog_policy + (joined for slug) beaches.
+  // Path 3b-3.x: beaches_gold is the spine; the legacy location_id slug
+  // lives on it now too. Any location_id input maps to arena_group_id
+  // via beaches_gold.
   const fidSet = new Set<number>(arenaGroupIds ?? []);
   if (locationIds?.length) {
-    const { data: legacyRows } = await supabase
-      .from("beaches")
-      .select("arena_group_id")
-      .in("location_id", locationIds)
-      .not("arena_group_id", "is", null);
-    for (const r of legacyRows ?? []) {
-      if (r.arena_group_id) fidSet.add(r.arena_group_id);
+    const { data: rows } = await supabase
+      .from("beaches_gold")
+      .select("fid")
+      .in("location_id", locationIds);
+    for (const r of rows ?? []) {
+      if (r.fid) fidSet.add(r.fid);
     }
   }
 
-  // Build the gold query. INNER JOIN beaches because the scoring tables
-  // still PK on location_id NOT NULL (until that migration). Without a
-  // joined slug we can't upsert.
   let beachQuery = supabase.from("beaches_gold")
     .select(`
       fid,
+      location_id,
       name,
       display_name_override,
       lat,
@@ -88,7 +85,6 @@ Deno.serve(async (req: Request) => {
       website,
       description,
       parking_text,
-      beaches!inner(location_id, location_numb, created_at, is_active),
       beach_dog_policy(dogs_prohibited_start, dogs_prohibited_end)
     `)
     .eq("is_active", true);
@@ -116,26 +112,22 @@ Deno.serve(async (req: Request) => {
 
   // Reshape gold rows into the existing beach shape so refreshNow doesn't change.
   type GoldRow = {
-    fid: number; name: string; display_name_override: string | null;
+    fid: number; location_id: string | null;
+    name: string; display_name_override: string | null;
     lat: number; lon: number;
     noaa_station_id: string | null; besttime_venue_id: string | null;
     timezone: string; open_time: string | null; close_time: string | null;
     is_active: boolean;
     address: string | null; website: string | null;
     description: string | null; parking_text: string | null;
-    beaches: { location_id: string; location_numb: number | null;
-               created_at: string; is_active: boolean }
-            | { location_id: string; location_numb: number | null;
-                created_at: string; is_active: boolean }[];
     beach_dog_policy: { dogs_prohibited_start: string | null; dogs_prohibited_end: string | null }
                       | null
                       | { dogs_prohibited_start: string | null; dogs_prohibited_end: string | null }[];
   };
   const beaches = (goldRes.data as GoldRow[]).map(g => {
-    const pb = Array.isArray(g.beaches) ? g.beaches[0] : g.beaches;
     const dp = Array.isArray(g.beach_dog_policy) ? g.beach_dog_policy[0] : g.beach_dog_policy;
     return {
-      location_id:    pb.location_id,
+      location_id:    g.location_id,
       arena_group_id: g.fid,
       display_name:   g.display_name_override ?? g.name,
       latitude:       g.lat,
@@ -214,7 +206,7 @@ async function refreshNow(
       fetchCurrentTide(beach.noaa_station_id, localHour),
       supabase.from("beach_day_hourly_scores")
         .select("busyness_score, busyness_category")
-        .eq("location_id", beach.location_id)
+        .eq("arena_group_id", beach.arena_group_id)
         .eq("local_date", localDate)
         .eq("local_hour", localHour)
         .maybeSingle(),
@@ -257,12 +249,12 @@ async function refreshNow(
     await supabase
       .from("beach_day_hourly_scores")
       .update({ is_now: false })
-      .eq("location_id", beach.location_id)
+      .eq("arena_group_id", beach.arena_group_id)
       .eq("is_now", true);
 
     const { error: upsertErr } = await supabase
       .from("beach_day_hourly_scores")
-      .upsert(row, { onConflict: "location_id,forecast_ts" });
+      .upsert(row, { onConflict: "arena_group_id,forecast_ts" });
 
     if (upsertErr) throw new Error(upsertErr.message);
 

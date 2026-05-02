@@ -175,43 +175,28 @@ def main() -> int:
                     (arena_fid,))
         print(f"  [arena]   inserted fid={arena_fid}, group_id={arena_fid}")
 
-    # 2. beaches_gold row (idempotent on fid)
+    # 2. beaches_gold row (idempotent on fid). Includes location_id slug
+    #    directly — public.beaches is gone.
     cur.execute("SELECT fid FROM public.beaches_gold WHERE fid = %s", (arena_fid,))
     if cur.fetchone():
         print(f"  [gold]    already exists at fid={arena_fid}")
     else:
         cur.execute("""
             INSERT INTO public.beaches_gold
-                (fid, name, lat, lon, county_name, source_code, source_id,
+                (fid, location_id, name, lat, lon, county_name, source_code, source_id,
                  group_id, nav_lat, nav_lon, nav_source, name_source,
                  park_name, state, promoted_from, is_active,
                  noaa_station_id, timezone, open_time, close_time)
             VALUES
-                (%s, %s, %s, %s, %s, 'manual', %s,
+                (%s, %s, %s, %s, %s, %s, 'manual', %s,
                  %s, %s, %s, 'manual_seed', 'manual_seed',
                  %s, %s, 'manual_seed_v1', true,
                  %s, %s, %s, %s);
-        """, (arena_fid, args.name, args.lat, args.lon, args.county,
+        """, (arena_fid, slug, args.name, args.lat, args.lon, args.county,
               source_id, arena_fid, args.lat, args.lon,
               args.park_name, args.state,
               noaa, timezone, args.open, args.close))
-        print(f"  [gold]    inserted fid={arena_fid}")
-
-    # 3. public.beaches row (idempotent on location_id)
-    cur.execute("SELECT location_id FROM public.beaches WHERE location_id = %s",
-                (slug,))
-    if cur.fetchone():
-        print(f"  [beaches] already exists at location_id={slug}")
-    else:
-        cur.execute("""
-            INSERT INTO public.beaches
-                (location_id, display_name, latitude, longitude,
-                 noaa_station_id, timezone, open_time, close_time,
-                 is_active, arena_group_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, true, %s);
-        """, (slug, args.name, args.lat, args.lon,
-              noaa, timezone, args.open, args.close, arena_fid))
-        print(f"  [beaches] inserted location_id={slug}, arena_group_id={arena_fid}")
+        print(f"  [gold]    inserted fid={arena_fid}, location_id={slug}")
 
     conn.commit()
 

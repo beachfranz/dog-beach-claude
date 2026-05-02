@@ -182,6 +182,7 @@ Deno.serve(async (req: Request) => {
     let beachQuery = supabase.from("beaches_gold")
       .select(`
         fid,
+        location_id,
         name,
         display_name_override,
         lat,
@@ -197,15 +198,12 @@ Deno.serve(async (req: Request) => {
         website,
         description,
         parking_text,
-        beaches!inner(location_id, location_numb, created_at, is_active),
         beach_dog_policy(dogs_prohibited_start, dogs_prohibited_end)
       `)
       .eq("is_scoreable", true)
       .eq("is_active", true);
     if (targetLocationIds && targetLocationIds.length > 0) {
-      // Caller pinned specific location_ids — filter via the joined beaches row.
-      // Note: PostgREST doesn't support .in() on a foreign-table column directly,
-      // so we post-filter in JS instead of complicating the query.
+      beachQuery = beachQuery.in("location_id", targetLocationIds);
     }
     const { data: goldRows, error: beachErr } = await beachQuery;
 
@@ -213,28 +211,24 @@ Deno.serve(async (req: Request) => {
     // the function doesn't need touching. PostgREST returns the joined
     // beaches row as either an object or array depending on cardinality;
     // since we INNER JOIN there's exactly one.
-    type GoldJoinedRow = {
-      fid: number; name: string; display_name_override: string | null;
+    type GoldRow = {
+      fid: number; location_id: string | null;
+      name: string; display_name_override: string | null;
       lat: number; lon: number;
       noaa_station_id: string | null; besttime_venue_id: string | null;
       timezone: string; open_time: string | null; close_time: string | null;
       is_scoreable: boolean; is_active: boolean;
       address: string | null; website: string | null;
       description: string | null; parking_text: string | null;
-      beaches: { location_id: string; location_numb: number | null;
-                 created_at: string; is_active: boolean }
-              | { location_id: string; location_numb: number | null;
-                  created_at: string; is_active: boolean }[];
       beach_dog_policy: { dogs_prohibited_start: string | null; dogs_prohibited_end: string | null }
                         | null
                         | { dogs_prohibited_start: string | null; dogs_prohibited_end: string | null }[];
     };
-    const flatten = (g: GoldJoinedRow): Beach => {
-      const pb = Array.isArray(g.beaches) ? g.beaches[0] : g.beaches;
+    const flatten = (g: GoldRow): Beach => {
       const dp = Array.isArray(g.beach_dog_policy) ? g.beach_dog_policy[0]
                : g.beach_dog_policy;
       return {
-        location_id:    pb.location_id,
+        location_id:    g.location_id ?? "",
         arena_group_id: g.fid,
         display_name:   g.display_name_override ?? g.name,
         latitude:       g.lat,
@@ -251,15 +245,11 @@ Deno.serve(async (req: Request) => {
         website:        g.website,
         description:    g.description,
         parking_text:   g.parking_text,
-        location_numb:  pb.location_numb,
-        created_at:     pb.created_at,
+        location_numb:  null,
+        created_at:     "",
       };
     };
-    let beaches: Beach[] | null = goldRows ? (goldRows as GoldJoinedRow[]).map(flatten) : null;
-    if (beaches && targetLocationIds && targetLocationIds.length > 0) {
-      const want = new Set(targetLocationIds);
-      beaches = beaches.filter(b => want.has(b.location_id));
-    }
+    const beaches: Beach[] | null = goldRows ? (goldRows as GoldRow[]).map(flatten) : null;
 
     console.log("Beach query result — data:", beaches?.length ?? "null", "error:", beachErr?.message ?? "none");
 
@@ -388,7 +378,7 @@ async function processBeach(
     for (let i = 0; i < hourlyRows.length; i += 100) {
       const { error } = await supabase
         .from("beach_day_hourly_scores")
-        .upsert(hourlyRows.slice(i, i + 100), { onConflict: "location_id,forecast_ts" });
+        .upsert(hourlyRows.slice(i, i + 100), { onConflict: "arena_group_id,forecast_ts" });
       if (error) throw new Error(error.message);
     }
     phases.upsert_hourly = "ok";
@@ -411,7 +401,7 @@ async function processBeach(
     });
     const { error } = await supabase
       .from("beach_day_recommendations")
-      .upsert(dailyRows, { onConflict: "location_id,local_date" });
+      .upsert(dailyRows, { onConflict: "arena_group_id,local_date" });
     if (error) throw new Error(error.message);
     phases.upsert_daily = "ok";
     console.log(`[${beach.location_id}] Upserted ${dailyRows.length} daily rows`);

@@ -220,6 +220,14 @@ def main() -> int:
         if not noaa:
             print(f"\n  [refresh] skipped: no NOAA station — beach has no tide signal")
         else:
+            # Flip is_scoreable so the nightly daily-beach-refresh picks
+            # this beach up going forward (not just the one-off run below).
+            cur.execute(
+                "UPDATE public.beaches_gold SET is_scoreable = true WHERE fid = %s",
+                (arena_fid,)
+            )
+            conn.commit()
+            print(f"  [score]   beaches_gold.is_scoreable = true")
             print(f"\n  Triggering daily-beach-refresh for {slug}...")
             result = trigger_refresh(slug)
             if "error" in result:

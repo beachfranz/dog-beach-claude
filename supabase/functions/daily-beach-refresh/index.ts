@@ -168,13 +168,92 @@ Deno.serve(async (req: Request) => {
   const results: RefreshResult[] = [];
 
   try {
-    // 1. Load active beaches
-    console.log("Loading beaches from DB...");
-    const { data: beaches, error: beachErr } = await (
-      targetLocationIds && targetLocationIds.length > 0
-        ? supabase.from("beaches").select("*").eq("is_active", true).in("location_id", targetLocationIds)
-        : supabase.from("beaches").select("*").eq("is_active", true)
-    );
+    // 1. Load scoreable beaches from the spine.
+    //
+    // Path 3b-3.1: source of truth is beaches_gold + the is_scoreable gate.
+    // INNER JOIN to public.beaches because the scoring tables still PK on
+    // location_id (NOT NULL) until the next migration retires that column.
+    // beach_dog_policy supplies dogs_prohibited_start/end (overlay table).
+    //
+    // The big swap was 15 → 15: today's curated set is exactly the rows
+    // where beaches_gold.is_scoreable=true. Future seeds opt in via
+    // seed_arena_beach.py --score (sets is_scoreable=true).
+    console.log("Loading beaches from beaches_gold (is_scoreable=true)...");
+    let beachQuery = supabase.from("beaches_gold")
+      .select(`
+        fid,
+        name,
+        display_name_override,
+        lat,
+        lon,
+        noaa_station_id,
+        besttime_venue_id,
+        timezone,
+        open_time,
+        close_time,
+        is_scoreable,
+        is_active,
+        beaches!inner(location_id, address, website, description, parking_text, location_numb, created_at, is_active),
+        beach_dog_policy(dogs_prohibited_start, dogs_prohibited_end)
+      `)
+      .eq("is_scoreable", true)
+      .eq("is_active", true);
+    if (targetLocationIds && targetLocationIds.length > 0) {
+      // Caller pinned specific location_ids — filter via the joined beaches row.
+      // Note: PostgREST doesn't support .in() on a foreign-table column directly,
+      // so we post-filter in JS instead of complicating the query.
+    }
+    const { data: goldRows, error: beachErr } = await beachQuery;
+
+    // Reshape gold rows into the existing Beach interface so the rest of
+    // the function doesn't need touching. PostgREST returns the joined
+    // beaches row as either an object or array depending on cardinality;
+    // since we INNER JOIN there's exactly one.
+    type GoldJoinedRow = {
+      fid: number; name: string; display_name_override: string | null;
+      lat: number; lon: number;
+      noaa_station_id: string | null; besttime_venue_id: string | null;
+      timezone: string; open_time: string | null; close_time: string | null;
+      is_scoreable: boolean; is_active: boolean;
+      beaches: { location_id: string; address: string | null; website: string | null;
+                 description: string | null; parking_text: string | null;
+                 location_numb: number | null; created_at: string;
+                 is_active: boolean } | { location_id: string }[];
+      beach_dog_policy: { dogs_prohibited_start: string | null; dogs_prohibited_end: string | null }
+                        | null
+                        | { dogs_prohibited_start: string | null; dogs_prohibited_end: string | null }[];
+    };
+    const flatten = (g: GoldJoinedRow): Beach => {
+      const pb = Array.isArray(g.beaches) ? g.beaches[0] : g.beaches;
+      const dp = Array.isArray(g.beach_dog_policy) ? g.beach_dog_policy[0]
+               : g.beach_dog_policy;
+      return {
+        location_id:    (pb as { location_id: string }).location_id,
+        arena_group_id: g.fid,
+        display_name:   g.display_name_override ?? g.name,
+        latitude:       g.lat,
+        longitude:      g.lon,
+        noaa_station_id: g.noaa_station_id,
+        besttime_venue_id: g.besttime_venue_id,
+        is_active:      g.is_active,
+        timezone:       g.timezone ?? "America/Los_Angeles",
+        open_time:      g.open_time,
+        close_time:     g.close_time,
+        dogs_prohibited_start: dp?.dogs_prohibited_start ?? null,
+        dogs_prohibited_end:   dp?.dogs_prohibited_end   ?? null,
+        address:        (pb as { address?: string }).address ?? null,
+        website:        (pb as { website?: string }).website ?? null,
+        description:    (pb as { description?: string }).description ?? null,
+        parking_text:   (pb as { parking_text?: string }).parking_text ?? null,
+        location_numb:  (pb as { location_numb?: number }).location_numb ?? null,
+        created_at:     (pb as { created_at?: string }).created_at ?? "",
+      };
+    };
+    let beaches: Beach[] | null = goldRows ? (goldRows as GoldJoinedRow[]).map(flatten) : null;
+    if (beaches && targetLocationIds && targetLocationIds.length > 0) {
+      const want = new Set(targetLocationIds);
+      beaches = beaches.filter(b => want.has(b.location_id));
+    }
 
     console.log("Beach query result — data:", beaches?.length ?? "null", "error:", beachErr?.message ?? "none");
 
@@ -255,10 +334,13 @@ async function processBeach(
     phases.besttime = "ok";
     console.log(`[${beach.location_id}] Crowds OK — ${crowdResult.busynessMap.size} slots`);
     if (crowdResult.isNewVenue) {
+      // Write the discovered venue back to the spine (beaches_gold). The
+      // legacy public.beaches column is now derived/optional and gets
+      // mirrored on next sync rather than directly written here.
       await supabase
-        .from("beaches")
+        .from("beaches_gold")
         .update({ besttime_venue_id: crowdResult.venueId })
-        .eq("location_id", beach.location_id);
+        .eq("fid", beach.arena_group_id);
       console.log(`[${beach.location_id}] Persisted venue_id: ${crowdResult.venueId}`);
     }
   } catch (err) {

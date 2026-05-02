@@ -193,7 +193,11 @@ Deno.serve(async (req: Request) => {
         close_time,
         is_scoreable,
         is_active,
-        beaches!inner(location_id, address, website, description, parking_text, location_numb, created_at, is_active),
+        address,
+        website,
+        description,
+        parking_text,
+        beaches!inner(location_id, location_numb, created_at, is_active),
         beach_dog_policy(dogs_prohibited_start, dogs_prohibited_end)
       `)
       .eq("is_scoreable", true)
@@ -215,10 +219,12 @@ Deno.serve(async (req: Request) => {
       noaa_station_id: string | null; besttime_venue_id: string | null;
       timezone: string; open_time: string | null; close_time: string | null;
       is_scoreable: boolean; is_active: boolean;
-      beaches: { location_id: string; address: string | null; website: string | null;
-                 description: string | null; parking_text: string | null;
-                 location_numb: number | null; created_at: string;
-                 is_active: boolean } | { location_id: string }[];
+      address: string | null; website: string | null;
+      description: string | null; parking_text: string | null;
+      beaches: { location_id: string; location_numb: number | null;
+                 created_at: string; is_active: boolean }
+              | { location_id: string; location_numb: number | null;
+                  created_at: string; is_active: boolean }[];
       beach_dog_policy: { dogs_prohibited_start: string | null; dogs_prohibited_end: string | null }
                         | null
                         | { dogs_prohibited_start: string | null; dogs_prohibited_end: string | null }[];
@@ -228,7 +234,7 @@ Deno.serve(async (req: Request) => {
       const dp = Array.isArray(g.beach_dog_policy) ? g.beach_dog_policy[0]
                : g.beach_dog_policy;
       return {
-        location_id:    (pb as { location_id: string }).location_id,
+        location_id:    pb.location_id,
         arena_group_id: g.fid,
         display_name:   g.display_name_override ?? g.name,
         latitude:       g.lat,
@@ -241,12 +247,12 @@ Deno.serve(async (req: Request) => {
         close_time:     g.close_time,
         dogs_prohibited_start: dp?.dogs_prohibited_start ?? null,
         dogs_prohibited_end:   dp?.dogs_prohibited_end   ?? null,
-        address:        (pb as { address?: string }).address ?? null,
-        website:        (pb as { website?: string }).website ?? null,
-        description:    (pb as { description?: string }).description ?? null,
-        parking_text:   (pb as { parking_text?: string }).parking_text ?? null,
-        location_numb:  (pb as { location_numb?: number }).location_numb ?? null,
-        created_at:     (pb as { created_at?: string }).created_at ?? "",
+        address:        g.address,
+        website:        g.website,
+        description:    g.description,
+        parking_text:   g.parking_text,
+        location_numb:  pb.location_numb,
+        created_at:     pb.created_at,
       };
     };
     let beaches: Beach[] | null = goldRows ? (goldRows as GoldJoinedRow[]).map(flatten) : null;

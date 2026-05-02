@@ -46,15 +46,16 @@ Deno.serve(async (req: Request) => {
       if (!fid) return json({ error: "Beach not found (no arena mapping for slug)" }, 404);
     }
 
-    // Beach metadata from the spine; website pulled from public.beaches
-    // when available (legacy curated beaches only).
+    // Beach metadata from the spine. Website + marketing text live on
+    // beaches_gold now (3b-3 migration). public.beaches is read only
+    // for the legacy slug.
     const [{ data: goldRows, error: goldErr }, { data: legacyMetaRows }] = await Promise.all([
       supabase.from("beaches_gold")
-        .select("fid, name, display_name_override, timezone, address")
+        .select("fid, name, display_name_override, timezone, address, website")
         .eq("fid", fid)
         .limit(1),
       supabase.from("beaches")
-        .select("location_id, website, arena_group_id")
+        .select("location_id, arena_group_id")
         .eq("arena_group_id", fid)
         .limit(1),
     ]);
@@ -67,7 +68,7 @@ Deno.serve(async (req: Request) => {
       display_name:    gold.display_name_override ?? gold.name,
       timezone:        gold.timezone ?? "America/Los_Angeles",
       address:         gold.address ?? null,
-      website:         legacyMeta?.website ?? null,
+      website:         gold.website ?? null,
     };
     const locationId = beach.location_id;  // may be null for non-curated
 

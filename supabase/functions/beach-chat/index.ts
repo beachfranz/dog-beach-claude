@@ -116,9 +116,8 @@ Deno.serve(async (req: Request) => {
 
     } else {
       // ── Single-beach mode: full detail for current beach ─────────────
-      // Path 3b-3.3: read beaches_gold (identity + scoring metadata) +
-      // INNER JOIN public.beaches for legacy slug + curated marketing
-      // text (address, website, description) the chat prompt uses.
+      // Path 3b-3.3: read beaches_gold (identity + marketing text) +
+      // INNER JOIN public.beaches only for the legacy slug.
       const { data: goldRows, error: beachErr } = await supabase
         .from("beaches_gold")
         .select(`
@@ -128,7 +127,10 @@ Deno.serve(async (req: Request) => {
           timezone,
           open_time,
           close_time,
-          beaches!inner(location_id, address, website, description)
+          address,
+          website,
+          description,
+          beaches!inner(location_id)
         `)
         .eq("beaches.location_id", location_id)
         .limit(1);
@@ -138,10 +140,9 @@ Deno.serve(async (req: Request) => {
       }
       const g = goldRows[0] as { fid: number; name: string; display_name_override: string | null;
                                   timezone: string; open_time: string | null; close_time: string | null;
-                                  beaches: { location_id: string; address: string | null;
-                                             website: string | null; description: string | null }
-                                           | { location_id: string; address: string | null;
-                                               website: string | null; description: string | null }[] };
+                                  address: string | null; website: string | null; description: string | null;
+                                  beaches: { location_id: string }
+                                           | { location_id: string }[] };
       const pb = Array.isArray(g.beaches) ? g.beaches[0] : g.beaches;
       const beach = {
         location_id:    pb.location_id,
@@ -150,9 +151,9 @@ Deno.serve(async (req: Request) => {
         timezone:       g.timezone ?? "America/Los_Angeles",
         open_time:      g.open_time,
         close_time:     g.close_time,
-        address:        pb.address,
-        website:        pb.website,
-        description:    pb.description,
+        address:        g.address,
+        website:        g.website,
+        description:    g.description,
       };
 
       // LLM-extracted policy metadata for this beach (leash rules, dog

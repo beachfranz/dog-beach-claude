@@ -188,8 +188,8 @@ def arena_group_polys(context: AssetExecutionContext, supabase_db: SupabaseDbRes
                 "arena beach group. Joins arena identity (name, address, "
                 "nav_lat/lon, park_name) with shape-aware policy "
                 "extractions (is_canon variant per field; junk filtered). "
-                "Read this from get-beach-detail edge function via "
-                "beaches.arena_group_id bridge.",
+                "Read by get-beach-detail keyed on beaches_gold.fid "
+                "(post path 3b — public.beaches bridge dropped).",
     group_name="ingest_arena",
     kinds={"sql", "view"},
     deps=[

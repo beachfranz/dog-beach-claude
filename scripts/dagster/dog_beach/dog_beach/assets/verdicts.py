@@ -8,19 +8,12 @@ flips/distribution as run metadata.
 Depends on the upstream ingest assets — the cascade reads
 operator_dogs_policy, cpad_unit_dogs_policy, and beach_locations.
 
-Also defines the consumer write-back asset `beaches` (key
-`['public', 'beaches']`). It shares the asset key with the dbt
-source so Dagster's lineage shows a single `beaches` node — the
-catalog cascade flowing INTO it from the left, and dbt's stg_beaches
-(the parity report mart) flowing OUT of it on the right. The asset
-body writes `dog_verdict_catalog{,_confidence,_computed_at}`; HTML
-still reads the curated `dogs_allowed` field.
-
-To avoid a cycle (beaches → stg_beaches → mart → write-back → beaches),
-the write-back joins `beach_verdicts` to `beach_locations` directly
-in SQL rather than going through the dbt mart. The mart is still
-queried at the end of the run for parity-report metadata only —
-that read does not establish a Dagster dependency.
+The `beaches` write-back asset below is **STALE** as of 2026-05-02:
+public.beaches was dropped, so the UPDATE statement will fail at
+materialize time. Open question: retire entirely, or repoint to
+the new public.beach_dog_policy overlay (FK → beaches_gold.fid)?
+Leaving in place pending Franz's call. Do NOT materialize this
+asset until decision lands.
 
 NOTE: no `from __future__ import annotations` here — Dagster's runtime
 context-type validator doesn't resolve PEP 563 string annotations.
@@ -110,18 +103,11 @@ def beach_verdicts(context: AssetExecutionContext,
 
 @asset(
     key=AssetKey(["public", "beaches"]),
-    description="Consumer-facing beach catalog. The most important "
-                "table in the database. Static metadata (lat/lng, "
-                "address, NOAA station, BestTime venue, open/close "
-                "hours) and dog policy (dogs_allowed, leash_policy, "
-                "off_leash_flag) are hand-curated and not modeled as "
-                "upstream Dagster assets. The cascade-computed dog "
-                "verdict columns (dog_verdict_catalog{,_confidence,"
-                "_computed_at}) are written here by this asset's "
-                "body — that write-back is the lineage edge shown in "
-                "the graph. HTML still reads dogs_allowed; the "
-                "catalog columns are reference-only for parity "
-                "review via dbt_dbt.consumer_beach_with_verdict.",
+    description="STALE — public.beaches was dropped 2026-05-02 (path 3b). "
+                "Pending decision: retire this asset entirely, or repoint "
+                "the write-back to public.beach_dog_policy (the new "
+                "curated overlay keyed on arena_group_id → beaches_gold.fid). "
+                "Materializing right now will fail.",
     group_name="consumer",
     kinds={"sql", "table"},
     deps=[AssetKey(["public", "beach_verdicts"]),

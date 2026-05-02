@@ -11,13 +11,13 @@ doesn't try to materialize them.
     Dagster controls.
   - HTML pages: static files in the repo, served by GitHub Pages.
 
-Lineage:
+Lineage (post path 3b — public.beaches dropped 2026-05-02):
 
-  beach_day_recommendations ─→ get_beach_summary ─→ index.html
-  beach_day_hourly_scores  ─┬→ get_beach_detail  ─→ detail.html
-                            └→ get_beach_compare ─→ find.html
-  public/beaches           ─→ get_beach_summary
-                           ─→ get_beach_compare
+  beaches_gold              ─┬→ get_beach_summary ─→ index.html
+  beach_dog_policy          ─┘                  └→ get_beach_detail ─→ detail.html
+  beach_day_recommendations ─→ get_beach_summary
+                            ─→ find_beaches RPC  ─→ get_beaches_find ─→ find.html
+  beach_day_hourly_scores   ─→ get_beach_detail
 """
 from dagster import AssetSpec, AssetKey
 
@@ -38,13 +38,12 @@ get_beach_summary = AssetSpec(
 
 get_beach_detail = AssetSpec(
     key=AssetKey(["edge", "get_beach_detail"]),
-    description="GET /functions/v1/get-beach-detail?location_id=<id>"
-                "&date=<YYYY-MM-DD>. Returns hour-by-hour scoring for "
+    description="GET /functions/v1/get-beach-detail?fid=<n> (or legacy "
+                "?location_id=<slug>). Returns hour-by-hour scoring for "
                 "one beach on one day, the day-level rollup, AND "
-                "LLM-extracted policy/amenity metadata via the "
-                "beaches.arena_group_id → arena_beach_metadata bridge "
-                "(dogs_*, public_access, parking_type, hours_text, "
-                "raw_address).",
+                "LLM-extracted policy/amenity metadata. Reads beaches_gold "
+                "directly + arena_beach_metadata keyed on fid (no longer "
+                "goes through public.beaches.arena_group_id bridge).",
     group_name="consumer_api",
     kinds={"edge_function", "deno"},
     deps=[AssetKey(["public", "beaches"]),

@@ -67,7 +67,22 @@ sources:
           warn_after: {count: 30, period: day}
           error_after: {count: 90, period: day}
 
-      # Consumer-app static metadata — the 5 SoCal beaches the live HTML serves.
-      # Bridges from the catalog pipeline (Layers 1-5) to the user pixel (Layer 9).
+      # Consumer-app static metadata.
+      # Pre path-3b (≤2026-05-02): public.beaches held the 5 hand-curated
+      # consumer beaches with location_id slug + scoring metadata + curated
+      # dog policy.
+      # Post path-3b: public.beaches DROPPED. beaches_gold is the spine
+      # (cross-state catalog, ~763 rows; is_scoreable=true gates daily fan-out
+      # to ~304 SoCal); beach_dog_policy is the curated overlay.
       - name: beaches
-        description: "Static metadata for the 5 consumer-app beaches: location_id (slug), display_name, lat/lng, NOAA station id, BestTime venue id, hours, address."
+        description: "STALE — table dropped 2026-05-02 (path 3b). Source kept here only to avoid breaking stg_beaches.sql parse until that model is repointed/retired."
+      - name: beaches_gold
+        description: "Cross-state canonical beach inventory (path-3 spine). PK=fid passes through from arena.fid. Carries identity (lat/lon, name, county, state) plus scoring metadata (noaa_station_id, timezone, open/close, location_id slug, is_scoreable gate)."
+        loaded_at_field: promoted_at
+        freshness:
+          warn_after: {count: 30, period: day}
+      - name: beach_dog_policy
+        description: "Hand-curated dog-access policy overlay. Keyed on arena_group_id → beaches_gold.fid. Holds dogs_allowed, leash_policy, off_leash_flag, dogs_prohibited_start/end, dogs_allowed_areas, access_rule."
+        loaded_at_field: curated_at
+        freshness:
+          warn_after: {count: 90, period: day}

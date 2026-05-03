@@ -1,6 +1,6 @@
 # Harmony branch — catalog ingest pipeline migration
 
-**Status:** Phases 1-7(1+2) + phase 8 (slices 1-8) + phase 6.3b + 6.3c(parts 1+2a) shipped 2026-05-03. Phase 7.3 BLOCKED behind 6.3c part 2b (buffer-rescued governance attribution) + locations_stage retire (audit at [docs/harmony-7-3-audit.md](harmony-7-3-audit.md)). Phase 8 = curator-on-canonical-tables migration (see `~/.claude/projects/C--Users-beach/memory/project_curator_on_canonical_tables.md`).
+**Status:** Phases 1-7(1+2) + phase 7.3 part 3a + phase 8 (slices 1-8 + 8b) + phase 6.3 fully shipped 2026-05-03. Phase 7.3 BLOCKED behind 6.3c part 2b (buffer-rescued governance attribution) + locations_stage retire (audit at [docs/harmony-7-3-audit.md](harmony-7-3-audit.md)). Phase 8 = curator-on-canonical-tables migration (see `~/.claude/projects/C--Users-beach/memory/project_curator_on_canonical_tables.md`).
 
 **End-of-day 2026-05-03 highlights** — 25 commits on harmony, all pushed:
 - Catalog ingest pipeline migrated to beaches_gold.fid (5 containment populators wired into Dagster + 763 active beaches backfilled)
@@ -63,7 +63,8 @@ members) — those rows stay legacy-only and get cleaned up in phase 7.
 | 6.3c (part 2a) | `populate_from_park_url_gold` for **dogs + practical only**. Reads park_url_extractions (arena_group_id is gold_fid). Picks highest-confidence row per beach. Includes audit columns (cpad_unit_name, extraction_type, cpad_role). 588 rows emitted: 279 beaches with dogs evidence + 309 with practical. | shipped 2026-05-03 |
 | 6.3c (part 2b) | The buffer-rescued **governance** attribution path inside _emit_evidence_from_park_url. Joins us_beach_points + beach_cpad_candidates (both legacy-fid). Stays deferred — needs gold equivalents of those join tables. | **STILL DEFERRED 2026-05-03** |
 | 7 (parts 1+2) | Wired into Dagster (`scripts/dagster/dog_beach/dog_beach/assets/ingest.py`): `polygon_containment_evidence` (cheap obs) + `polygon_containment_run` (heavy). Backfill across all 763 active beaches: 1,539 evidence rows emitted, 1,078 FK promotions. **Coverage**: 763/763 county_geoid, 394/763 cpad_unit_id (52%), 290/763 c1_jurisdiction_id (38%), 15 in scoreability_review_queue. | shipped 2026-05-03 |
-| 7 (part 3) | Deprecate `locations_stage`. Drop legacy `fid` column on `beach_enrichment_provenance`. | **BLOCKED** — see [docs/harmony-7-3-audit.md](harmony-7-3-audit.md). Two independent blockers: (a) admin-update-location still writes to locations_stage; (b) 5,532 legacy evidence rows have no gold equivalent until 6.3b/c lands. |
+| 7 (part 3a) | Drop legacy `fid` column on `beach_enrichment_provenance` + 32 legacy ingest functions. Verified preservation: 100% park_url + 96% research/old_school_llm preserved byte-identical in source tables; spatial-derived regenerable; 4 hand-typed manual rows re-attached to new gold_fid 9717 (Huntington Beach Dog Beach added to arena via seed_arena_beach.py). Archive table preserves id→legacy_fid mapping. | shipped 2026-05-03 |
+| 7 (part 3b) | Retire `locations_stage` table + `admin-update-location` endpoint. Still BLOCKED behind curator-UI cutover from `location-editor.html` to `beach-editor-gold.html`. | parked |
 
 ### 6.3b/c deferral — explicit triggers to un-defer
 

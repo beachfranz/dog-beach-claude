@@ -119,7 +119,7 @@
 
   .field-row .row-body {
     padding: 10px 14px;
-    display: grid; grid-template-columns: 1fr 280px; gap: 16px;
+    display: flex; flex-direction: column; gap: 12px;
   }
 
   .src-list { display: flex; flex-direction: column; gap: 4px; }
@@ -159,6 +159,11 @@
     font-size: 10px; color: var(--muted); display: flex; align-items: center; gap: 8px;
     flex-shrink: 0;
   }
+  .src-row .xref {
+    font-size: 9px; padding: 1px 5px; border-radius: 4px;
+    background: rgba(168,85,247,0.18); color: #c084fc;
+    border: 1px solid #a855f7;
+  }
   .src-row .src-meta a { color: var(--muted); text-decoration: none; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
   .src-row .src-meta a:hover { color: var(--blue); text-decoration: underline; }
   .src-row .use-btn {
@@ -170,20 +175,53 @@
   .no-sources { color: var(--muted); font-size: 12px; font-style: italic; padding: 8px 12px;
     background: rgba(0,0,0,0.15); border-radius: 6px; text-align: center; }
 
+  /* Truth row — horizontal at the TOP of the row body, so the input is wide
+     and easily readable. Pinned above the source list. */
   .truth-col {
     background: rgba(74,222,128,0.04); border: 1px solid rgba(74,222,128,0.2);
-    border-radius: 6px; padding: 10px 12px;
-    display: flex; flex-direction: column; gap: 8px;
+    border-radius: 6px; padding: 8px 10px;
+    display: grid;
+    grid-template-columns: 130px minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    gap: 4px 10px;
+    align-items: center;
   }
-  .truth-col label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); font-weight: 700; }
-  .truth-col input, .truth-col select, .truth-col textarea {
-    width: 100%; padding: 6px 8px; font-size: 12px;
+  .truth-col .label-col {
+    grid-column: 1; grid-row: 1;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--accent); font-weight: 700;
+  }
+  .truth-col .input-col { grid-column: 2; grid-row: 1; min-width: 0; }
+  .truth-col .input-col input, .truth-col .input-col select, .truth-col .input-col textarea {
+    width: 100%; padding: 6px 10px; font-size: 13px;
     background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
     font-family: ui-monospace, Menlo, monospace;
   }
-  .truth-col textarea { font-family: inherit; min-height: 50px; resize: vertical; }
-  .truth-col button { padding: 8px 12px; font-size: 12px; }
-  .truth-col .ts-meta { font-size: 10px; color: var(--muted); }
+  .truth-col .input-col textarea { font-family: inherit; min-height: 76px; resize: vertical; }
+  .truth-col .actions {
+    grid-column: 3; grid-row: 1;
+    display: flex; gap: 4px; align-items: stretch; flex-shrink: 0;
+  }
+  .truth-col .actions .trim-btn {
+    background: var(--panel2); color: var(--muted); border: 1px solid var(--border);
+    padding: 5px 8px; font-size: 11px; border-radius: 4px; cursor: pointer;
+    white-space: nowrap; font-family: inherit;
+  }
+  .truth-col .actions .trim-btn:hover { color: var(--blue); border-color: var(--blue); }
+  .truth-col .actions .trim-btn:disabled { opacity: 0.4; cursor: wait; }
+  .truth-col .actions .cc-select {
+    padding: 6px 4px; font-size: 11px; min-width: 100px;
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px;
+  }
+  .truth-col .actions .save-btn {
+    background: var(--accent); color: #062012; border: none; font-weight: 600;
+    padding: 6px 14px; font-size: 12px; border-radius: 4px; cursor: pointer;
+  }
+  .truth-col .ts-meta {
+    grid-column: 2 / span 2; grid-row: 2;
+    font-size: 10px; color: var(--muted); margin-top: 2px;
+  }
   .field-row.unsupported { padding: 14px; color: var(--muted); text-align: center; font-style: italic; }
   input[type=text], input[type=password] { cursor: text; }
   button.primary { background: var(--accent); color: #062012; border: none; font-weight: 600; }
@@ -388,7 +426,9 @@ const FEATURE_TYPES = [
   ["food_concession",  "Food / concession"],
 ];
 const FEATURE_STATUSES = ["off_leash","on_leash","not_allowed","seasonal","unknown"];
-const LEASH_VALUES     = ["off_leash","on_leash","leash_optional","varies_by_time","not_allowed","unknown"];
+// not_allowed removed 2026-05-02 — redundant with dogs_allowed=no.
+// leash_policy now purely answers "given dogs are allowed, what's the leash rule".
+const LEASH_VALUES     = ["off_leash","on_leash","leash_optional","varies_by_time","unknown"];
 const CONFIDENCE_VALUES= ["high","medium","low","none"];
 
 // Field definitions per category. Each entry tells the renderer how to draw
@@ -406,20 +446,26 @@ const CATEGORIES = [
         hint: 'How a visitor reaches the beach + any barriers (boat-only, hike-in, gated).' },
       { name: "public_access", label: "Public access", shape: "enum",
         enum: ["yes","no","restricted","unclear"] },
-      { name: "parking_type",  label: "Parking",       shape: "enum",
-        enum: ["lot","street","both","none","unclear"] },
+      { name: "parking_lot",    label: "Parking lot",    shape: "enum",
+        enum: ["free","paid","none","unclear"],
+        hint: "Designated parking lot for visitors — and is it free or charges a fee?" },
+      { name: "parking_street", label: "Street parking", shape: "enum",
+        enum: ["free","paid","none","unclear"],
+        hint: "Curbside street parking near the access — and is it free or metered/permit-required?" },
     ],
   },
   {
     key: "dogs", label: "Dogs", tag: "8",
     fields: [
-      // The has_sections trigger + branching is rendered inline below
-      // (custom UI, not a generic row).
-      // After the trigger UI, we render two more legacy text fields:
-      { name: "dogs_off_leash_area", label: "Off-leash area",  shape: "textarea",
+      { name: "dogs_allowed",        label: "Dogs allowed",     shape: "enum",
+        enum: ["yes","no","seasonal","unclear"],
+        hint: 'Binary: are dogs allowed on this beach AT ALL? Distinct from public_access (which is about humans).' },
+      { name: "dogs_allowed_areas",  label: "Dog access prose", shape: "textarea",
+        hint: 'Prose describing where dogs can/cannot go on this beach (e.g. "north of Tower 3", "parking lot only", "everywhere except the wildlife reserve").' },
+      { name: "dogs_off_leash_area", label: "Off-leash area",   shape: "textarea",
         hint: 'Description of any off-leash area (or "none").' },
-      { name: "dogs_policy_notes",   label: "Policy notes",    shape: "textarea",
-        hint: 'Free-form summary of the dog policy. Cite the source.' },
+      { name: "dogs_policy_notes",   label: "Policy notes",     shape: "textarea",
+        hint: 'Free-form summary of the dog policy. Cite the source. Include time-of-day or seasonal rules here (e.g. "off-leash 6-10am only").' },
     ],
   },
   {
@@ -434,15 +480,8 @@ const CATEGORIES = [
         hint: 'Cold-water rinse stations at the access point — useful for rinsing dogs.' },
     ],
   },
-  {
-    key: "provenance", label: "Provenance", tag: "2",
-    fields: [
-      { name: "evidence_quote", label: "Evidence quote", shape: "textarea",
-        hint: 'Exact quote from the source page (no paraphrasing).' },
-      { name: "confidence",     label: "Confidence",     shape: "enum",
-        enum: CONFIDENCE_VALUES },
-    ],
-  },
+  // provenance category removed 2026-05-02 — evidence_quote and confidence
+  // both dropped (the latter redundant with the per-truth curator_confidence).
 ];
 
 let CANDIDATES = [];
@@ -450,22 +489,23 @@ let CANDIDATES = [];
 // per Franz: "we should use [By Field] for all gold set curation."
 
 // Scalar fields curatable in By Field mode (excludes structured: sections,
-// feature_zones, has_sections-trigger which is per-beach branched)
+// feature_zones, has_sections-trigger which is per-beach branched).
+// parking_type was split into parking_lot + parking_street on 2026-05-02.
 const FIELD_PICKER_LIST = [
   ["raw_address",          "Raw address"],
   ["hours_text",           "Hours"],
   ["access_text",          "Access prose"],
   ["public_access",        "Public access"],
-  ["parking_type",         "Parking type"],
+  ["parking_lot",          "Parking lot (free/paid)"],
+  ["parking_street",       "Street parking (free/paid)"],
+  ["dogs_allowed",         "Dogs allowed (yes/no)"],
+  ["dogs_allowed_areas",   "Dog access prose"],
   ["leash_policy",         "Leash policy"],
-  ["temporal_restrictions","Temporal restrictions"],
   ["dogs_off_leash_area",  "Off-leash area"],
   ["dogs_policy_notes",    "Policy notes"],
   ["lifeguard",            "Lifeguard"],
   ["restrooms",            "Restrooms"],
   ["outdoor_showers",      "Outdoor showers"],
-  ["evidence_quote",       "Evidence quote"],
-  ["confidence",           "Confidence"],
 ];
 
 // Lookup field schema by name (so renderByField can build the right control).
@@ -593,6 +633,8 @@ function classifySource(variantKey) {
 }
 
 // ---- Completion calculators ----
+// Picker count: 4 identity + 2 parking + 5 dogs + 3 amenities = 14 scalar
+// fields. Adjust if the picker grows/shrinks.
 const BEACH_TRUTH_TARGET = 14;
 
 function fieldCompletion(fname) {
@@ -742,7 +784,10 @@ function buildFieldOnlyRow(c, fname, f) {
                      data-field="${escapeHtml(fname)}" data-idx="${idx}"
                      onclick="useSourceVariant(this)">
           <span class="badge" title="${escapeHtml(v.model_name || '')}">${escapeHtml(badgeText)}</span>
-          <div><div class="value">${escapeHtml(displayVal)}</div></div>
+          <div>
+            <div class="value">${escapeHtml(displayVal)}</div>
+            ${v._xref_from ? `<div style="margin-top:3px"><span class="xref" title="Variant pulled from another field's extractions because the prose overlaps">cross-ref from <b>${escapeHtml(v._xref_from)}</b></span></div>` : ''}
+          </div>
           <div class="src-meta">
             <span title="${escapeHtml(variantKey)}" style="font-size:10px">${escapeHtml(v.variant_key)}</span>
             ${srcUrl ? `<a href="${escapeHtml(srcUrl)}" target="_blank" onclick="event.stopPropagation()">${escapeHtml(prettyUrl(srcUrl))}</a>` : ''}
@@ -772,22 +817,26 @@ function buildFieldOnlyRow(c, fname, f) {
       </button>
     </div>
     <div class="row-body">
-      <div>${srcListHtml}</div>
       <div class="truth-col">
-        <label>YOUR TRUTH for ${escapeHtml(f ? f.label : fname)}</label>
-        ${control}
-        <div style="display:flex;gap:6px;align-items:center">
-          <select id="cc-${fname}-${c.fid}" title="Your confidence in this truth"
-                  style="flex:0 0 110px;padding:6px 4px;font-size:11px">
+        <div class="label-col">TRUTH · ${escapeHtml(f ? f.label : fname)}</div>
+        <div class="input-col">${control}</div>
+        <div class="actions">
+          ${(f && f.shape !== 'enum') ? `
+            <button class="trim-btn" onclick="applyTransform(${c.fid},'${fname}','sentence')" title="Trim to first sentence">Sentence</button>
+            <button class="trim-btn" onclick="applyTransform(${c.fid},'${fname}','boilerplate')" title="Strip 'Based on the source...' prefix">Boilerplate</button>
+            <button class="trim-btn" onclick="applyTransform(${c.fid},'${fname}','find', this)" title="LLM extracts only the relevant text (Haiku, ~$0.001)">Find</button>
+          ` : ''}
+          <select class="cc-select" id="cc-${fname}-${c.fid}" title="Your confidence in this truth">
             <option value="">conf —</option>
             <option value="high"   ${truth?.curator_confidence==='high'?'selected':''}>conf high</option>
             <option value="medium" ${truth?.curator_confidence==='medium'?'selected':''}>conf medium</option>
             <option value="low"    ${truth?.curator_confidence==='low'?'selected':''}>conf low</option>
           </select>
-          <button class="primary" style="flex:1" onclick="saveScalarFromField(${c.fid}, '${fname}')">Save truth</button>
+          <button class="save-btn" onclick="saveScalarFromField(${c.fid}, '${fname}')">Save truth</button>
         </div>
         ${truth?.verified_at ? `<div class="ts-meta">last saved ${escapeHtml(truth.verified_at.slice(0,16))} by ${escapeHtml(truth.verified_by || '?')}${truth.curator_confidence ? ` · conf ${escapeHtml(truth.curator_confidence)}` : ''}</div>` : ''}
       </div>
+      <div>${srcListHtml}</div>
     </div>
   `;
   return row;
@@ -828,16 +877,83 @@ function replaceRowsForBeach(fid, savedField) {
 }
 
 async function excludeBeach(fid, btn) {
-  if (!confirm("Exclude this beach from the gold set? You can re-include it later in SQL.")) return;
+  const reason = prompt("Why exclude this beach? (saved to membership notes)");
+  if (reason === null) return;  // user hit Cancel
+  if (!reason.trim()) {
+    if (!confirm("No reason given — exclude anyway?")) return;
+  }
   try {
     await apiPost("admin-set-gold-exclude", {
       set_name: document.getElementById("set-picker").value,
       fid, excluded: true,
+      notes: reason.trim() || null,
     });
-    toast(`excluded fid ${fid}`);
+    toast(`excluded fid ${fid}${reason ? ': ' + reason.slice(0,40) : ''}`);
     CANDIDATES = CANDIDATES.filter(c => c.fid !== fid);
     renderAll();
   } catch (e) { toast(`exclude failed: ${e.message}`, "err"); }
+}
+
+// ---- Trim transforms (truth-control content massaging) ----
+function trimToFirstSentence(s) {
+  if (!s) return s;
+  const m = s.match(/^[\s\S]+?[.!?](?:\s|$)/);
+  return (m ? m[0] : s).trim();
+}
+function stripBoilerplate(s) {
+  if (!s) return s;
+  let out = s;
+  const patterns = [
+    /^based on the (?:source|webpage|page|content|provided text|article)(?:\s+(?:provided|text|content|article))?[,.:]?\s+/i,
+    /^according to the (?:source|webpage|page)(?:\s+provided)?[,.:]?\s+/i,
+    /^from the (?:source|page|webpage)(?:\s+(?:provided|content))?[,.:]?\s+/i,
+    /^the (?:webpage|source|page) (?:content|text|page|states|specifies|mentions|indicates|provides) (?:that |the )?/i,
+    /^the source (?:provided |document |page |text )?(?:does not (?:specify|mention|address)|states|indicates)[,.:]?\s+/i,
+    /^"?(?:yes|no|n\/a)"?[,.:]?\s+/i,
+  ];
+  for (let i = 0; i < 4; i++) {
+    let prev = out;
+    for (const p of patterns) out = out.replace(p, '');
+    if (out === prev) break;
+  }
+  out = out.trim();
+  if (out) out = out[0].toUpperCase() + out.slice(1);
+  return out;
+}
+async function findRelevantText(text, fname, label) {
+  const resp = await apiPost("admin-llm-trim", {
+    text, field_name: fname, field_label: label || fname,
+  });
+  return (resp.trimmed || text).trim();
+}
+async function applyTransform(fid, fname, kind, btn) {
+  const el = document.getElementById(`t-${fname}-${fid}`);
+  if (!el) return;
+  const cur = el.value || '';
+  if (!cur.trim()) { toast('nothing to trim', 'err'); return; }
+  let next = cur;
+  if (kind === 'sentence') {
+    next = trimToFirstSentence(cur);
+  } else if (kind === 'boilerplate') {
+    next = stripBoilerplate(cur);
+  } else if (kind === 'find') {
+    if (btn) { btn.disabled = true; btn.dataset.label = btn.textContent; btn.textContent = '…'; }
+    try {
+      next = await findRelevantText(cur, fname, fieldSchema(fname)?.label);
+    } catch (e) {
+      toast(`find failed: ${e.message}`, 'err'); next = cur;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = btn.dataset.label || 'Find'; }
+    }
+  }
+  if (next !== cur) {
+    el.value = next;
+    const row = el.closest('.field-row');
+    if (row) { row.classList.remove('saved','beach-done'); row.classList.add('dirty'); }
+    toast(`${kind}: ${cur.length} → ${next.length} chars`);
+  } else {
+    toast(`${kind}: no change`);
+  }
 }
 
 function submitField() {

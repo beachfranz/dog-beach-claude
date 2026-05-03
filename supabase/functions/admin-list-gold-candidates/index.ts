@@ -61,6 +61,50 @@ function confidenceFromNumeric(n: number | null | undefined): string {
 }
 function jsonOrNull(v: any): any { return v ?? null; }
 
+// Render structured temporal JSON (time-window arrays, seasonal-rule arrays)
+// as human-readable prose. Without this the curator sees "[object Object]"
+// when the JSONB column is joined with non-JSON text.
+function fmtTime(s: any): string {
+  const m = String(s ?? "").match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return String(s ?? "");
+  const h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  if (h === 0  && min === 0)  return "midnight";
+  if (h === 12 && min === 0)  return "noon";
+  if (h === 23 && min === 59) return "midnight";
+  const period = h < 12 ? "am" : "pm";
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return min === 0 ? `${h12}${period}` : `${h12}:${m[2]}${period}`;
+}
+function fmtMonthDay(s: any): string {
+  const m = String(s ?? "").match(/^(\d{1,2})-(\d{1,2})/);
+  if (!m) return String(s ?? "");
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${months[parseInt(m[1],10) - 1] || m[1]} ${parseInt(m[2],10)}`;
+}
+function fmtTemporalItem(item: any): string {
+  if (item == null) return "";
+  if (typeof item === "string") return item;
+  if (typeof item !== "object") return String(item);
+  const notes = item.notes ? ` (${item.notes})` : "";
+  // Time window: {start, end} HH:MM
+  if (item.start != null && item.end != null && /^\d{1,2}:\d{2}/.test(String(item.start))) {
+    return `${fmtTime(item.start)}–${fmtTime(item.end)}${notes}`;
+  }
+  // Date range: {from, to} MM-DD
+  if (item.from != null && item.to != null) {
+    return `${fmtMonthDay(item.from)}–${fmtMonthDay(item.to)}${notes}`;
+  }
+  return JSON.stringify(item);
+}
+function fmtTemporal(v: any): string {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (Array.isArray(v)) return v.map(fmtTemporalItem).join("; ");
+  if (typeof v === "object") return fmtTemporalItem(v);
+  return String(v);
+}
+
 // Build feature_zones object from area_* columns. Returns 7-key object.
 function featureZonesFromAreas(row: any): Record<string, string> {
   const norm = (v: string | null) => {
@@ -124,9 +168,14 @@ function synthesizeFromParkUrlShape(row: any, variantTag: string, modelTag: stri
     variantKey: variantTag, parsedValue: leashFromText(String(row.dogs_leash_required)),
     sourceUrl, modelName, extractedAt: at,
   })});
-  const temporal = [row.dogs_restricted_hours, row.dogs_seasonal_rules].filter(Boolean).join(" / ");
-  if (temporal) out.push({ field: "temporal_restrictions", variant: makeVariant({
-    variantKey: variantTag, parsedValue: temporal, sourceUrl, modelName, extractedAt: at,
+  const dh = fmtTemporal(row.dogs_restricted_hours);
+  const sr = fmtTemporal(row.dogs_seasonal_rules);
+  const tparts: string[] = [];
+  if (dh) tparts.push(`Hours: ${dh}`);
+  if (sr) tparts.push(`Seasonal: ${sr}`);
+  if (tparts.length) out.push({ field: "temporal_restrictions", variant: makeVariant({
+    variantKey: variantTag, parsedValue: tparts.join(" · "), sourceUrl, modelName, extractedAt: at,
+    rawObject: { dogs_restricted_hours: row.dogs_restricted_hours, dogs_seasonal_rules: row.dogs_seasonal_rules },
   })});
   if (row.dogs_zone_description) out.push({ field: "dogs_off_leash_area", variant: makeVariant({
     variantKey: variantTag, parsedValue: row.dogs_zone_description, sourceUrl, modelName, extractedAt: at,
@@ -187,14 +236,15 @@ function synthesizeFromCpadUnit(row: any): { field: string; variant: any }[] {
     rawObject: fz, sourceUrl, modelName, extractedAt: at,
     evidenceQuote: row.source_quote ?? null,
   })});
-  // Time/seasonal → temporal_restrictions
-  const tw = row.time_windows;
-  const sr = row.seasonal_rules;
-  const parts: string[] = [];
-  if (tw && Object.keys(tw).length) parts.push(`time_windows: ${JSON.stringify(tw)}`);
-  if (sr && Object.keys(sr).length) parts.push(`seasonal: ${JSON.stringify(sr)}`);
-  if (parts.length) out.push({ field: "temporal_restrictions", variant: makeVariant({
-    variantKey: "cpad_unit", parsedValue: parts.join(" / "), sourceUrl, modelName, extractedAt: at,
+  // Time/seasonal → temporal_restrictions (formatted human-readable)
+  const tw = fmtTemporal(row.time_windows);
+  const srt = fmtTemporal(row.seasonal_rules);
+  const cparts: string[] = [];
+  if (tw)  cparts.push(`Hours: ${tw}`);
+  if (srt) cparts.push(`Seasonal: ${srt}`);
+  if (cparts.length) out.push({ field: "temporal_restrictions", variant: makeVariant({
+    variantKey: "cpad_unit", parsedValue: cparts.join(" · "), sourceUrl, modelName, extractedAt: at,
+    rawObject: { time_windows: row.time_windows, seasonal_rules: row.seasonal_rules },
   })});
   if (row.designated_dog_zones) out.push({ field: "dogs_off_leash_area", variant: makeVariant({
     variantKey: "cpad_unit", parsedValue: row.designated_dog_zones, sourceUrl, modelName, extractedAt: at,
@@ -234,12 +284,14 @@ function synthesizeFromOperator(row: any, operatorName: string | null): { field:
     rawObject: fz, sourceUrl, modelName, extractedAt: at,
     evidenceQuote,
   })});
-  const tw = row.time_windows, sc = row.seasonal_closures;
-  const parts: string[] = [];
-  if (tw && Object.keys(tw).length) parts.push(`time_windows: ${JSON.stringify(tw)}`);
-  if (sc && Object.keys(sc).length) parts.push(`seasonal_closures: ${JSON.stringify(sc)}`);
-  if (parts.length) out.push({ field: "temporal_restrictions", variant: makeVariant({
-    variantKey: "operator", parsedValue: parts.join(" / "), sourceUrl, modelName, extractedAt: at,
+  const otw = fmtTemporal(row.time_windows);
+  const osc = fmtTemporal(row.seasonal_closures);
+  const oparts: string[] = [];
+  if (otw) oparts.push(`Hours: ${otw}`);
+  if (osc) oparts.push(`Seasonal closures: ${osc}`);
+  if (oparts.length) out.push({ field: "temporal_restrictions", variant: makeVariant({
+    variantKey: "operator", parsedValue: oparts.join(" · "), sourceUrl, modelName, extractedAt: at,
+    rawObject: { time_windows: row.time_windows, seasonal_closures: row.seasonal_closures },
   })});
   if (row.designated_dog_zones) out.push({ field: "dogs_off_leash_area", variant: makeVariant({
     variantKey: "operator", parsedValue: row.designated_dog_zones, sourceUrl, modelName, extractedAt: at,
@@ -529,6 +581,26 @@ Deno.serve(async (req) => {
     for (const exc of (opExcByOpId[opId] ?? [])) {
       const synthed = synthesizeFromException(exc, "operator");
       for (const { field, variant } of synthed) push(fid, field, variant);
+    }
+  }
+
+  // Cross-promote prose between dogs_allowed_areas ↔ dogs_off_leash_area.
+  // These two fields cover almost-overlapping ground — content answering
+  // one usually answers the other. Surface variants on both pages so the
+  // curator has the full pool when picking truth on either.
+  const PROSE_XREF: [string, string][] = [
+    ["dogs_allowed_areas", "dogs_off_leash_area"],
+  ];
+  for (const fid of fids) {
+    const ext = extByFid[fid];
+    if (!ext) continue;
+    for (const [a, b] of PROSE_XREF) {
+      for (const v of (ext[a] || [])) {
+        push(fid, b, { ...v, _xref_from: a });
+      }
+      for (const v of (ext[b] || [])) {
+        push(fid, a, { ...v, _xref_from: b });
+      }
     }
   }
 

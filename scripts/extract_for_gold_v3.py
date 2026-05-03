@@ -71,6 +71,9 @@ URL_OVERRIDES = {
     9069: "https://www.newportbeachca.gov/recreation/visitors-guide/beaches",
     # South Mission Beach — pin to lifeguards/beaches/sm rather than missionbay
     8357: "https://www.sandiego.gov/lifeguards/beaches/mb",
+    # v3b additions 2026-05-02 — both had no/broken URLs from auto-resolution
+    8524: "https://www.parks.ca.gov/?page_id=601",                          # El Capitan Beach (Santa Barbara state beach)
+    8269: "https://www.longbeach.gov/park/beaches-and-marina/beaches/",     # Alamitos Bay Beach (Long Beach)
 }
 
 # Field set per archetype: sections runs ONLY for geographic_sections beaches

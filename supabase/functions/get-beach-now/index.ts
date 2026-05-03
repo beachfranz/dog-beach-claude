@@ -29,23 +29,76 @@ Deno.serve(async (req: Request) => {
   const runAt    = new Date();
 
   // ── Which beaches to refresh ─────────────────────────────────────────────────
-  let locationIds: string[] | null = null;
+  // Accepts either location_id (text slug, legacy) or arena_group_id (bigint,
+  // new spine). Path 3b dual-input — both work; 3c will drop location_id.
+  let locationIds:    string[] | null = null;
+  let arenaGroupIds:  number[] | null = null;
 
   if (req.method === "GET") {
-    const id = new URL(req.url).searchParams.get("location_id");
-    if (id) locationIds = [id];
+    const params = new URL(req.url).searchParams;
+    const loc = params.get("location_id");
+    const fid = params.get("arena_group_id") ?? params.get("fid");
+    if (loc) locationIds = [loc];
+    if (fid) arenaGroupIds = [parseInt(fid, 10)].filter(Number.isFinite);
   } else if (req.method === "POST") {
     const body = await req.json().catch(() => ({}));
     if (Array.isArray(body?.location_ids) && body.location_ids.length > 0) {
       locationIds = body.location_ids;
     }
+    if (Array.isArray(body?.arena_group_ids) && body.arena_group_ids.length > 0) {
+      arenaGroupIds = body.arena_group_ids
+        .map((x: unknown) => typeof x === "number" ? x : parseInt(String(x), 10))
+        .filter(Number.isFinite);
+    }
   }
 
-  // ── Load beaches + scoring config in parallel ────────────────────────────────
-  const [beachRes, configRes] = await Promise.all([
-    locationIds?.length
-      ? supabase.from("beaches").select("*").eq("is_active", true).in("location_id", locationIds)
-      : supabase.from("beaches").select("*").eq("is_active", true),
+  // ── Resolve all input keys to a single set of arena_group_ids ───────────────
+  // Path 3b-3.x: beaches_gold is the spine; the legacy location_id slug
+  // lives on it now too. Any location_id input maps to arena_group_id
+  // via beaches_gold.
+  const fidSet = new Set<number>(arenaGroupIds ?? []);
+  if (locationIds?.length) {
+    const { data: rows } = await supabase
+      .from("beaches_gold")
+      .select("fid")
+      .in("location_id", locationIds);
+    for (const r of rows ?? []) {
+      if (r.fid) fidSet.add(r.fid);
+    }
+  }
+
+  let beachQuery = supabase.from("beaches_gold")
+    .select(`
+      fid,
+      location_id,
+      name,
+      display_name_override,
+      lat,
+      lon,
+      noaa_station_id,
+      besttime_venue_id,
+      timezone,
+      open_time,
+      close_time,
+      is_active,
+      address,
+      website,
+      description,
+      parking_text,
+      beach_dog_policy(dogs_prohibited_start, dogs_prohibited_end)
+    `)
+    .eq("is_active", true);
+  if (fidSet.size > 0) {
+    beachQuery = beachQuery.in("fid", [...fidSet]);
+  }
+  // If neither key was provided, fall through to "all active scoreable
+  // beaches" — same semantic as the hourly cron call (POST {} → batch).
+  if (!locationIds?.length && !arenaGroupIds?.length) {
+    beachQuery = beachQuery.eq("is_scoreable", true);
+  }
+
+  const [goldRes, configRes] = await Promise.all([
+    beachQuery,
     supabase.from("scoring_config")
       .select("*")
       .eq("is_active", true)
@@ -54,11 +107,46 @@ Deno.serve(async (req: Request) => {
       .single(),
   ]);
 
-  if (beachRes.error || !beachRes.data?.length) return json({ error: "No beaches found" }, 404);
-  if (configRes.error || !configRes.data)        return json({ error: "Scoring config not found" }, 500);
+  if (goldRes.error || !goldRes.data?.length) return json({ error: "No beaches found" }, 404);
+  if (configRes.error || !configRes.data)     return json({ error: "Scoring config not found" }, 500);
 
-  const beaches = beachRes.data;
-  const config  = configRes.data;
+  // Reshape gold rows into the existing beach shape so refreshNow doesn't change.
+  type GoldRow = {
+    fid: number; location_id: string | null;
+    name: string; display_name_override: string | null;
+    lat: number; lon: number;
+    noaa_station_id: string | null; besttime_venue_id: string | null;
+    timezone: string; open_time: string | null; close_time: string | null;
+    is_active: boolean;
+    address: string | null; website: string | null;
+    description: string | null; parking_text: string | null;
+    beach_dog_policy: { dogs_prohibited_start: string | null; dogs_prohibited_end: string | null }
+                      | null
+                      | { dogs_prohibited_start: string | null; dogs_prohibited_end: string | null }[];
+  };
+  const beaches = (goldRes.data as GoldRow[]).map(g => {
+    const dp = Array.isArray(g.beach_dog_policy) ? g.beach_dog_policy[0] : g.beach_dog_policy;
+    return {
+      location_id:    g.location_id,
+      arena_group_id: g.fid,
+      display_name:   g.display_name_override ?? g.name,
+      latitude:       g.lat,
+      longitude:      g.lon,
+      noaa_station_id: g.noaa_station_id,
+      besttime_venue_id: g.besttime_venue_id,
+      is_active:      g.is_active,
+      timezone:       g.timezone ?? "America/Los_Angeles",
+      open_time:      g.open_time,
+      close_time:     g.close_time,
+      dogs_prohibited_start: dp?.dogs_prohibited_start ?? null,
+      dogs_prohibited_end:   dp?.dogs_prohibited_end   ?? null,
+      address:        g.address,
+      website:        g.website,
+      description:    g.description,
+      parking_text:   g.parking_text,
+    };
+  });
+  const config = configRes.data;
 
   // ── Process each beach ───────────────────────────────────────────────────────
   const results = await Promise.all(
@@ -66,7 +154,7 @@ Deno.serve(async (req: Request) => {
   );
 
   // Single-beach GET: return the NOW row directly (frontend call)
-  if (req.method === "GET" && locationIds?.length === 1) {
+  if (req.method === "GET" && results.length === 1) {
     const r = results[0];
     if (!r.ok) return json({ error: r.error }, 500);
     return json(r.row);
@@ -118,7 +206,7 @@ async function refreshNow(
       fetchCurrentTide(beach.noaa_station_id, localHour),
       supabase.from("beach_day_hourly_scores")
         .select("busyness_score, busyness_category")
-        .eq("location_id", beach.location_id)
+        .eq("arena_group_id", beach.arena_group_id)
         .eq("local_date", localDate)
         .eq("local_hour", localHour)
         .maybeSingle(),
@@ -161,12 +249,12 @@ async function refreshNow(
     await supabase
       .from("beach_day_hourly_scores")
       .update({ is_now: false })
-      .eq("location_id", beach.location_id)
+      .eq("arena_group_id", beach.arena_group_id)
       .eq("is_now", true);
 
     const { error: upsertErr } = await supabase
       .from("beach_day_hourly_scores")
-      .upsert(row, { onConflict: "location_id,forecast_ts" });
+      .upsert(row, { onConflict: "arena_group_id,forecast_ts" });
 
     if (upsertErr) throw new Error(upsertErr.message);
 
@@ -187,12 +275,13 @@ async function refreshNow(
 
 function buildNowRow(
   h: ScoredHour,
-  beach: { location_id: string; timezone: string },
+  beach: { location_id: string; timezone: string; arena_group_id?: number | null },
   config: { scoring_version: string },
   runAt: Date,
 ) {
   return {
     location_id:           beach.location_id,
+    arena_group_id:        beach.arena_group_id ?? null,
     local_date:            h.localDate,
     forecast_ts:           h.forecastTs,
     local_hour:            h.localHour,

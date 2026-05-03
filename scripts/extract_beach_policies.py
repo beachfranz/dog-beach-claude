@@ -168,7 +168,7 @@ def call_llm(client, model: str, variant_prompt: str, page_content: str) -> dict
     t0 = time.time()
     resp = client.messages.create(
         model=model,
-        max_tokens=500,
+        max_tokens=900,
         system=SYSTEM_PROMPT,
         messages=[{
             "role": "user",

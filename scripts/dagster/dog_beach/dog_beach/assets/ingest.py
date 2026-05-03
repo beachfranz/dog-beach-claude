@@ -390,13 +390,79 @@ def cpad_units(context: AssetExecutionContext,
 
 
 @asset(
+    key=AssetKey(["public", "osm_landing"]),
+    description="Raw Overpass output (matches Overpass JSON element "
+                "shape: type/id/lat/lon/geometry/tags). Every fetch "
+                "lands a new row per (type, id, fetched_at) — full "
+                "history. public.osm_features consumes via "
+                "promote_osm_features_from_landing().",
+    group_name="ingest",
+    kinds={"sql", "table", "landing"},
+    deps=[AssetKey(["external", "osm_overpass"])],
+)
+def osm_landing(context: AssetExecutionContext,
+                  supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            select count(*),
+                   count(distinct (type, id)) as distinct_features,
+                   count(distinct fetched_by) as distinct_sources,
+                   max(fetched_at)
+              from public.osm_landing
+        """)
+        total, distinct_features, distinct_sources, max_ts = cur.fetchone()
+        preview = md_table(cur, """
+            select fetched_by, type, id, tags->>'name' as name,
+                   tags->>'natural' as natural_tag,
+                   tags->>'leisure' as leisure_tag
+              from public.osm_landing
+             order by fetched_at desc
+             limit 10
+        """, max_col_chars=22)
+    return Output(
+        None,
+        metadata={
+            "total_rows":         MetadataValue.int(total),
+            "distinct_features":  MetadataValue.int(distinct_features),
+            "distinct_sources":   MetadataValue.int(distinct_sources),
+            "last_fetched_at":    MetadataValue.text(str(max_ts)),
+            "preview":            MetadataValue.md(preview),
+        },
+    )
+
+
+@asset(
+    description="Promotes the latest osm_landing row per (type, id) "
+                "into public.osm_features. Wraps SQL function "
+                "public.promote_osm_features_from_landing(). Preserves "
+                "downstream enrichment (operator_id, admin_inactive, "
+                "cleaning_status, geom_full from polygon fetcher).",
+    group_name="ingest_heavy",
+    kinds={"plpgsql", "promote"},
+    deps=[AssetKey(["public", "osm_landing"])],
+)
+def osm_features_promote_run(context: AssetExecutionContext,
+                               supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("select public.promote_osm_features_from_landing()")
+        summary = cur.fetchone()[0]
+    return Output(
+        None,
+        metadata={
+            "inserted":  MetadataValue.int(summary.get("inserted", 0)),
+            "updated":   MetadataValue.int(summary.get("updated", 0)),
+        },
+    )
+
+
+@asset(
     key=AssetKey(["public", "osm_features"]),
     description="OSM features filtered to beach polys + dog-related tags. "
-                "Loaded via external sync (no Python wrapper here). Cheap "
-                "observation only.",
+                "Cheap observation only. Populated by promote_osm_features"
+                "_from_landing() from public.osm_landing.",
     group_name="ingest",
     kinds={"sql", "table"},
-    deps=[AssetKey(["external", "osm_overpass"])],
+    deps=[AssetKey(["public", "osm_landing"])],
 )
 def osm_features(context: AssetExecutionContext,
                   supabase_db: SupabaseDbResource):
@@ -523,6 +589,86 @@ def beach_locations(context: AssetExecutionContext,
             "from_ccc":         MetadataValue.int(ccc_),
             "distinct_states":  MetadataValue.int(distinct_states),
             "preview":          MetadataValue.md(preview),
+        },
+    )
+
+
+@asset(
+    description="Re-classifies every public.osm_features row as "
+                "clean / dropped / needs_review based on cleaning "
+                "rules. Wraps SQL function "
+                "public.classify_osm_features_cleanliness(). "
+                "Idempotent. Updates cleaning_status + cleaning_reason "
+                "in place. Surfaces public.osm_features_clean view.",
+    group_name="ingest_heavy",
+    kinds={"plpgsql", "data_quality"},
+    deps=[AssetKey(["public", "osm_features"])],
+)
+def osm_features_classify_run(context: AssetExecutionContext,
+                                supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("select public.classify_osm_features_cleanliness()")
+        summary = cur.fetchone()[0]
+    md_lines = [f"- **{k}**: {v}" for k, v in sorted(summary.items())]
+    return Output(
+        None,
+        metadata={
+            "total":             MetadataValue.int(summary.get("total", 0)),
+            "clean":             MetadataValue.int(summary.get("clean", 0)),
+            "dropped_inactive":  MetadataValue.int(summary.get("dropped_inactive", 0)),
+            "dropped_tiny":      MetadataValue.int(summary.get("dropped_tiny_unnamed", 0)),
+            "needs_review":      MetadataValue.int(summary.get("needs_review_centroid", 0)),
+            "summary":           MetadataValue.md("\n".join(md_lines)),
+        },
+    )
+
+
+@asset(
+    key=AssetKey(["public", "osm_features_clean"]),
+    description="View over public.osm_features filtered to "
+                "cleaning_status='clean'. Use this in downstream "
+                "joins to skip noise (admin_inactive, tiny unnamed, "
+                "centroid-only). Cleaning rules + classifier in "
+                "supabase/migrations/20260429_osm_features_cleaning.sql.",
+    group_name="ingest",
+    kinds={"sql", "view", "data_quality"},
+    deps=[AssetKey(["public", "osm_features"])],
+)
+def osm_features_clean(context: AssetExecutionContext,
+                        supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            select count(*),
+                   count(*) filter (where (tags->>'natural') = 'beach'),
+                   count(*) filter (where (tags->>'leisure') = 'park'),
+                   count(*) filter (where (tags->>'leisure') = 'dog_park')
+              from public.osm_features_clean
+        """)
+        total, beaches, parks, dog_parks = cur.fetchone()
+        cur.execute("""
+            select cleaning_status, count(*)
+              from public.osm_features
+             group by 1 order by 2 desc
+        """)
+        status_dist = ", ".join(f"{k}={v}" for k, v in cur.fetchall())
+        preview = md_table(cur, """
+            select osm_type, osm_id, name,
+                   tags->>'natural' as natural_tag,
+                   tags->>'leisure' as leisure_tag,
+                   cleaning_status
+              from public.osm_features
+             order by random()
+             limit 10
+        """, max_col_chars=25)
+    return Output(
+        None,
+        metadata={
+            "clean_total":   MetadataValue.int(total),
+            "clean_beaches": MetadataValue.int(beaches),
+            "clean_parks":   MetadataValue.int(parks),
+            "clean_dog_parks": MetadataValue.int(dog_parks),
+            "status_distribution": MetadataValue.text(status_dist),
+            "preview":       MetadataValue.md(preview),
         },
     )
 
@@ -714,6 +860,40 @@ def operator_id_resolve_run(context: AssetExecutionContext,
 
 
 @asset(
+    description="Borrows names for unnamed OSM beach polygons from "
+                "nearby authoritative sources. Wraps SQL function "
+                "public.reborrow_osm_feature_names(). Idempotent.\n\n"
+                "Cascade:\n"
+                "  Pass 1: nearest us_beach_points within 200m\n"
+                "  Pass 2: nearest ccc_access_points within 200m, only "
+                "if its name carries a beach-y word (beach|cove|shore|"
+                "sand)\n\n"
+                "Updates osm_features.name + name_source. Original-OSM "
+                "names (name_source='osm') and manual overrides are "
+                "never touched. Re-runs reset prior borrows then re-pick.",
+    group_name="ingest_heavy",
+    kinds={"plpgsql", "borrow"},
+    deps=[AssetKey(["public", "osm_features"]),
+          AssetKey(["public", "us_beach_points"]),
+          AssetKey(["public", "ccc_access_points"])],
+)
+def osm_reborrow_names_run(context: AssetExecutionContext,
+                            supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("select public.reborrow_osm_feature_names()")
+        summary = cur.fetchone()[0]
+    return Output(
+        None,
+        metadata={
+            "reset_prior_borrows": MetadataValue.int(summary.get("reset_prior_borrows", 0)),
+            "borrowed_from_ubp":   MetadataValue.int(summary.get("borrowed_from_ubp", 0)),
+            "borrowed_from_ccc":   MetadataValue.int(summary.get("borrowed_from_ccc", 0)),
+            "still_unnamed":       MetadataValue.int(summary.get("still_unnamed", 0)),
+        },
+    )
+
+
+@asset(
     description="EXPENSIVE — runs Tavily extract + Sonnet classification "
                 "for each CPAD unit with a park_url that intersects "
                 "beach_locations. Writes public.cpad_unit_dogs_policy "
@@ -753,7 +933,9 @@ assets = [
     # 805 spine sources (cheap obs)
     us_beach_points,
     cpad_units,
+    osm_landing,
     osm_features,
+    osm_features_clean,
     ccc_access_points,
     beach_access_source,
     beach_locations,
@@ -767,4 +949,7 @@ assets = [
     osm_beach_polygons_run,
     cpad_unit_dog_policy_extract_run,
     operator_id_resolve_run,
+    osm_features_classify_run,
+    osm_features_promote_run,
+    osm_reborrow_names_run,
 ]

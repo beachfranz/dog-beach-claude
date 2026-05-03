@@ -11,11 +11,16 @@ Same split as the ingest layer:
     daily_beach_refresh_run         POST /functions/v1/daily-beach-refresh
     get_beach_now_run               POST /functions/v1/get-beach-now (batch)
 
-The lineage edge `public/beaches -> beach_day_hourly_scores` reflects
-the real data flow: daily-beach-refresh reads beach metadata (lat/lng,
-station IDs) from `public.beaches` to know which beaches to fetch
-weather/tides/crowds for, and writes scored hourly rows. HTML then
-reads `beach_day_hourly_scores` + `beach_day_recommendations`.
+The lineage edge `public/beaches_gold -> beach_day_hourly_scores`
+reflects the real data flow: daily-beach-refresh reads beach metadata
+(lat/lng, station IDs, slug) from `public.beaches_gold` filtered to
+`is_scoreable=true` (the curated scoring set, currently ~304 SoCal
+beaches), and writes scored hourly rows keyed on arena_group_id.
+HTML then reads `beach_day_hourly_scores` + `beach_day_recommendations`.
+
+(Pre path-3b this asset depended on `public.beaches`; that table was
+dropped 2026-05-02 and its scoring metadata + slug migrated to
+beaches_gold.)
 
 The cheap variants run in <1s and never call edge functions. The
 _run variants POST to Supabase using SUPABASE_URL + SUPABASE_SERVICE_KEY

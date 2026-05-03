@@ -46,17 +46,40 @@ Deno.serve(async (req: Request) => {
       .lt("hour", new Date(Date.now() - 86_400_000).toISOString());
   }
 
-  let body: { location_id?: string; question?: string; conversation_history?: ConversationTurn[]; local_date?: string };
+  let body: { location_id?: string; arena_group_id?: number; question?: string; conversation_history?: ConversationTurn[]; local_date?: string };
   try {
     body = await req.json();
   } catch {
     return json({ error: "Invalid JSON body" }, 400);
   }
 
-  const { location_id, question, conversation_history = [], local_date } = body;
+  let { location_id, arena_group_id, question, conversation_history = [], local_date } = body;
 
-  if (!location_id || !question) {
-    return json({ error: "location_id and question are required" }, 400);
+  if (!question || (!location_id && !arena_group_id)) {
+    return json({ error: "question and (location_id or arena_group_id) are required" }, 400);
+  }
+
+  // Resolve location_id ↔ arena_group_id via the spine. Scoring-table
+  // queries use arena_group_id (now the PK); the legacy slug is just
+  // here to keep input flexible.
+  if (!arena_group_id && location_id) {
+    const { data: row } = await supabase
+      .from("beaches_gold")
+      .select("fid")
+      .eq("location_id", location_id)
+      .limit(1);
+    arena_group_id = row?.[0]?.fid ?? undefined;
+  }
+  if (!location_id && arena_group_id) {
+    const { data: row } = await supabase
+      .from("beaches_gold")
+      .select("location_id")
+      .eq("fid", arena_group_id)
+      .limit(1);
+    location_id = row?.[0]?.location_id ?? undefined;
+  }
+  if (!arena_group_id) {
+    return json({ error: `Beach not found in spine for input` }, 404);
   }
   try {
     let systemPrompt: string;
@@ -70,10 +93,13 @@ Deno.serve(async (req: Request) => {
       // All beaches are in California — use Pacific time for "today"
       const todayPacific = localDateForTimezone(new Date(), "America/Los_Angeles");
 
-      const [{ data: beaches }, { data: allDays }] = await Promise.all([
+      // Cross-beach mode: scoreable set, all from the spine.
+      const [{ data: beachesRaw }, { data: allDays }] = await Promise.all([
         supabase
-          .from("beaches")
-          .select("location_id, display_name, timezone"),
+          .from("beaches_gold")
+          .select("fid, location_id, name, display_name_override, timezone")
+          .eq("is_scoreable", true)
+          .eq("is_active", true),
         supabase
           .from("beach_day_recommendations")
           .select("location_id, local_date, day_status, best_window_label, best_window_text, avg_temp, avg_wind, avg_uv, avg_tide_height, lowest_tide_height, busyness_category, go_hours_count, caution_hours_count, no_go_hours_count, caution_text, risk_reason_codes, positive_reason_codes, summary_weather, bacteria_risk, precip_72h_mm")
@@ -83,18 +109,70 @@ Deno.serve(async (req: Request) => {
           .limit(50),
       ]);
 
-      systemPrompt = buildCrossBeachPrompt(beaches ?? [], allDays ?? []);
+      // Reshape gold rows into the {location_id, display_name, timezone}
+      // shape that buildCrossBeachPrompt expects.
+      const beaches = (beachesRaw ?? []).map((g: { fid: number; location_id: string | null; name: string; display_name_override: string | null; timezone: string }) => ({
+        location_id:  g.location_id ?? null,
+        display_name: g.display_name_override ?? g.name,
+        timezone:     g.timezone ?? "America/Los_Angeles",
+      }));
+      systemPrompt = buildCrossBeachPrompt(beaches, allDays ?? []);
 
     } else {
       // ── Single-beach mode: full detail for current beach ─────────────
-      const { data: beach, error: beachErr } = await supabase
-        .from("beaches")
-        .select("location_id, display_name, address, timezone, open_time, close_time, description, website")
-        .eq("location_id", location_id)
-        .single();
+      // Single-beach mode: all on the spine.
+      const { data: goldRows, error: beachErr } = await supabase
+        .from("beaches_gold")
+        .select(`
+          fid,
+          location_id,
+          name,
+          display_name_override,
+          timezone,
+          open_time,
+          close_time,
+          address,
+          website,
+          description
+        `)
+        .eq("fid", arena_group_id)
+        .limit(1);
 
-      if (beachErr || !beach) {
-        return json({ error: `Beach not found: ${location_id}` }, 404);
+      if (beachErr || !goldRows?.length) {
+        return json({ error: `Beach not found in spine: arena_group_id=${arena_group_id}` }, 404);
+      }
+      const g = goldRows[0] as { fid: number; location_id: string | null; name: string;
+                                  display_name_override: string | null;
+                                  timezone: string; open_time: string | null; close_time: string | null;
+                                  address: string | null; website: string | null; description: string | null };
+      const beach = {
+        location_id:    g.location_id,
+        arena_group_id: g.fid,
+        display_name:   g.display_name_override ?? g.name,
+        timezone:       g.timezone ?? "America/Los_Angeles",
+        open_time:      g.open_time,
+        close_time:     g.close_time,
+        address:        g.address,
+        website:        g.website,
+        description:    g.description,
+      };
+
+      // LLM-extracted policy metadata for this beach (leash rules, dog
+      // zones, hours, etc.). Drives Scout's activity advice — Scout must
+      // not suggest off-leash play if leash is required, must not
+      // suggest sand/wave play if dogs aren't allowed on sand, etc.
+      let metadata: Record<string, unknown> | null = null;
+      if (beach.arena_group_id) {
+        const { data: meta } = await supabase
+          .from("arena_beach_metadata")
+          .select(
+            "dogs_allowed, dogs_leash_required, dogs_off_leash_area, " +
+            "dogs_seasonal_restrictions, dogs_time_restrictions, " +
+            "dogs_policy_notes, dogs_allowed_areas, hours_text"
+          )
+          .eq("arena_group_id", beach.arena_group_id)
+          .maybeSingle();
+        metadata = meta ?? null;
       }
 
       // Get current local date + hour in the beach's timezone
@@ -141,7 +219,7 @@ Deno.serve(async (req: Request) => {
         h.local_date !== filterDate || Number(h.local_hour) >= currentLocalHour
       );
 
-      systemPrompt = buildSystemPrompt(beach, days ?? [], remainingHours, currentTimeLabel, local_date ?? null);
+      systemPrompt = buildSystemPrompt(beach, days ?? [], remainingHours, currentTimeLabel, local_date ?? null, metadata);
     }
 
     const answer = await callAnthropic(systemPrompt, conversation_history, question);
@@ -168,6 +246,7 @@ function buildSystemPrompt(
   hours: Record<string, unknown>[],
   currentTimeLabel?: string,
   scopedDate: string | null = null,
+  metadata: Record<string, unknown> | null = null,
 ): string {
   const hoursByDate = new Map<string, Record<string, unknown>[]>();
   for (const h of hours) {
@@ -266,6 +345,52 @@ function buildSystemPrompt(
 ${hourLines || "    (none)"}`;
   }).join("\n");
 
+  // ── Dog policy block (extracted via arena_beach_metadata) ───────────
+  // Scout MUST respect these rules. They drive activity recommendations:
+  // if dogs aren't allowed on sand, don't suggest fetch/wave play; if
+  // leash required, don't suggest letting dog run free; for mixed_by_zone,
+  // direct advice toward the off-leash zone specifically.
+  const dogPolicyLines: string[] = [];
+  let dogAdviceConstraints = "";
+  if (metadata) {
+    const dogsAllowed   = (metadata.dogs_allowed as string | null) || null;
+    const leashRequired = (metadata.dogs_leash_required as string | null) || null;
+    const offLeashArea  = (metadata.dogs_off_leash_area as string | null) || null;
+    const seasonal      = (metadata.dogs_seasonal_restrictions as string | null) || null;
+    const timeRules     = (metadata.dogs_time_restrictions as string | null) || null;
+    const allowedAreas  = (metadata.dogs_allowed_areas as string | null) || null;
+    const policyNotes   = (metadata.dogs_policy_notes as string | null) || null;
+
+    if (dogsAllowed)   dogPolicyLines.push(`- dogs_allowed: ${dogsAllowed}`);
+    if (leashRequired) dogPolicyLines.push(`- leash: ${leashRequired}`);
+    if (offLeashArea)  dogPolicyLines.push(`- off_leash_area: ${trim(offLeashArea, 200)}`);
+    if (allowedAreas)  dogPolicyLines.push(`- allowed_areas: ${trim(allowedAreas, 200)}`);
+    if (seasonal)      dogPolicyLines.push(`- seasonal: ${trim(seasonal, 200)}`);
+    if (timeRules)     dogPolicyLines.push(`- time_rules: ${trim(timeRules, 200)}`);
+    if (policyNotes)   dogPolicyLines.push(`- notes: ${trim(policyNotes, 400)}`);
+
+    // Translate the structured fields into hard activity constraints
+    const constraints: string[] = [];
+    if (dogsAllowed === "no") {
+      constraints.push("Dogs are NOT allowed on the sand at this beach. Do NOT suggest fetch, swim, or any sand/wave activity. If there is an allowed_area (parking lot, multi-use trail), point the user there and make the best of it. If no allowed area exists, gently say this isn't a dog beach today.");
+    } else if (leashRequired === "required") {
+      constraints.push("Leash is REQUIRED. Never suggest letting the dog run free, off-leash fetch, or unrestrained swimming. Suggest leash-friendly activities: walks along the waterline, on-leash swim, sniff time on the dunes.");
+    } else if (leashRequired === "mixed_by_zone") {
+      constraints.push("Leash rules vary by zone. Off-leash activity is ONLY OK in the designated zone (see allowed_areas / off_leash_area / notes). Outside that zone the dog must be leashed. Always direct the user to the specific off-leash area when suggesting active play.");
+    } else if (leashRequired === "varies_by_time") {
+      constraints.push("Leash rules vary by time of day or season. Check seasonal/time_rules carefully before suggesting off-leash activity. When in doubt or outside the off-leash window, default to leashed advice.");
+    }
+    if (dogsAllowed === "seasonal" || seasonal) {
+      constraints.push("Seasonal restrictions apply. Confirm the current date is within the dog-friendly window before recommending off-leash play; if outside the window, treat as leash-required or no-dogs as appropriate.");
+    }
+    dogAdviceConstraints = constraints.length
+      ? `\nDOG POLICY CONSTRAINTS (HARD RULES — never violate):\n${constraints.map(c => `- ${c}`).join("\n")}\n`
+      : "";
+  }
+  const dogPolicyBlock = dogPolicyLines.length
+    ? `\nDOG POLICY (extracted from official source):\n${dogPolicyLines.join("\n")}\n`
+    : "";
+
   return `You are Scout — a local surfer who's been bringing your dog to ${beach.display_name} for years. You know every sandbar, every swell window, when the kooks show up, and when it's firing. You text like a surfer — laid back, uses surf/beach slang naturally (swell, glassy, onshore, sectiony, blown out, dawn patrol, dropping in, firing, going off, closeout, mushy, punchy, clean, choppy, overhead, waist-high), first-person, never formal. You're stoked to help but keep it real — if it's blown out, say it's blown out.
 
 BEACH: ${beach.display_name}
@@ -274,6 +399,7 @@ ${beach.open_time ? `Hours: ${beach.open_time} – ${beach.close_time}` : ""}
 ${beach.description ? `About: ${beach.description}` : ""}
 ${beach.website ? `Website: ${beach.website}` : ""}
 Timezone: ${beach.timezone}
+${dogPolicyBlock}${dogAdviceConstraints}
 
 ${currentTimeLabel ? `Current local time: ${currentTimeLabel} — only today's remaining hours are shown in the hourly data below.` : ""}
 ${scopedDate
@@ -294,7 +420,12 @@ ${scopedDate
 - Crowd terms: quiet = few people, moderate = getting busy, dog_party = packed with dogs, too_crowded = avoid
 - Never mention numeric scores (hour_score, tide_score, etc.) unless the user explicitly asks about them — use the conditions and statuses to inform your language instead
 - When giving pack advice, lead with the dog's needs (water, towel, fetch ball, sunscreen, booties, leash) — human comfort items are secondary
-- Always assume the user is bringing their dog; frame all advice through that lens`;
+- Always assume the user is bringing their dog; frame all advice through that lens
+- DOG POLICY is non-negotiable — never suggest activities that violate the leash rule or "no dogs on sand" rule above. If the policy says leash required, the dog stays leashed; if dogs aren't allowed on sand, point the user to the allowed zone (parking lot / multi-use trail) and make the most of that. Don't argue with the policy or hedge — Scout knows the local rules cold and respects them.`;
+}
+
+function trim(s: string, n: number): string {
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
 // ─── Comparative question detection ──────────────────────────────────────────

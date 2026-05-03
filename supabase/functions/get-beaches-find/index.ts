@@ -2,7 +2,10 @@
 // Single-query beach list for find.html day-pill views.
 // Uses the find_beaches PostgreSQL RPC (PostGIS) for efficient distance computation.
 //
-// GET ?date=2026-04-18[&lat=33.6&lng=-117.9][&leash=any|off_leash|on_leash|mixed]
+// GET ?date=2026-04-18[&lat=33.6&lng=-117.9][&leash=any|off_leash|on_leash|mixed][&scored=true|false]
+//   scored=true  (default) → only beaches with a beach_day_recommendations row
+//   scored=false           → full beaches_gold catalog (763 active rows)
+//
 // Returns: { date, beaches: RankedBeach[], is_today: boolean }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -34,6 +37,10 @@ Deno.serve(async (req: Request) => {
     const lngParam = url.searchParams.get("lng");
     const lat   = latParam ? parseFloat(latParam) : null;
     const lng   = lngParam ? parseFloat(lngParam) : null;
+    // scored=true (default) — only beaches with day_recommendations rows.
+    // scored=false → full catalog (763), unscored render as no_data cards.
+    const scoredParam = url.searchParams.get("scored");
+    const scoredOnly  = scoredParam === "false" ? false : true;
 
     // Bounded result set via spatial KNN. Only applied when lat/lng present;
     // without coords the server still returns the full active set (ghost-user
@@ -58,17 +65,20 @@ Deno.serve(async (req: Request) => {
 
     // ── 1. find_beaches RPC: beaches + day rec, one join, PostGIS distance ────
     const { data: beaches, error: rpcErr } = await supabase.rpc("find_beaches", {
-      p_date:  date,
-      p_lat:   lat,
-      p_lng:   lng,
-      p_leash: leash,
-      p_limit: limit,
+      p_date:         date,
+      p_lat:          lat,
+      p_lng:          lng,
+      p_leash:        leash,
+      p_limit:        limit,
+      p_scored_only:  scoredOnly,
     });
 
     if (rpcErr || !beaches) return json({ error: rpcErr?.message ?? "RPC failed" }, 500);
 
-    const locationIds = (beaches as BeachRow[]).map(b => b.location_id);
-    if (locationIds.length === 0) return json({ date, is_today: isToday, beaches: [] });
+    const arenaGroupIds = (beaches as BeachRow[])
+      .map(b => b.arena_group_id)
+      .filter((x): x is number => typeof x === "number");
+    if (arenaGroupIds.length === 0) return json({ date, is_today: isToday, beaches: [] });
 
     // ── 2. Hourly scores in one query ─────────────────────────────────────────
     // For today: fetch all candidate-window hours so we can compute remaining windows.
@@ -76,11 +86,11 @@ Deno.serve(async (req: Request) => {
     const hoursQuery = supabase
       .from("beach_day_hourly_scores")
       .select(
-        "location_id, local_hour, hour_score, is_in_best_window, is_candidate_window, " +
+        "arena_group_id, local_hour, hour_score, is_in_best_window, is_candidate_window, " +
         "explainability, hour_status, " +
         "tide_status, wind_status, crowd_status, rain_status, temp_status, uv_status"
       )
-      .in("location_id", locationIds)
+      .in("arena_group_id", arenaGroupIds)
       .eq("local_date", date)
       .eq("is_daylight", true)
       .order("local_hour", { ascending: true });
@@ -90,7 +100,7 @@ Deno.serve(async (req: Request) => {
 
     // ── 3. Build per-beach data structures ───────────────────────────────────
     type HourRow = {
-      location_id: string;
+      arena_group_id: number;
       local_hour: number;
       hour_score: number;
       is_in_best_window: boolean;
@@ -102,21 +112,21 @@ Deno.serve(async (req: Request) => {
       temp_status: string | null; uv_status: string | null;
     };
 
-    // Group hours by location
-    const hoursByLocation: Record<string, HourRow[]> = {};
+    // Group hours by arena_group_id
+    const hoursByFid: Record<number, HourRow[]> = {};
     for (const h of (hours ?? []) as HourRow[]) {
-      (hoursByLocation[h.location_id] ??= []).push(h);
+      (hoursByFid[h.arena_group_id] ??= []).push(h);
     }
 
     // Compute composite + component scores per beach
-    const scoresByLocation: Record<string, {
+    const scoresByFid: Record<number, {
       composite: number; tide: number; wind: number;
       crowd: number; rain: number; temp: number; count: number;
       bestWindowLabel: string | null; bestWindowStatus: string | null;
     }> = {};
 
-    for (const locId of locationIds) {
-      const locHours = hoursByLocation[locId] ?? [];
+    for (const fid of arenaGroupIds) {
+      const locHours = hoursByFid[fid] ?? [];
 
       let windowHours: HourRow[];
       let bestWindowLabel:  string | null = null;
@@ -138,7 +148,7 @@ Deno.serve(async (req: Request) => {
 
       const count = windowHours.length;
       if (count === 0) {
-        scoresByLocation[locId] = { composite: 0, tide: 0, wind: 0, crowd: 0, rain: 0, temp: 0, count: 0, bestWindowLabel, bestWindowStatus };
+        scoresByFid[fid] = { composite: 0, tide: 0, wind: 0, crowd: 0, rain: 0, temp: 0, count: 0, bestWindowLabel, bestWindowStatus };
         continue;
       }
 
@@ -153,7 +163,7 @@ Deno.serve(async (req: Request) => {
         temp      += ex.temp_score  ?? 0;
       }
 
-      scoresByLocation[locId] = {
+      scoresByFid[fid] = {
         composite: composite / count,
         tide:      tide      / count,
         wind:      wind      / count,
@@ -168,10 +178,11 @@ Deno.serve(async (req: Request) => {
 
     // ── 4. Assemble and rank ──────────────────────────────────────────────────
     const ranked = (beaches as BeachRow[]).map(b => {
-      const s = scoresByLocation[b.location_id];
+      const s = scoresByFid[b.arena_group_id];
       const bestWindowLabel  = isToday ? (s?.bestWindowLabel  ?? b.best_window_label)  : b.best_window_label;
       const bestWindowStatus = isToday ? (s?.bestWindowStatus ?? b.best_window_status) : b.best_window_status;
       return {
+        arena_group_id:     b.arena_group_id,
         location_id:        b.location_id,
         display_name:       b.display_name,
         latitude:           b.latitude,
@@ -213,7 +224,8 @@ Deno.serve(async (req: Request) => {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface BeachRow {
-  location_id:        string;
+  arena_group_id:     number;
+  location_id:        string | null;
   display_name:       string;
   latitude:           number;
   longitude:          number;

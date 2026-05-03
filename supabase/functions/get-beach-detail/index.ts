@@ -20,9 +20,10 @@ Deno.serve(async (req: Request) => {
     new Response(JSON.stringify(body), { status, headers: cors });
 
   try {
-    const url        = new URL(req.url);
-    const locationId = url.searchParams.get("location_id") ?? "huntington-dog-beach";
-    const date       = url.searchParams.get("date");
+    const url               = new URL(req.url);
+    const locationIdParam   = url.searchParams.get("location_id");
+    const arenaGroupIdParam = url.searchParams.get("arena_group_id") ?? url.searchParams.get("fid");
+    const date              = url.searchParams.get("date");
 
     if (!date) {
       return json({ error: "date parameter required (YYYY-MM-DD)" }, 400);
@@ -31,16 +32,39 @@ Deno.serve(async (req: Request) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
     const nowUtc   = new Date();
 
-    // Beach metadata
-    const { data: beach, error: beachErr } = await supabase
-      .from("beaches")
-      .select("location_id, display_name, timezone, address, website")
-      .eq("location_id", locationId)
-      .single();
-
-    if (beachErr || !beach) {
-      return json({ error: "Beach not found" }, 404);
+    // Resolve to fid via either input. Legacy slug lives on beaches_gold now.
+    let fid: number | null = null;
+    if (arenaGroupIdParam) {
+      const parsed = parseInt(arenaGroupIdParam, 10);
+      if (!Number.isFinite(parsed)) return json({ error: "Invalid arena_group_id" }, 400);
+      fid = parsed;
+    } else {
+      const slug = locationIdParam ?? "huntington-dog-beach";
+      const { data: row } = await supabase
+        .from("beaches_gold")
+        .select("fid")
+        .eq("location_id", slug)
+        .limit(1);
+      fid = row?.[0]?.fid ?? null;
+      if (!fid) return json({ error: "Beach not found (slug not in spine)" }, 404);
     }
+
+    const { data: goldRows, error: goldErr } = await supabase
+      .from("beaches_gold")
+      .select("fid, location_id, name, display_name_override, timezone, address, website")
+      .eq("fid", fid)
+      .limit(1);
+    const gold = goldRows?.[0];
+    if (goldErr || !gold) return json({ error: "Beach not found" }, 404);
+    const beach = {
+      location_id:     gold.location_id ?? null,
+      arena_group_id:  gold.fid,
+      display_name:    gold.display_name_override ?? gold.name,
+      timezone:        gold.timezone ?? "America/Los_Angeles",
+      address:         gold.address ?? null,
+      website:         gold.website ?? null,
+    };
+    const locationId = beach.location_id;  // may be null for non-curated
 
     // Derive today's local date + hour from beach timezone (never use UTC date)
     const localParts = new Intl.DateTimeFormat("en-US", {
@@ -53,14 +77,14 @@ Deno.serve(async (req: Request) => {
     const isToday        = date === today;
     const currentLocalHour = isToday ? parseInt(getPart("hour")) % 24 : 0;
 
-    // Daily recommendation + hourly scores in parallel
+    // Daily recommendation + hourly scores in parallel (keyed on arena_group_id)
     const [{ data: day, error: dayErr }, { data: hours, error: hoursErr }] = await Promise.all([
       supabase
         .from("beach_day_recommendations")
         .select("*")
-        .eq("location_id", locationId)
+        .eq("arena_group_id", fid)
         .eq("local_date", date)
-        .single(),
+        .maybeSingle(),
       supabase
         .from("beach_day_hourly_scores")
         .select(
@@ -71,14 +95,36 @@ Deno.serve(async (req: Request) => {
           "tide_status, wind_status, crowd_status, rain_status, temp_status, uv_status, " +
           "temp_cold_status, temp_hot_status, sand_temp, asphalt_temp, sand_status, asphalt_status"
         )
-        .eq("location_id", locationId)
+        .eq("arena_group_id", fid)
         .eq("local_date", date)
         .eq("is_daylight", true)
         .order("local_hour", { ascending: true }),
     ]);
 
-    if (dayErr || !day) return json({ error: "No recommendation found for this date" }, 404);
+    if (dayErr) return json({ error: dayErr.message }, 500);
     if (hoursErr)        return json({ error: hoursErr.message }, 500);
+    // day may be null for non-curated beaches with no scoring data; let
+    // frontend render the metadata-only state.
+
+    // LLM-extracted policy/amenity metadata via the arena bridge.
+    // Best-effort: if no arena_group_id (e.g., OR beach), or no extraction
+    // yet, fields are simply null.
+    let metadata: Record<string, unknown> | null = null;
+    if (beach.arena_group_id) {
+      const { data: meta } = await supabase
+        .from("arena_beach_metadata")
+        .select(
+          "dogs_allowed, dogs_leash_required, dogs_off_leash_area, " +
+          "dogs_seasonal_restrictions, dogs_time_restrictions, " +
+          "dogs_policy_notes, dogs_allowed_areas, " +
+          "hours_text, public_access, access_text, " +
+          "parking_type, " +
+          "extracted_address, best_address"
+        )
+        .eq("arena_group_id", beach.arena_group_id)
+        .maybeSingle();
+      metadata = meta ?? null;
+    }
 
     // For today: find best remaining window and override is_in_best_window + day label
     let finalDay   = day;
@@ -105,7 +151,7 @@ Deno.serve(async (req: Request) => {
       };
     }
 
-    return json({ beach, day: finalDay, hours: finalHours });
+    return json({ beach, day: finalDay, hours: finalHours, metadata });
 
   } catch (err) {
     return json({ error: String(err) }, 500);

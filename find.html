@@ -512,6 +512,11 @@
         <option value="mixed">Mixed</option>
         <option value="on_leash">Required</option>
       </select>
+      <span class="sort-label">Show</span>
+      <select class="sort-select compact" id="catalog-select" onchange="onCatalogModeChange(this.value)">
+        <option value="scored">Scored only</option>
+        <option value="all">Full catalog</option>
+      </select>
     </div>
     <div class="loc-row" id="loc-row">
       <span class="location-label" id="location-label">📍 Detecting location…</span>
@@ -557,6 +562,13 @@
   let userLng     = null;
   let currentSort = 'conditions';
   let leashFilter = 'any';
+  // 'scored' → only beaches with scoring data (default; today's 14)
+  // 'all'    → full beaches_gold catalog (763 active rows; most no_data)
+  const CATALOG_KEY = 'find.catalogMode';
+  let catalogMode = (() => {
+    try { return localStorage.getItem(CATALOG_KEY) || 'scored'; }
+    catch { return 'scored'; }
+  })();
 
   // Server-bounded nearest-N set. Client filters/sorts within this set.
   // GIST index on beaches.location makes the server query O(log N) at
@@ -618,17 +630,24 @@
       // client-side haversine path.
       const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
       const beachList = (await loadBeachesForDate(todayISO))
-        .map(b => ({ location_id: b.location_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule, distance_m: b.distance_m }));
+        .map(b => ({ location_id: b.location_id, arena_group_id: b.arena_group_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule, distance_m: b.distance_m, day_status: b.day_status, composite_score: b.composite_score }));
 
       const filteredBeachList = beachList.filter(b => matchesLeashFilter(b));
 
+      // Only fetch live NOW data for beaches that have scoring (curated set).
+      // For unscored beaches in the catalog (gold-only, no daily-beach-refresh
+      // run yet), skip the get-beach-now call — the card renders from
+      // composite_score directly.
+      const hasScoring = b => b.day_status && b.day_status !== 'no_data';
       const results = await Promise.all(
         filteredBeachList.map(b =>
-          fetch(`${SUPABASE_URL}/functions/v1/get-beach-now?location_id=${b.location_id}`,
-            { headers: { 'Authorization': `Bearer ${ANON_KEY}` } })
-            .then(r => r.json())
-            .then(d => ({ beach: b, day: nowToDay(d) }))
-            .catch(() => ({ beach: b, day: null }))
+          hasScoring(b)
+            ? fetch(`${SUPABASE_URL}/functions/v1/get-beach-now?${b.arena_group_id ? 'arena_group_id=' + b.arena_group_id : 'location_id=' + b.location_id}`,
+                { headers: { 'Authorization': `Bearer ${ANON_KEY}` } })
+                .then(r => r.json())
+                .then(d => ({ beach: b, day: nowToDay(d) }))
+                .catch(() => ({ beach: b, day: null }))
+            : Promise.resolve({ beach: b, day: null })
         )
       );
       nowBeaches = results;
@@ -660,6 +679,7 @@
     return {
       is_now:             true,
       location_id:        d.location_id,
+      arena_group_id:     d.arena_group_id,
       local_date:         d.local_date,
       day_status:         d.hour_status,
       best_window_label:  'Right now',
@@ -699,19 +719,23 @@
   // server returns only the nearest NEAREST_LIMIT beaches (GIST-indexed
   // KNN). Without coords, returns the full active set for score sorting.
   async function loadBeachesForDate(date) {
-    if (beachCache[date]) return beachCache[date];
+    // Cache key includes catalogMode so toggling Scored/All re-fetches
+    // instead of returning the prior result.
+    const cacheKey = `${date}::${catalogMode}`;
+    if (beachCache[cacheKey]) return beachCache[cacheKey];
     const params = new URLSearchParams({ date });
     if (userLat !== null && userLng !== null) {
       params.set('lat',   String(userLat));
       params.set('lng',   String(userLng));
       params.set('limit', String(NEAREST_LIMIT));
     }
+    if (catalogMode === 'all') params.set('scored', 'false');
     const res  = await fetch(
       `${SUPABASE_URL}/functions/v1/get-beaches-find?${params}`,
       { headers: { 'Authorization': `Bearer ${ANON_KEY}` } }
     );
     const data = await res.json();
-    if (Array.isArray(data.beaches)) beachCache[date] = data.beaches;
+    if (Array.isArray(data.beaches)) beachCache[cacheKey] = data.beaches;
     return data.beaches ?? [];
   }
 
@@ -872,7 +896,7 @@
     const scoreHtml = `
       <div class="day-score ${scoreClass}">
         <span class="day-score-value">${score !== null ? score : '—'}</span>
-        <span class="day-score-label">${day?.is_now ? 'NOW' : 'SCORE'}</span>
+        <span class="day-score-label">SCORE</span>
       </div>`;
 
     const weatherIcon = getWeatherIcon(day?.summary_weather, day?.weather_code);
@@ -909,7 +933,7 @@
     const chips = buildChips(day, distance);
 
     return `
-      <div class="day-card status-${status}" data-location-id="${beach.location_id}" onclick="window.location.href='detail.html?location=${beach.location_id}&date=${selectedDate}'">
+      <div class="day-card status-${status}" data-location-id="${beach.location_id}" onclick="window.location.href='detail.html?${beach.arena_group_id ? 'fid=' + beach.arena_group_id : 'location=' + beach.location_id}&date=${selectedDate}'">
         <div class="day-left">
           <div class="rank-label">#${rank}</div>
           ${scoreHtml}
@@ -1133,6 +1157,13 @@
     sortAndRender();
   }
 
+  function onCatalogModeChange(val) {
+    catalogMode = val;
+    try { localStorage.setItem(CATALOG_KEY, val); } catch { /* storage may be blocked */ }
+    nowBeaches = null;     // reset so the wider/narrower set takes effect
+    sortAndRender();
+  }
+
   function matchesLeashFilter(beach) {
     if (leashFilter === 'any') return true;
     return (beach.access_rule ?? 'off_leash') === leashFilter;
@@ -1283,6 +1314,9 @@
   }
 
   // ── Boot ───────────────────────────────────────────────────────────
+  // Sync the catalog-mode dropdown to whatever was persisted last visit
+  const _catalogSelect = document.getElementById('catalog-select');
+  if (_catalogSelect) _catalogSelect.value = catalogMode;
   requestGeolocation();
   // Pre-fetch today so TDY pill is instant; warms beach list for NOW mode
   const _todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });

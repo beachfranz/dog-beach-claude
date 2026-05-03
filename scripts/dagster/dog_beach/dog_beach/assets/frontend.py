@@ -11,13 +11,13 @@ doesn't try to materialize them.
     Dagster controls.
   - HTML pages: static files in the repo, served by GitHub Pages.
 
-Lineage:
+Lineage (post path 3b — public.beaches dropped 2026-05-02):
 
-  beach_day_recommendations ─→ get_beach_summary ─→ index.html
-  beach_day_hourly_scores  ─┬→ get_beach_detail  ─→ detail.html
-                            └→ get_beach_compare ─→ find.html
-  public/beaches           ─→ get_beach_summary
-                           ─→ get_beach_compare
+  beaches_gold              ─┬→ get_beach_summary ─→ index.html
+  beach_dog_policy          ─┘                  └→ get_beach_detail ─→ detail.html
+  beach_day_recommendations ─→ get_beach_summary
+                            ─→ find_beaches RPC  ─→ get_beaches_find ─→ find.html
+  beach_day_hourly_scores   ─→ get_beach_detail
 """
 from dagster import AssetSpec, AssetKey
 
@@ -38,15 +38,18 @@ get_beach_summary = AssetSpec(
 
 get_beach_detail = AssetSpec(
     key=AssetKey(["edge", "get_beach_detail"]),
-    description="GET /functions/v1/get-beach-detail?location_id=<id>"
-                "&date=<YYYY-MM-DD>. Returns hour-by-hour scoring for "
-                "one beach on one day, plus the beach metadata and "
-                "day-level rollup.",
+    description="GET /functions/v1/get-beach-detail?fid=<n> (or legacy "
+                "?location_id=<slug>). Returns hour-by-hour scoring for "
+                "one beach on one day, the day-level rollup, AND "
+                "LLM-extracted policy/amenity metadata. Reads beaches_gold "
+                "directly + arena_beach_metadata keyed on fid (no longer "
+                "goes through public.beaches.arena_group_id bridge).",
     group_name="consumer_api",
     kinds={"edge_function", "deno"},
     deps=[AssetKey(["public", "beaches"]),
           AssetKey(["beach_day_hourly_scores"]),
-          AssetKey(["beach_day_recommendations"])],
+          AssetKey(["beach_day_recommendations"]),
+          AssetKey(["public", "arena_beach_metadata"])],
 )
 
 get_beach_compare = AssetSpec(
@@ -63,13 +66,17 @@ get_beach_compare = AssetSpec(
 
 beach_chat = AssetSpec(
     key=AssetKey(["edge", "beach_chat"]),
-    description="POST /functions/v1/beach-chat. Anthropic-backed chat "
-                "endpoint with beach + day context injected into the "
-                "system prompt. Rate-limited via chat_rate_limits.",
+    description="POST /functions/v1/beach-chat. Anthropic-backed Scout "
+                "chat endpoint with beach + day context AND LLM-extracted "
+                "dog policy injected into the system prompt as hard "
+                "constraints (e.g. 'don't suggest off-leash where "
+                "dogs_leash_required=required'). Rate-limited via "
+                "chat_rate_limits.",
     group_name="consumer_api",
     kinds={"edge_function", "deno", "anthropic"},
     deps=[AssetKey(["public", "beaches"]),
-          AssetKey(["beach_day_recommendations"])],
+          AssetKey(["beach_day_recommendations"]),
+          AssetKey(["public", "arena_beach_metadata"])],
 )
 
 

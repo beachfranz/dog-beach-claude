@@ -37,13 +37,15 @@ def dbt_models(context: AssetExecutionContext, dbt: DbtCliResource):
 # Group the public.* dbt source assets together. Excludes tables that
 # already have a Dagster asset claiming the key (those keep their
 # owning asset's group):
-#   - public.beaches                     -> consumer (write-back asset)
+#   - public.beaches                     -> verdicts (STALE — table dropped 2026-05-02)
+#   - public.beaches_gold                -> gold (path-3 spine)
+#   - public.beach_dog_policy            -> gold (curated overlay)
 #   - public.beach_verdicts              -> verdicts (cascade asset)
 #   - public.operator_dogs_policy        -> ingest
 #   - public.operator_policy_exceptions  -> ingest
 #   - public.cpad_unit_dogs_policy       -> ingest
 #   - public.cpad_unit_policy_exceptions -> ingest
-#   - public.us_beach_points             -> ingest (805 spine)
+#   - public.us_beach_points             -> ingest (legacy spine; no longer consumed)
 #   - public.cpad_units                  -> ingest (805 spine)
 #   - public.osm_features                -> ingest (805 spine)
 #   - public.ccc_access_points           -> ingest (805 spine)

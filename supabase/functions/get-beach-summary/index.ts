@@ -20,22 +20,47 @@ Deno.serve(async (req: Request) => {
     new Response(JSON.stringify(body), { status, headers: cors });
 
   try {
-    const url        = new URL(req.url);
-    const locationId = url.searchParams.get("location_id") ?? "huntington-dog-beach";
+    const url               = new URL(req.url);
+    const locationIdParam   = url.searchParams.get("location_id");
+    const arenaGroupIdParam = url.searchParams.get("arena_group_id") ?? url.searchParams.get("fid");
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
     const nowUtc   = new Date();
 
-    // Fetch beach metadata
-    const { data: beach, error: beachErr } = await supabase
-      .from("beaches")
-      .select("location_id, display_name, timezone, address, website")
-      .eq("location_id", locationId)
-      .single();
-
-    if (beachErr || !beach) {
-      return json({ error: "Beach not found" }, 404);
+    // Resolve to fid via either input. Legacy slug lives on beaches_gold now.
+    let fid: number | null = null;
+    if (arenaGroupIdParam) {
+      const parsed = parseInt(arenaGroupIdParam, 10);
+      if (!Number.isFinite(parsed)) return json({ error: "Invalid arena_group_id" }, 400);
+      fid = parsed;
+    } else {
+      const slug = locationIdParam ?? "huntington-dog-beach";
+      const { data: row } = await supabase
+        .from("beaches_gold")
+        .select("fid")
+        .eq("location_id", slug)
+        .limit(1);
+      fid = row?.[0]?.fid ?? null;
+      if (!fid) return json({ error: "Beach not found (slug not in spine)" }, 404);
     }
+
+    // Beach metadata — all on the spine now.
+    const { data: goldRows, error: goldErr } = await supabase
+      .from("beaches_gold")
+      .select("fid, location_id, name, display_name_override, timezone, address, website")
+      .eq("fid", fid)
+      .limit(1);
+    const gold = goldRows?.[0];
+    if (goldErr || !gold) return json({ error: "Beach not found" }, 404);
+    const beach = {
+      location_id:     gold.location_id ?? null,
+      arena_group_id:  gold.fid,
+      display_name:    gold.display_name_override ?? gold.name,
+      timezone:        gold.timezone ?? "America/Los_Angeles",
+      address:         gold.address ?? null,
+      website:         gold.website ?? null,
+    };
+    const locationId = beach.location_id;  // may be null for non-curated
 
     // Current local date + hour for this beach (must use beach timezone, not UTC)
     const localParts = new Intl.DateTimeFormat("en-US", {
@@ -47,11 +72,11 @@ Deno.serve(async (req: Request) => {
     const today         = `${getPart("year")}-${getPart("month")}-${getPart("day")}`;
     const currentLocalHour = parseInt(getPart("hour")) % 24;
 
-    // Fetch 7 days of recommendations starting today
+    // Fetch 7 days of recommendations starting today (keyed on arena_group_id)
     const { data: days, error: daysErr } = await supabase
       .from("beach_day_recommendations")
       .select("*")
-      .eq("location_id", locationId)
+      .eq("arena_group_id", fid)
       .gte("local_date", today)
       .order("local_date", { ascending: true })
       .limit(7);
@@ -63,19 +88,19 @@ Deno.serve(async (req: Request) => {
     const dates        = (days ?? []).map(d => d.local_date);
     const futureDates  = dates.filter(d => d !== today);
 
-    // Query 1: best-window hours for future days
+    // Query 1: best-window hours for future days (keyed on arena_group_id)
     const { data: futureHours } = futureDates.length ? await supabase
       .from("beach_day_hourly_scores")
       .select("local_date, local_hour, hour_score, tide_status, wind_status, rain_status, crowd_status, temp_status, uv_status")
-      .eq("location_id", locationId)
+      .eq("arena_group_id", fid)
       .in("local_date", futureDates)
       .eq("is_in_best_window", true) : { data: [] };
 
-    // Query 2: remaining candidate hours for today (the new best window search space)
+    // Query 2: remaining candidate hours for today (keyed on arena_group_id)
     const { data: todayHours } = await supabase
       .from("beach_day_hourly_scores")
       .select("local_hour, hour_score, tide_status, wind_status, rain_status, crowd_status, temp_status, uv_status")
-      .eq("location_id", locationId)
+      .eq("arena_group_id", fid)
       .eq("local_date", today)
       .eq("is_candidate_window", true)
       .gte("local_hour", currentLocalHour)
@@ -148,12 +173,18 @@ Deno.serve(async (req: Request) => {
       };
     });
 
-    // Fetch all active beaches for location switcher
-    const { data: allBeaches } = await supabase
-      .from("beaches")
-      .select("location_id, display_name")
+    // Fetch all active beaches for the location switcher dropdown.
+    // All on the spine now — no JOIN needed.
+    const { data: goldList } = await supabase
+      .from("beaches_gold")
+      .select("fid, location_id, name, display_name_override")
       .eq("is_active", true)
-      .order("display_name");
+      .order("name");
+    const allBeaches = (goldList ?? []).map(g => ({
+      location_id:    g.location_id ?? null,
+      arena_group_id: g.fid,
+      display_name:   g.display_name_override ?? g.name,
+    }));
 
     return json({ beach, days: daysWithScore, allBeaches: allBeaches ?? [] });
 

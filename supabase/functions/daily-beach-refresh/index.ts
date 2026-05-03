@@ -27,6 +27,7 @@ type BacteriaRisk     = "none" | "low" | "moderate" | "high";
 
 interface Beach {
   location_id: string;
+  arena_group_id: number | null;   // path 3a dual-key bridge to beaches_gold
   display_name: string;
   latitude: number;
   longitude: number;
@@ -167,13 +168,88 @@ Deno.serve(async (req: Request) => {
   const results: RefreshResult[] = [];
 
   try {
-    // 1. Load active beaches
-    console.log("Loading beaches from DB...");
-    const { data: beaches, error: beachErr } = await (
-      targetLocationIds && targetLocationIds.length > 0
-        ? supabase.from("beaches").select("*").eq("is_active", true).in("location_id", targetLocationIds)
-        : supabase.from("beaches").select("*").eq("is_active", true)
-    );
+    // 1. Load scoreable beaches from the spine.
+    //
+    // Path 3b-3.1: source of truth is beaches_gold + the is_scoreable gate.
+    // INNER JOIN to public.beaches because the scoring tables still PK on
+    // location_id (NOT NULL) until the next migration retires that column.
+    // beach_dog_policy supplies dogs_prohibited_start/end (overlay table).
+    //
+    // The big swap was 15 → 15: today's curated set is exactly the rows
+    // where beaches_gold.is_scoreable=true. Future seeds opt in via
+    // seed_arena_beach.py --score (sets is_scoreable=true).
+    console.log("Loading beaches from beaches_gold (is_scoreable=true)...");
+    let beachQuery = supabase.from("beaches_gold")
+      .select(`
+        fid,
+        location_id,
+        name,
+        display_name_override,
+        lat,
+        lon,
+        noaa_station_id,
+        besttime_venue_id,
+        timezone,
+        open_time,
+        close_time,
+        is_scoreable,
+        is_active,
+        address,
+        website,
+        description,
+        parking_text,
+        beach_dog_policy(dogs_prohibited_start, dogs_prohibited_end)
+      `)
+      .eq("is_scoreable", true)
+      .eq("is_active", true);
+    if (targetLocationIds && targetLocationIds.length > 0) {
+      beachQuery = beachQuery.in("location_id", targetLocationIds);
+    }
+    const { data: goldRows, error: beachErr } = await beachQuery;
+
+    // Reshape gold rows into the existing Beach interface so the rest of
+    // the function doesn't need touching. PostgREST returns the joined
+    // beaches row as either an object or array depending on cardinality;
+    // since we INNER JOIN there's exactly one.
+    type GoldRow = {
+      fid: number; location_id: string | null;
+      name: string; display_name_override: string | null;
+      lat: number; lon: number;
+      noaa_station_id: string | null; besttime_venue_id: string | null;
+      timezone: string; open_time: string | null; close_time: string | null;
+      is_scoreable: boolean; is_active: boolean;
+      address: string | null; website: string | null;
+      description: string | null; parking_text: string | null;
+      beach_dog_policy: { dogs_prohibited_start: string | null; dogs_prohibited_end: string | null }
+                        | null
+                        | { dogs_prohibited_start: string | null; dogs_prohibited_end: string | null }[];
+    };
+    const flatten = (g: GoldRow): Beach => {
+      const dp = Array.isArray(g.beach_dog_policy) ? g.beach_dog_policy[0]
+               : g.beach_dog_policy;
+      return {
+        location_id:    g.location_id ?? "",
+        arena_group_id: g.fid,
+        display_name:   g.display_name_override ?? g.name,
+        latitude:       g.lat,
+        longitude:      g.lon,
+        noaa_station_id: g.noaa_station_id,
+        besttime_venue_id: g.besttime_venue_id,
+        is_active:      g.is_active,
+        timezone:       g.timezone ?? "America/Los_Angeles",
+        open_time:      g.open_time,
+        close_time:     g.close_time,
+        dogs_prohibited_start: dp?.dogs_prohibited_start ?? null,
+        dogs_prohibited_end:   dp?.dogs_prohibited_end   ?? null,
+        address:        g.address,
+        website:        g.website,
+        description:    g.description,
+        parking_text:   g.parking_text,
+        location_numb:  null,
+        created_at:     "",
+      };
+    };
+    const beaches: Beach[] | null = goldRows ? (goldRows as GoldRow[]).map(flatten) : null;
 
     console.log("Beach query result — data:", beaches?.length ?? "null", "error:", beachErr?.message ?? "none");
 
@@ -254,10 +330,13 @@ async function processBeach(
     phases.besttime = "ok";
     console.log(`[${beach.location_id}] Crowds OK — ${crowdResult.busynessMap.size} slots`);
     if (crowdResult.isNewVenue) {
+      // Write the discovered venue back to the spine (beaches_gold). The
+      // legacy public.beaches column is now derived/optional and gets
+      // mirrored on next sync rather than directly written here.
       await supabase
-        .from("beaches")
+        .from("beaches_gold")
         .update({ besttime_venue_id: crowdResult.venueId })
-        .eq("location_id", beach.location_id);
+        .eq("fid", beach.arena_group_id);
       console.log(`[${beach.location_id}] Persisted venue_id: ${crowdResult.venueId}`);
     }
   } catch (err) {
@@ -299,7 +378,7 @@ async function processBeach(
     for (let i = 0; i < hourlyRows.length; i += 100) {
       const { error } = await supabase
         .from("beach_day_hourly_scores")
-        .upsert(hourlyRows.slice(i, i + 100), { onConflict: "location_id,forecast_ts" });
+        .upsert(hourlyRows.slice(i, i + 100), { onConflict: "arena_group_id,forecast_ts" });
       if (error) throw new Error(error.message);
     }
     phases.upsert_hourly = "ok";
@@ -322,7 +401,7 @@ async function processBeach(
     });
     const { error } = await supabase
       .from("beach_day_recommendations")
-      .upsert(dailyRows, { onConflict: "location_id,local_date" });
+      .upsert(dailyRows, { onConflict: "arena_group_id,local_date" });
     if (error) throw new Error(error.message);
     phases.upsert_daily = "ok";
     console.log(`[${beach.location_id}] Upserted ${dailyRows.length} daily rows`);
@@ -450,6 +529,7 @@ function buildHourlyRow(
 ) {
   return {
     location_id:           beach.location_id,
+    arena_group_id:        beach.arena_group_id ?? null,
     local_date:            h.localDate,
     forecast_ts:           h.forecastTs,
     local_hour:            h.localHour,
@@ -550,6 +630,7 @@ function buildDailyRow(
 
   return {
     location_id:           beach.location_id,
+    arena_group_id:        beach.arena_group_id ?? null,
     local_date:            date,
     day_status:            dayStatus,
     best_window_start_ts:  window?.startTs ?? null,

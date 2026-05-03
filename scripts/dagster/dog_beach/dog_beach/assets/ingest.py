@@ -1020,6 +1020,122 @@ def polygon_containment_run(context: AssetExecutionContext,
     )
 
 
+# ----- harmony 6.3b/c: gold-spine non-containment evidence ----------------
+# Three populators that emit governance/dogs/practical evidence into
+# beach_enrichment_provenance keyed on gold_fid. Companion to the
+# containment populators above. Resolvers + promoters for these field
+# groups are still pending (governance has no canonical consumer column
+# on beaches_gold today; dogs/practical promoters would be parallel to
+# promote_production_to_beach_dog_policy.py).
+
+@asset(
+    key=AssetKey(["public", "research_evidence_gold"]),
+    description="Per-source breakdown of policy_research_extractions evidence "
+                "now landed on beach_enrichment_provenance keyed on gold_fid. "
+                "Cheap observation. Source: phase 6.3c part 1.",
+    group_name="ingest",
+    kinds={"sql", "evidence"},
+)
+def research_evidence_gold(context: AssetExecutionContext,
+                            supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            select source, field_group, count(*) as n
+              from public.beach_enrichment_provenance
+             where source in ('research', 'old_school_llm', 'manual', 'park_url',
+                              'park_operators')
+               and gold_fid is not null
+             group by source, field_group
+             order by source, field_group
+        """)
+        rows = cur.fetchall()
+        cur.execute("""
+            select count(distinct gold_fid)
+              from public.beach_enrichment_provenance
+             where source in ('research', 'old_school_llm', 'manual', 'park_url',
+                              'park_operators')
+               and gold_fid is not null
+        """)
+        distinct_beaches = cur.fetchone()[0]
+    breakdown = ", ".join(f"{src}/{fg}={n}" for src, fg, n in rows) or "(none)"
+    return Output(
+        None,
+        metadata={
+            "total_evidence_rows": MetadataValue.int(sum(r[2] for r in rows)),
+            "distinct_beaches":    MetadataValue.int(distinct_beaches),
+            "breakdown":           MetadataValue.text(breakdown),
+        },
+    )
+
+
+@asset(
+    description="Refreshes gold-spine governance evidence from the curated "
+                "park_operators table (catches CDPR-named state beaches "
+                "actually leased to city/county per "
+                "project_state_park_operators.md). Wraps SQL "
+                "populate_from_park_operators_gold(NULL). Idempotent.",
+    group_name="ingest_heavy",
+    kinds={"plpgsql", "harmony"},
+    deps=[AssetKey(["public", "cpad_units"])],
+)
+def park_operators_governance_run(context: AssetExecutionContext,
+                                    supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("select public.populate_from_park_operators_gold(null)")
+        emitted = cur.fetchone()[0]
+    return Output(
+        None,
+        metadata={
+            "evidence_emitted": MetadataValue.int(emitted),
+        },
+    )
+
+
+@asset(
+    description="Refreshes gold-spine dogs/practical evidence from the LLM "
+                "research extraction table (policy_research_extractions). "
+                "Wraps SQL populate_from_research_gold(NULL). Idempotent. "
+                "Maps origin → source: v2_dog_policy_old → old_school_llm; "
+                "v2_dog_policy_v2 → research; manual → manual.",
+    group_name="ingest_heavy",
+    kinds={"plpgsql", "anthropic", "harmony"},
+)
+def research_extraction_gold_run(context: AssetExecutionContext,
+                                   supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("select public.populate_from_research_gold(null)")
+        emitted = cur.fetchone()[0]
+    return Output(
+        None,
+        metadata={
+            "evidence_emitted": MetadataValue.int(emitted),
+        },
+    )
+
+
+@asset(
+    description="Refreshes gold-spine dogs/practical evidence from the park "
+                "URL extraction table (park_url_extractions). Wraps SQL "
+                "populate_from_park_url_gold(NULL). Idempotent. Picks "
+                "highest-confidence row per beach (gold-side narrows "
+                "multi-URL evidence). Includes audit columns "
+                "(cpad_unit_name, extraction_type, cpad_role).",
+    group_name="ingest_heavy",
+    kinds={"plpgsql", "anthropic", "tavily", "harmony"},
+)
+def park_url_extraction_gold_run(context: AssetExecutionContext,
+                                   supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("select public.populate_from_park_url_gold(null)")
+        emitted = cur.fetchone()[0]
+    return Output(
+        None,
+        metadata={
+            "evidence_emitted": MetadataValue.int(emitted),
+        },
+    )
+
+
 assets = [
     # cheap observations (default in Materialize-All)
     cpad_unit_dogs_policy,
@@ -1038,6 +1154,8 @@ assets = [
     beach_locations,
     # harmony: gold-spine containment (cheap obs)
     polygon_containment_evidence,
+    # harmony 6.3b/c: gold-spine non-containment evidence (cheap obs)
+    research_evidence_gold,
     # expensive runs (manual-only)
     cpad_unit_dogs_policy_cdpr_run,
     operator_policy_extractions_run,
@@ -1053,4 +1171,8 @@ assets = [
     osm_reborrow_names_run,
     # harmony: gold-spine containment (heavy run)
     polygon_containment_run,
+    # harmony 6.3b/c: gold-spine non-containment populators (heavy runs)
+    park_operators_governance_run,
+    research_extraction_gold_run,
+    park_url_extraction_gold_run,
 ]

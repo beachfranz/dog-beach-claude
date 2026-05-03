@@ -1,6 +1,6 @@
 # Harmony branch — catalog ingest pipeline migration
 
-**Status:** Phases 1 + 2 + 3 shipped 2026-05-03. Phase 4 (`populate_polygon_assignment` peer) is next.
+**Status:** Phases 1 + 2 + 3 + 4 shipped 2026-05-03. Phase 5 (promoter to `beaches_gold.cpad_unit_id`) is next.
 
 **One-line:** Migrate the `populate_from_*` / resolver / promoter family from
 `locations_stage.fid` (legacy POI / OSM / CCC source IDs in the millions) to
@@ -43,7 +43,7 @@ members) — those rows stay legacy-only and get cleaned up in phase 7.
 | 1 | Lock plan as memo + this doc | shipped 2026-05-03 |
 | 2 | Schema: ADD `gold_fid bigint` on `beach_enrichment_provenance`. Additive — both namespaces coexist. Index + partial unique constraint where `gold_fid IS NOT NULL`. | shipped 2026-05-03 |
 | 3 | Pilot: re-target `populate_from_cpad` to read `beaches_gold` and write evidence keyed on `gold_fid`. Validates the shape. New function `populate_from_cpad_gold(p_fid bigint)` ships alongside legacy. ALTER `fid` → nullable. Smoke-tested on Cabrillo (Catalina, 0.75 conf) + Las Tunas (LA County DBH, 0.95 conf); idempotent. | shipped 2026-05-03 |
-| 4 | Add `populate_polygon_assignment(p_fid)` peer — beach-polygon containment evidence in the same shape | depends on 3 |
+| 4 | Add `populate_cpad_containment_gold(p_fid)` peer — beach-CPAD containment evidence in the same shape. New `field_group='polygon_containment'` (CHECK constraint extended). Tier 1 ranking applied (env-overlay demote, "Beach"-in-name, name token overlap, smallest area). Smoke-tested: Cabrillo→11462, Las Tunas→51669 (0.95), El Segundo→6135 (0.95), Fiesta→18858. All match the 2026-05-02 hand backfills. Idempotent. Tier 1 multi-poly resolution is in place but not currently exercised — no scoreable beach today falls in nested CPAD. | shipped 2026-05-03 |
 | 5 | Promoter: write typed FK columns on `beaches_gold` (`cpad_unit_id` and additions for `c1_jurisdiction_id`, `county_id`, etc.) from canonical evidence | depends on 3 + 4 |
 | 6 | Migrate remaining populators: `populate_from_jurisdictions`, `populate_from_csp_parks`, `populate_from_military_bases`, `populate_from_nps_places`, `populate_from_tribal_lands`, `populate_from_park_operators`, `populate_from_park_url`, `populate_from_research` | repetitive sweep |
 | 7 | Wire into Dagster (`scripts/dagster/dog_beach/dog_beach/assets/ingest.py`). Backfill across 763 active beaches. Deprecate `locations_stage`. Drop legacy `fid` column. | terminal |

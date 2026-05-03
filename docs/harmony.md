@@ -1,6 +1,16 @@
 # Harmony branch — catalog ingest pipeline migration
 
-**Status:** Phases 1-7(1+2) + phase 8 (slices 1-6) + phase 6.3b + 6.3c(parts 1+2a) shipped 2026-05-03. Phase 7.3 BLOCKED behind 6.3c part 2b (buffer-rescued governance attribution) + locations_stage retire (audit at [docs/harmony-7-3-audit.md](harmony-7-3-audit.md)). Phase 8 = curator-on-canonical-tables migration (see `~/.claude/projects/C--Users-beach/memory/project_curator_on_canonical_tables.md`). New curator surface is `admin/beach-editor-gold.html`; legacy `location-editor.html` carries a deprecation banner pointing at it. Phase 8 slice 6 added gold-side resolvers (governance/dogs/practical) — 565 dogs + 523 practical + 6 governance canonical per-beach evidence picks.
+**Status:** Phases 1-7(1+2) + phase 8 (slices 1-8) + phase 6.3b + 6.3c(parts 1+2a) shipped 2026-05-03. Phase 7.3 BLOCKED behind 6.3c part 2b (buffer-rescued governance attribution) + locations_stage retire (audit at [docs/harmony-7-3-audit.md](harmony-7-3-audit.md)). Phase 8 = curator-on-canonical-tables migration (see `~/.claude/projects/C--Users-beach/memory/project_curator_on_canonical_tables.md`).
+
+**End-of-day 2026-05-03 highlights** — 25 commits on harmony, all pushed:
+- Catalog ingest pipeline migrated to beaches_gold.fid (5 containment populators wired into Dagster + 763 active beaches backfilled)
+- 3 typed FK columns auto-promoted on beaches_gold (`cpad_unit_id`, `c1_jurisdiction_id`, `county_geoid`)
+- 3 non-containment populators on the gold spine (park_operators governance, research dogs/practical, park_url dogs/practical)
+- 3 gold-side resolvers (governance/dogs/practical) — canonical evidence picks via source priority
+- Curator workflow on canonical tables: 3 new edge functions + new editor page (`admin/beach-editor-gold.html`)
+- Audit-trail view (`gold_evidence_audit`) + first calibration view (`gold_dogs_allowed_calibration`)
+- Cumulative gold-side evidence: 823 distinct beaches across 4 source families
+- All work on `harmony` branch; not merged to main pending soak
 
 **One-line:** Migrate the `populate_from_*` / resolver / promoter family from
 `locations_stage.fid` (legacy POI / OSM / CCC source IDs in the millions) to

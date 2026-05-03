@@ -1,6 +1,6 @@
 # Harmony branch — catalog ingest pipeline migration
 
-**Status:** Phases 1 + 2 + 3 + 4 + 5 + 6.1 + 6.2 shipped 2026-05-03. Phase 6.3 (operator + park_url + research populators, plus c1/county FK columns) is next.
+**Status:** Phases 1 + 2 + 3 + 4 + 5 + 6.1 + 6.2 + 6.3a shipped 2026-05-03. Phase 6.3b (operator-keyed populators) is next.
 
 **One-line:** Migrate the `populate_from_*` / resolver / promoter family from
 `locations_stage.fid` (legacy POI / OSM / CCC source IDs in the millions) to
@@ -47,7 +47,9 @@ members) — those rows stay legacy-only and get cleaned up in phase 7.
 | 5 | Promoter trio for containment: `_resolve_polygon_containment` (sets `is_canonical=true` per source priority manual > llm > cpad) + `_promote_polygon_containment_to_gold` (writes `beaches_gold.cpad_unit_id` from canonical, only when value changes) + `populate_polygon_containment_gold` (orchestrator: emit + resolve + promote). Smoke-tested on San Gregorio State Beach (8579): NULL → unit 421 (0.95 conf, has_beach + token overlap). End-to-end working. Raw `UPDATE beaches_gold SET cpad_unit_id` is now obsolete. | shipped 2026-05-03 |
 | 6.1 | Jurisdictions + counties containment populators. Resolver upgraded to partition by polygon_kind (a beach can have N canonical rows, one per kind). Source CHECK extended with 'counties'. Smoke test on Las Tunas: 3 canonical rows (county=LA, cpad_unit=Las Tunas County Beach, c1_city=Malibu). | shipped 2026-05-03 |
 | 6.2 | Military + tribal containment populators. NPS deferred — current `nps_places` is points-only (lat+lng, no polygon `geom`). New `scoreability_review_queue` view surfaces scoreable beaches whose canonical containment is military or tribal. Smoke tests: Las Flores Beach → MCB Camp Pendleton (MC Active); Klamath Beach → Yurok LAR. | shipped 2026-05-03 |
-| 6.3 | Operator-keyed + URL/research populators (`park_operators`, `park_url`, `research`, `csp_parks` if not redundant with cpad). | later |
+| 6.3a | ALTER `beaches_gold` ADD `c1_jurisdiction_id bigint` + `county_geoid text`. Extended `_promote_polygon_containment_to_gold` to write all three FK columns (cpad/c1/county) from canonical evidence. cdp/military/tribal kinds intentionally don't promote. Smoke: Las Tunas → all 3 FKs populated; Carbon Beach (no CPAD) → c1+county promote independently. | shipped 2026-05-03 |
+| 6.3b | Operator-keyed populator: `populate_from_park_operators_gold`. Different shape — joins via cpad_units.mng_agncy not spatial. | next |
+| 6.3c | URL/research populators: `populate_from_park_url_gold` + `populate_from_research_gold`. Read existing extraction tables; arena_group_id IS gold_fid already. | later |
 | 7 | Wire into Dagster (`scripts/dagster/dog_beach/dog_beach/assets/ingest.py`). Backfill across 763 active beaches. Deprecate `locations_stage`. Drop legacy `fid` column. | terminal |
 
 ## Phase 2 schema (shipped)

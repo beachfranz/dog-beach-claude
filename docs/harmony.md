@@ -51,7 +51,7 @@ members) — those rows stay legacy-only and get cleaned up in phase 7.
 | 6.3b | Operator-keyed populator: `populate_from_park_operators_gold`. Joins via `csp_parks` × `park_operators` (catches "CDPR state park leased to city/county" cases per `project_state_park_operators.md`). | **DEFERRED 2026-05-03** — see triggers below |
 | 6.3c | URL/research populators: `populate_from_park_url_gold` + `populate_from_research_gold`. Read existing extraction tables; arena_group_id IS gold_fid already. The buffer-rescued attribution path in park_url is the complex bit. | **DEFERRED 2026-05-03** — see triggers below |
 | 7 (parts 1+2) | Wired into Dagster (`scripts/dagster/dog_beach/dog_beach/assets/ingest.py`): `polygon_containment_evidence` (cheap obs) + `polygon_containment_run` (heavy). Backfill across all 763 active beaches: 1,539 evidence rows emitted, 1,078 FK promotions. **Coverage**: 763/763 county_geoid, 394/763 cpad_unit_id (52%), 290/763 c1_jurisdiction_id (38%), 15 in scoreability_review_queue. | shipped 2026-05-03 |
-| 7 (part 3) | Deprecate `locations_stage`. Drop legacy `fid` column on `beach_enrichment_provenance`. Parity check first. | parked |
+| 7 (part 3) | Deprecate `locations_stage`. Drop legacy `fid` column on `beach_enrichment_provenance`. | **BLOCKED** — see [docs/harmony-7-3-audit.md](harmony-7-3-audit.md). Two independent blockers: (a) admin-update-location still writes to locations_stage; (b) 5,532 legacy evidence rows have no gold equivalent until 6.3b/c lands. |
 
 ### 6.3b/c deferral — explicit triggers to un-defer
 

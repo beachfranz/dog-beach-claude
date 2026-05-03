@@ -1,4 +1,13 @@
 // admin-update-location/index.ts
+//
+// DEPRECATED 2026-05-03. Use admin-update-beaches-gold + admin-update-beach-
+// dog-policy + admin-update-beach-amenities instead. See docs/harmony.md.
+//
+// This endpoint is kept alive for editing the 862 rows still in
+// locations_stage. It will be retired once harmony phases 6.3b/c land
+// (so extraction evidence has a gold-spine home) and locations_stage
+// can be dropped — see docs/harmony-7-3-audit.md.
+//
 // Updates a single locations_stage row from the location-editor admin page.
 // Two arms:
 //

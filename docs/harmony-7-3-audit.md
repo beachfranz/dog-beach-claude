@@ -49,12 +49,17 @@ Final partition after both backfills:
 | Safe to drop — gold-side duplicate exists | 784 | 14% | safe — gold-side has same `(gold_fid, field_group, source)` |
 | **True orphans — not even in arena** | **1,131** | **20%** | **NOT safe — no arena beach within 200m** |
 
-True orphans are evidence rows for legacy `locations_stage` beaches that don't exist in our master inventory at all (~170 distinct beaches). Could be:
-* Defunct curator entries (delete candidates)
-* Mis-located curator points (geom outside expected area)
-* **Real coverage gaps that should be promoted into arena**
+True orphans are evidence rows for legacy `locations_stage` beaches that don't exist in arena (the master inventory) within 200m. ~170 distinct beaches.
 
-Need case-by-case review before column drop. The 65% backfill is significant progress — the remaining work is much more tractable than the original 5,532-row block.
+**Sampling check 2026-05-03 EOD**: 12 random true-orphan beaches turned out to be real, well-known CA beaches: Moonlight State Beach (Encinitas), Point Dume (Malibu), Pescadero Beach (San Mateo), East Beach (Santa Barbara), Swami's Beach, Limantour Beach (Point Reyes), Miramar Beach (Half Moon Bay), etc. So these are NOT "safely discardable filter rejects" as initially hypothesized. They're either:
+
+1. Beaches arena has under a different name/geom that 200m proximity didn't catch (e.g. arena's "Encinitas Beach" might be the canonical for Moonlight State Beach but at a different geom point)
+2. Real coverage gaps where a well-known beach truly never made it into arena
+3. Cases where arena dedup collapsed them with a canonical row whose geom is far away
+
+**Don't drop the legacy fid column without name-based fuzzy matching first.** The right next-session work is to name-match the 170 distinct true-orphans against arena (regardless of distance). That'll separate "in arena under different name" (mappable) from "real coverage gap" (real residual).
+
+The 65% spatial backfill is real progress, but the 1,131 stranded rows are NOT safe drops.
 
 See:
 * `supabase/migrations/20260503_harmony_phase7_3_legacy_evidence_backfill.sql` (vs beaches_gold)

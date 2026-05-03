@@ -401,6 +401,7 @@
   <select id="set-picker" onchange="loadSet()">
     <option value="v3"  selected>v3  — first 25</option>
     <option value="v3b">v3b — second 25 (validation)</option>
+    <option value="unclear_dogs">unclear_dogs — 9 beaches needing dogs_allowed review</option>
   </select>
   <button class="ghost" onclick="forgetSecret()">Forget secret</button>
 </header>
@@ -540,6 +541,25 @@ function initAuthorized() {
   document.getElementById("header").style.display = "flex";
   document.getElementById("main").style.display = "block";
   ensureFieldPickerPopulated();
+  // Honor ?set=NAME URL param for direct preload (e.g. ?set=unclear_dogs).
+  // Falls back to the dropdown's default (v3) if the param is missing or
+  // not in the dropdown.
+  const params = new URLSearchParams(location.search);
+  const requested = params.get("set");
+  if (requested) {
+    const picker = document.getElementById("set-picker");
+    if (Array.from(picker.options).some(o => o.value === requested)) {
+      picker.value = requested;
+    }
+  }
+  // Honor ?field=NAME URL param too — preselect the field picker if valid.
+  const reqField = params.get("field");
+  if (reqField) {
+    const fp = document.getElementById("field-picker");
+    if (Array.from(fp.options).some(o => o.value === reqField)) {
+      fp.value = reqField;
+    }
+  }
   loadSet();
 }
 

@@ -1,7 +1,6 @@
 # Harmony phase 7.3 — locations_stage + legacy fid drop audit (2026-05-03)
 
-**TL;DR — phase 7.3 is BLOCKED.** Two independent dependency families.
-Audit complete; nothing dropped. Resume when both unblockers land.
+**TL;DR — Updated 2026-05-03 EOD: legacy `fid` column DROPPED.** locations_stage retire is still parked behind admin-update-location migration. Original audit text below preserved for context; resolution at the bottom.
 
 ---
 
@@ -121,3 +120,58 @@ Pick 7.3 back up when **both** are true:
    rows.
 
 Order doesn't matter — both blockers are independent.
+
+---
+
+## Resolution 2026-05-03 EOD
+
+**Phase 7.3 part 2 SHIPPED.** Migration:
+`supabase/migrations/20260503_harmony_phase7_3c_drop_legacy_fid.sql`
+
+Sequence executed:
+1. **Added Huntington Beach Dog Beach to arena → beaches_gold** (fid 9717)
+   via `seed_arena_beach.py`. Was the only beach with truly hand-typed
+   manual evidence (4 rows, legacy_fid 999000001) and was a real
+   coverage gap.
+2. **Re-attached the 4 manual rows** to gold_fid=9717. Wrote canonical
+   entries to `beach_dog_policy` (off-leash with the rich zone
+   description) + `beach_amenities` (parking/restrooms/hours). Set
+   `beaches_gold.open_time`/`close_time` from the practical evidence.
+   Ran `populate_polygon_containment_gold(9717)` → c1=394 (HB city),
+   county=06059 (Orange).
+3. **Archived legacy fid mapping** to
+   `beach_enrichment_provenance_legacy_fid_archive` (5,532 rows preserving
+   id → legacy_fid mapping for future archeology).
+4. **Dropped 32 legacy ingest functions**: populate_all, populate_from_*
+   (10), _emit_evidence_from_park_url, _rank_park_url_evidence,
+   _resolve_dogs/governance/practical/research_evidence/tiger_vs_operator,
+   _promote_dogs/governance/practical_to_stage, _compute_review_flags,
+   flag_dogs_consistency, pick_canonical_evidence, resolve_access/dogs/
+   governance/practical, populate_governance_from_name,
+   populate_dogs_from_governing_body, populate_layer1_geographic.
+5. **Dropped FK** `beach_enrichment_provenance_fid_fkey` →
+   `locations_stage(fid)`.
+6. **Dropped legacy `fid` column** with CASCADE — auto-dropped 3 indexes
+   (`bep_fid_group_idx`, `bep_one_canonical_per_group`,
+   `bep_one_per_fid_group_source_url`).
+
+What survived (intentionally):
+- `cpad_units_near_beach`, `staging_find_dedup_pairs`,
+  `staging_find_neighbor_inheritance` — touch `locations_stage` for
+  staging dedup but NOT the dropped column. Continue to work.
+- `locations_stage` table itself (862 rows of curator state,
+  `admin-update-location` still wires here from `admin/location-editor.html`)
+- `admin-update-location` edge function (deprecated banner, still functional)
+
+Verified post-drop:
+- `populate_polygon_containment_gold(8473)` → emitted=3, resolved=3,
+  promoted=0 (steady-state; gold pipeline unaffected)
+- `beaches_gold.fid=9717` Huntington Beach Dog Beach has
+  `c1_jurisdiction_id=394`, `county_geoid="06059"`, dog_policy + amenities
+
+Remaining 7.3 work (still parked):
+- locations_stage retirement — needs `admin-update-location` migration
+  to actually be decommissioned (curator UI cutover from `location-editor.html`
+  to `beach-editor-gold.html`). Phase 8 slice 5 deprecated the legacy
+  editor with a banner; actual retirement of `admin-update-location`
+  endpoint requires a curator-side cutover decision.

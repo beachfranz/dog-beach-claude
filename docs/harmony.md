@@ -1,6 +1,6 @@
 # Harmony branch — catalog ingest pipeline migration
 
-**Status:** Phases 1 + 2 + 3 + 4 + 5 + 6.1 + 6.2 + 6.3a shipped 2026-05-03. Phase 6.3b (operator-keyed populators) is next.
+**Status:** Phases 1 + 2 + 3 + 4 + 5 + 6.1 + 6.2 + 6.3a shipped 2026-05-03. Phases 6.3b + 6.3c **deferred** (see triggers below — not abandoned). Phase 7 (Dagster wiring + backfill + locations_stage deprecation) is the next pickup.
 
 **One-line:** Migrate the `populate_from_*` / resolver / promoter family from
 `locations_stage.fid` (legacy POI / OSM / CCC source IDs in the millions) to
@@ -48,8 +48,24 @@ members) — those rows stay legacy-only and get cleaned up in phase 7.
 | 6.1 | Jurisdictions + counties containment populators. Resolver upgraded to partition by polygon_kind (a beach can have N canonical rows, one per kind). Source CHECK extended with 'counties'. Smoke test on Las Tunas: 3 canonical rows (county=LA, cpad_unit=Las Tunas County Beach, c1_city=Malibu). | shipped 2026-05-03 |
 | 6.2 | Military + tribal containment populators. NPS deferred — current `nps_places` is points-only (lat+lng, no polygon `geom`). New `scoreability_review_queue` view surfaces scoreable beaches whose canonical containment is military or tribal. Smoke tests: Las Flores Beach → MCB Camp Pendleton (MC Active); Klamath Beach → Yurok LAR. | shipped 2026-05-03 |
 | 6.3a | ALTER `beaches_gold` ADD `c1_jurisdiction_id bigint` + `county_geoid text`. Extended `_promote_polygon_containment_to_gold` to write all three FK columns (cpad/c1/county) from canonical evidence. cdp/military/tribal kinds intentionally don't promote. Smoke: Las Tunas → all 3 FKs populated; Carbon Beach (no CPAD) → c1+county promote independently. | shipped 2026-05-03 |
-| 6.3b | Operator-keyed populator: `populate_from_park_operators_gold`. Different shape — joins via cpad_units.mng_agncy not spatial. | next |
-| 6.3c | URL/research populators: `populate_from_park_url_gold` + `populate_from_research_gold`. Read existing extraction tables; arena_group_id IS gold_fid already. | later |
+| 6.3b | Operator-keyed populator: `populate_from_park_operators_gold`. Joins via `csp_parks` × `park_operators` (catches "CDPR state park leased to city/county" cases per `project_state_park_operators.md`). | **DEFERRED 2026-05-03** — see triggers below |
+| 6.3c | URL/research populators: `populate_from_park_url_gold` + `populate_from_research_gold`. Read existing extraction tables; arena_group_id IS gold_fid already. The buffer-rescued attribution path in park_url is the complex bit. | **DEFERRED 2026-05-03** — see triggers below |
+| 7 | Wire into Dagster (`scripts/dagster/dog_beach/dog_beach/assets/ingest.py`). Backfill across all 763 active beaches. Deprecate `locations_stage`. Drop legacy `fid` column on `beach_enrichment_provenance`. | terminal |
+
+### 6.3b/c deferral — explicit triggers to un-defer
+
+Phases 6.3b/c are **deferred, not abandoned**. The legacy populators write evidence consumed by promoters → `locations_stage` columns. We don't yet have equivalent target columns on `beaches_gold`, so porting the populators today produces "stranded evidence" — correct shape, no consumer.
+
+The production tables those populators read from (`park_url_extractions`, `policy_research_extractions`, `operator_dogs_policy`, `cpad_unit_dogs_policy`) are **NOT** affected by the deferral. They keep being written and the direct-promotion path (`promote_production_to_beach_dog_policy.py`) keeps consuming them.
+
+Pick 6.3b/c back up the moment any of these is on the table:
+
+1. **Audit trail required.** "This dogs_allowed=yes came from which source URL with what confidence?" — beach_enrichment_provenance keeps that history per claim. Direct-promotion does not.
+2. **Multi-source resolution as a separate step.** Today consensus is inline in `promote_production_to_beach_dog_policy.py`. If we want a pluggable resolver (e.g., to add manual-curator overrides as evidence rows, or to swap heuristics), we need evidence-based path on the gold spine.
+3. **Calibration loops.** Comparing source-by-source accuracy against the truth set is much cleaner reading from evidence rows than re-running extraction.
+4. **Adding any new evidence source.** A second LLM model, a second research pipeline variant, a manual-pin workflow — all are easier to add as a new `populate_from_<source>_gold` than as another branch in the inline consensus script.
+
+If any of these comes up in a session, **don't bypass it with a one-off SQL update**. Build the populator. The pattern is established (cpad / jurisdictions / counties / military / tribal containment populators are all working examples).
 | 7 | Wire into Dagster (`scripts/dagster/dog_beach/dog_beach/assets/ingest.py`). Backfill across 763 active beaches. Deprecate `locations_stage`. Drop legacy `fid` column. | terminal |
 
 ## Phase 2 schema (shipped)

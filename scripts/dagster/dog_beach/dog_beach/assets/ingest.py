@@ -1137,6 +1137,29 @@ def park_url_extraction_gold_run(context: AssetExecutionContext,
 
 
 @asset(
+    description="Buffer-rescued park_url governance attribution (phase 6.3c "
+                "part 2b). Confirms park_url_extractions cpad_unit_name "
+                "claims for beaches whose geom is OUTSIDE all CPAD polygons "
+                "by checking distinguishing name tokens appear in raw_text "
+                "(or trigram similarity ≥ 0.6). Emits governance evidence "
+                "with source='park_url_buffer_attribution', confidence 0.75.",
+    group_name="ingest_heavy",
+    kinds={"plpgsql", "harmony"},
+)
+def park_url_governance_buffer_run(context: AssetExecutionContext,
+                                     supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("select public.populate_from_park_url_governance_gold(null)")
+        emitted = cur.fetchone()[0]
+    return Output(
+        None,
+        metadata={
+            "evidence_emitted": MetadataValue.int(emitted),
+        },
+    )
+
+
+@asset(
     description="Refreshes gold-side canonical picks for governance / dogs / "
                 "practical field groups. Wraps the three SQL resolvers: "
                 "_resolve_governance_gold + _resolve_dogs_gold + "
@@ -1207,6 +1230,7 @@ assets = [
     park_operators_governance_run,
     research_extraction_gold_run,
     park_url_extraction_gold_run,
+    park_url_governance_buffer_run,
     # harmony phase 8 slice 6: gold-side resolvers (governance/dogs/practical)
     gold_evidence_resolve_run,
 ]

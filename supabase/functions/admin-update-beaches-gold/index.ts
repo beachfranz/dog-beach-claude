@@ -51,6 +51,9 @@ const EDITABLE_FIELDS = new Set<string>([
   "is_active", "inactive_reason",
   "is_scoreable",
   "timezone",
+  // Review workflow (slice 4 — added 2026-05-03)
+  // CHECK constraint enforces: needs_review | verified | flagged | null
+  "review_status", "review_notes",
 ]);
 
 type StatusTo = "active" | "inactive";

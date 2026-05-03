@@ -29,17 +29,25 @@ import { logAdminWrite } from "../_shared/admin-audit.ts";
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-// 14 spine fields the curator may write directly. Excludes generated
-// (geom), promoted-from-evidence (cpad_unit_id, c1_jurisdiction_id,
-// county_geoid — set by populate_polygon_containment_gold), and
-// pipeline-managed identifiers (fid, location_id, group_id, source_*,
-// promoted_*, etc.).
+// Curator-editable spine fields. Excludes generated (geom), promoted-
+// from-evidence (cpad_unit_id, c1_jurisdiction_id, county_geoid — set
+// by populate_polygon_containment_gold), and pipeline-managed
+// identifiers (fid, location_id, group_id, source_*, promoted_*, etc.).
 const EDITABLE_FIELDS = new Set<string>([
+  // Identity
   "name", "display_name_override",
+  // Location
   "lat", "lon",
+  // Address (slice 3 — added 2026-05-03)
+  "address",
+  "address_street", "address_city", "address_state", "address_zip",
+  "address_county",
+  // Marketing / detail text
   "website", "description", "parking_text",
+  // Scoring infra
   "noaa_station_id",
   "open_time", "close_time",
+  // Lifecycle
   "is_active", "inactive_reason",
   "is_scoreable",
   "timezone",

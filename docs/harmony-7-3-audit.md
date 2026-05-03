@@ -39,17 +39,26 @@ gold-spine equivalent.
 
 ### Blocker 2 — legacy `beach_enrichment_provenance.fid` holds 5,532 rows of evidence with no gold equivalent
 
-**UPDATE 2026-05-03 EOD (post-backfill):** Spatial backfill via locations_stage.geom + ST_DWithin(50m) against beaches_gold mapped **1,087 of 5,532 legacy rows** to gold_fid. Remaining 4,445 stranded rows partition cleanly:
+**UPDATE 2026-05-03 EOD (post-backfill, two passes):** Two spatial backfills landed. The first (vs beaches_gold within 50m) was misleadingly narrow — Franz pointed out that beaches_gold is a small subset of arena, the master inventory. The second pass (vs arena within 200m) is the right comparison since `arena.fid = beaches_gold.fid` by path-3 inheritance.
 
-| bucket | count | drop safety |
-|---|---:|---|
-| Backfilled (gold_fid set) | 1,087 | safe — already on gold |
-| Safe to drop — gold-side duplicate exists | 848 | safe — gold-side has same `(gold_fid, field_group, source)` |
-| **True orphans — would lose data** | **3,597** | **NOT safe — no beaches_gold beach within 50m** |
+Final partition after both backfills:
 
-True orphans are legacy `locations_stage` beaches that don't have a gold-spine equivalent within 50m. Could be defunct, dedup'd during arena promotion, or geographically mislocated. **Need case-by-case review before column drop.**
+| bucket | count | % | drop safety |
+|---|---:|---:|---|
+| Backfilled to gold_fid (vs beaches_gold + vs arena) | 3,617 | 65% | safe — already on gold |
+| Safe to drop — gold-side duplicate exists | 784 | 14% | safe — gold-side has same `(gold_fid, field_group, source)` |
+| **True orphans — not even in arena** | **1,131** | **20%** | **NOT safe — no arena beach within 200m** |
 
-See `supabase/migrations/20260503_harmony_phase7_3_legacy_evidence_backfill.sql`.
+True orphans are evidence rows for legacy `locations_stage` beaches that don't exist in our master inventory at all (~170 distinct beaches). Could be:
+* Defunct curator entries (delete candidates)
+* Mis-located curator points (geom outside expected area)
+* **Real coverage gaps that should be promoted into arena**
+
+Need case-by-case review before column drop. The 65% backfill is significant progress — the remaining work is much more tractable than the original 5,532-row block.
+
+See:
+* `supabase/migrations/20260503_harmony_phase7_3_legacy_evidence_backfill.sql` (vs beaches_gold)
+* `supabase/migrations/20260503_harmony_phase7_3b_arena_backfill.sql` (vs arena, the right comparison)
 
 Partition of `beach_enrichment_provenance` as of 2026-05-03 backfill:
 

@@ -1,6 +1,6 @@
 # Harmony branch — catalog ingest pipeline migration
 
-**Status:** Phases 1 + 2 + 3 + 4 + 5 + 6.1 + 6.2 + 6.3a + 7 (parts 1+2) shipped 2026-05-03. Phases 6.3b + 6.3c **deferred** (see triggers below — not abandoned). Phase 7 part 3 (locations_stage deprecation + drop legacy fid column) parked for a follow-up session.
+**Status:** Phases 1-7(1+2) + phase 8 slice 1 shipped 2026-05-03. Phase 7.3 BLOCKED behind 6.3b/c + admin migration (audit at [docs/harmony-7-3-audit.md](harmony-7-3-audit.md)). Phase 8 = curator-on-canonical-tables migration (see `~/.claude/projects/C--Users-beach/memory/project_curator_on_canonical_tables.md`). Slice 1 lands the new edge functions: `admin-update-beaches-gold` + `admin-update-beach-dog-policy`. Slices 2-5 still ahead.
 
 **One-line:** Migrate the `populate_from_*` / resolver / promoter family from
 `locations_stage.fid` (legacy POI / OSM / CCC source IDs in the millions) to

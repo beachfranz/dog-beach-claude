@@ -1136,6 +1136,38 @@ def park_url_extraction_gold_run(context: AssetExecutionContext,
     )
 
 
+@asset(
+    description="Refreshes gold-side canonical picks for governance / dogs / "
+                "practical field groups. Wraps the three SQL resolvers: "
+                "_resolve_governance_gold + _resolve_dogs_gold + "
+                "_resolve_practical_gold. Each picks one canonical evidence "
+                "row per beach per field_group via source priority "
+                "(manual > llm > park_url/park_operators > research > "
+                "old_school_llm > spatial sources). Idempotent — clears "
+                "is_canonical=false then re-marks winners.",
+    group_name="ingest_heavy",
+    kinds={"plpgsql", "harmony"},
+    deps=[AssetKey(["public", "research_evidence_gold"])],
+)
+def gold_evidence_resolve_run(context: AssetExecutionContext,
+                                supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            select public._resolve_governance_gold(null) as gov,
+                   public._resolve_dogs_gold(null)        as dogs,
+                   public._resolve_practical_gold(null)   as practical
+        """)
+        gov, dogs, practical = cur.fetchone()
+    return Output(
+        None,
+        metadata={
+            "governance_canonical_picks": MetadataValue.int(gov),
+            "dogs_canonical_picks":       MetadataValue.int(dogs),
+            "practical_canonical_picks":  MetadataValue.int(practical),
+        },
+    )
+
+
 assets = [
     # cheap observations (default in Materialize-All)
     cpad_unit_dogs_policy,
@@ -1175,4 +1207,6 @@ assets = [
     park_operators_governance_run,
     research_extraction_gold_run,
     park_url_extraction_gold_run,
+    # harmony phase 8 slice 6: gold-side resolvers (governance/dogs/practical)
+    gold_evidence_resolve_run,
 ]

@@ -1,6 +1,6 @@
 # Harmony branch — catalog ingest pipeline migration
 
-**Status:** Phases 1 + 2 + 3 + 4 + 5 + 6.1 + 6.2 + 6.3a shipped 2026-05-03. Phases 6.3b + 6.3c **deferred** (see triggers below — not abandoned). Phase 7 (Dagster wiring + backfill + locations_stage deprecation) is the next pickup.
+**Status:** Phases 1 + 2 + 3 + 4 + 5 + 6.1 + 6.2 + 6.3a + 7 (parts 1+2) shipped 2026-05-03. Phases 6.3b + 6.3c **deferred** (see triggers below — not abandoned). Phase 7 part 3 (locations_stage deprecation + drop legacy fid column) parked for a follow-up session.
 
 **One-line:** Migrate the `populate_from_*` / resolver / promoter family from
 `locations_stage.fid` (legacy POI / OSM / CCC source IDs in the millions) to
@@ -50,7 +50,8 @@ members) — those rows stay legacy-only and get cleaned up in phase 7.
 | 6.3a | ALTER `beaches_gold` ADD `c1_jurisdiction_id bigint` + `county_geoid text`. Extended `_promote_polygon_containment_to_gold` to write all three FK columns (cpad/c1/county) from canonical evidence. cdp/military/tribal kinds intentionally don't promote. Smoke: Las Tunas → all 3 FKs populated; Carbon Beach (no CPAD) → c1+county promote independently. | shipped 2026-05-03 |
 | 6.3b | Operator-keyed populator: `populate_from_park_operators_gold`. Joins via `csp_parks` × `park_operators` (catches "CDPR state park leased to city/county" cases per `project_state_park_operators.md`). | **DEFERRED 2026-05-03** — see triggers below |
 | 6.3c | URL/research populators: `populate_from_park_url_gold` + `populate_from_research_gold`. Read existing extraction tables; arena_group_id IS gold_fid already. The buffer-rescued attribution path in park_url is the complex bit. | **DEFERRED 2026-05-03** — see triggers below |
-| 7 | Wire into Dagster (`scripts/dagster/dog_beach/dog_beach/assets/ingest.py`). Backfill across all 763 active beaches. Deprecate `locations_stage`. Drop legacy `fid` column on `beach_enrichment_provenance`. | terminal |
+| 7 (parts 1+2) | Wired into Dagster (`scripts/dagster/dog_beach/dog_beach/assets/ingest.py`): `polygon_containment_evidence` (cheap obs) + `polygon_containment_run` (heavy). Backfill across all 763 active beaches: 1,539 evidence rows emitted, 1,078 FK promotions. **Coverage**: 763/763 county_geoid, 394/763 cpad_unit_id (52%), 290/763 c1_jurisdiction_id (38%), 15 in scoreability_review_queue. | shipped 2026-05-03 |
+| 7 (part 3) | Deprecate `locations_stage`. Drop legacy `fid` column on `beach_enrichment_provenance`. Parity check first. | parked |
 
 ### 6.3b/c deferral — explicit triggers to un-defer
 

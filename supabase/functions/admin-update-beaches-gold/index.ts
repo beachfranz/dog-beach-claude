@@ -1,26 +1,24 @@
-// admin-update-location/index.ts
+// admin-update-beaches-gold/index.ts
 //
-// DEPRECATED 2026-05-03. Use admin-update-beaches-gold + admin-update-beach-
-// dog-policy + admin-update-beach-amenities instead. See docs/harmony.md.
+// Updates a single beaches_gold row from the admin curator surface.
+// This is slice 1 of "harmony phase 8 — curator on canonical tables"
+// (see project_curator_on_canonical_tables.md). Replaces the spine-field
+// arm of admin-update-location, which writes to the legacy locations_stage
+// table. Both endpoints coexist during the transition; admin UI is not
+// migrated yet.
 //
-// This endpoint is kept alive for editing the 862 rows still in
-// locations_stage. It will be retired once harmony phases 6.3b/c land
-// (so extraction evidence has a gold-spine home) and locations_stage
-// can be dropped — see docs/harmony-7-3-audit.md.
-//
-// Updates a single locations_stage row from the location-editor admin page.
 // Two arms:
-//
 //   1. Field updates: { fid, fields: { col: value, ... } } — allowlist-filtered
-//   2. Status transitions: { fid, status_change: { to: 'active'|'inactive'|'deleted', reason?: string } }
-//      Reason required for inactive + deleted. Restoring to active clears the
-//      reason fields.
+//   2. Status transitions: { fid, status_change: { to: 'active'|'inactive', reason?: string } }
+//      Reason required for inactive; restoring to active clears inactive_reason.
+//
+// beaches_gold has no "deleted" lifecycle; deletion is just is_active=false
+// with an inactive_reason.
 //
 // Both arms write to admin_audit via logAdminWrite. fid is stored in the
-// audit table's location_id column as text (column predates the staging
-// schema; treat the column as a freeform entity_id slot).
+// audit table's location_id column as text.
 //
-// Mirrors the security model of admin-update-beach: x-admin-secret header
+// Mirrors the security model of admin-update-location: x-admin-secret header
 // + per-IP rate limit via requireAdmin(). No JWT verification.
 
 import { createClient }  from "https://esm.sh/@supabase/supabase-js@2";
@@ -31,29 +29,35 @@ import { logAdminWrite } from "../_shared/admin-audit.ts";
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-// Columns the editor may write directly. Excludes generated/system columns
-// (geom, created_at, updated_at, fid, pipeline_*) and lifecycle columns
-// (handled by status_change arm).
+// Curator-editable spine fields. Excludes generated (geom), promoted-
+// from-evidence (cpad_unit_id, c1_jurisdiction_id, county_geoid — set
+// by populate_polygon_containment_gold), and pipeline-managed
+// identifiers (fid, location_id, group_id, source_*, promoted_*, etc.).
 const EDITABLE_FIELDS = new Set<string>([
-  "display_name", "latitude", "longitude", "timezone",
+  // Identity
+  "name", "display_name_override",
+  // Location
+  "lat", "lon",
+  // Address (slice 3 — added 2026-05-03)
+  "address",
   "address_street", "address_city", "address_state", "address_zip",
-  "address_county", "raw_address",
-  "state_code", "county_name", "county_fips",
-  "place_name", "place_fips", "place_type",
-  "governing_body_name", "governing_body_type",
-  "access_status", "description", "website",
-  "dogs_allowed", "dogs_leash_required", "dogs_restricted_hours",
-  "dogs_seasonal_rules", "dogs_zone_description",
-  "open_time", "close_time", "hours_text",
-  "has_parking", "parking_type", "parking_notes",
-  "has_restrooms", "has_showers", "has_lifeguards", "has_drinking_water",
-  "has_disabled_access", "has_food", "has_fire_pits", "has_picnic_area",
-  "noaa_station_id", "noaa_station_name", "noaa_station_distance_m",
+  "address_county",
+  // Marketing / detail text
+  "website", "description", "parking_text",
+  // Scoring infra
+  "noaa_station_id",
+  "open_time", "close_time",
+  // Lifecycle
+  "is_active", "inactive_reason",
+  "is_scoreable",
+  "timezone",
+  // Review workflow (slice 4 — added 2026-05-03)
+  // CHECK constraint enforces: needs_review | verified | flagged | null
   "review_status", "review_notes",
 ]);
 
-type StatusTo = "active" | "inactive" | "deleted";
-const STATUS_VALUES: StatusTo[] = ["active", "inactive", "deleted"];
+type StatusTo = "active" | "inactive";
+const STATUS_VALUES: StatusTo[] = ["active", "inactive"];
 
 Deno.serve(async (req: Request) => {
   const cors = { ...corsHeaders(req, "POST, OPTIONS"), "Content-Type": "application/json" };
@@ -80,8 +84,8 @@ Deno.serve(async (req: Request) => {
 
   // Snapshot before any change so the audit row carries before/after.
   const { data: beforeRow } = await supabase
-    .from("locations_stage").select("*").eq("fid", fid).single();
-  if (!beforeRow) return json({ error: `No locations_stage row with fid=${fid}` }, 404);
+    .from("beaches_gold").select("*").eq("fid", fid).single();
+  if (!beforeRow) return json({ error: `No beaches_gold row with fid=${fid}` }, 404);
 
   // Build the update payload — combines fields arm + status_change arm.
   const update: Record<string, unknown> = {};
@@ -99,24 +103,15 @@ Deno.serve(async (req: Request) => {
     const reason = (body.status_change.reason ?? "").trim();
     if (!to || !STATUS_VALUES.includes(to))
       return json({ error: `status_change.to must be one of ${STATUS_VALUES.join(", ")}` }, 400);
-    if ((to === "inactive" || to === "deleted") && !reason)
-      return json({ error: `reason required when transitioning to ${to}` }, 400);
+    if (to === "inactive" && !reason)
+      return json({ error: "reason required when transitioning to inactive" }, 400);
 
     if (to === "active") {
       update.is_active       = true;
       update.inactive_reason = null;
-      update.deleted_at      = null;
-      update.deleted_reason  = null;
-    } else if (to === "inactive") {
+    } else {
       update.is_active       = false;
       update.inactive_reason = reason;
-      update.deleted_at      = null;
-      update.deleted_reason  = null;
-    } else {
-      // deleted
-      update.is_active      = false;
-      update.deleted_at     = new Date().toISOString();
-      update.deleted_reason = reason;
     }
   }
 
@@ -124,12 +119,11 @@ Deno.serve(async (req: Request) => {
     return json({ error: "Nothing to update — provide fields or status_change", rejected }, 400);
 
   const { data: afterRow, error } = await supabase
-    .from("locations_stage").update(update).eq("fid", fid).select("*").single();
+    .from("beaches_gold").update(update).eq("fid", fid).select("*").single();
 
-  const auditAction = body.status_change ? "update" : "update";
   const auditEntry = {
-    functionName: "admin-update-location" as const,
-    action:       auditAction,
+    functionName: "admin-update-beaches-gold" as const,
+    action:       "update",
     req,
     locationId:   String(fid),
     before:       beforeRow,
@@ -149,5 +143,5 @@ Deno.serve(async (req: Request) => {
     success: true,
   });
 
-  return json({ ok: true, location: afterRow, rejected });
+  return json({ ok: true, beach: afterRow, rejected });
 });

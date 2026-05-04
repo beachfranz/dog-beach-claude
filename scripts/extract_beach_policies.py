@@ -264,14 +264,27 @@ def load_city_work(city_filter: str | None) -> list[dict]:
         order by j.name;
     """)
     for c in cities:
-        fids = run_sql(f"""
-            select fid from public.us_beach_points
-            where place_fips = {sql_literal(c['fips'])}
-              and is_active = true
-              and validation_status = 'valid'
-            order by fid;
+        # Two beach pools per city, both keyed off the same place_fips:
+        #   1. Legacy us_beach_points (pre-arena 8K-row catalog)
+        #   2. Post-path-3 beaches_gold via c1_jurisdiction_id → jurisdictions.fips
+        # Beaches that exist in both are deduped by fid (which is canonical
+        # post-path-3: arena.fid = beaches_gold.fid).
+        rows = run_sql(f"""
+            select fid, 'us_beach_points'::text as src
+              from public.us_beach_points
+             where place_fips = {sql_literal(c['fips'])}
+               and is_active = true
+               and validation_status = 'valid'
+            union
+            select g.fid, 'beaches_gold'::text as src
+              from public.beaches_gold g
+              join public.jurisdictions j on j.id = g.c1_jurisdiction_id
+             where j.fips_state || j.fips_place = {sql_literal(c['fips'])}
+               and g.is_active = true
+            order by 1;
         """)
-        c["beach_fids"] = [r["fid"] for r in fids]
+        c["beach_fids"] = [r["fid"] for r in rows]
+        c["arena_fids"] = {r["fid"] for r in rows if r["src"] == "beaches_gold"}
         if isinstance(c["sources"], str):
             c["sources"] = json.loads(c["sources"])
     return cities
@@ -291,6 +304,7 @@ def bulk_insert_extractions(rows: list[dict], run_id: str):
         values_sql = ",\n".join(
             "(" + ", ".join([
                 sql_literal(r["fid"]),
+                sql_literal(r["arena_group_id"]),
                 sql_literal(r["source_id"]),
                 sql_literal(r["variant_id"]),
                 sql_literal(r["field_name"]),
@@ -312,7 +326,7 @@ def bulk_insert_extractions(rows: list[dict], run_id: str):
         )
         sql = f"""
             insert into public.beach_policy_extractions (
-              fid, source_id, variant_id, field_name, source_type, variant_key,
+              fid, arena_group_id, source_id, variant_id, field_name, source_type, variant_key,
               raw_response, parsed_value, evidence_quote, raw_snippet,
               parse_succeeded, extraction_method, run_id, model_name,
               input_tokens, output_tokens, latency_ms
@@ -444,6 +458,11 @@ def main():
                 for fid in city["beach_fids"]:
                     page_rows.append({
                         "fid": fid,
+                        # arena_group_id set when this fid came from beaches_gold
+                        # (post-path-3 catalog), null for legacy us_beach_points.
+                        # Curator UI joins on arena_group_id, so this is what
+                        # actually surfaces pills.
+                        "arena_group_id": fid if fid in city["arena_fids"] else None,
                         "source_id": source["id"],
                         "variant_id": v["id"],
                         "field_name": v["field_name"],

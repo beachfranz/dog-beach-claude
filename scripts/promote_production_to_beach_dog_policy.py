@@ -192,6 +192,32 @@ def consensus(values: list[tuple[str, str]]) -> tuple[str | None, str | None, st
     return (None, None, sources_str + "(conflict)")
 
 
+def consensus_dogs_allowed(values: list[tuple[str, str]]) -> tuple[str | None, str | None, str]:
+    """Specialized consensus for `dogs_allowed` only.
+
+    Empirical finding 2026-05-03 (gold_dogs_allowed_calibration_binary):
+    when park_url AND research both commit to the same binary value, they
+    matched curator truth in 12/12 cases (100%). When they disagreed,
+    each was right in 50% of cases — neither was reliable.
+
+    Rule for dogs_allowed:
+      * park_url + research both present + agree → HIGH (gold-standard signal)
+      * park_url + research both present + disagree → SKIP, flag for review
+      * else → fall through to the generic consensus() logic
+
+    Amenity / leash / other field logic uses generic consensus() unchanged.
+    """
+    by_source = {s: v for s, v in values}
+    pu = by_source.get('park_url')
+    rs = by_source.get('research')
+    if pu is not None and rs is not None:
+        if pu == rs:
+            return (pu, 'high', 'park_url+research(consensus)')
+        return (None, None,
+                f'park_url={pu}/research={rs}(disagree,review)')
+    return consensus(values)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true", help="Write rows to beach_dog_policy")
@@ -258,10 +284,11 @@ def main() -> int:
         any_value = False
         for fname in ('dogs_allowed', 'leash_policy', 'restrooms',
                       'outdoor_showers', 'lifeguard'):
-            v, conf, src = consensus(signals.get(fname, []))
+            picker = consensus_dogs_allowed if fname == 'dogs_allowed' else consensus
+            v, conf, src = picker(signals.get(fname, []))
             row[fname] = (v, conf, src)
             if v is not None: any_value = True
-            elif src.endswith("(conflict)"):
+            elif src.endswith("(conflict)") or src.endswith("(disagree,review)"):
                 conflicts.append((b, fname, signals[fname]))
         if any_value:
             promotions.append(row)

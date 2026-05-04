@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<!--
+  admin/beach-editor-gold.html — Canonical curator surface.
+
+  Load a beach by fid (?fid=NNNN). Reads merged state from three
+  canonical tables:
+    beaches_gold        — spine (identity, lat/lon, address, scoring infra,
+                          lifecycle, review workflow)
+    beach_dog_policy    — dog-policy overlay (consumer surface)
+    beach_amenities     — amenity overlay
+
+  Saves dirty fields to the matching endpoint:
+    admin-update-beaches-gold       — beaches_gold spine fields
+    admin-update-beach-dog-policy   — beach_dog_policy UPSERT
+    admin-update-beach-amenities    — beach_amenities UPSERT
+
+  This is slice 5 of harmony phase 8 — the curator-on-canonical-tables
+  cutover. See docs/harmony.md and the project_curator_on_canonical_tables.md
+  memo for context.
+
+  This page DOES NOT touch locations_stage or admin-update-location.
+  The legacy location-editor.html stays alive for editing the 862
+  rows still in locations_stage; it'll be retired once 6.3b/c lands and
+  locations_stage can be dropped (see docs/harmony-7-3-audit.md).
+
+  Bare-bones for slice 5: no map, no list view, no filter bar. Query
+  by fid, see all 46 editable fields grouped by table, save dirty.
+  Polish (map, list, filter) comes in a follow-up slice if the curator
+  workflow needs it.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Beach Editor (gold) — Dog Beach Admin</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #f8fafc; --panel: #ffffff; --border: #e2e8f0;
+      --text: #0f172a; --text-muted: #475569;
+      --accent: #3b82f6; --accent-hov: #2563eb;
+      --green: #15803d; --red: #b91c1c; --amber: #b45309;
+      --dirty-bg: #fffbeb; --gray-bg: #f1f5f9;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg); color: var(--text);
+      font-size: 14px; line-height: 1.5;
+      padding: 16px;
+      max-width: 1100px; margin: 0 auto;
+    }
+    h1 { font-size: 18px; margin-bottom: 8px; }
+    h2 { font-size: 15px; margin: 20px 0 8px; padding: 8px 12px;
+         background: var(--gray-bg); border-radius: 4px; }
+    .top {
+      display: flex; gap: 12px; align-items: center;
+      padding: 12px; background: var(--panel);
+      border: 1px solid var(--border); border-radius: 6px;
+      margin-bottom: 12px;
+    }
+    .top input[type=number] {
+      padding: 6px 10px; border: 1px solid var(--border);
+      border-radius: 4px; font-size: 14px; width: 110px;
+    }
+    button {
+      padding: 6px 14px; background: var(--accent); color: white;
+      border: none; border-radius: 4px; cursor: pointer;
+      font-size: 14px; font-weight: 500;
+    }
+    button:hover { background: var(--accent-hov); }
+    button:disabled { background: #cbd5e1; cursor: not-allowed; }
+    button.save { background: var(--green); }
+    button.save:hover { background: #166534; }
+    .meta { font-size: 12px; color: var(--text-muted); }
+    .meta strong { color: var(--text); }
+    .panel {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 6px; padding: 12px 16px; margin-bottom: 12px;
+    }
+    .field {
+      display: grid; grid-template-columns: 200px 1fr;
+      gap: 10px; align-items: center; margin-bottom: 8px;
+    }
+    .field label { color: var(--text-muted); font-size: 13px; }
+    .field input, .field select, .field textarea {
+      padding: 6px 10px; border: 1px solid var(--border);
+      border-radius: 4px; font-size: 13px; font-family: inherit;
+      width: 100%;
+    }
+    .field textarea { min-height: 50px; resize: vertical; }
+    .field.dirty input, .field.dirty select, .field.dirty textarea {
+      background: var(--dirty-bg); border-color: var(--amber);
+    }
+    .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    #toast {
+      position: fixed; top: 16px; right: 16px;
+      padding: 10px 16px; border-radius: 4px;
+      background: var(--green); color: white;
+      box-shadow: 0 4px 8px rgba(0,0,0,.1);
+      max-width: 360px; opacity: 0; pointer-events: none;
+      transition: opacity .2s;
+    }
+    #toast.error { background: var(--red); }
+    #toast.show { opacity: 1; }
+    .hint { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
+    .save-status {
+      display: inline-block; margin-left: 12px; font-size: 12px;
+      color: var(--text-muted);
+    }
+    .save-status .ok { color: var(--green); }
+    .save-status .err { color: var(--red); }
+    .deprecation {
+      background: #fef3c7; border: 1px solid #fde68a;
+      color: #92400e; padding: 8px 12px; border-radius: 4px;
+      font-size: 12px; margin-bottom: 12px;
+    }
+    .deprecation a { color: #92400e; }
+  </style>
+</head>
+<body>
+  <h1>Beach Editor (canonical tables) <span class="meta">— harmony phase 8 slice 5</span></h1>
+
+  <div class="deprecation">
+    Edits beaches_gold + beach_dog_policy + beach_amenities directly.
+    For locations_stage editing of unmigrated rows, use
+    <a href="location-editor.html">location-editor.html</a>.
+  </div>
+
+  <div class="top">
+    <label for="fid-input">fid:</label>
+    <input id="fid-input" type="number" placeholder="e.g. 286">
+    <button id="load-btn" onclick="loadBeach()">Load</button>
+    <span id="beach-meta" class="meta"></span>
+  </div>
+
+  <div id="form-container" style="display:none;">
+    <div class="panel">
+      <h2>beaches_gold (spine)</h2>
+      <div class="field"><label>name</label><input data-table="gold" data-field="name" type="text"></div>
+      <div class="field"><label>display_name_override</label><input data-table="gold" data-field="display_name_override" type="text"></div>
+      <div class="row2">
+        <div class="field"><label>lat</label><input data-table="gold" data-field="lat" type="number" step="any"></div>
+        <div class="field"><label>lon</label><input data-table="gold" data-field="lon" type="number" step="any"></div>
+      </div>
+      <div class="field"><label>address (raw)</label><input data-table="gold" data-field="address" type="text"></div>
+      <div class="row3">
+        <div class="field"><label>address_street</label><input data-table="gold" data-field="address_street" type="text"></div>
+        <div class="field"><label>address_city</label><input data-table="gold" data-field="address_city" type="text"></div>
+        <div class="field"><label>address_state</label><input data-table="gold" data-field="address_state" type="text"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>address_zip</label><input data-table="gold" data-field="address_zip" type="text"></div>
+        <div class="field"><label>address_county</label><input data-table="gold" data-field="address_county" type="text"></div>
+      </div>
+      <div class="field"><label>website</label><input data-table="gold" data-field="website" type="text"></div>
+      <div class="field"><label>description</label><textarea data-table="gold" data-field="description"></textarea></div>
+      <div class="field"><label>parking_text</label><textarea data-table="gold" data-field="parking_text"></textarea></div>
+      <div class="field"><label>noaa_station_id</label><input data-table="gold" data-field="noaa_station_id" type="text"></div>
+      <div class="row2">
+        <div class="field"><label>open_time</label><input data-table="gold" data-field="open_time" type="text" placeholder="HH:MM"></div>
+        <div class="field"><label>close_time</label><input data-table="gold" data-field="close_time" type="text" placeholder="HH:MM"></div>
+      </div>
+      <div class="field"><label>timezone</label><input data-table="gold" data-field="timezone" type="text"></div>
+      <div class="row2">
+        <div class="field"><label>is_active</label>
+          <select data-table="gold" data-field="is_active">
+            <option value="">(unchanged)</option>
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+        </div>
+        <div class="field"><label>is_scoreable</label>
+          <select data-table="gold" data-field="is_scoreable">
+            <option value="">(unchanged)</option>
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+        </div>
+      </div>
+      <div class="field"><label>inactive_reason</label><input data-table="gold" data-field="inactive_reason" type="text"></div>
+      <div class="field"><label>review_status</label>
+        <select data-table="gold" data-field="review_status">
+          <option value="">(unset)</option>
+          <option value="needs_review">needs_review</option>
+          <option value="verified">verified</option>
+          <option value="flagged">flagged</option>
+        </select>
+      </div>
+      <div class="field"><label>review_notes</label><textarea data-table="gold" data-field="review_notes"></textarea></div>
+    </div>
+
+    <div class="panel">
+      <h2>beach_dog_policy (consumer overlay)</h2>
+      <div class="hint">Empty entry = no dog-policy row for this beach yet. Saving creates one with source=manual_curator.</div>
+      <div class="field"><label>dogs_allowed</label>
+        <select data-table="dog" data-field="dogs_allowed">
+          <option value="">(unchanged)</option>
+          <option value="yes">yes</option>
+          <option value="no">no</option>
+          <option value="seasonal">seasonal</option>
+          <option value="unclear">unclear</option>
+        </select>
+      </div>
+      <div class="field"><label>leash_policy</label>
+        <select data-table="dog" data-field="leash_policy">
+          <option value="">(unchanged)</option>
+          <option value="on_leash">on_leash</option>
+          <option value="off_leash">off_leash</option>
+        </select>
+      </div>
+      <div class="field"><label>off_leash_flag</label>
+        <select data-table="dog" data-field="off_leash_flag">
+          <option value="">(unchanged)</option>
+          <option value="true">true</option>
+          <option value="false">false</option>
+        </select>
+      </div>
+      <div class="row2">
+        <div class="field"><label>dogs_prohibited_start</label><input data-table="dog" data-field="dogs_prohibited_start" type="text" placeholder="HH:MM"></div>
+        <div class="field"><label>dogs_prohibited_end</label><input data-table="dog" data-field="dogs_prohibited_end" type="text" placeholder="HH:MM"></div>
+      </div>
+      <div class="field"><label>dogs_allowed_areas</label><input data-table="dog" data-field="dogs_allowed_areas" type="text"></div>
+      <div class="field"><label>access_rule</label><input data-table="dog" data-field="access_rule" type="text"></div>
+      <div class="field"><label>notes</label><textarea data-table="dog" data-field="notes"></textarea></div>
+    </div>
+
+    <div class="panel">
+      <h2>beach_amenities (overlay)</h2>
+      <div class="hint">Empty entry = no amenity row. Saving creates one with source=manual_curator (overrides any auto_promoted_from_production backfill).</div>
+      <div class="row3">
+        <div class="field"><label>has_restrooms</label>
+          <select data-table="amen" data-field="has_restrooms">
+            <option value="">?</option><option value="true">true</option><option value="false">false</option>
+          </select>
+        </div>
+        <div class="field"><label>has_showers</label>
+          <select data-table="amen" data-field="has_showers">
+            <option value="">?</option><option value="true">true</option><option value="false">false</option>
+          </select>
+        </div>
+        <div class="field"><label>has_lifeguards</label>
+          <select data-table="amen" data-field="has_lifeguards">
+            <option value="">?</option><option value="true">true</option><option value="false">false</option>
+          </select>
+        </div>
+      </div>
+      <div class="row3">
+        <div class="field"><label>has_drinking_water</label>
+          <select data-table="amen" data-field="has_drinking_water">
+            <option value="">?</option><option value="true">true</option><option value="false">false</option>
+          </select>
+        </div>
+        <div class="field"><label>has_disabled_access</label>
+          <select data-table="amen" data-field="has_disabled_access">
+            <option value="">?</option><option value="true">true</option><option value="false">false</option>
+          </select>
+        </div>
+        <div class="field"><label>has_food</label>
+          <select data-table="amen" data-field="has_food">
+            <option value="">?</option><option value="true">true</option><option value="false">false</option>
+          </select>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>has_fire_pits</label>
+          <select data-table="amen" data-field="has_fire_pits">
+            <option value="">?</option><option value="true">true</option><option value="false">false</option>
+          </select>
+        </div>
+        <div class="field"><label>has_picnic_area</label>
+          <select data-table="amen" data-field="has_picnic_area">
+            <option value="">?</option><option value="true">true</option><option value="false">false</option>
+          </select>
+        </div>
+      </div>
+      <div class="field"><label>parking_type</label>
+        <select data-table="amen" data-field="parking_type">
+          <option value="">(unchanged)</option>
+          <option value="lot">lot</option>
+          <option value="street">street</option>
+          <option value="metered">metered</option>
+          <option value="mixed">mixed</option>
+          <option value="none">none</option>
+        </select>
+      </div>
+      <div class="field"><label>parking_notes</label><textarea data-table="amen" data-field="parking_notes"></textarea></div>
+      <div class="field"><label>hours_text</label><input data-table="amen" data-field="hours_text" type="text"></div>
+      <div class="field"><label>notes</label><textarea data-table="amen" data-field="notes"></textarea></div>
+    </div>
+
+    <div style="margin: 16px 0;">
+      <button class="save" id="save-btn" onclick="save()">Save dirty fields</button>
+      <span id="save-status" class="save-status"></span>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+const ADMIN_SECRET_KEY = 'db_admin_secret';
+function promptForAdminSecret(reason) {
+  const msg = reason ? `${reason}\n\nAdmin secret:` : 'Admin secret:';
+  while (true) {
+    const s = (prompt(msg) || '').trim();
+    if (s) { localStorage.setItem(ADMIN_SECRET_KEY, s); return s; }
+  }
+}
+function getAdminSecret() {
+  return localStorage.getItem(ADMIN_SECRET_KEY) || promptForAdminSecret();
+}
+function clearAdminSecret() { localStorage.removeItem(ADMIN_SECRET_KEY); }
+
+async function restGet(path) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
+  });
+  if (!r.ok) throw new Error(`REST ${r.status}: ${await r.text()}`);
+  return r.json();
+}
+
+async function edgeFn(fn, body) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const secret = getAdminSecret();
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/${fn}`, {
+      method: 'POST',
+      headers: {
+        Authorization:    `Bearer ${ANON_KEY}`,
+        'Content-Type':   'application/json',
+        'x-admin-secret': secret,
+      },
+      body: JSON.stringify(body),
+    });
+    if (r.status === 401) {
+      clearAdminSecret();
+      if (attempt === 0) {
+        promptForAdminSecret('Admin secret rejected — try again:');
+        continue;
+      }
+      return { error: 'Unauthorized' };
+    }
+    if (r.status === 429) return { error: 'Admin rate limit exceeded.' };
+    return r.json();
+  }
+  return { error: 'Unauthorized' };
+}
+
+function showToast(msg, isError) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.toggle('error', !!isError);
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+let initial = { gold: {}, dog: {}, amen: {} };
+let currentFid = null;
+
+function fieldsByTable(table) {
+  return Array.from(document.querySelectorAll(`[data-table="${table}"]`));
+}
+
+function setFieldValue(el, value) {
+  if (value === null || value === undefined) {
+    el.value = '';
+  } else if (typeof value === 'boolean') {
+    el.value = String(value);
+  } else {
+    el.value = String(value);
+  }
+}
+
+function getFieldValue(el) {
+  const v = el.value;
+  // Empty string → not changed (or for booleans, "no change selected")
+  if (v === '') return undefined;
+  if (el.tagName === 'SELECT' && (v === 'true' || v === 'false')) return v === 'true';
+  return v;
+}
+
+function markDirtyClasses() {
+  for (const el of document.querySelectorAll('[data-table]')) {
+    const t = el.dataset.table;
+    const f = el.dataset.field;
+    const cur = getFieldValue(el);
+    const orig = initial[t][f];
+    const isDirty = cur !== undefined && !valuesEqual(cur, orig);
+    el.parentElement.classList.toggle('dirty', isDirty);
+  }
+}
+function valuesEqual(a, b) {
+  if (a === b) return true;
+  if (a == null && b == null) return true;
+  if (a == null || b == null) return false;
+  return String(a) === String(b);
+}
+
+async function loadBeach() {
+  const fidStr = document.getElementById('fid-input').value.trim();
+  const fid = parseInt(fidStr, 10);
+  if (!fid) { showToast('Enter a fid', true); return; }
+  currentFid = fid;
+
+  document.getElementById('beach-meta').textContent = 'Loading…';
+  try {
+    const [goldRows, dogRows, amenRows] = await Promise.all([
+      restGet(`beaches_gold?select=*&fid=eq.${fid}`),
+      restGet(`beach_dog_policy?select=*&arena_group_id=eq.${fid}`),
+      restGet(`beach_amenities?select=*&arena_group_id=eq.${fid}`),
+    ]);
+    if (!goldRows.length) {
+      showToast(`No beaches_gold row with fid=${fid}`, true);
+      document.getElementById('beach-meta').textContent = '';
+      return;
+    }
+    initial = {
+      gold: goldRows[0],
+      dog:  dogRows[0]  || {},
+      amen: amenRows[0] || {},
+    };
+
+    const g = initial.gold;
+    document.getElementById('beach-meta').innerHTML =
+      `<strong>${g.name || '(unnamed)'}</strong> ` +
+      `<span class="meta">— ${g.county_name || '?'} ` +
+      `(scoreable: ${g.is_scoreable}; active: ${g.is_active}) ` +
+      `· dog policy: ${dogRows.length ? 'present' : 'none'} ` +
+      `· amenities: ${amenRows.length ? 'present' : 'none'}</span>`;
+
+    for (const el of document.querySelectorAll('[data-table]')) {
+      const t = el.dataset.table;
+      const f = el.dataset.field;
+      setFieldValue(el, initial[t][f]);
+    }
+    markDirtyClasses();
+    document.getElementById('form-container').style.display = 'block';
+  } catch (err) {
+    showToast(`Load failed: ${err.message}`, true);
+  }
+}
+
+function dirtyByTable() {
+  const out = { gold: {}, dog: {}, amen: {} };
+  for (const el of document.querySelectorAll('[data-table]')) {
+    const t = el.dataset.table;
+    const f = el.dataset.field;
+    const cur = getFieldValue(el);
+    if (cur === undefined) continue;
+    const orig = initial[t][f];
+    if (valuesEqual(cur, orig)) continue;
+    out[t][f] = cur;
+  }
+  return out;
+}
+
+async function save() {
+  if (!currentFid) { showToast('Load a beach first', true); return; }
+  const dirty = dirtyByTable();
+  const totalDirty = Object.values(dirty).reduce((n, t) => n + Object.keys(t).length, 0);
+  if (!totalDirty) { showToast('No dirty fields'); return; }
+
+  const status = document.getElementById('save-status');
+  status.innerHTML = '';
+  document.getElementById('save-btn').disabled = true;
+
+  // Three independent calls (sequential — order doesn't matter, but
+  // sequential output is easier to read in the status line).
+  const calls = [];
+  if (Object.keys(dirty.gold).length)
+    calls.push(['gold', 'admin-update-beaches-gold', { fid: currentFid, fields: dirty.gold }]);
+  if (Object.keys(dirty.dog).length)
+    calls.push(['dog',  'admin-update-beach-dog-policy', { fid: currentFid, fields: dirty.dog }]);
+  if (Object.keys(dirty.amen).length)
+    calls.push(['amen', 'admin-update-beach-amenities',  { fid: currentFid, fields: dirty.amen }]);
+
+  let allOk = true;
+  for (const [tag, fn, body] of calls) {
+    const res = await edgeFn(fn, body);
+    if (res.error) {
+      status.innerHTML += `<span class="err">[${tag} failed: ${res.error}] </span>`;
+      allOk = false;
+    } else {
+      status.innerHTML += `<span class="ok">[${tag} ✓] </span>`;
+    }
+  }
+
+  document.getElementById('save-btn').disabled = false;
+
+  if (allOk) {
+    showToast('Saved.');
+    // Reload to refresh `initial` and clear dirty marks
+    await loadBeach();
+  } else {
+    showToast('Some saves failed — see status', true);
+  }
+}
+
+// Wire input listeners after DOM ready
+document.addEventListener('DOMContentLoaded', () => {
+  for (const el of document.querySelectorAll('[data-table]')) {
+    el.addEventListener('input', markDirtyClasses);
+    el.addEventListener('change', markDirtyClasses);
+  }
+  // Allow ?fid= URL param to auto-load
+  const params = new URLSearchParams(location.search);
+  const fid = params.get('fid');
+  if (fid) {
+    document.getElementById('fid-input').value = fid;
+    loadBeach();
+  }
+});
+</script>
+</body>
+</html>

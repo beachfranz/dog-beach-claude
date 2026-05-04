@@ -191,6 +191,51 @@ def gather_urls(cur, fid: int, beach_name: str) -> list[dict]:
     """, (fid,))
     for r in cur.fetchall():
         urls.setdefault(r['url'], "prior_extraction_source")
+
+    # NEW (2026-05-03): operator websites via C1 city containment.
+    # Many beaches have c1_jurisdiction_id but no cpad_unit_id, so the
+    # original cpad-derived operator lookup misses them.
+    cur.execute("""
+      select op.website, op.dog_policy_url, op.canonical_name, j.name as city_name
+        from public.beaches_gold g
+        join public.jurisdictions j on j.id = g.c1_jurisdiction_id
+        join public.operators op on op.cpad_agncy_name like (j.name || ', City of%%')
+       where g.fid = %s
+    """, (fid,))
+    for r in cur.fetchall():
+        for k in ('website', 'dog_policy_url'):
+            if r[k]:
+                urls.setdefault(r[k], f"city_operator:{r['city_name']}")
+
+    # NEW (2026-05-03): operator websites via county containment.
+    cur.execute("""
+      select op.website, op.dog_policy_url, op.canonical_name, c.name as county
+        from public.beaches_gold g
+        join public.counties c on c.geoid = g.county_geoid
+        join public.operators op on op.cpad_agncy_name like (c.name || ' County%%')
+       where g.fid = %s
+    """, (fid,))
+    for r in cur.fetchall():
+        for k in ('website', 'dog_policy_url'):
+            if r[k]:
+                urls.setdefault(r[k], f"county_operator:{r['county']}")
+
+    # NEW (2026-05-03): OSM website tags from nearby beach polygons (100m).
+    # Sparse — only ~19 of 1670 OSM beaches have website tags — but
+    # niche beaches sometimes carry an official website here.
+    cur.execute("""
+      select distinct (osm.tags->>'website') as website,
+             coalesce(osm.name, '?') as osm_name
+        from public.beaches_gold g
+        join public.osm_features osm
+          on st_dwithin(osm.geom::geography, g.geom, 100)
+       where g.fid = %s
+         and (osm.tags->>'natural') = 'beach'
+         and (osm.tags->>'website') is not null
+    """, (fid,))
+    for r in cur.fetchall():
+        urls.setdefault(r['website'], f"osm_beach:{r['osm_name']}")
+
     return [{"url": u, "kind": k, "auth": authority_score(u)} for u, k in urls.items()]
 
 

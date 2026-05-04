@@ -184,16 +184,18 @@ def main() -> int:
             print(f"  extract_for_beach exited with code {rc}; aborting chain")
             return rc
 
-        print("\n  [3/3] re-running populator + resolvers + promoter for new evidence")
-        cur.execute("select * from public.populate_from_unified_v1_gold(null)")
-        for r in cur.fetchall(): print(f"    populator: {dict(r)}")
-        cur.execute("select public._resolve_dogs_gold(null) as n");     print(f"    resolve dogs: {cur.fetchone()['n']}")
-        cur.execute("select public._resolve_practical_gold(null) as n"); print(f"    resolve practical: {cur.fetchone()['n']}")
-        cur.execute("select * from public.promote_canonical_to_consumer_tables(null)")
-        for r in cur.fetchall(): print(f"    promoter: {dict(r)}")
+        print("\n  [3/3] re-running pipeline tail on new extractions")
+        # The cleanest re-entry is to call promote_to_gold(fids) again — it's
+        # idempotent and runs every bonafide pipeline step in order:
+        # populate_from_*_gold (incl unified_v1), resolvers,
+        # compute_beach_field_consensus, promote_canonical_to_consumer_tables.
+        cur.execute("select * from public.promote_to_gold(%s::bigint[], false)", (fids,))
+        result2 = cur.fetchone()
         conn.commit()
+        for k, v in result2.items():
+            print(f"    {k}: {v}")
         print()
-        print("  with-extraction: complete chain ran end-to-end.")
+        print("  with-extraction: complete chain ran end-to-end (promote → discover → extract → promote).")
 
     print()
     print("  Direct links to verify:")

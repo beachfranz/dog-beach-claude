@@ -180,12 +180,21 @@ def anthropic_web_search(query: str, count: int = 10) -> list[dict]:
         return []
 
 
-def detect_backend() -> str:
+def detect_backends() -> list[str]:
+    """Return ordered list of available backends. Brave is preferred (cheap + fast);
+    Anthropic web_search runs as fallback when Brave returns 0 results."""
+    backends = []
     if os.environ.get("BRAVE_API_KEY"):
-        return "brave_search"
+        backends.append("brave_search")
     if os.environ.get("ANTHROPIC_API_KEY"):
-        return "anthropic_web"
-    return None
+        backends.append("anthropic_web")
+    return backends
+
+
+def detect_backend() -> str:
+    """Single primary backend label. Kept for backward compat / display."""
+    backends = detect_backends()
+    return backends[0] if backends else None
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -339,16 +348,18 @@ def main() -> int:
     ap.add_argument("--max-results", type=int, default=10)
     args = ap.parse_args()
 
-    backend = detect_backend()
-    if not backend:
+    backends = detect_backends()
+    if not backends:
         print("ERROR: no search backend configured.")
         print("  Set BRAVE_API_KEY in scripts/pipeline/.env (preferred — free 2K/mo at")
-        print("    https://api.search.brave.com/app/keys), OR")
+        print("    https://api-dashboard.search.brave.com/register), OR")
         print("  ensure ANTHROPIC_API_KEY is set (uses web_search tool, ~$10/1K).")
         return 2
-    print(f"Backend: {backend}")
-    if backend == "anthropic_web":
-        print("  (Anthropic web_search fallback — pricier than Brave; consider getting a Brave key.)")
+    primary = backends[0]
+    fallback = backends[1] if len(backends) > 1 else None
+    print(f"Backends: primary={primary}" + (f", fallback={fallback}" if fallback else ""))
+    if primary == "anthropic_web":
+        print("  (Anthropic web_search primary — pricier than Brave; consider getting a Brave key.)")
 
     conn = psycopg2.connect(**PG)
     conn.set_client_encoding("UTF8")
@@ -371,18 +382,29 @@ def main() -> int:
     total_inserted = 0
     total_validated = 0
     total_rejected = 0
+    fallback_fired = 0
     for i, c in enumerate(candidates, 1):
         name = c["name"]
         city = c.get("city") or ""
         query = f"{name} {city} {c['county_name']} dogs".strip()
-        # Prefer Brave; fall back to Anthropic
-        results = brave_search(query, args.max_results) if backend == "brave_search" \
-                  else anthropic_web_search(query, args.max_results)
+        # Try primary; if 0 results AND fallback exists, try fallback.
+        # Each result is tagged with the backend that produced it (source column),
+        # so provenance survives the fallback path.
+        backend_used = primary
+        results = (brave_search(query, args.max_results) if primary == "brave_search"
+                   else anthropic_web_search(query, args.max_results))
         if results is None:
             results = []
+        if not results and fallback:
+            backend_used = fallback
+            fallback_fired += 1
+            results = (brave_search(query, args.max_results) if fallback == "brave_search"
+                       else anthropic_web_search(query, args.max_results))
+            if results is None:
+                results = []
         new_count = 0
         for r in results:
-            if insert_discovered_url(cur, c["fid"], c.get("state") or "CA", query, backend, r):
+            if insert_discovered_url(cur, c["fid"], c.get("state") or "CA", query, backend_used, r):
                 new_count += 1
         conn.commit()
         total_inserted += new_count
@@ -403,6 +425,9 @@ def main() -> int:
     print(f"  rows inserted:   {total_inserted}")
     print(f"  validated:       {total_validated}")
     print(f"  rejected:        {total_rejected}")
+    if fallback:
+        print(f"  fallback fired:  {fallback_fired} of {len(candidates)} beaches "
+              f"({fallback_fired*100//max(1,len(candidates))}%)")
     print(f"  beaches with ≥1 validated URL:")
     cur.execute("""select count(distinct gold_fid) as n from public.discovered_urls
                     where validation_status='validated' and gold_fid = any(%s)""",

@@ -450,13 +450,15 @@ def ensure_variant_ids(cur) -> dict[str, int]:
 
 def extract_for_beach(conn, fid: int, name: str, city: str | None,
                      fields: list[dict], variant_ids: dict[str, int],
-                     also_sonnet_for_enums: bool, apply: bool) -> dict:
+                     also_sonnet_for_enums: bool, apply: bool,
+                     run_id: str | None = None) -> dict:
     """Run all fields × all URLs through unified extractor for one beach.
     Returns summary dict."""
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     summary = {"fid": fid, "name": name, "urls_total": 0, "urls_passed_gate": 0,
                "calls_total": 0, "rows_inserted": 0, "fields_with_value": 0,
                "tokens_in": 0, "tokens_out": 0, "tokens_cache_w": 0, "tokens_cache_r": 0,
+               "run_id": run_id,
                "errors": []}
 
     urls = gather_urls(cur, fid, name)
@@ -532,12 +534,15 @@ def extract_for_beach(conn, fid: int, name: str, city: str | None,
             if also_sonnet_for_enums and "values" in f and f["model"] == "haiku":
                 try:
                     result2 = call_llm("sonnet", content, name, city, f)
-                except Exception:
+                except Exception as e:
+                    summary["errors"].append(f"sonnet_compare {f['name']}: {e}")
                     continue
                 parsed2 = parse_response(result2["raw"], f)
                 summary["calls_total"] += 1
                 summary["tokens_in"]      += result2["input_tokens"]
                 summary["tokens_out"]     += result2["output_tokens"]
+                summary["tokens_cache_w"] += result2["cache_creation_input_tokens"]
+                summary["tokens_cache_r"] += result2["cache_read_input_tokens"]
                 if apply:
                     cur.execute("""
                         insert into public.beach_policy_extractions
@@ -761,8 +766,8 @@ def main() -> int:
 
         s = extract_for_beach(conn, c["fid"], c["name"], c.get("city"),
                               ALL_FIELDS, variant_ids,
-                              args.also_sonnet_for_enums, args.apply)
-        s["run_id"] = run_id
+                              args.also_sonnet_for_enums, args.apply,
+                              run_id=run_id)
         for k in totals:
             totals[k] += s.get(k, 0)
         print(f"  [{i}/{len(candidates)}] [{c['stratum']:<14}] fid={c['fid']:<5} {c['name'][:34]:<34} "

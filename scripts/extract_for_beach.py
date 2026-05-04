@@ -323,7 +323,24 @@ def gather_urls(cur, fid: int, beach_name: str) -> list[dict]:
     for r in cur.fetchall():
         urls.setdefault(r['url'], f"city:{r['source_type']}")
 
-    return [{"url": u, "kind": k} for u, k in urls.items()]
+    # Mirror discover_urls authority_score so it can flow through to
+    # beach_policy_extractions.source_authority_score.
+    AUTH = {"parks.ca.gov":4,"ca.gov":3,"nps.gov":4,"sandiego.gov":4,
+            "longbeach.gov":4,"newportbeachca.gov":4,"smgov.net":4,
+            "hermosabeach.gov":4,"ventura.org":4,"lacounty.gov":3,
+            "ocparks.com":3,"danapoint.org":3,"delmar.ca.us":4,
+            "coronado.ca.us":4,"wildlife.ca.gov":3,"bringfido.com":1,
+            "dogtrekker.com":1,"californiabeaches.com":2,
+            "movingtolagunabeach.com":1,"yelp.com":0,"tripadvisor.com":0,
+            "alltrails.com":1,"wikipedia.org":2,"nature.org":3}
+    def _auth(url: str) -> int:
+        host = (urllib.parse.urlparse(url).hostname or "").lower().lstrip("www.")
+        for dom, score in AUTH.items():
+            if host.endswith(dom): return score
+        if host.endswith(".gov"):  return 3
+        if host.endswith(".ca.us"): return 3
+        return 1
+    return [{"url": u, "kind": k, "auth": _auth(u)} for u, k in urls.items()]
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -517,13 +534,15 @@ def extract_for_beach(conn, fid: int, name: str, city: str | None,
                        source_type, variant_key, raw_response, parsed_value,
                        evidence_quote, raw_snippet, parse_succeeded,
                        extraction_method, run_id, model_name,
-                       input_tokens, output_tokens, latency_ms)
+                       input_tokens, output_tokens, latency_ms,
+                       source_authority_score)
                     values
                       (%s, %s, null, %s, %s,
                        %s, %s, %s, %s,
                        %s, %s, %s,
                        'llm_hybrid', %s, %s,
-                       %s, %s, %s)
+                       %s, %s, %s,
+                       %s)
                 """, (
                     fid, fid, variant_ids[f["name"]], f["name"],
                     u["kind"], VARIANT_KEY,
@@ -534,6 +553,7 @@ def extract_for_beach(conn, fid: int, name: str, city: str | None,
                     model_id(f["model"]),
                     result["input_tokens"], result["output_tokens"],
                     result["latency_ms"],
+                    u.get("auth"),
                 ))
                 summary["rows_inserted"] += 1
 
@@ -557,11 +577,12 @@ def extract_for_beach(conn, fid: int, name: str, city: str | None,
                            source_type, variant_key, raw_response, parsed_value,
                            evidence_quote, raw_snippet, parse_succeeded,
                            extraction_method, run_id, model_name,
-                           input_tokens, output_tokens, latency_ms)
+                           input_tokens, output_tokens, latency_ms,
+                           source_authority_score)
                         values
                           (%s, %s, null, %s, %s, %s, %s, %s, %s,
                            %s, %s, %s, 'llm_hybrid', %s, %s,
-                           %s, %s, %s)
+                           %s, %s, %s, %s)
                     """, (
                         fid, fid, variant_ids[f["name"]], f["name"],
                         u["kind"], VARIANT_KEY + "__sonnet_compare",
@@ -572,6 +593,7 @@ def extract_for_beach(conn, fid: int, name: str, city: str | None,
                         MODEL_SONNET,
                         result2["input_tokens"], result2["output_tokens"],
                         result2["latency_ms"],
+                        u.get("auth"),
                     ))
                     summary["rows_inserted"] += 1
         if apply:

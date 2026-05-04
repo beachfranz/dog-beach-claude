@@ -116,6 +116,59 @@
       font-size: 12px; margin-bottom: 12px;
     }
     .deprecation a { color: #92400e; }
+    /* Consensus display — Phase C */
+    .consensus {
+      grid-column: 2;
+      font-size: 11.5px; color: var(--text-muted);
+      padding: 4px 8px; margin-top: 2px;
+      border-left: 2px solid #cbd5e1;
+      background: #f8fafc;
+      border-radius: 0 4px 4px 0;
+      cursor: pointer; user-select: none;
+    }
+    .consensus.empty { display: none; }
+    .consensus.disagreement {
+      border-left-color: #d97706;
+      background: #fffbeb;
+      color: #78350f;
+    }
+    .consensus .conf-badge {
+      display: inline-block; padding: 1px 6px; border-radius: 3px;
+      background: #e0f2fe; color: #075985; font-weight: 500;
+      margin-right: 6px; font-variant-numeric: tabular-nums;
+    }
+    .consensus.disagreement .conf-badge {
+      background: #fef3c7; color: #78350f;
+    }
+    .consensus .winner { font-weight: 500; color: var(--text); }
+    .consensus .flag {
+      display: inline-block; padding: 1px 6px;
+      background: #d97706; color: white; border-radius: 3px;
+      margin-left: 6px; font-size: 10px; font-weight: 600;
+    }
+    .consensus .breakdown {
+      display: none; margin-top: 6px;
+      padding-top: 6px; border-top: 1px dashed #cbd5e1;
+    }
+    .consensus.expanded .breakdown { display: block; }
+    .consensus.expanded { background: #f1f5f9; }
+    .consensus .bucket {
+      display: flex; gap: 8px; align-items: baseline; margin-bottom: 2px;
+    }
+    .consensus .bucket-value {
+      font-family: ui-monospace, monospace;
+      background: #fff; padding: 1px 6px; border-radius: 3px;
+      border: 1px solid #cbd5e1;
+      min-width: 80px; font-size: 11px;
+    }
+    .consensus .bucket-weight { color: var(--text-muted); }
+    .consensus .voters {
+      margin-left: 10px; font-size: 10.5px; color: var(--text-muted);
+      font-family: ui-monospace, monospace;
+    }
+    .consensus .toggle-hint {
+      font-size: 10px; color: var(--text-muted); margin-left: 6px;
+    }
   </style>
 </head>
 <body>
@@ -202,13 +255,16 @@
           <option value="unclear">unclear</option>
         </select>
       </div>
+      <div class="consensus empty" data-consensus-field="allowed"></div>
       <div class="field"><label>leash_policy</label>
         <select data-table="dog" data-field="leash_policy">
           <option value="">(unchanged)</option>
           <option value="on_leash">on_leash</option>
           <option value="off_leash">off_leash</option>
+          <option value="mixed">mixed</option>
         </select>
       </div>
+      <div class="consensus empty" data-consensus-field="leash_required"></div>
       <div class="field"><label>off_leash_flag</label>
         <select data-table="dog" data-field="off_leash_flag">
           <option value="">(unchanged)</option>
@@ -228,52 +284,54 @@
     <div class="panel">
       <h2>beach_amenities (overlay)</h2>
       <div class="hint">Empty entry = no amenity row. Saving creates one with source=manual_curator (overrides any auto_promoted_from_production backfill).</div>
-      <div class="row3">
-        <div class="field"><label>has_restrooms</label>
-          <select data-table="amen" data-field="has_restrooms">
-            <option value="">?</option><option value="true">true</option><option value="false">false</option>
-          </select>
-        </div>
-        <div class="field"><label>has_showers</label>
-          <select data-table="amen" data-field="has_showers">
-            <option value="">?</option><option value="true">true</option><option value="false">false</option>
-          </select>
-        </div>
-        <div class="field"><label>has_lifeguards</label>
-          <select data-table="amen" data-field="has_lifeguards">
-            <option value="">?</option><option value="true">true</option><option value="false">false</option>
-          </select>
-        </div>
+      <div class="field"><label>has_restrooms</label>
+        <select data-table="amen" data-field="has_restrooms">
+          <option value="">?</option><option value="true">true</option><option value="false">false</option>
+        </select>
       </div>
-      <div class="row3">
-        <div class="field"><label>has_drinking_water</label>
-          <select data-table="amen" data-field="has_drinking_water">
-            <option value="">?</option><option value="true">true</option><option value="false">false</option>
-          </select>
-        </div>
-        <div class="field"><label>has_disabled_access</label>
-          <select data-table="amen" data-field="has_disabled_access">
-            <option value="">?</option><option value="true">true</option><option value="false">false</option>
-          </select>
-        </div>
-        <div class="field"><label>has_food</label>
-          <select data-table="amen" data-field="has_food">
-            <option value="">?</option><option value="true">true</option><option value="false">false</option>
-          </select>
-        </div>
+      <div class="consensus empty" data-consensus-field="has_restrooms"></div>
+      <div class="field"><label>has_showers</label>
+        <select data-table="amen" data-field="has_showers">
+          <option value="">?</option><option value="true">true</option><option value="false">false</option>
+        </select>
       </div>
-      <div class="row2">
-        <div class="field"><label>has_fire_pits</label>
-          <select data-table="amen" data-field="has_fire_pits">
-            <option value="">?</option><option value="true">true</option><option value="false">false</option>
-          </select>
-        </div>
-        <div class="field"><label>has_picnic_area</label>
-          <select data-table="amen" data-field="has_picnic_area">
-            <option value="">?</option><option value="true">true</option><option value="false">false</option>
-          </select>
-        </div>
+      <div class="consensus empty" data-consensus-field="has_showers"></div>
+      <div class="field"><label>has_lifeguards</label>
+        <select data-table="amen" data-field="has_lifeguards">
+          <option value="">?</option><option value="true">true</option><option value="false">false</option>
+        </select>
       </div>
+      <div class="consensus empty" data-consensus-field="has_lifeguards"></div>
+      <div class="field"><label>has_drinking_water</label>
+        <select data-table="amen" data-field="has_drinking_water">
+          <option value="">?</option><option value="true">true</option><option value="false">false</option>
+        </select>
+      </div>
+      <div class="consensus empty" data-consensus-field="has_drinking_water"></div>
+      <div class="field"><label>has_disabled_access</label>
+        <select data-table="amen" data-field="has_disabled_access">
+          <option value="">?</option><option value="true">true</option><option value="false">false</option>
+        </select>
+      </div>
+      <div class="consensus empty" data-consensus-field="has_disabled_access"></div>
+      <div class="field"><label>has_food</label>
+        <select data-table="amen" data-field="has_food">
+          <option value="">?</option><option value="true">true</option><option value="false">false</option>
+        </select>
+      </div>
+      <div class="consensus empty" data-consensus-field="has_food"></div>
+      <div class="field"><label>has_fire_pits</label>
+        <select data-table="amen" data-field="has_fire_pits">
+          <option value="">?</option><option value="true">true</option><option value="false">false</option>
+        </select>
+      </div>
+      <div class="consensus empty" data-consensus-field="has_fire_pits"></div>
+      <div class="field"><label>has_picnic_area</label>
+        <select data-table="amen" data-field="has_picnic_area">
+          <option value="">?</option><option value="true">true</option><option value="false">false</option>
+        </select>
+      </div>
+      <div class="consensus empty" data-consensus-field="has_picnic_area"></div>
       <div class="field"><label>parking_type</label>
         <select data-table="amen" data-field="parking_type">
           <option value="">(unchanged)</option>
@@ -406,10 +464,11 @@ async function loadBeach() {
 
   document.getElementById('beach-meta').textContent = 'Loading…';
   try {
-    const [goldRows, dogRows, amenRows] = await Promise.all([
+    const [goldRows, dogRows, amenRows, consensusRows] = await Promise.all([
       restGet(`beaches_gold?select=*&fid=eq.${fid}`),
       restGet(`beach_dog_policy?select=*&arena_group_id=eq.${fid}`),
       restGet(`beach_amenities?select=*&arena_group_id=eq.${fid}`),
+      restGet(`beach_field_consensus?select=*&gold_fid=eq.${fid}`),
     ]);
     if (!goldRows.length) {
       showToast(`No beaches_gold row with fid=${fid}`, true);
@@ -435,6 +494,7 @@ async function loadBeach() {
       const f = el.dataset.field;
       setFieldValue(el, initial[t][f]);
     }
+    renderConsensus(consensusRows);
     markDirtyClasses();
     document.getElementById('form-container').style.display = 'block';
   } catch (err) {
@@ -496,6 +556,64 @@ async function save() {
   } else {
     showToast('Some saves failed — see status', true);
   }
+}
+
+function renderConsensus(rows) {
+  // Reset all consensus blocks
+  document.querySelectorAll('.consensus').forEach(el => {
+    el.classList.add('empty');
+    el.classList.remove('disagreement', 'expanded');
+    el.innerHTML = '';
+  });
+  if (!Array.isArray(rows) || rows.length === 0) return;
+
+  for (const r of rows) {
+    const block = document.querySelector(`.consensus[data-consensus-field="${r.field_name}"]`);
+    if (!block) continue;
+    const conf = (r.confidence != null) ? Number(r.confidence).toFixed(2) : '?';
+    const winner = r.winning_value ?? '(null)';
+    const flag = r.disagreement
+      ? '<span class="flag">DISAGREEMENT</span>'
+      : '';
+    const sourceCount = r.source_count ?? '?';
+    let html = `
+      <div class="summary">
+        <span class="conf-badge">conf ${conf}</span>
+        consensus: <span class="winner">${winner}</span>
+        ${flag}
+        <span class="toggle-hint">— ${sourceCount} source(s); click for breakdown ▾</span>
+      </div>
+    `;
+    // Build breakdown
+    const bd = r.vote_breakdown;
+    if (bd && typeof bd === 'object') {
+      const buckets = Object.entries(bd).sort(
+        (a, b) => (b[1].weight || 0) - (a[1].weight || 0)
+      );
+      html += '<div class="breakdown">';
+      for (const [value, info] of buckets) {
+        const w = (info.weight ?? 0);
+        const voters = (info.voters || [])
+          .map(v => `${v.source}(${(v.weight ?? 0).toFixed(2)})`)
+          .join(', ');
+        html += `
+          <div class="bucket">
+            <span class="bucket-value">${value}</span>
+            <span class="bucket-weight">weight ${Number(w).toFixed(2)}</span>
+            <span class="voters">${voters}</span>
+          </div>
+        `;
+      }
+      html += '</div>';
+    }
+    block.innerHTML = html;
+    block.classList.remove('empty');
+    if (r.disagreement) block.classList.add('disagreement');
+  }
+  // Wire toggles
+  document.querySelectorAll('.consensus:not(.empty)').forEach(el => {
+    el.addEventListener('click', () => el.classList.toggle('expanded'));
+  });
 }
 
 // Wire input listeners after DOM ready

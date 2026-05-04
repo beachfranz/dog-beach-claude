@@ -110,6 +110,10 @@ def main() -> int:
                     help="Cap the number of fids selected.")
     ap.add_argument("--score", action="store_true",
                     help="Also flip is_scoreable=true on the promoted beaches.")
+    ap.add_argument("--with-extraction", action="store_true",
+                    help="After promotion, auto-fire discover_urls.py + extract_for_beach.py "
+                         "+ re-run populator/resolver/promoter for the promoted beaches. "
+                         "Closes the procedural-drift gap (URL discovery remediation #3).")
     ap.add_argument("--dry-run", action="store_true",
                     help="Resolve fids but don't actually promote.")
     args = ap.parse_args()
@@ -150,6 +154,46 @@ def main() -> int:
         print(f"  beach_dog_policy: {result['beach_dog_policy_changed']} resolver-driven row(s) ")
     if result["beach_amenities_changed"] > 0:
         print(f"  beach_amenities:  {result['beach_amenities_changed']} resolver-driven row(s)")
+
+    if args.with_extraction:
+        import subprocess
+        fid_csv = ",".join(str(f) for f in fids)
+        scripts_dir = ROOT / "scripts"
+        print()
+        print("=" * 64)
+        print("  --with-extraction: firing discover_urls + extract_for_beach")
+        print("=" * 64)
+
+        print("\n  [1/3] discover_urls.py --apply")
+        rc = subprocess.run(
+            [sys.executable, str(scripts_dir / "discover_urls.py"),
+             "--fids", fid_csv, "--apply"],
+            cwd=str(ROOT),
+        ).returncode
+        if rc != 0:
+            print(f"  discover_urls exited with code {rc}; aborting chain")
+            return rc
+
+        print("\n  [2/3] extract_for_beach.py --apply")
+        rc = subprocess.run(
+            [sys.executable, str(scripts_dir / "extract_for_beach.py"),
+             "--fids", fid_csv, "--apply"],
+            cwd=str(ROOT),
+        ).returncode
+        if rc != 0:
+            print(f"  extract_for_beach exited with code {rc}; aborting chain")
+            return rc
+
+        print("\n  [3/3] re-running populator + resolvers + promoter for new evidence")
+        cur.execute("select * from public.populate_from_unified_v1_gold(null)")
+        for r in cur.fetchall(): print(f"    populator: {dict(r)}")
+        cur.execute("select public._resolve_dogs_gold(null) as n");     print(f"    resolve dogs: {cur.fetchone()['n']}")
+        cur.execute("select public._resolve_practical_gold(null) as n"); print(f"    resolve practical: {cur.fetchone()['n']}")
+        cur.execute("select * from public.promote_canonical_to_consumer_tables(null)")
+        for r in cur.fetchall(): print(f"    promoter: {dict(r)}")
+        conn.commit()
+        print()
+        print("  with-extraction: complete chain ran end-to-end.")
 
     print()
     print("  Direct links to verify:")

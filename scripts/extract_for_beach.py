@@ -323,24 +323,17 @@ def gather_urls(cur, fid: int, beach_name: str) -> list[dict]:
     for r in cur.fetchall():
         urls.setdefault(r['url'], f"city:{r['source_type']}")
 
-    # Mirror discover_urls authority_score so it can flow through to
-    # beach_policy_extractions.source_authority_score.
-    AUTH = {"parks.ca.gov":4,"ca.gov":3,"nps.gov":4,"sandiego.gov":4,
-            "longbeach.gov":4,"newportbeachca.gov":4,"smgov.net":4,
-            "hermosabeach.gov":4,"ventura.org":4,"lacounty.gov":3,
-            "ocparks.com":3,"danapoint.org":3,"delmar.ca.us":4,
-            "coronado.ca.us":4,"wildlife.ca.gov":3,"bringfido.com":1,
-            "dogtrekker.com":1,"californiabeaches.com":2,
-            "movingtolagunabeach.com":1,"yelp.com":0,"tripadvisor.com":0,
-            "alltrails.com":1,"wikipedia.org":2,"nature.org":3}
-    def _auth(url: str) -> int:
-        host = (urllib.parse.urlparse(url).hostname or "").lower().lstrip("www.")
-        for dom, score in AUTH.items():
-            if host.endswith(dom): return score
-        if host.endswith(".gov"):  return 3
-        if host.endswith(".ca.us"): return 3
-        return 1
-    return [{"url": u, "kind": k, "auth": _auth(u)} for u, k in urls.items()]
+    # Look up beach state for authority scoring
+    cur.execute("select state from public.beaches_gold where fid=%s", (fid,))
+    row = cur.fetchone()
+    state = (row.get('state') if row else None) or 'CA'
+    out = []
+    for u, k in urls.items():
+        cur.execute("select public._state_authority_score(%s, %s) as s", (state, u))
+        s = cur.fetchone()
+        auth = (s["s"] if s else 1) or 1
+        out.append({"url": u, "kind": k, "auth": auth})
+    return out
 
 
 # ─────────────────────────────────────────────────────────────────────────

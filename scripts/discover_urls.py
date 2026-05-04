@@ -61,28 +61,14 @@ HEADERS = {"User-Agent": USER_AGENT,
            "Accept-Language": "en-US,en;q=0.9",
            "Accept-Encoding": "identity"}
 
-# Mirror extract_research_v2's authority priors. Higher = more trustworthy.
-AUTH_DOMAINS = {
-    "parks.ca.gov":     4, "ca.gov":           3, "nps.gov":           4,
-    "sandiego.gov":     4, "longbeach.gov":    4, "newportbeachca.gov": 4,
-    "smgov.net":        4, "hermosabeach.gov": 4, "ventura.org":       4,
-    "lacounty.gov":     3, "ocparks.com":      3, "danapoint.org":     3,
-    "delmar.ca.us":     4, "coronado.ca.us":   4, "wildlife.ca.gov":   3,
-    "bringfido.com":    1, "dogtrekker.com":   1, "californiabeaches.com": 2,
-    "movingtolagunabeach.com": 1, "yelp.com":  0, "tripadvisor.com":   0,
-    "alltrails.com":    1, "wikipedia.org":    2, "nature.org":        3,
-    "savetheredwoods.org": 3,
-}
+# Authority priors live in public.state_url_priors (per-state) — see
+# 20260504_unified_pipeline_phase1_state_url_priors.sql. We call the
+# DB function _state_authority_score(state, url) to resolve.
 
-
-def authority_score(url: str) -> int:
-    host = (urllib.parse.urlparse(url).hostname or "").lower().lstrip("www.")
-    for dom, score in AUTH_DOMAINS.items():
-        if host.endswith(dom):
-            return score
-    if host.endswith(".gov"):  return 3
-    if host.endswith(".ca.us"): return 3
-    return 1
+def authority_score(cur, state: str, url: str) -> int:
+    cur.execute("select public._state_authority_score(%s, %s) as s", (state, url))
+    r = cur.fetchone()
+    return (r["s"] if r else 1) or 1
 
 
 def classify_kind(url: str) -> str:
@@ -249,7 +235,7 @@ def select_target_fids(cur, args) -> list[dict]:
     if args.fids:
         fids = [int(x.strip()) for x in args.fids.split(",")]
         cur.execute("""
-          select g.fid, g.name, g.county_name, j.name as city
+          select g.fid, g.name, g.county_name, g.state, j.name as city
             from public.beaches_gold g
             left join public.jurisdictions j on j.id = g.c1_jurisdiction_id
            where g.fid = any(%s)""", (fids,))
@@ -257,7 +243,7 @@ def select_target_fids(cur, args) -> list[dict]:
     if args.gap_only:
         # Beaches with NO conclusive policy evidence — the 85-beach surface
         cur.execute("""
-          select g.fid, g.name, g.county_name, j.name as city
+          select g.fid, g.name, g.county_name, g.state, j.name as city
             from public.beaches_gold g
             left join public.jurisdictions j on j.id = g.c1_jurisdiction_id
            where g.is_active and g.is_scoreable
@@ -278,7 +264,7 @@ def already_in_pool(cur, fid: int, url_normalized: str) -> bool:
     return cur.fetchone() is not None
 
 
-def insert_discovered_url(cur, fid: int, query: str, source: str, r: dict):
+def insert_discovered_url(cur, fid: int, state: str, query: str, source: str, r: dict):
     url = r["url"]
     norm = normalize_url(url)
     if already_in_pool(cur, fid, norm):
@@ -290,7 +276,7 @@ def insert_discovered_url(cur, fid: int, query: str, source: str, r: dict):
       values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
       on conflict (gold_fid, url_normalized) do nothing
     """, (fid, url, norm, source, query, r.get("rank"),
-          authority_score(url), classify_kind(url),
+          authority_score(cur, state, url), classify_kind(url),
           (r.get("title") or "")[:500],
           (r.get("description") or "")[:1000]))
     return cur.rowcount > 0
@@ -388,7 +374,7 @@ def main() -> int:
             results = []
         new_count = 0
         for r in results:
-            if insert_discovered_url(cur, c["fid"], query, backend, r):
+            if insert_discovered_url(cur, c["fid"], c.get("state") or "CA", query, backend, r):
                 new_count += 1
         conn.commit()
         total_inserted += new_count

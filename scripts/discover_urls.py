@@ -115,7 +115,15 @@ def brave_search(query: str, count: int = 10) -> list[dict]:
     })
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+            raw = resp.read()
+            if resp.headers.get("Content-Encoding") == "gzip":
+                import gzip
+                raw = gzip.decompress(raw)
+            data = json.loads(raw.decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")[:400]
+        print(f"  brave_search HTTP {e.code}: {e.reason} — {body}", file=sys.stderr)
+        return []
     except Exception as e:
         print(f"  brave_search error: {e}", file=sys.stderr)
         return []

@@ -134,6 +134,11 @@ def main() -> int:
 
     print(f"\n  Calling promote_to_gold(fids={fids[:5]}{'...' if len(fids)>5 else ''}, "
           f"score={args.score})...")
+    # Bump statement_timeout for this transaction — promote_to_gold runs the
+    # full Layer C+D batch (containment + 7 source populators + 5 resolvers +
+    # Layer 2 consensus + auto-promoter), which takes longer than the default
+    # 60s connection timeout when the catalog has hundreds of beaches.
+    cur.execute("set local statement_timeout = '600s'")
     cur.execute("select * from public.promote_to_gold(%s::bigint[], %s)",
                 (fids, args.score))
     result = cur.fetchone()
@@ -189,6 +194,7 @@ def main() -> int:
         # idempotent and runs every bonafide pipeline step in order:
         # populate_from_*_gold (incl unified_v1), resolvers,
         # compute_beach_field_consensus, promote_canonical_to_consumer_tables.
+        cur.execute("set local statement_timeout = '600s'")
         cur.execute("select * from public.promote_to_gold(%s::bigint[], false)", (fids,))
         result2 = cur.fetchone()
         conn.commit()

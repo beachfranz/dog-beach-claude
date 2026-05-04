@@ -240,10 +240,17 @@ def name_match(text: str, beach_name: str) -> bool:
 
 
 def gather_urls(cur, fid: int, beach_name: str) -> list[dict]:
-    """Build candidate URL pool from existing local sources only.
-    No web search — deferred to its own discussion per unified pipeline spec.
+    """Build candidate URL pool from existing local sources + discovered URLs.
+    Discovery (web search) happens via scripts/discover_urls.py and lands in
+    public.discovered_urls; we pull validated ones first.
     """
     urls = {}
+    # Highest priority: validated URLs from web-search discovery
+    cur.execute("""select url, kind, authority_score from public.discovered_urls
+                    where gold_fid=%s and validation_status='validated'
+                    order by authority_score desc, rank asc limit 5""", (fid,))
+    for r in cur.fetchall():
+        urls.setdefault(r['url'], f"discovered:{r.get('kind','unknown')}")
     cur.execute("""select source_url from public.park_url_extractions
                     where arena_group_id=%s and source_url is not null
                     order by scraped_at desc limit 5""", (fid,))

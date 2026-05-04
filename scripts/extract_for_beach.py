@@ -715,9 +715,9 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true",
                     help="Actually call LLMs + write to beach_policy_extractions. "
                          "Default is dry-run (URL gather only).")
-    ap.add_argument("--also-sonnet-for-enums", action="store_true", default=True,
+    ap.add_argument("--also-sonnet-for-enums", action="store_true", default=False,
                     help="Also run Sonnet on enum fields for Haiku-vs-Sonnet comparison. "
-                         "Default true for the probe.")
+                         "Default off; pass flag to enable for calibration probes.")
     ap.add_argument("--max-beaches", type=int,
                     help="Cap the number of beaches processed (testing).")
     args = ap.parse_args()

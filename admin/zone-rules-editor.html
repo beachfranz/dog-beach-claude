@@ -1,0 +1,1717 @@
+<!DOCTYPE html>
+<!--
+  admin/zone-rules-editor.html — UI mock for section-aware dog-policy moderation.
+
+  Step 3 of the zone_rules build order: validate the interaction model
+  before any backend wiring. Single self-contained HTML; no fetches, no
+  edge functions. Loads the 8-anchor fixture inline plus a curated set
+  of evidence cards drawn from real BEP text for those beaches.
+
+  See: project_zone_rules_design_locked.md, tests/zone_rules_anchors.json.
+
+  No-backend behaviors:
+    - "Save" writes the current jsonb to localStorage as
+      `zone_rules_draft__<fid>` and prints it to the JSON pane. Real
+      backend would POST to admin-update-beach-dog-policy.
+    - All edits are local-only and reset on beach/variant switch.
+
+  open at: file:///C:/Users/beach/Documents/dog-beach-claude/admin/zone-rules-editor.html
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Zone Rules Editor (mock) — Dog Beach Admin</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #f8fafc; --panel: #ffffff; --border: #e2e8f0;
+    --text: #0f172a; --text-muted: #475569;
+    --accent: #3b82f6; --accent-hov: #2563eb;
+    --green: #15803d; --red: #b91c1c; --amber: #b45309;
+    --dirty-bg: #fffbeb; --gray-bg: #f1f5f9;
+    --pin-bg: #ecfeff; --pin-border: #67e8f9;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--text);
+    font-size: 14px; line-height: 1.5;
+    padding: 12px;
+    max-width: 1400px; margin: 0 auto;
+  }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .sub { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+
+  .top {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    padding: 10px 12px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 6px;
+    margin-bottom: 12px;
+  }
+  .top label { font-size: 12px; color: var(--text-muted); }
+  .top select, .top input {
+    padding: 5px 8px; border: 1px solid var(--border);
+    border-radius: 4px; font-size: 13px; background: white;
+  }
+  .top select { min-width: 240px; }
+  .variant-toggle button {
+    padding: 5px 10px; background: white; color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px; cursor: pointer;
+    font-size: 13px;
+  }
+  .variant-toggle button.active {
+    background: var(--accent); color: white; border-color: var(--accent);
+  }
+  .top .grow { flex: 1; }
+  button.save {
+    padding: 6px 14px; background: var(--green); color: white;
+    border: none; border-radius: 4px; cursor: pointer; font-weight: 500;
+  }
+  button.save:hover { background: #166534; }
+
+  /* Two-pane layout */
+  .panes {
+    display: grid; grid-template-columns: 1fr 380px; gap: 12px;
+    margin-bottom: 12px;
+  }
+  .pane {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 6px; padding: 12px;
+    min-height: 500px;
+  }
+  .pane h2 { font-size: 13px; color: var(--text-muted);
+             text-transform: uppercase; letter-spacing: 0.5px;
+             margin-bottom: 10px; padding-bottom: 6px;
+             border-bottom: 1px solid var(--border); }
+
+  /* Region cards */
+  .region {
+    background: var(--gray-bg); border-radius: 6px; padding: 10px;
+    margin-bottom: 10px;
+  }
+  .region-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 8px;
+  }
+  .region-name {
+    font-weight: 600; font-size: 13px;
+  }
+  .region-name.unnamed { color: var(--text-muted); font-style: italic; }
+  .region-mods {
+    font-size: 11px; color: var(--text-muted); margin-top: 4px;
+  }
+  .region-mods .mod {
+    display: inline-block; padding: 2px 6px; margin-right: 4px;
+    background: white; border: 1px solid var(--border); border-radius: 3px;
+  }
+
+  /* Section rows */
+  .section-row {
+    display: grid; grid-template-columns: 28px 130px 130px 1fr;
+    gap: 8px; align-items: center;
+    padding: 6px 8px; background: white;
+    border-radius: 4px; margin-bottom: 4px;
+    border: 1px solid var(--border);
+  }
+  .section-row.selected {
+    border-color: var(--accent); box-shadow: 0 0 0 2px rgba(59,130,246,0.15);
+  }
+  .section-icon { font-size: 18px; text-align: center; }
+  .section-name { font-weight: 500; }
+  .section-rule {
+    padding: 3px 8px; border-radius: 3px; font-size: 12px;
+    text-align: center; cursor: pointer; user-select: none;
+    border: 1px solid transparent;
+  }
+  .section-rule:hover { border-color: var(--accent); }
+  .rule-off_leash { background: #dcfce7; color: #166534; }
+  .rule-on_leash { background: #f1f5f9; color: #334155; }
+  .rule-not_allowed { background: #fee2e2; color: #991b1b; }
+  .rule-unknown { background: #fef9c3; color: #854d0e; }
+
+  .section-extras {
+    font-size: 11px; color: var(--text-muted);
+  }
+  .section-extras .pill {
+    display: inline-block; padding: 1px 6px; margin-right: 3px;
+    background: var(--gray-bg); border-radius: 3px;
+    border: 1px solid var(--border);
+  }
+  .section-extras .pill.evidence { background: var(--pin-bg); border-color: var(--pin-border); }
+
+  .add-link {
+    font-size: 12px; color: var(--accent); cursor: pointer;
+    padding: 4px 8px; display: inline-block;
+  }
+  .add-link:hover { text-decoration: underline; }
+
+  /* Evidence cards */
+  .evidence-card {
+    background: white; border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px; margin-bottom: 8px;
+    font-size: 12px;
+  }
+  .evidence-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 6px; font-size: 11px;
+  }
+  .evidence-source {
+    font-weight: 600; color: var(--text);
+  }
+  .evidence-conf {
+    color: var(--text-muted);
+  }
+  .evidence-quote {
+    color: var(--text); margin-bottom: 8px;
+    line-height: 1.5; font-size: 12px;
+  }
+  .evidence-url {
+    font-size: 10px; color: var(--text-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    margin-bottom: 6px;
+  }
+  .pin-btn {
+    padding: 4px 8px; background: var(--pin-bg); color: var(--text);
+    border: 1px solid var(--pin-border); border-radius: 3px;
+    cursor: pointer; font-size: 11px; font-weight: 500;
+  }
+  .pin-btn:hover { background: var(--pin-border); }
+  .pin-btn select {
+    margin-left: 4px; padding: 2px 4px; font-size: 11px;
+    border: 1px solid var(--border); border-radius: 3px; background: white;
+  }
+
+  /* Notes + JSON */
+  .notes-row {
+    margin-top: 12px; padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+  .notes-row label { font-size: 11px; color: var(--text-muted);
+                     text-transform: uppercase; letter-spacing: 0.5px; }
+  .notes-row textarea {
+    width: 100%; min-height: 60px; margin-top: 4px;
+    padding: 6px; border: 1px solid var(--border);
+    border-radius: 4px; font-family: inherit; font-size: 12px;
+  }
+
+  .json-pane {
+    background: #0f172a; color: #e2e8f0; border-radius: 6px;
+    padding: 12px; font-family: 'Consolas','Monaco',monospace;
+    font-size: 11px; line-height: 1.5;
+    max-height: 400px; overflow: auto;
+  }
+  .json-pane pre { margin: 0; }
+  .disagreement-flag {
+    display: none; padding: 4px 8px; background: var(--dirty-bg);
+    border: 1px solid var(--amber); border-radius: 3px;
+    color: var(--amber); font-size: 11px; font-weight: 500;
+  }
+  .disagreement-flag.show { display: inline-block; }
+
+  /* Drawer for editing time_windows / sub_zones */
+  .drawer {
+    margin-top: 6px; padding: 8px; background: #f8fafc;
+    border-left: 3px solid var(--accent); border-radius: 4px;
+    font-size: 11px;
+  }
+  .drawer-row {
+    display: flex; gap: 4px; align-items: center; margin-bottom: 4px;
+  }
+  .drawer-row input { padding: 3px 6px; font-size: 11px; }
+  .drawer-row .mini-rule {
+    padding: 2px 6px; font-size: 10px; border-radius: 2px;
+  }
+
+  .footnote { font-size: 11px; color: var(--text-muted); margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>Zone Rules Editor <span style="font-size:13px; color:var(--text-muted); font-weight: normal;">(mock — step 3)</span></h1>
+<div class="sub">
+  Click a rule to cycle. Hover the icon for time/seasonal/sub-zone hints.
+  Click a [pin to: …] button on an evidence card to attach a quote to a section.
+  No backend — Save writes to localStorage.
+</div>
+
+<div class="top">
+  <label>Beach</label>
+  <select id="beach-picker"></select>
+  <span class="grow"></span>
+  <span class="variant-toggle">
+    <label>Variant</label>
+    <button class="variant active" data-variant="A_conservative">A conservative</button>
+    <button class="variant" data-variant="B_rich">B rich</button>
+  </span>
+  <span class="disagreement-flag" id="disagreement">⚠ disagreement detected</span>
+  <button class="save" id="save-btn">Save (mock)</button>
+</div>
+
+<div class="panes">
+  <div class="pane" id="zones-pane">
+    <h2>Zones</h2>
+    <div id="regions"></div>
+    <div class="add-link" id="add-region">+ add region</div>
+    <div class="notes-row">
+      <label>Global notes</label>
+      <textarea id="global-notes"></textarea>
+    </div>
+  </div>
+  <div class="pane">
+    <h2>Evidence</h2>
+    <div id="evidence-cards"></div>
+  </div>
+</div>
+
+<div class="json-pane">
+  <pre id="json-output"></pre>
+</div>
+<div class="footnote">
+  Section icons: 🏖 sand · 🌊 water · 🥾 trails · 🛹 boardwalk · ⛰ bluff · 🏵 dunes · 🧺 picnic · 🅿 parking · ⛺ campground · 🛝 playground · 🚿 restrooms · 🪨 tide pools.
+  Rule chips: 🟢 off_leash · ⚪ on_leash · 🔴 not_allowed · 🟡 time-restricted · 🟠 seasonal · ❓ unknown.
+</div>
+
+<script>
+// ============================================================================
+// Fixture data — embedded copy of tests/zone_rules_anchors.json (8 anchors,
+// 2 variants each). Real impl would fetch from the file or from BEP.
+// ============================================================================
+const FIXTURE = {
+  "_doc": "Hand-curated zone_rules anchors for the section-aware dog-policy spec. See project_zone_rules_design_locked.md and docs/unified-pipeline.md. Each anchor is a real beach with two interpretations of how its zone_rules jsonb could look \u2014 Variant A (conservative: less structure, region-level modifier cascade, evidence on load-bearing rules only) vs Variant B (rich: more named regions, section-level modifiers, evidence on every rule, fuller global_notes). Used as fixture for: UI mock, prompt-engineering target for closed_zones_v3, calibration regression check.",
+  "spec_version": "1.0",
+  "spec_locked_at": "2026-05-04",
+  "section_taxonomy": [
+    "sand",
+    "water_swim",
+    "trails",
+    "boardwalk",
+    "bluff",
+    "dunes",
+    "picnic_area",
+    "parking_lot",
+    "campground",
+    "playground",
+    "restrooms_showers",
+    "tide_pools"
+  ],
+  "rule_values": [
+    "not_allowed",
+    "on_leash",
+    "off_leash",
+    "unknown"
+  ],
+  "anchors": [
+    {
+      "fid": 6202,
+      "name": "Coronado Dog Beach",
+      "what_it_tests": "Pure off-leash dog beach. Simple base case \u2014 uniform region, no time/seasonal modifiers, just per-section rules.",
+      "variants": {
+        "A_conservative": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "off_leash"
+                },
+                "water_swim": {
+                  "rule": "off_leash"
+                },
+                "parking_lot": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "must be on-leash at all points before reaching the beach",
+                    "source": "research"
+                  }
+                }
+              }
+            }
+          ],
+          "global_notes": "Dog beach at north end of Coronado Beach (200 Ocean Boulevard).",
+          "extraction_method": "manual_curator"
+        },
+        "B_rich": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "off_leash",
+                  "evidence": {
+                    "quote": "Dogs may be off-leash in this designated dog beach area",
+                    "source": "research",
+                    "source_url": "https://www.coronado.ca.us/757/Dogs"
+                  }
+                },
+                "water_swim": {
+                  "rule": "off_leash",
+                  "evidence": {
+                    "quote": "where they can freely roam in the sea and sand",
+                    "source": "park_url",
+                    "source_url": "https://www.sandiego.com/beaches/coronado-beach"
+                  }
+                },
+                "parking_lot": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "must be on-leash at all points before reaching the beach",
+                    "source": "research",
+                    "source_url": "https://www.coronado.ca.us/757/Dogs"
+                  }
+                }
+              }
+            }
+          ],
+          "global_notes": "Designated dog beach at the north end of Coronado Beach, located at 200 Ocean Boulevard in front of Sunset Park. The rest of Coronado Beach prohibits dogs entirely (including the area in front of Hotel del Coronado).",
+          "extraction_method": "manual_curator"
+        }
+      }
+    },
+    {
+      "fid": 9716,
+      "name": "Fiesta Island",
+      "what_it_tests": "Time-of-day modifier (4am\u201310pm) plus seasonal modifier (Apr\u2013Sep Least Tern nesting). Region-level vs section-level modifier cascade is the variant axis here.",
+      "variants": {
+        "A_conservative": {
+          "regions": [
+            {
+              "name": null,
+              "time_windows": [
+                {
+                  "start": "22:00",
+                  "end": "04:00",
+                  "rule": "not_allowed"
+                }
+              ],
+              "seasonal": [
+                {
+                  "months": "Apr-Sep",
+                  "reason": "Least Tern nesting \u2014 some zones closed; primary off-leash area remains open"
+                }
+              ],
+              "evidence": {
+                "quote": "Dogs are allowed off-leash at Dog Beach and Fiesta Island (4am\u201310pm)",
+                "source": "city_policy",
+                "source_url": "https://www.sandiego.gov/park-and-recreation/parks/dogs/bchdog"
+              },
+              "sections": {
+                "sand": {
+                  "rule": "off_leash"
+                },
+                "water_swim": {
+                  "rule": "off_leash"
+                },
+                "trails": {
+                  "rule": "off_leash"
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                }
+              }
+            }
+          ],
+          "global_notes": "One of San Diego's two designated off-leash dog beaches. Hours 4am\u201310pm year-round.",
+          "extraction_method": "manual_curator"
+        },
+        "B_rich": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "off_leash",
+                  "time_windows": [
+                    {
+                      "start": "22:00",
+                      "end": "04:00",
+                      "rule": "not_allowed"
+                    }
+                  ],
+                  "seasonal": [
+                    {
+                      "months": "Apr-Sep",
+                      "reason": "Least Tern nesting closes some zones; primary off-leash area remains open"
+                    }
+                  ],
+                  "evidence": {
+                    "quote": "Dogs are allowed off-leash at Dog Beach and Fiesta Island (4am\u201310pm)",
+                    "source": "city_policy",
+                    "source_url": "https://www.sandiego.gov/park-and-recreation/parks/dogs/bchdog"
+                  }
+                },
+                "water_swim": {
+                  "rule": "off_leash",
+                  "time_windows": [
+                    {
+                      "start": "22:00",
+                      "end": "04:00",
+                      "rule": "not_allowed"
+                    }
+                  ]
+                },
+                "trails": {
+                  "rule": "off_leash",
+                  "time_windows": [
+                    {
+                      "start": "22:00",
+                      "end": "04:00",
+                      "rule": "not_allowed"
+                    }
+                  ]
+                },
+                "parking_lot": {
+                  "rule": "on_leash",
+                  "time_windows": [
+                    {
+                      "start": "22:00",
+                      "end": "04:00",
+                      "rule": "not_allowed"
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "global_notes": "One of San Diego's two designated off-leash dog beaches (the other is Dog Beach at the mouth of the San Diego River). Hours: 4am\u201310pm year-round. Seasonal closures Apr 15 \u2013 Sep 15 protect Least Tern nesting in some zones; the primary off-leash area remains open throughout the season.",
+          "extraction_method": "manual_curator"
+        }
+      }
+    },
+    {
+      "fid": 8339,
+      "name": "Little Corona Del Mar Beach",
+      "what_it_tests": "Citywide time-window ordinance (10am\u20134:30pm). Conservative puts the time_window at region level (cascades to all sections); rich repeats it per-section.",
+      "variants": {
+        "A_conservative": {
+          "regions": [
+            {
+              "name": null,
+              "time_windows": [
+                {
+                  "start": "10:00",
+                  "end": "16:30",
+                  "rule": "not_allowed"
+                }
+              ],
+              "evidence": {
+                "quote": "Dogs not allowed on the beach or any beachfront sidewalk between 10 a.m. and 4:30 p.m.",
+                "source": "park_url",
+                "source_url": "http://www.parks.ca.gov/default.asp?page_id=652"
+              },
+              "sections": {
+                "sand": {
+                  "rule": "on_leash"
+                },
+                "water_swim": {
+                  "rule": "on_leash"
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "tide_pools": {
+                  "rule": "not_allowed"
+                }
+              }
+            }
+          ],
+          "global_notes": "Newport Beach city ordinance: leashed dogs only, prohibited 10:00\u201316:30 daily.",
+          "extraction_method": "manual_curator"
+        },
+        "B_rich": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "on_leash",
+                  "time_windows": [
+                    {
+                      "start": "10:00",
+                      "end": "16:30",
+                      "rule": "not_allowed"
+                    }
+                  ],
+                  "evidence": {
+                    "quote": "Dogs not allowed on the beach... between 10 a.m. and 4:30 p.m.",
+                    "source": "park_url"
+                  }
+                },
+                "water_swim": {
+                  "rule": "on_leash",
+                  "time_windows": [
+                    {
+                      "start": "10:00",
+                      "end": "16:30",
+                      "rule": "not_allowed"
+                    }
+                  ]
+                },
+                "parking_lot": {
+                  "rule": "on_leash",
+                  "time_windows": [
+                    {
+                      "start": "10:00",
+                      "end": "16:30",
+                      "rule": "not_allowed"
+                    }
+                  ],
+                  "evidence": {
+                    "quote": "any beachfront sidewalk between 10 a.m. and 4:30 p.m.",
+                    "source": "park_url"
+                  }
+                },
+                "tide_pools": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Marine protected area \u2014 tide pools strictly off-limits",
+                    "source": "city_policy"
+                  }
+                }
+              }
+            }
+          ],
+          "global_notes": "Newport Beach city ordinance: leashed dogs only, prohibited on beach + beachfront sidewalks 10:00\u201316:30 daily. Tide pools strictly off-limits as part of the Robert E. Badham Marine Protected Area.",
+          "extraction_method": "manual_curator"
+        }
+      }
+    },
+    {
+      "fid": 9717,
+      "name": "Huntington Beach Dog Beach",
+      "what_it_tests": "Bluff section + multi-section variation within one beach (sand off-leash, bluff/parking on-leash). Conservative uses single unnamed region; rich names the geographic footprint as a region.",
+      "variants": {
+        "A_conservative": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "off_leash"
+                },
+                "water_swim": {
+                  "rule": "off_leash"
+                },
+                "bluff": {
+                  "rule": "on_leash"
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                }
+              }
+            }
+          ],
+          "global_notes": "Dog-beach footprint: north of 22nd Street to Seapoint Avenue. Adjacent Huntington State Beach (south) prohibits dogs.",
+          "extraction_method": "manual_curator"
+        },
+        "B_rich": {
+          "regions": [
+            {
+              "name": "Beach footprint (north of 22nd Street to Seapoint Avenue)",
+              "sections": {
+                "sand": {
+                  "rule": "off_leash",
+                  "evidence": {
+                    "quote": "Beach sand is leash-optional",
+                    "source": "manual_curator"
+                  }
+                },
+                "water_swim": {
+                  "rule": "off_leash",
+                  "evidence": {
+                    "quote": "Off-leash from the sand to the ocean",
+                    "source": "manual_curator"
+                  }
+                },
+                "bluff": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "leashed... on the upper bluff",
+                    "source": "manual_curator"
+                  }
+                },
+                "parking_lot": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs must be leashed in the parking lot... until reaching the sand",
+                    "source": "manual_curator"
+                  }
+                }
+              }
+            }
+          ],
+          "global_notes": "Designated dog beach within Huntington City Beach. Footprint runs from north of 22nd Street to Seapoint Avenue. Sand-to-ocean is leash-optional; bluff and parking lot are leash-required. Adjacent Huntington State Beach (immediately south) prohibits dogs entirely.",
+          "extraction_method": "manual_curator"
+        }
+      }
+    },
+    {
+      "fid": 3407,
+      "name": "Garrapata State Beach",
+      "what_it_tests": "Multi-region beach with named geographic carve-outs. Conservative collapses to single region with sub_zones; rich splits into 3 named regions (Gate 19 area / rest of park / Soberanes Canyon Trail across Highway 1). This is the spec's most contested case.",
+      "variants": {
+        "A_conservative": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed",
+                  "sub_zones": [
+                    {
+                      "name": "Gate 19 beach (south end of park)",
+                      "rule": "on_leash"
+                    }
+                  ],
+                  "evidence": {
+                    "quote": "Dogs on leash are only allowed on the beach at Gate 19 (south end of park)",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=579"
+                  }
+                },
+                "water_swim": {
+                  "rule": "not_allowed"
+                },
+                "trails": {
+                  "rule": "not_allowed",
+                  "sub_zones": [
+                    {
+                      "name": "Trails leading to Gate 19 beach",
+                      "rule": "on_leash"
+                    },
+                    {
+                      "name": "Soberanes Canyon Trail (across Highway 1)",
+                      "rule": "not_allowed"
+                    }
+                  ],
+                  "evidence": {
+                    "quote": "trails leading to it [Gate 19]... not allowed in all other areas, including across Highway 1 in the Soberanes Canyon Trail area",
+                    "source": "park_url"
+                  }
+                },
+                "bluff": {
+                  "rule": "not_allowed"
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                }
+              }
+            }
+          ],
+          "global_notes": "Strictly enforced wildlife area. Dogs on leash only at Gate 19 (south end of park) and the trails leading to it. Prohibited elsewhere including the Soberanes Canyon Trail across Highway 1.",
+          "extraction_method": "manual_curator"
+        },
+        "B_rich": {
+          "regions": [
+            {
+              "name": "Gate 19 area (south end of park)",
+              "sections": {
+                "sand": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs on leash are only allowed on the beach at Gate 19 (south end of park)",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=579"
+                  }
+                },
+                "trails": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "and on the trails leading to it",
+                    "source": "park_url"
+                  }
+                }
+              }
+            },
+            {
+              "name": "Rest of park (north of Gate 19)",
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed"
+                },
+                "water_swim": {
+                  "rule": "not_allowed"
+                },
+                "trails": {
+                  "rule": "not_allowed"
+                },
+                "bluff": {
+                  "rule": "not_allowed"
+                }
+              }
+            },
+            {
+              "name": "Soberanes Canyon Trail (across Highway 1)",
+              "sections": {
+                "trails": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "across Highway 1 in the Soberanes Canyon Trail area",
+                    "source": "park_url"
+                  }
+                }
+              }
+            },
+            {
+              "name": null,
+              "sections": {
+                "parking_lot": {
+                  "rule": "on_leash"
+                }
+              }
+            }
+          ],
+          "global_notes": "California State Park, strictly enforced as a wildlife protection area. Dogs on leash only at Gate 19 (south end of park) and the trails leading to it. The rest of the park beach + bluff + connecting trails prohibit dogs. Soberanes Canyon Trail (across Highway 1, part of the same state park unit) also prohibits dogs.",
+          "extraction_method": "manual_curator"
+        }
+      }
+    },
+    {
+      "fid": 8673,
+      "name": "Carpinteria State Beach",
+      "what_it_tests": "Campground-bearing state park (CDPR developed-areas-only policy). Tests the campground section + the inference-from-beach-level-statements behavior: A omits sections the source text doesn't address, B includes them with rules inferred from CDPR's general policy.",
+      "variants": {
+        "A_conservative": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed"
+                },
+                "picnic_area": {
+                  "rule": "on_leash"
+                },
+                "campground": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs allowed in campground and day-use area. Dogs not allowed on beach.",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=599"
+                  }
+                }
+              }
+            }
+          ],
+          "global_notes": "California State Park with major campground. Leashed dogs allowed in campground and day-use areas; prohibited on the sand beach itself.",
+          "extraction_method": "manual_curator"
+        },
+        "B_rich": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs not allowed on beach",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=599"
+                  }
+                },
+                "water_swim": {
+                  "rule": "not_allowed"
+                },
+                "picnic_area": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs allowed in... day-use area",
+                    "source": "park_url"
+                  }
+                },
+                "parking_lot": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "must be leashed at all times in public areas per city ordinance",
+                    "source": "old_school_llm"
+                  }
+                },
+                "campground": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs allowed in campground",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=599"
+                  }
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                },
+                "trails": {
+                  "rule": "on_leash"
+                }
+              }
+            }
+          ],
+          "global_notes": "California State Park with full campground (~260 sites). CDPR developed-areas policy: leashed dogs allowed throughout campground + day-use areas + connecting paths; prohibited on the sand beach itself. Carpinteria city ordinance also requires leashing in all public areas.",
+          "extraction_method": "manual_curator"
+        }
+      }
+    },
+    {
+      "fid": 8356,
+      "name": "Mission Beach",
+      "what_it_tests": "Urban beach with the full amenity stack \u2014 boardwalk, playground, restrooms_showers \u2014 plus San Diego citywide time-window ordinance (prohibited 9am\u20136pm). Tests boardwalk section + more aggressive section coverage than Little CdM. Variant axis: A omits inferred amenity sections without explicit evidence; B includes them with the citywide time_window applied.",
+      "variants": {
+        "A_conservative": {
+          "regions": [
+            {
+              "name": null,
+              "time_windows": [
+                {
+                  "start": "09:00",
+                  "end": "18:00",
+                  "rule": "not_allowed"
+                }
+              ],
+              "evidence": {
+                "quote": "Dogs allowed on beach shoreline and adjacent park areas only during night hours and early morning until 9 a.m.; must be leashed during these hours",
+                "source": "research",
+                "source_url": "https://www.sandiego.gov/park-and-recreation/parks/dogs/bchdog"
+              },
+              "sections": {
+                "sand": {
+                  "rule": "on_leash"
+                },
+                "water_swim": {
+                  "rule": "on_leash"
+                },
+                "boardwalk": {
+                  "rule": "on_leash"
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                }
+              }
+            }
+          ],
+          "global_notes": "San Diego city beach. Citywide ordinance: leashed dogs only, prohibited 9:00\u201318:00 daily. The Mission Beach Boardwalk runs the full length. No off-leash zone \u2014 nearest are Dog Beach (Ocean Beach) and Fiesta Island.",
+          "extraction_method": "manual_curator"
+        },
+        "B_rich": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "on_leash",
+                  "time_windows": [
+                    {
+                      "start": "09:00",
+                      "end": "18:00",
+                      "rule": "not_allowed"
+                    }
+                  ],
+                  "evidence": {
+                    "quote": "Dogs allowed on Mission Beach shoreline and sand during designated hours (night and early morning until 9 a.m.)",
+                    "source": "research"
+                  }
+                },
+                "water_swim": {
+                  "rule": "on_leash",
+                  "time_windows": [
+                    {
+                      "start": "09:00",
+                      "end": "18:00",
+                      "rule": "not_allowed"
+                    }
+                  ]
+                },
+                "boardwalk": {
+                  "rule": "on_leash",
+                  "time_windows": [
+                    {
+                      "start": "09:00",
+                      "end": "18:00",
+                      "rule": "not_allowed"
+                    }
+                  ],
+                  "evidence": {
+                    "quote": "and adjacent park areas during those same times when leashed",
+                    "source": "research"
+                  }
+                },
+                "parking_lot": {
+                  "rule": "on_leash",
+                  "time_windows": [
+                    {
+                      "start": "09:00",
+                      "end": "18:00",
+                      "rule": "not_allowed"
+                    }
+                  ]
+                },
+                "playground": {
+                  "rule": "not_allowed"
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash",
+                  "time_windows": [
+                    {
+                      "start": "09:00",
+                      "end": "18:00",
+                      "rule": "not_allowed"
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "global_notes": "San Diego city beach with full urban amenity stack \u2014 boardwalk runs the entire length, multiple playgrounds (incl. Belmont Park), restrooms/showers throughout. Citywide ordinance: leashed dogs only, prohibited 09:00\u201318:00 daily on beach + adjacent park areas. Playgrounds prohibited to dogs 24/7 per city park rule. No off-leash zone \u2014 nearest off-leash options are Dog Beach (Ocean Beach) and Fiesta Island in Mission Bay.",
+          "extraction_method": "manual_curator"
+        }
+      }
+    },
+    {
+      "fid": 8740,
+      "name": "Wildcat Beach",
+      "what_it_tests": "NPS Point Reyes National Seashore \u2014 operator text describes MANY beaches with different rules; the LLM must disambiguate that THIS beach is one of the prohibited ones (Kehoe Beach Trail is the carve-out, Wildcat is not). Critical text-disambiguation test. Both variants prohibit; differ in evidence richness and global_notes context.",
+      "variants": {
+        "A_conservative": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed"
+                },
+                "water_swim": {
+                  "rule": "not_allowed"
+                },
+                "trails": {
+                  "rule": "not_allowed"
+                },
+                "bluff": {
+                  "rule": "not_allowed"
+                }
+              }
+            }
+          ],
+          "global_notes": "Remote backcountry beach within Point Reyes National Seashore. NPS prohibits dogs on Wildcat Beach. Park-wide policy permits dogs only at Kehoe Beach Trail and a few designated areas \u2014 Wildcat is not one of them.",
+          "extraction_method": "manual_curator"
+        },
+        "B_rich": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs prohibited: All other trails, beaches, and off-trail lands within Point Reyes National Seashore",
+                    "source": "research",
+                    "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+                  }
+                },
+                "water_swim": {
+                  "rule": "not_allowed"
+                },
+                "trails": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Most trails and beaches are closed to dogs",
+                    "source": "research"
+                  }
+                },
+                "bluff": {
+                  "rule": "not_allowed"
+                }
+              }
+            }
+          ],
+          "global_notes": "Remote backcountry beach within Point Reyes National Seashore (Marin County). Strictly prohibited to dogs under NPS Point Reyes Pet Policy. Park-wide, only Kehoe Beach Trail, Great Beach/North Beach (south of North Beach parking lot), Limantour Beach (southeast of parking lot), parking lots, and public roads permit leashed dogs \u2014 Wildcat is not on that list. The source text describes the whole park's rules; per-beach disambiguation requires recognizing that Wildcat falls into the 'all other beaches' prohibition bucket.",
+          "extraction_method": "manual_curator"
+        }
+      }
+    }
+  ]
+};
+
+// ============================================================================
+// Evidence pool — curated BEP quotes for the 8 anchors. In production this
+// comes from beach_enrichment_provenance for the loaded fid.
+// ============================================================================
+const EVIDENCE = {
+  "3407": [
+    {
+      "source": "park_url",
+      "confidence": 0.92,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Limited access for dogs on leash. Dogs must be on leash in allowed areas.\n\n\n\n[zones] Dogs on leash are only allowed on the beach at Gate 19 (south end of park) and on the trails leading to it. Dogs are not allowed in all other areas, including across Highway 1 in the Soberanes Canyon Trail area.",
+      "source_url": "https://www.parks.ca.gov/?page_id=579"
+    },
+    {
+      "source": "county_policy",
+      "confidence": 0.7,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Dogs welcome at all Monterey County Parks on leash \u22647ft; proof of rabies vaccination required and extra fees apply for camping.",
+      "source_url": "https://www.countyofmonterey.gov/government/departments-i-z/public-works-facilities-parks/county-parks/policies"
+    }
+  ],
+  "6202": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": "mixed",
+      "quote": "Dogs are prohibited from most of Coronado Beach but are welcome year-round at the designated Coronado Dog Beach at the north end. Dogs must be leashed until reaching the dog beach area.\n\n\n\n[zones] Dogs allowed: Dogs are permitted at Coronado Dog Beach (located at the north end of Coronado Municipal Beach, 200 Ocean Boulevard). Dogs may be off-leash in this designated dog beach area. | Dogs prohibited: Dogs are not allowed on the remainder of Coronado Beach (south of Dog Beach), including the area in front of Hotel del Coronado. | Off-leash area: Coronado Dog Beach (200 Ocean Boulevard) - dogs may be off-leash on the beach itself, but must be on-leash at all points before reaching the beach.",
+      "source_url": "https://www.coronado.ca.us/757/Dogs"
+    },
+    {
+      "source": "city_policy",
+      "confidence": 0.95,
+      "is_canonical": false,
+      "allowed": "no",
+      "leash": "on_leash",
+      "quote": "Dogs are banned from all of Coronado Beach except Dog Beach at the north end, where they are always permitted off-leash.\n\n[designated dog zones] Dog Beach (sandy area at north end of beach)\n\n[prohibited areas] any area of Coronado Beach except at Dog Beach",
+      "source_url": "https://www.coronado.ca.us/757/Dogs"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs are only allowed at the designated Dog Beach (North Beach) at the north end of Coronado Beach where an off-leash area exists. Dogs are prohibited on all other areas of Coronado Beach and other city beaches.\n\n\n\n[zones] Dog Beach (North Beach at north end of Coronado Beach in front of Sunset Park)",
+      "source_url": "https://www.coronado.ca.us/244/Coronado-Beach"
+    },
+    {
+      "source": "park_url",
+      "confidence": 0.72,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": null,
+      "quote": "Dogs are allowed in the northern section of the beach where they can freely roam in the sea and sand\n\n\n\n[zones] northern section of the beach",
+      "source_url": "https://www.sandiego.com/beaches/coronado-beach"
+    },
+    {
+      "source": "json_explode",
+      "confidence": 0.7,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "mixed_by_zone",
+      "quote": "(no prose; structured claim only \u2014 allowed=yes, leash=mixed_by_zone)",
+      "source_url": null
+    }
+  ],
+  "8339": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "yes",
+      "leash": "required",
+      "quote": "Dogs are permitted on Corona del Mar State Beach but only during off-peak hours (before 10am and after 4:30pm) and must be leashed. Dogs are prohibited during daytime hours when beach crowds are higher. Time restrictions: Dogs allowed before 10:00 am and after 4:30 pm only\n\n\n\n[zones] Dogs allowed: Beach sand and beachfront areas | Dogs prohibited: Beach and beachfront sidewalk between 10:00 am and 4:30 pm",
+      "source_url": "https://visitnewportbeach.com/beaches-and-parks/corona-del-mar-state-beach/"
+    },
+    {
+      "source": "city_policy",
+      "confidence": 0.95,
+      "is_canonical": false,
+      "allowed": "no",
+      "leash": "on_leash",
+      "quote": "Dogs are banned from all city beaches 10am\u20134:30pm; must be leashed at all times.\n\n[prohibited areas] any city beaches between 10am-4:30pm",
+      "source_url": "https://www.newportbeachca.gov/government/departments/recreation-senior-services/marine-protection-tidepools"
+    },
+    {
+      "source": "park_url",
+      "confidence": 0.92,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": null,
+      "quote": "Dogs are allowed before 10 a.m. and after 4:30 p.m. Park unit operated by City of Newport Beach.\n\n\n\n[zones] Dogs not allowed on the beach or any beachfront sidewalk between 10 a.m. and 4:30 p.m., including ocean front beaches and bay front beaches",
+      "source_url": "http://www.parks.ca.gov/default.asp?page_id=652"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Leashed dogs are welcome at Newport Beach's sandy areas during off-peak morning and evening hours. A dedicated off-leash dog park is available at 1521 Avocado Ave with amenities including water fountains and ocean views.\n\n\n\n[zones] Leashed dogs allowed at beaches during off-peak hours",
+      "source_url": "https://visitnewportbeach.com/wp-content/uploads/2015/11/NB_Pets_14_v5.pdf"
+    }
+  ],
+  "8356": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "yes",
+      "leash": "required",
+      "quote": "Dogs are permitted on Mission Beach during early morning and nighttime hours while leashed. Mission Beach is dog-friendly but does not have a designated off-leash area; the nearest off-leash options are Dog Beach at Ocean Beach and Fiesta Island. Time restrictions: Dogs allowed on beach shoreline and adjacent park areas only during night hours and early morning until 9 a.m.; must be leashed during these hours.\n\n\n\n[zones] Dogs allowed: Dogs are allowed on Mission Beach shoreline and sand during designated hours (night and early morning until 9 a.m.), and in adjacent park areas during those same times when leashed. | Dogs prohibited: Dogs are restricted at most other beach and bay locations except for designated off-leash areas (Dog Beach at Ocean Beach and Fiesta Island in Mission Bay). | Off-leash area: Mission Beach itself does not have a designated off-leash area. Off-leash zones in San Diego are limited to Dog Beach (Ocean Beach) and Fiesta Island in Mission Bay Park.",
+      "source_url": "https://www.sandiego.gov/park-and-recreation/parks/dogs/bchdog"
+    },
+    {
+      "source": "park_url",
+      "confidence": 0.92,
+      "is_canonical": false,
+      "allowed": "no",
+      "leash": null,
+      "quote": "(no prose; structured claim only \u2014 allowed=no)",
+      "source_url": "https://www.sandiego.gov/lifeguards/beaches/mb"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "The City of San Diego designates Ocean Beach Dog Beach as a 24-hour off-leash area. At other city beaches (Pacific Beach, Mission Beach, La Jolla Shores), dogs are allowed only on leash during morning and evening hours, with seasonal time variations.\n\n\n\n[zones] Ocean Beach (Dog Beach), Fiesta Island, Pacific Beach, Mission Beach, La Jolla Shores",
+      "source_url": "https://www.sandiego.gov/park-and-recreation/parks/dogs/bchdog"
+    },
+    {
+      "source": "unified_v1",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "no",
+      "leash": null,
+      "quote": "(no prose; structured claim only \u2014 allowed=no)",
+      "source_url": null
+    },
+    {
+      "source": "json_explode",
+      "confidence": 0.7,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": null,
+      "quote": "(no prose; structured claim only \u2014 allowed=yes)",
+      "source_url": null
+    },
+    {
+      "source": "city_policy",
+      "confidence": 0.36,
+      "is_canonical": false,
+      "allowed": "no",
+      "leash": "off_leash",
+      "quote": "Dogs are allowed off-leash at Dog Beach and Fiesta Island (4am\u201310pm); all other San Diego beach/bay areas restrict dogs.",
+      "source_url": "https://www.sandiego.gov/park-and-recreation/parks/dogs/bchdog"
+    }
+  ],
+  "8673": [
+    {
+      "source": "park_url",
+      "confidence": 0.92,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": null,
+      "quote": "[zones] Dogs allowed in campground and day-use area. Dogs not allowed on beach.",
+      "source_url": "https://www.parks.ca.gov/?page_id=599"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs are prohibited on Carpinteria City Beach between Linden and Ash Avenues. If you bring a dog to Carpinteria, it must be leashed at all times in public areas per city ordinance. No designated off-leash dog beach exists within city limits.\n\n\n\n[zones] Loon Point Beach (nearby; outside main city beach zone)",
+      "source_url": "https://carpinteriaca.gov/city-hall/community-development/animal-care-and-control/special-dog-regulations/"
+    },
+    {
+      "source": "unified_v1",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": null,
+      "quote": "(no prose; structured claim only \u2014 allowed=yes)",
+      "source_url": null
+    },
+    {
+      "source": "json_explode",
+      "confidence": 0.7,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "unclear",
+      "quote": "(no prose; structured claim only \u2014 allowed=yes, leash=unclear)",
+      "source_url": null
+    }
+  ],
+  "8740": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs are permitted only in specific areas at Point Reyes National Seashore and must be leashed. Park rangers enforce these rules strictly. Most trails and beaches are closed to dogs, with only Kehoe Beach Trail and limited beach sections allowed year-round. Seasonal: Sections of beaches or trails may temporarily be closed to dogs due to unexpected circumstances (such as wildlife nesting)\n\n\n\n[zones] Dogs allowed: Kehoe Beach Trail and certain beach sections (including Great Beach/North Beach area from North Beach parking lot heading south); parking lots and public roads | Dogs prohibited: All other trails, beaches, and off-trail lands within Point Reyes National Seashore and the Northern District of Golden Gate National Recreation Area",
+      "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Leashed dogs are permitted only in specific areas including certain beaches, trails, and parking lots. Park rangers enforce these regulations strictly to protect wildlife and other visitors. Check current maps before visiting as beach and trail access for dogs may change seasonally.\n\n\n\n[zones] Kehoe Beach Trail, North Beach (from North Beach parking lot heading south), Limantour Beach (southeast of parking lot), Bear Valley Picnic Area, most parking lots, parts of certain trails",
+      "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+    },
+    {
+      "source": "park_url",
+      "confidence": 0.65,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Pets must be on a 6-foot or shorter leash at all times\n\n\n\n[zones] Pets are welcome on only a few trails and beaches at Point Reyes",
+      "source_url": "http://www.nps.gov/pore/index.htm"
+    }
+  ],
+  "9716": [
+    {
+      "source": "city_policy",
+      "confidence": 0.95,
+      "is_canonical": true,
+      "allowed": "yes",
+      "leash": "off_leash",
+      "quote": "Dogs are allowed off-leash at Dog Beach and Fiesta Island (4am\u201310pm); all other San Diego beach/bay areas restrict dogs.",
+      "source_url": "https://www.sandiego.gov/park-and-recreation/parks/dogs/bchdog"
+    },
+    {
+      "source": "unified_v1",
+      "confidence": 0.9,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "off_leash",
+      "quote": "(no prose; structured claim only \u2014 allowed=yes, leash=off_leash)",
+      "source_url": null
+    }
+  ],
+  "9717": [
+    {
+      "source": "manual",
+      "confidence": 1.0,
+      "is_canonical": true,
+      "allowed": "yes",
+      "leash": "mixed",
+      "quote": "[zones] Beach sand is leash-optional. Dogs must be leashed in the parking lot, on the upper bluff, and until reaching the sand. Off-leash from the sand to the ocean. Adjacent Huntington State Beach (south) prohibits dogs.",
+      "source_url": null
+    },
+    {
+      "source": "city_policy",
+      "confidence": 0.66,
+      "is_canonical": false,
+      "allowed": "no",
+      "leash": "on_leash",
+      "quote": "Dogs prohibited on most of Huntington Beach; leashed dogs (\u22646 ft) allowed only in the area north of 22nd Street to Seapoint Avenue.\n\n[designated dog zones] Water Activity Zone north of 22nd Street to Seapoint Avenue (leash \u22646 ft)\n\n[prohibited areas] the Pier or on or upon that Beach or Adjacent Beach Area bounded by the Beach Service Road and the Pacific Ocean, including the Water Activity Zone",
+      "source_url": "https://www.huntingtonbeachca.gov/departments/parks_recreation/parks_facilities/huntington_beach_park_rules.php"
+    }
+  ]
+};
+
+// ============================================================================
+// Section vocab + icons + status colors
+// ============================================================================
+const SECTION_VOCAB = [
+  'sand', 'water_swim', 'trails', 'boardwalk', 'bluff', 'dunes',
+  'picnic_area', 'parking_lot', 'campground', 'playground',
+  'restrooms_showers', 'tide_pools'
+];
+const SECTION_ICON = {
+  sand: '🏖', water_swim: '🌊', trails: '🥾', boardwalk: '🛹',
+  bluff: '⛰', dunes: '🏵', picnic_area: '🧺', parking_lot: '🅿',
+  campground: '⛺', playground: '🛝', restrooms_showers: '🚿',
+  tide_pools: '🪨'
+};
+const SECTION_LABEL = {
+  sand: 'sand', water_swim: 'water/swim', trails: 'trails',
+  boardwalk: 'boardwalk', bluff: 'bluff', dunes: 'dunes',
+  picnic_area: 'picnic area', parking_lot: 'parking lot',
+  campground: 'campground', playground: 'playground',
+  restrooms_showers: 'restrooms', tide_pools: 'tide pools'
+};
+const RULE_CYCLE = ['off_leash', 'on_leash', 'not_allowed', 'unknown'];
+
+// ============================================================================
+// State
+// ============================================================================
+let currentFid = null;
+let currentVariant = 'A_conservative';
+let currentDoc = null;  // mutable working copy of the zone_rules jsonb
+let selectedSection = null;  // {regionIdx, section} — for [pin to] target
+
+// ============================================================================
+// Bootstrap
+// ============================================================================
+function init() {
+  const picker = document.getElementById('beach-picker');
+  FIXTURE.anchors.forEach(a => {
+    const opt = document.createElement('option');
+    opt.value = a.fid;
+    opt.textContent = `fid=${a.fid} · ${a.name}`;
+    picker.appendChild(opt);
+  });
+  picker.addEventListener('change', () => loadBeach(parseInt(picker.value)));
+
+  document.querySelectorAll('.variant-toggle button.variant').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.variant-toggle button.variant').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      currentVariant = b.dataset.variant;
+      loadBeach(currentFid);
+    });
+  });
+
+  document.getElementById('add-region').addEventListener('click', addRegion);
+  document.getElementById('save-btn').addEventListener('click', save);
+  document.getElementById('global-notes').addEventListener('input', e => {
+    currentDoc.global_notes = e.target.value;
+    renderJson();
+  });
+
+  loadBeach(FIXTURE.anchors[0].fid);
+}
+
+function loadBeach(fid) {
+  currentFid = fid;
+  const anchor = FIXTURE.anchors.find(a => a.fid === fid);
+  document.getElementById('beach-picker').value = fid;
+  // deep clone the variant doc so edits don't mutate the fixture
+  currentDoc = JSON.parse(JSON.stringify(anchor.variants[currentVariant]));
+  selectedSection = null;
+  renderAll();
+}
+
+// ============================================================================
+// Render
+// ============================================================================
+function renderAll() {
+  renderRegions();
+  renderEvidence();
+  renderJson();
+  renderDisagreement();
+  document.getElementById('global-notes').value = currentDoc.global_notes || '';
+}
+
+function renderRegions() {
+  const root = document.getElementById('regions');
+  root.innerHTML = '';
+  currentDoc.regions.forEach((region, regionIdx) => {
+    root.appendChild(renderRegion(region, regionIdx));
+  });
+}
+
+function renderRegion(region, regionIdx) {
+  const card = document.createElement('div');
+  card.className = 'region';
+
+  const head = document.createElement('div');
+  head.className = 'region-head';
+  const nameDiv = document.createElement('div');
+  nameDiv.className = 'region-name' + (region.name ? '' : ' unnamed');
+  nameDiv.textContent = region.name || '(default region — whole beach)';
+  nameDiv.style.cursor = 'pointer';
+  nameDiv.title = 'click to rename';
+  nameDiv.addEventListener('click', () => {
+    const nn = prompt('Region name (blank for default):', region.name || '');
+    if (nn !== null) {
+      region.name = nn.trim() || null;
+      renderAll();
+    }
+  });
+  head.appendChild(nameDiv);
+
+  const removeBtn = document.createElement('span');
+  removeBtn.textContent = '✕';
+  removeBtn.style.cssText = 'cursor:pointer; color:var(--text-muted); font-size:13px;';
+  removeBtn.title = 'remove region';
+  removeBtn.addEventListener('click', () => {
+    currentDoc.regions.splice(regionIdx, 1);
+    if (currentDoc.regions.length === 0) {
+      currentDoc.regions.push({ name: null, sections: {} });
+    }
+    renderAll();
+  });
+  head.appendChild(removeBtn);
+  card.appendChild(head);
+
+  // Region-level modifiers
+  if (region.time_windows || region.seasonal || region.evidence) {
+    const mods = document.createElement('div');
+    mods.className = 'region-mods';
+    if (region.time_windows) {
+      region.time_windows.forEach(tw => {
+        const m = document.createElement('span');
+        m.className = 'mod';
+        m.textContent = `⏰ ${tw.start}-${tw.end} ${tw.rule}`;
+        mods.appendChild(m);
+      });
+    }
+    if (region.seasonal) {
+      region.seasonal.forEach(s => {
+        const m = document.createElement('span');
+        m.className = 'mod';
+        m.textContent = `🟠 ${s.months}${s.reason ? ' — ' + s.reason : ''}`;
+        mods.appendChild(m);
+      });
+    }
+    if (region.evidence) {
+      const m = document.createElement('span');
+      m.className = 'mod';
+      m.style.background = 'var(--pin-bg)';
+      m.style.borderColor = 'var(--pin-border)';
+      m.textContent = `📌 region-level evidence pinned`;
+      m.title = region.evidence.quote;
+      mods.appendChild(m);
+    }
+    card.appendChild(mods);
+  }
+
+  // Sections
+  const sections = region.sections || {};
+  Object.keys(sections).forEach(sec => {
+    card.appendChild(renderSection(regionIdx, sec, sections[sec]));
+  });
+
+  // Add-section dropdown
+  const addRow = document.createElement('div');
+  const addSel = document.createElement('select');
+  addSel.style.cssText = 'font-size: 12px; padding: 3px 6px; margin-right: 6px;';
+  const blank = document.createElement('option');
+  blank.value = ''; blank.textContent = '+ add section…';
+  addSel.appendChild(blank);
+  SECTION_VOCAB.filter(s => !sections[s]).forEach(s => {
+    const o = document.createElement('option');
+    o.value = s; o.textContent = `${SECTION_ICON[s]} ${SECTION_LABEL[s]}`;
+    addSel.appendChild(o);
+  });
+  addSel.addEventListener('change', () => {
+    if (addSel.value) {
+      sections[addSel.value] = { rule: 'unknown' };
+      renderAll();
+    }
+  });
+  addRow.appendChild(addSel);
+  card.appendChild(addRow);
+
+  return card;
+}
+
+function renderSection(regionIdx, sec, secObj) {
+  const row = document.createElement('div');
+  row.className = 'section-row';
+  if (selectedSection &&
+      selectedSection.regionIdx === regionIdx &&
+      selectedSection.section === sec) {
+    row.classList.add('selected');
+  }
+  row.dataset.regionIdx = regionIdx;
+  row.dataset.section = sec;
+  row.addEventListener('click', e => {
+    if (e.target.closest('.section-rule')) return;
+    selectedSection = { regionIdx, section: sec };
+    renderRegions();
+  });
+
+  // icon
+  const ic = document.createElement('div');
+  ic.className = 'section-icon';
+  ic.textContent = SECTION_ICON[sec] || '?';
+  row.appendChild(ic);
+
+  // name
+  const nm = document.createElement('div');
+  nm.className = 'section-name';
+  nm.textContent = SECTION_LABEL[sec] || sec;
+  row.appendChild(nm);
+
+  // rule chip (click to cycle)
+  const rule = document.createElement('div');
+  rule.className = `section-rule rule-${secObj.rule || 'unknown'}`;
+  rule.textContent = secObj.rule || 'unknown';
+  rule.title = 'click to cycle rule';
+  rule.addEventListener('click', e => {
+    e.stopPropagation();
+    const idx = RULE_CYCLE.indexOf(secObj.rule);
+    secObj.rule = RULE_CYCLE[(idx + 1) % RULE_CYCLE.length];
+    renderAll();
+  });
+  row.appendChild(rule);
+
+  // extras
+  const extras = document.createElement('div');
+  extras.className = 'section-extras';
+  if (secObj.time_windows) {
+    secObj.time_windows.forEach(tw => {
+      const p = document.createElement('span');
+      p.className = 'pill';
+      p.textContent = `⏰ ${tw.start}-${tw.end} ${tw.rule}`;
+      extras.appendChild(p);
+    });
+  }
+  if (secObj.seasonal) {
+    secObj.seasonal.forEach(s => {
+      const p = document.createElement('span');
+      p.className = 'pill';
+      p.textContent = `🟠 ${s.months}`;
+      extras.appendChild(p);
+    });
+  }
+  if (secObj.sub_zones) {
+    secObj.sub_zones.forEach(sz => {
+      const p = document.createElement('span');
+      p.className = 'pill';
+      p.textContent = `📍 ${sz.name} (${sz.rule})`;
+      extras.appendChild(p);
+    });
+  }
+  if (secObj.evidence) {
+    const p = document.createElement('span');
+    p.className = 'pill evidence';
+    p.textContent = `📌 evidence pinned`;
+    p.title = secObj.evidence.quote;
+    extras.appendChild(p);
+  }
+  // remove section
+  const rm = document.createElement('span');
+  rm.textContent = ' ✕';
+  rm.style.cssText = 'cursor: pointer; color: var(--text-muted); margin-left: 4px;';
+  rm.title = 'remove section';
+  rm.addEventListener('click', e => {
+    e.stopPropagation();
+    delete currentDoc.regions[regionIdx].sections[sec];
+    renderAll();
+  });
+  extras.appendChild(rm);
+  row.appendChild(extras);
+
+  return row;
+}
+
+function renderEvidence() {
+  const root = document.getElementById('evidence-cards');
+  root.innerHTML = '';
+  const evs = EVIDENCE[currentFid] || [];
+  if (evs.length === 0) {
+    root.innerHTML = '<div class="footnote">No evidence cards seeded for this fid.</div>';
+    return;
+  }
+  evs.forEach((ev, i) => {
+    root.appendChild(renderEvidenceCard(ev, i));
+  });
+}
+
+function renderEvidenceCard(ev, i) {
+  const card = document.createElement('div');
+  card.className = 'evidence-card';
+  if (ev.is_canonical) card.style.borderColor = 'var(--accent)';
+
+  const head = document.createElement('div');
+  head.className = 'evidence-head';
+  const src = document.createElement('span');
+  src.className = 'evidence-source';
+  src.textContent = `📄 ${ev.source}`;
+  if (ev.is_canonical) {
+    src.textContent += '  ★ canonical';
+    src.style.color = 'var(--accent)';
+  }
+  head.appendChild(src);
+  const conf = document.createElement('span');
+  conf.className = 'evidence-conf';
+  conf.textContent = `conf ${ev.confidence.toFixed(2)}`;
+  head.appendChild(conf);
+  card.appendChild(head);
+
+  // Structured claims chips
+  const claims = document.createElement('div');
+  claims.style.cssText = 'margin-bottom: 6px; font-size: 11px;';
+  const chip = txt => {
+    const c = document.createElement('span');
+    c.style.cssText = 'display:inline-block; padding:1px 6px; margin-right:4px; background:var(--gray-bg); border-radius:3px; border:1px solid var(--border);';
+    c.textContent = txt;
+    return c;
+  };
+  if (ev.allowed) claims.appendChild(chip(`allowed: ${ev.allowed}`));
+  if (ev.leash)   claims.appendChild(chip(`leash: ${ev.leash}`));
+  if (claims.children.length > 0) card.appendChild(claims);
+
+  const q = document.createElement('div');
+  q.className = 'evidence-quote';
+  q.textContent = `"${ev.quote}"`;
+  card.appendChild(q);
+
+  if (ev.source_url) {
+    const u = document.createElement('div');
+    u.className = 'evidence-url';
+    u.textContent = ev.source_url;
+    card.appendChild(u);
+  }
+
+  // Pin-to selector
+  const pinRow = document.createElement('div');
+  const pinBtn = document.createElement('button');
+  pinBtn.className = 'pin-btn';
+  pinBtn.textContent = '📌 pin to: ';
+  const pinSel = document.createElement('select');
+  // Populate with current sections
+  const opts = [{value:'', label:'…select section'}];
+  currentDoc.regions.forEach((r, ri) => {
+    Object.keys(r.sections || {}).forEach(s => {
+      const lbl = (r.name ? `${r.name} · ` : '') + SECTION_LABEL[s];
+      opts.push({ value: `${ri}.${s}`, label: lbl });
+    });
+    opts.push({ value: `${ri}.__region__`,
+                label: (r.name ? `${r.name}` : '(default region)') + ' (region-level)' });
+  });
+  opts.forEach(o => {
+    const oel = document.createElement('option');
+    oel.value = o.value; oel.textContent = o.label;
+    pinSel.appendChild(oel);
+  });
+  pinBtn.appendChild(pinSel);
+  pinSel.addEventListener('click', e => e.stopPropagation());
+  pinSel.addEventListener('change', () => {
+    if (!pinSel.value) return;
+    const [ri, key] = pinSel.value.split('.');
+    const evidence = {
+      quote: ev.quote, source: ev.source, source_url: ev.source_url
+    };
+    if (key === '__region__') {
+      currentDoc.regions[parseInt(ri)].evidence = evidence;
+    } else {
+      currentDoc.regions[parseInt(ri)].sections[key].evidence = evidence;
+    }
+    renderAll();
+  });
+  pinRow.appendChild(pinBtn);
+  card.appendChild(pinRow);
+
+  return card;
+}
+
+function renderJson() {
+  document.getElementById('json-output').textContent =
+    JSON.stringify(currentDoc, null, 2);
+}
+
+function renderDisagreement() {
+  // Mock: surface a disagreement flag if we have ≥2 evidence sources
+  // claiming different "allowed"-derived rules. Simplistic for the mock.
+  const evs = EVIDENCE[currentFid] || [];
+  const allowedClaims = new Set(evs.filter(e => e.allowed).map(e => e.allowed));
+  document.getElementById('disagreement').classList.toggle(
+    'show', allowedClaims.size >= 2
+  );
+}
+
+function addRegion() {
+  const name = prompt('Region name (blank for default):', '');
+  if (name === null) return;
+  currentDoc.regions.push({
+    name: name.trim() || null,
+    sections: {}
+  });
+  renderAll();
+}
+
+function save() {
+  const key = `zone_rules_draft__${currentFid}`;
+  localStorage.setItem(key, JSON.stringify(currentDoc));
+  alert(`Saved to localStorage as "${key}".\n\nIn production this would POST to admin-update-beach-dog-policy with the zone_rules jsonb.`);
+}
+
+init();
+</script>
+</body>
+</html>

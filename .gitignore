@@ -30,3 +30,6 @@ __pycache__/
 share/
 .venv-pipeline/
 .tmp_dagster_home_*/
+
+# Throwaway scratch — exploratory artifacts, tile caches, one-off CSVs
+tmp/

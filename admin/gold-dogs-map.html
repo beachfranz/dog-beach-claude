@@ -1,0 +1,744 @@
+<!doctype html>
+<!--
+  admin/gold-dogs-map.html — Map of every beach in beaches_gold, colored by
+  beach_dog_policy.dogs_allowed. Smart tooltip shows status + leash + off-leash
+  flag + scoreability + jump-links to detail.html and zone-rules-editor.html.
+
+  Anon key only (no admin secret needed). Data: beaches_gold + beach_dog_policy
+  via PostgREST. Map: Leaflet + tile.openstreetmap.fr.
+
+  open at: file:///C:/Users/beach/Documents/dog-beach-claude/admin/gold-dogs-map.html
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gold beaches · dogs_allowed map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  html, body { margin: 0; padding: 0; height: 100%;
+               font-family: 'DM Sans', system-ui, sans-serif; }
+  #map { position: absolute; inset: 0; }
+
+  .panel {
+    position: absolute; z-index: 1000;
+    background: #ffffff; border: 1px solid #d1dde8;
+    border-radius: 8px; padding: 10px 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+    font-size: 13px; color: #0f2742;
+  }
+  .filter-panel { top: 12px; right: 12px; min-width: 220px; }
+  .filter-panel h1 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
+  .filter-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 0; cursor: pointer; user-select: none;
+  }
+  .filter-row input { margin: 0; }
+  .swatch {
+    width: 12px; height: 12px; border-radius: 50%;
+    flex-shrink: 0; box-shadow: 0 0 0 1.5px #ffffff, 0 0 0 2.5px rgba(0,0,0,0.6);
+  }
+  .filter-label { flex: 1; }
+  .filter-count { color: #64748b; font-variant-numeric: tabular-nums; font-size: 12px; }
+  .filter-status { margin-top: 6px; padding-top: 6px; border-top: 1px solid #e2e8f0;
+                   color: #64748b; font-size: 11px; }
+
+  .legend-panel { bottom: 16px; right: 12px; font-size: 11px; line-height: 1.5; }
+  .legend-panel h2 { font-size: 11px; font-weight: 600; margin: 0 0 4px;
+                     letter-spacing: 0.04em; text-transform: uppercase; color: #475569; }
+  .legend-row { display: flex; align-items: center; gap: 6px; }
+
+  .title-panel { top: 12px; left: 12px; min-width: 260px; }
+  .title-panel h1 { font-size: 14px; margin: 0 0 2px; }
+  .title-panel .sub { font-size: 11px; color: #64748b; }
+
+  /* Search box */
+  .search-wrap { margin-top: 8px; position: relative; }
+  .search-wrap input {
+    width: 100%; box-sizing: border-box;
+    padding: 6px 24px 6px 8px; font-size: 12px;
+    border: 1px solid #cbd5e1; border-radius: 4px;
+    font-family: inherit; color: #0f172a;
+  }
+  .search-wrap input:focus { outline: none; border-color: #2563eb; }
+  .search-clear {
+    position: absolute; top: 50%; right: 4px; transform: translateY(-50%);
+    background: none; border: none; color: #94a3b8; font-size: 14px;
+    cursor: pointer; padding: 0 4px; line-height: 1;
+  }
+  .search-clear:hover { color: #475569; }
+  .search-results {
+    position: absolute; top: 100%; left: 0; right: 0; margin-top: 2px;
+    background: #fff; border: 1px solid #cbd5e1; border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+    max-height: 280px; overflow-y: auto; display: none; z-index: 1100;
+  }
+  .search-results.open { display: block; }
+  .search-result {
+    padding: 6px 10px; cursor: pointer; font-size: 12px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .search-result:last-child { border-bottom: none; }
+  .search-result:hover, .search-result.active { background: #f1f5f9; }
+  .search-result .sr-name { font-weight: 600; color: #0f2742; }
+  .search-result .sr-county { font-size: 11px; color: #334155; margin-top: 1px; }
+  .search-result .sr-meta { font-size: 10px; color: #64748b; margin-top: 1px; }
+  .search-result mark { background: #fef08a; color: inherit; padding: 0; }
+  .search-empty { padding: 8px 10px; font-size: 11px; color: #94a3b8; }
+
+  /* Leaflet popup */
+  .leaflet-popup-content { margin: 10px 12px; font-size: 12px; line-height: 1.45;
+                            color: #0f172a; min-width: 220px; }
+  .popup-name { font-weight: 700; font-size: 14px; margin-bottom: 4px; color: #0f2742; }
+  .popup-fid { font-size: 10px; color: #94a3b8; font-family: monospace; }
+  .popup-row { margin-top: 4px; }
+  .popup-label { color: #64748b; font-size: 11px; text-transform: uppercase;
+                 letter-spacing: 0.04em; }
+  .popup-badge { display: inline-block; padding: 1px 7px; border-radius: 3px;
+                 font-weight: 600; font-size: 11px; }
+  .popup-actions { margin-top: 8px; padding-top: 8px;
+                   border-top: 1px solid #e2e8f0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .popup-actions a { color: #2563eb; text-decoration: none; font-size: 11px; }
+  .popup-actions a:hover { text-decoration: underline; }
+
+  /* Big, obvious polygon toggle on its own row */
+  .popup-poly-row {
+    margin-top: 8px; padding-top: 8px;
+    border-top: 1px solid #e2e8f0;
+    display: flex; align-items: center;
+  }
+  .popup-poly-row button.poly-toggle {
+    flex: 1; padding: 6px 10px;
+    background: #eff6ff; border: 1.5px solid #2563eb; border-radius: 5px;
+    color: #1d4ed8; font-size: 12px; font-weight: 600;
+    cursor: pointer; font-family: inherit;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .popup-poly-row button.poly-toggle:hover { background: #dbeafe; }
+  .popup-poly-row button.poly-toggle.on {
+    background: #f0fdf4; border-color: #15803d; color: #166534;
+  }
+  .popup-poly-row button.poly-toggle.on:hover { background: #dcfce7; }
+
+  .badge-yes        { background: #dcfce7; color: #166534; }
+  .badge-no         { background: #fee2e2; color: #991b1b; }
+  .badge-restricted { background: #fef3c7; color: #854d0e; }
+  .badge-seasonal   { background: #ffedd5; color: #9a3412; }
+  .badge-mixed      { background: #ede9fe; color: #5b21b6; }
+  .badge-unknown    { background: #f1f5f9; color: #475569; }
+  .badge-scoreable  { background: #dbeafe; color: #1e40af; }
+  .badge-offleash   { background: #d1fae5; color: #065f46; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="panel title-panel">
+  <h1>🐕 Gold beaches — dogs_allowed</h1>
+  <div class="sub">Click any marker for details · <span id="visible-count">…</span></div>
+  <div class="search-wrap">
+    <input type="text" id="search-input" placeholder="Search beach name… (Esc to clear)" autocomplete="off" />
+    <button type="button" class="search-clear" id="search-clear" title="Clear" style="display:none;">✕</button>
+    <div class="search-results" id="search-results"></div>
+  </div>
+</div>
+
+<div class="panel filter-panel">
+  <h1>Filter</h1>
+  <div id="status-filters"></div>
+  <div class="filter-row" style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #e2e8f0;">
+    <input type="checkbox" id="scoreable-only" />
+    <span class="filter-label">Scoreable beaches only</span>
+    <span class="filter-count" id="scoreable-count"></span>
+  </div>
+  <div class="filter-row">
+    <input type="checkbox" id="offleash-only" />
+    <span class="filter-label">Off-leash flag only</span>
+    <span class="filter-count" id="offleash-count"></span>
+  </div>
+  <div class="filter-row" style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #e2e8f0;">
+    <input type="checkbox" id="show-polygons" />
+    <span class="filter-label">Show beach polygons</span>
+  </div>
+  <div class="filter-row">
+    <input type="checkbox" id="show-policy-zones" checked />
+    <span class="filter-label">Show dog-policy zones overlay</span>
+    <span class="filter-count" id="policy-zone-count"></span>
+  </div>
+  <div class="filter-status" id="filter-status">Loading…</div>
+</div>
+
+<div class="panel legend-panel">
+  <h2>dogs_allowed</h2>
+  <div class="legend-row"><span class="swatch" style="background:#15803d"></span>yes</div>
+  <div class="legend-row"><span class="swatch" style="background:#fbbf24"></span>restricted</div>
+  <div class="legend-row"><span class="swatch" style="background:#fb923c"></span>seasonal</div>
+  <div class="legend-row"><span class="swatch" style="background:#a78bfa"></span>mixed</div>
+  <div class="legend-row"><span class="swatch" style="background:#ef4444"></span>no</div>
+  <div class="legend-row"><span class="swatch" style="background:#94a3b8"></span>unknown / null</div>
+  <h2 style="margin-top:6px;">polygon source</h2>
+  <div class="legend-row" style="font-size:10px;">
+    <span style="display:inline-block; width:14px; height:6px; background:#94a3b8; opacity:0.35; margin-right:4px;"></span>osm (true beach)
+  </div>
+  <div class="legend-row" style="font-size:10px;">
+    <span style="display:inline-block; width:14px; height:6px; background:#94a3b8; opacity:0.15; border:1px dashed #475569; margin-right:4px;"></span>cpad (managing unit)
+  </div>
+  <div class="legend-row" style="font-size:10px;">
+    <span style="display:inline-block; width:14px; height:6px; background:#94a3b8; opacity:0.08; border:1px dashed #475569; margin-right:4px;"></span>buffer (250m)
+  </div>
+  <h2 style="margin-top:6px;">policy zones</h2>
+  <div class="legend-row" style="font-size:10px;">
+    <span style="display:inline-block; width:14px; height:6px; background:#15803d; opacity:0.4; border:1px dashed #15803d; margin-right:4px;"></span>pet-allowed carve-out
+  </div>
+  <div class="legend-row" style="font-size:10px;">
+    <span style="display:inline-block; width:14px; height:6px; background:#b91c1c; opacity:0.4; border:1px dashed #b91c1c; margin-right:4px;"></span>pet-prohibited zone
+  </div>
+  <div class="legend-row" style="font-size:10px;">
+    <span style="display:inline-block; width:14px; height:6px; background:#d97706; opacity:0.4; border:1px dashed #d97706; margin-right:4px;"></span>wildlife critical habitat
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+const STATUS_COLORS = {
+  yes:        '#15803d',
+  restricted: '#fbbf24',
+  seasonal:   '#fb923c',
+  mixed:      '#a78bfa',
+  no:         '#ef4444',
+  unknown:    '#94a3b8',
+};
+const STATUS_ORDER = ['yes', 'restricted', 'seasonal', 'mixed', 'no', 'unknown'];
+
+// State
+const allBeaches = [];          // merged rows: {fid, name, lat, lon, county, state, is_scoreable, dogs_allowed, leash_policy, off_leash_flag, dogs_allowed_areas}
+const markers = [];             // {beach, marker}
+const policyZoneLayers = [];    // L.geoJSON layers for dog_policy_zones
+let map;
+const filterState = {
+  status: new Set(STATUS_ORDER), // all on by default
+  scoreable_only: false,
+  offleash_only: false,
+  show_polygons: false,          // beach_polygons overlay OFF by default
+                                 // (so basemap is visible — easier for sand-edge experiments)
+  show_policy_zones: true,       // dog_policy_zones overlay on by default
+  // Per-beach polygon overrides: when global show_polygons=false, polygons
+  // for fids in this set still render. Click "Show polygon" in a beach popup
+  // to add/remove. Persists across other filter changes.
+  individually_on: new Set(),
+};
+
+const ZONE_STYLES = {
+  pet_allowed_carveout:      { color: '#15803d', weight: 2, dashArray: '5 5', fillColor: '#15803d', fillOpacity: 0.10 },
+  pet_prohibited_zone:       { color: '#b91c1c', weight: 2, dashArray: '5 5', fillColor: '#b91c1c', fillOpacity: 0.10 },
+  wildlife_critical_habitat: { color: '#d97706', weight: 2, dashArray: '2 6', fillColor: '#d97706', fillOpacity: 0.08 },
+  seasonal_closure:          { color: '#ea580c', weight: 2, dashArray: '2 6', fillColor: '#ea580c', fillOpacity: 0.08 },
+};
+
+// ============================================================================
+// Boot
+// ============================================================================
+async function init() {
+  map = L.map('map', {
+    zoomControl: true,
+    preferCanvas: true,  // big perf win at 800+ markers
+  }).setView([35.5, -120.0], 6);
+
+  // Each popup re-renders its content on open — wire the polygon-toggle each time.
+  map.on('popupopen', (e) => wirePopupPolyToggle(e.popup.getElement()));
+
+  // Esri World_Topo_Map — US-hosted (~50ms TTFB vs OSM France ~600ms).
+  // Picked over OSM France 2026-05-05 after A/B comparison.
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles &copy; Esri — Esri, DeLorme, NAVTEQ, TomTom, Intermap, iPC, USGS, FAO, NPS, NRCAN, GeoBase, Kadaster NL, Ordnance Survey, Esri Japan, METI, Esri China (Hong Kong), and the GIS User Community',
+    maxZoom: 19,
+  }).addTo(map);
+
+  document.getElementById('filter-status').textContent = 'Fetching beaches_gold…';
+
+  try {
+    const [gold, dogs, polys, zones] = await Promise.all([
+      restGetAll('beaches_gold?select=fid,name,lat,lon,county_name,state,is_scoreable,location_id&is_active=eq.true'),
+      restGetAll('beach_dog_policy?select=arena_group_id,dogs_allowed,leash_policy,off_leash_flag,dogs_allowed_areas,access_rule,source,consensus_confidence,disagreement_flag'),
+      restGetAll('beach_polygons_geojson?select=fid,source_tier,is_split_loser,area_m2,geom'),
+      restGetAll('dog_policy_zones_geojson?select=id,category,name,species,source_agency,source_url,effective_dates,notes,area_m2,geom'),
+    ]);
+
+    renderPolicyZones(zones);
+    // policy-zone-count is added in buildFilterRows; set it after that.
+    setTimeout(() => {
+      const el = document.getElementById('policy-zone-count');
+      if (el) el.textContent = zones.length;
+    }, 0);
+
+    // beach_dog_policy joins to beaches_gold via arena_group_id (== fid for gold)
+    const dogsByFid = new Map();
+    dogs.forEach(d => dogsByFid.set(d.arena_group_id, d));
+    const polyByFid = new Map();
+    polys.forEach(p => polyByFid.set(p.fid, p));
+
+    gold.forEach(g => {
+      if (g.lat == null || g.lon == null) return;
+      const d = dogsByFid.get(g.fid) || {};
+      const poly = polyByFid.get(g.fid);
+      allBeaches.push({
+        fid: g.fid, name: g.name, lat: g.lat, lon: g.lon,
+        county: g.county_name, state: g.state,
+        location_id: g.location_id, is_scoreable: g.is_scoreable,
+        dogs_allowed: d.dogs_allowed,
+        leash_policy: d.leash_policy,
+        off_leash_flag: d.off_leash_flag,
+        dogs_allowed_areas: d.dogs_allowed_areas,
+        access_rule: d.access_rule,
+        policy_source: d.source,
+        consensus_confidence: d.consensus_confidence,
+        disagreement_flag: d.disagreement_flag,
+        polygon: poly ? poly.geom : null,
+        polygon_tier: poly ? poly.source_tier : null,
+        polygon_split_loser: poly ? poly.is_split_loser : false,
+      });
+    });
+
+    document.getElementById('filter-status').textContent =
+      `${allBeaches.length} beaches · ${polys.length} polygons (${
+        polys.filter(p => p.source_tier === 'osm').length} osm · ${
+        polys.filter(p => p.source_tier === 'cpad').length} cpad · ${
+        polys.filter(p => p.source_tier === 'buffer').length} buffer)`;
+
+    buildFilterRows();
+    renderMarkers();
+  } catch (e) {
+    document.getElementById('filter-status').textContent = `ERROR: ${e.message}`;
+    console.error(e);
+  }
+}
+
+async function restGetAll(path, page = 1000) {
+  const all = [];
+  for (let offset = 0; offset < 100000; offset += page) {
+    const sep = path.includes('?') ? '&' : '?';
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}${sep}offset=${offset}&limit=${page}`, {
+      headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
+    });
+    if (!r.ok) throw new Error(`REST ${r.status}: ${await r.text()}`);
+    const batch = await r.json();
+    all.push(...batch);
+    if (batch.length < page) break;
+  }
+  return all;
+}
+
+// ============================================================================
+// Filter rows
+// ============================================================================
+function statusOf(b) {
+  return STATUS_ORDER.includes(b.dogs_allowed) ? b.dogs_allowed : 'unknown';
+}
+
+function buildFilterRows() {
+  const counts = {};
+  STATUS_ORDER.forEach(s => counts[s] = 0);
+  allBeaches.forEach(b => counts[statusOf(b)]++);
+
+  const root = document.getElementById('status-filters');
+  root.innerHTML = '';
+  STATUS_ORDER.forEach(s => {
+    const row = document.createElement('label');
+    row.className = 'filter-row';
+    row.innerHTML = `
+      <input type="checkbox" data-status="${s}" checked />
+      <span class="swatch" style="background:${STATUS_COLORS[s]}"></span>
+      <span class="filter-label">${s}</span>
+      <span class="filter-count">${counts[s]}</span>`;
+    row.querySelector('input').addEventListener('change', e => {
+      if (e.target.checked) filterState.status.add(s);
+      else filterState.status.delete(s);
+      renderMarkers();
+    });
+    root.appendChild(row);
+  });
+
+  const scoreableCount = allBeaches.filter(b => b.is_scoreable).length;
+  document.getElementById('scoreable-count').textContent = scoreableCount;
+  document.getElementById('scoreable-only').addEventListener('change', e => {
+    filterState.scoreable_only = e.target.checked;
+    renderMarkers();
+  });
+
+  const offleashCount = allBeaches.filter(b => b.off_leash_flag).length;
+  document.getElementById('offleash-count').textContent = offleashCount;
+  document.getElementById('offleash-only').addEventListener('change', e => {
+    filterState.offleash_only = e.target.checked;
+    renderMarkers();
+  });
+
+  // Beach polygons toggle: re-render markers (polygon creation gated on flag)
+  document.getElementById('show-polygons').addEventListener('change', e => {
+    filterState.show_polygons = e.target.checked;
+    renderMarkers();
+  });
+
+  // Policy-zones overlay toggle: re-fetch + re-render when flipped
+  document.getElementById('show-policy-zones').addEventListener('change', e => {
+    filterState.show_policy_zones = e.target.checked;
+    if (filterState.show_policy_zones) {
+      restGetAll('dog_policy_zones_geojson?select=id,category,name,species,source_agency,source_url,effective_dates,notes,area_m2,geom')
+        .then(zones => {
+          renderPolicyZones(zones);
+          document.getElementById('policy-zone-count').textContent = zones.length;
+        });
+    } else {
+      renderPolicyZones([]);
+    }
+  });
+}
+
+// ============================================================================
+// Markers
+// ============================================================================
+function visible(b) {
+  if (!filterState.status.has(statusOf(b))) return false;
+  if (filterState.scoreable_only && !b.is_scoreable) return false;
+  if (filterState.offleash_only && !b.off_leash_flag) return false;
+  return true;
+}
+
+function renderPolicyZones(zones) {
+  // Drop existing layers
+  policyZoneLayers.forEach(l => map.removeLayer(l));
+  policyZoneLayers.length = 0;
+  if (!filterState.show_policy_zones) return;
+
+  zones.forEach(z => {
+    const style = ZONE_STYLES[z.category] || ZONE_STYLES.pet_allowed_carveout;
+    const layer = L.geoJSON(z.geom, { style });
+    const datesLabel = z.effective_dates
+      ? ` (${z.effective_dates.start}–${z.effective_dates.end})` : '';
+    layer.bindTooltip(
+      `${z.category} · ${z.name}${datesLabel} · ${z.source_agency}`,
+      { direction: 'top' }
+    );
+    layer.bindPopup(`
+      <div style="font-size:12px; line-height:1.4; min-width:220px;">
+        <div style="font-weight:700; margin-bottom:4px;">${escapeHtml(z.name)}</div>
+        <div style="font-size:11px; color:#64748b;">
+          ${escapeHtml(z.category)} · ${escapeHtml(z.source_agency)}
+        </div>
+        ${z.species ? `<div>species: <strong>${escapeHtml(z.species)}</strong></div>` : ''}
+        ${z.effective_dates ? `<div>dates: ${escapeHtml(JSON.stringify(z.effective_dates))}</div>` : ''}
+        ${z.notes ? `<div style="margin-top:4px; font-size:11px;">${escapeHtml(z.notes)}</div>` : ''}
+        ${z.source_url ? `<div style="margin-top:4px; font-size:10px;"><a href="${escapeHtml(z.source_url)}" target="_blank">source</a></div>` : ''}
+      </div>
+    `, { minWidth: 240, maxWidth: 320 });
+    layer.addTo(map);
+    policyZoneLayers.push(layer);
+  });
+}
+
+function polygonStyle(b) {
+  // Style polygon by dogs_allowed status (color) and polygon source_tier
+  // (visual treatment — osm filled, cpad lower-fill+dashed, buffer dashed-only).
+  const status = statusOf(b);
+  const fill = STATUS_COLORS[status];
+  const t = b.polygon_tier;
+  const base = { color: fill, weight: 1, opacity: 0.9, fillColor: fill };
+  if (t === 'osm') {
+    return { ...base, fillOpacity: 0.35, weight: 1.5 };
+  }
+  if (t === 'cpad') {
+    return { ...base, fillOpacity: 0.15, weight: 1.5, dashArray: '4 4' };
+  }
+  // buffer
+  return { ...base, fillOpacity: 0.08, weight: 1, dashArray: '2 4' };
+}
+
+function renderMarkers() {
+  // Drop existing markers + polygons
+  markers.forEach(m => {
+    map.removeLayer(m.marker);
+    if (m.polygon) map.removeLayer(m.polygon);
+  });
+  markers.length = 0;
+
+  let count = 0;
+  allBeaches.forEach(b => {
+    if (!visible(b)) return;
+    const status = statusOf(b);
+    const fill = STATUS_COLORS[status];
+
+    // Polygon layer: render if global toggle on OR this fid is individually on.
+    // Hard suppression list (catalog/OSM mismatches we know are wrong; keeps
+    // these polygons off until a manual override mechanism is built).
+    const polySuppressed =
+      (b.county === 'Orange' && /^sunset beach$/i.test(b.name)) ||
+      (b.county === 'Orange' && /^seal beach$/i.test(b.name));
+    let polygon = null;
+    const wantPolygon = b.polygon && !polySuppressed &&
+      (filterState.show_polygons || filterState.individually_on.has(b.fid));
+    if (wantPolygon) {
+      polygon = L.geoJSON(b.polygon, { style: polygonStyle(b) });
+      polygon.bindTooltip(`${b.name} (${b.polygon_tier}${b.polygon_split_loser ? ' · split-loser' : ''})`,
+                          { direction: 'top' });
+      polygon.bindPopup(() => buildPopup(b), { minWidth: 240, maxWidth: 320 });
+      polygon.addTo(map);
+    }
+
+    // Point marker (small dot to mark canonical lat/lon, on top of polygon)
+    const marker = L.circleMarker([b.lat, b.lon], {
+      radius: b.is_scoreable ? 5 : 3,
+      fillColor: fill,
+      color: b.off_leash_flag ? '#0f172a' : '#ffffff',
+      weight: b.off_leash_flag ? 2 : 1,
+      opacity: 1,
+      fillOpacity: 0.9,
+    });
+    marker.bindTooltip(b.name, { direction: 'top', offset: [0, -4] });
+    marker.bindPopup(() => buildPopup(b), { minWidth: 240, maxWidth: 320 });
+    marker.addTo(map);
+
+    markers.push({ beach: b, marker, polygon });
+    count++;
+  });
+  document.getElementById('visible-count').textContent = `${count} of ${allBeaches.length} visible`;
+}
+
+function buildPopup(b) {
+  const status = statusOf(b);
+  const dogsLabel = b.dogs_allowed ?? 'unknown / null';
+  const leashLabel = b.leash_policy ?? '—';
+
+  const detailHref = b.location_id
+    ? `../detail.html?location_id=${encodeURIComponent(b.location_id)}`
+    : `../detail.html?fid=${b.fid}`;
+  const indexHref = `../index.html?fid=${b.fid}`;
+  const editorHref = `./beach-editor-gold.html?fid=${b.fid}`;
+  const zoneHref = `./zone-rules-editor.html?fid=${b.fid}`;
+
+  return `
+    <div class="popup-name">${escapeHtml(b.name)}</div>
+    <div class="popup-fid">fid=${b.fid} · ${escapeHtml(b.county || '')} · ${b.state || ''}
+      ${b.is_scoreable ? '<span class="popup-badge badge-scoreable">scoreable</span>' : ''}
+      ${b.off_leash_flag ? '<span class="popup-badge badge-offleash">off-leash flag</span>' : ''}
+    </div>
+
+    <div class="popup-row">
+      <span class="popup-label">dogs_allowed:</span>
+      <span class="popup-badge badge-${status}">${escapeHtml(dogsLabel)}</span>
+    </div>
+    <div class="popup-row">
+      <span class="popup-label">leash_policy:</span> ${escapeHtml(leashLabel)}
+    </div>
+    ${b.dogs_allowed_areas ? `
+      <div class="popup-row">
+        <span class="popup-label">areas:</span> ${escapeHtml(b.dogs_allowed_areas)}
+      </div>` : ''}
+    ${b.access_rule ? `
+      <div class="popup-row">
+        <span class="popup-label">access:</span> ${escapeHtml(b.access_rule)}
+      </div>` : ''}
+    ${b.policy_source ? `
+      <div class="popup-row">
+        <span class="popup-label">source:</span> ${escapeHtml(b.policy_source)}
+        ${b.consensus_confidence != null ? ` · conf ${(+b.consensus_confidence).toFixed(2)}` : ''}
+        ${b.disagreement_flag ? ' · <span class="popup-badge" style="background:#fef3c7;color:#854d0e">⚠ disagreement</span>' : ''}
+      </div>` : ''}
+    ${b.polygon_tier ? `
+      <div class="popup-row">
+        <span class="popup-label">polygon:</span> ${escapeHtml(b.polygon_tier)}
+        ${b.polygon_split_loser ? ' · <span class="popup-badge" style="background:#f3e8ff;color:#6b21a8">split-loser</span>' : ''}
+      </div>` : ''}
+
+    <div class="popup-actions">
+      <a href="${indexHref}" target="_blank">index</a>
+      <a href="${detailHref}" target="_blank">detail</a>
+      <a href="${editorHref}" target="_blank">editor</a>
+      <a href="${zoneHref}" target="_blank">zones</a>
+    </div>
+
+    ${b.polygon ? `
+      <div class="popup-poly-row">
+        <button type="button" class="poly-toggle ${polyToggleOn(b.fid) ? 'on' : ''}"
+                data-action="toggle-polygon" data-fid="${b.fid}">
+          ${polyToggleOn(b.fid) ? '✓ Polygon shown — click to hide' : '⬡ Show polygon on map'}
+        </button>
+      </div>` : ''}
+  `;
+}
+
+function polyToggleOn(fid) {
+  // Polygon currently visible if global toggle is on OR fid is in the per-beach set
+  return filterState.show_polygons || filterState.individually_on.has(fid);
+}
+
+// Wire the polygon-toggle button each time a popup opens.
+// (Leaflet calls disableClickPropagation on popup content, so a document-level
+//  delegated handler would never fire — we have to bind onto the popup element.)
+function wirePopupPolyToggle(popupEl) {
+  if (!popupEl) return;
+  const btn = popupEl.querySelector('button[data-action="toggle-polygon"]');
+  if (!btn) return;
+  L.DomEvent.on(btn, 'click', (e) => {
+    L.DomEvent.stop(e);
+    const fid = Number(btn.dataset.fid);
+    if (!Number.isFinite(fid)) return;
+
+    if (filterState.individually_on.has(fid)) {
+      filterState.individually_on.delete(fid);
+    } else {
+      filterState.individually_on.add(fid);
+    }
+    map.closePopup();
+    renderMarkers();
+    // Re-open this beach's popup so the user keeps context.
+    const entry = markers.find(m => m.beach.fid === fid);
+    if (entry) entry.marker.openPopup();
+  });
+}
+
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+// ============================================================================
+// Search (top-left)
+// ============================================================================
+function setupSearch() {
+  const input  = document.getElementById('search-input');
+  const clear  = document.getElementById('search-clear');
+  const list   = document.getElementById('search-results');
+  let activeIdx = -1;
+  let lastResults = [];
+
+  function highlight(name, query) {
+    const i = name.toLowerCase().indexOf(query.toLowerCase());
+    if (i < 0) return escapeHtml(name);
+    return escapeHtml(name.slice(0, i)) +
+           '<mark>' + escapeHtml(name.slice(i, i + query.length)) + '</mark>' +
+           escapeHtml(name.slice(i + query.length));
+  }
+
+  function search(q) {
+    q = q.trim();
+    if (!q) { close(); return; }
+    const ql = q.toLowerCase();
+    // Match against name OR county; rank name-matches above county-only matches
+    const hits = [];
+    for (const b of allBeaches) {
+      const nameHit   = b.name   && b.name.toLowerCase().includes(ql);
+      const countyHit = b.county && b.county.toLowerCase().includes(ql);
+      if (nameHit || countyHit) hits.push({ b, rank: nameHit ? 0 : 1 });
+    }
+    hits.sort((a, x) => a.rank - x.rank);
+    lastResults = hits.slice(0, 12).map(h => h.b);
+    activeIdx = lastResults.length ? 0 : -1;
+
+    if (!lastResults.length) {
+      list.innerHTML = '<div class="search-empty">No matches</div>';
+    } else {
+      list.innerHTML = lastResults.map((b, i) => {
+        const county = b.county ? `${b.county} County` : '';
+        const countyHtml = county
+          ? (county.toLowerCase().includes(ql)
+              ? highlight(county, q)
+              : escapeHtml(county))
+          : '';
+        return `
+        <div class="search-result ${i === activeIdx ? 'active' : ''}" data-fid="${b.fid}">
+          <div class="sr-name">${highlight(b.name || '', q)}</div>
+          <div class="sr-county">${countyHtml}${b.state ? `, ${escapeHtml(b.state)}` : ''}</div>
+          <div class="sr-meta">fid=${b.fid}${b.is_scoreable ? ' · scoreable' : ''}</div>
+        </div>`;
+      }).join('');
+    }
+    list.classList.add('open');
+    clear.style.display = '';
+  }
+
+  function close() {
+    list.classList.remove('open');
+    list.innerHTML = '';
+    activeIdx = -1;
+    lastResults = [];
+  }
+
+  function pick(b) {
+    if (!b) return;
+    close();
+    input.value = b.name;
+    map.flyTo([b.lat, b.lon], Math.max(map.getZoom(), 14), { duration: 0.6 });
+    // Open popup once flyTo settles
+    const open = () => {
+      const entry = markers.find(m => m.beach.fid === b.fid);
+      if (entry) entry.marker.openPopup();
+    };
+    map.once('moveend', open);
+    setTimeout(open, 800); // safety net if moveend doesn't fire
+  }
+
+  input.addEventListener('input', e => search(e.target.value));
+  input.addEventListener('keydown', e => {
+    if (!list.classList.contains('open') && e.key !== 'Escape') return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeIdx = Math.min(activeIdx + 1, lastResults.length - 1);
+      refreshActive();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeIdx = Math.max(activeIdx - 1, 0);
+      refreshActive();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (activeIdx >= 0) pick(lastResults[activeIdx]);
+    } else if (e.key === 'Escape') {
+      input.value = '';
+      clear.style.display = 'none';
+      close();
+      input.blur();
+    }
+  });
+
+  function refreshActive() {
+    [...list.children].forEach((el, i) => {
+      el.classList.toggle('active', i === activeIdx);
+      if (i === activeIdx) el.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
+  list.addEventListener('click', e => {
+    const row = e.target.closest('.search-result');
+    if (!row) return;
+    const fid = Number(row.dataset.fid);
+    pick(lastResults.find(b => b.fid === fid));
+  });
+
+  clear.addEventListener('click', () => {
+    input.value = '';
+    clear.style.display = 'none';
+    close();
+    input.focus();
+  });
+
+  // Close dropdown when clicking outside the search wrap
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.search-wrap')) close();
+  });
+
+  // Stop Leaflet from hijacking keyboard/scroll inside the search box
+  const wrap = document.querySelector('.search-wrap');
+  if (wrap && L.DomEvent) {
+    L.DomEvent.disableClickPropagation(wrap);
+    L.DomEvent.disableScrollPropagation(wrap);
+  }
+}
+
+init().then(() => setupSearch());
+</script>
+</body>
+</html>

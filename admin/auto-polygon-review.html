@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Auto-extracted polygons · Review</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  html, body { margin: 0; padding: 0; height: 100%;
+               font-family: 'DM Sans', system-ui, sans-serif; color: #0f2742; }
+  body { display: grid; grid-template-columns: 380px 1fr;
+         grid-template-rows: 56px 1fr; height: 100vh; }
+  header {
+    grid-column: 1 / -1; padding: 12px 16px;
+    background: #0f2742; color: #fff;
+    display: flex; align-items: center; gap: 16px;
+  }
+  header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+  header .pill {
+    background: #1e40af; padding: 3px 10px; border-radius: 999px;
+    font-size: 11px; font-weight: 600;
+  }
+
+  .sidebar { overflow-y: auto; border-right: 1px solid #cbd5e1;
+             background: #f8fafc; padding: 12px; }
+  .sidebar h2 { font-size: 12px; font-weight: 600; margin: 0 0 8px;
+                color: #475569; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  .filter-bar { display: flex; gap: 6px; margin-bottom: 12px; }
+  .filter-bar button {
+    flex: 1; padding: 6px 8px; font-size: 11px; font-weight: 600;
+    border: 1px solid #cbd5e1; background: #fff; color: #475569;
+    border-radius: 4px; cursor: pointer; font-family: inherit;
+  }
+  .filter-bar button.active { background: #1e40af; color: #fff; border-color: #1e40af; }
+
+  .row {
+    background: #fff; border: 1px solid #cbd5e1; border-radius: 6px;
+    padding: 10px 12px; margin-bottom: 8px; cursor: pointer;
+    transition: border-color 0.1s, box-shadow 0.1s;
+  }
+  .row:hover  { border-color: #2563eb; }
+  .row.active { border-color: #15803d; box-shadow: 0 0 0 2px #bbf7d0; }
+  .row .name  { font-weight: 600; font-size: 13px; }
+  .row .meta  { font-size: 11px; color: #64748b; margin-top: 3px;
+                font-family: monospace; }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 3px;
+           font-size: 10px; font-weight: 600; text-transform: uppercase;
+           letter-spacing: 0.04em; }
+  .badge.pending  { background: #fef3c7; color: #854d0e; }
+  .badge.approved { background: #dcfce7; color: #166534; }
+  .badge.rejected { background: #fee2e2; color: #991b1b; }
+
+  #map { position: relative; width: 100%; height: 100%; }
+
+  .toolbar {
+    position: absolute; top: 14px; right: 14px;
+    background: rgba(255,255,255,0.96); border: 1px solid #cbd5e1;
+    border-radius: 8px; padding: 12px 14px; z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+    min-width: 320px; max-width: 360px;
+  }
+  .toolbar h3 { margin: 0 0 6px; font-size: 13px; }
+  .toolbar .stats { font-size: 11px; color: #64748b; line-height: 1.6;
+                    font-family: monospace; }
+  .toolbar .actions { margin-top: 12px; display: flex; gap: 8px; }
+  .toolbar button {
+    flex: 1; padding: 8px 10px; font-size: 12px; font-weight: 600;
+    border-radius: 5px; cursor: pointer; font-family: inherit;
+    border: 1px solid; transition: background 0.1s;
+  }
+  .toolbar button.approve { background: #15803d; color: #fff; border-color: #15803d; }
+  .toolbar button.approve:hover { background: #166534; }
+  .toolbar button.reject  { background: #fff; color: #b91c1c; border-color: #fca5a5; }
+  .toolbar button.reject:hover  { background: #fee2e2; }
+  .toolbar button.revert  { background: #fff; color: #475569; border-color: #cbd5e1; }
+  .toolbar button.revert:hover  { background: #f1f5f9; }
+  .toolbar button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .toolbar .notes { margin-top: 10px; }
+  .toolbar .notes label { font-size: 10px; color: #64748b;
+                          text-transform: uppercase; letter-spacing: 0.05em; }
+  .toolbar .notes textarea {
+    width: 100%; box-sizing: border-box; font-family: inherit;
+    font-size: 12px; padding: 6px 8px; border: 1px solid #cbd5e1;
+    border-radius: 4px; resize: vertical; min-height: 50px;
+  }
+
+  .legend {
+    position: absolute; bottom: 14px; right: 14px;
+    background: rgba(255,255,255,0.96); border: 1px solid #cbd5e1;
+    border-radius: 6px; padding: 8px 12px; z-index: 1000;
+    font-size: 11px; line-height: 1.7;
+  }
+  .legend .row { background: none; border: none; padding: 0; margin: 0; cursor: default; }
+  .swatch { display: inline-block; width: 12px; height: 12px; vertical-align: middle;
+            margin-right: 6px; border: 1px solid rgba(0,0,0,0.2); }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: #0f2742; color: #fff; padding: 10px 16px; border-radius: 6px;
+    font-size: 13px; box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s;
+    z-index: 1500;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+  .toast.error { background: #b91c1c; }
+
+  /* Draggable catalog point — small filled circle that signals it's grabbable */
+  .catalog-dot { cursor: grab; }
+  .catalog-dot:active { cursor: grabbing; }
+  .catalog-dot .catalog-dot-inner {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #1e40af; border: 2px solid #ffffff;
+    box-shadow: 0 0 0 1px #1e40af, 0 2px 4px rgba(0,0,0,0.3);
+    transition: transform 0.1s;
+  }
+  .catalog-dot:hover .catalog-dot-inner { transform: scale(1.2); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🏖️ Auto-extracted polygon review</h1>
+  <span class="pill" id="pending-count">…</span>
+  <div style="flex: 1"></div>
+  <span style="font-size: 12px; opacity: 0.85">x-admin-secret in localStorage</span>
+</header>
+
+<div class="sidebar">
+  <h2>Candidates</h2>
+  <div class="filter-bar">
+    <button class="active" data-filter="pending">Pending</button>
+    <button data-filter="approved">Approved</button>
+    <button data-filter="rejected">Rejected</button>
+    <button data-filter="all">All</button>
+  </div>
+  <div id="list"></div>
+</div>
+
+<div id="map">
+  <div class="toolbar" id="toolbar" style="display:none;">
+    <h3 id="t-name">—</h3>
+    <div class="stats" id="t-stats">—</div>
+    <div class="notes">
+      <label for="t-notes">Reviewer notes (optional)</label>
+      <textarea id="t-notes" placeholder="why approved/rejected"></textarea>
+    </div>
+    <div class="actions">
+      <button class="reject"  id="btn-reject">Reject</button>
+      <button class="revert"  id="btn-revert">Revert</button>
+      <button class="approve" id="btn-approve">Approve</button>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="row"><span class="swatch" style="background:#ef4444"></span>OSM polygon</div>
+    <div class="row"><span class="swatch" style="background:#ec4899"></span>auto-extracted (this row)</div>
+    <div class="row"><span class="swatch" style="background:#1e40af"></span>catalog lat/lon</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+const FN_REVIEW    = `${SUPABASE_URL}/functions/v1/admin-review-auto-polygon`;
+const FN_MOVE_PT   = `${SUPABASE_URL}/functions/v1/admin-move-beach-point`;
+
+// Admin secret stash (paywall.html convention)
+const ADMIN_SECRET_KEY = 'admin_secret';
+let adminSecret = localStorage.getItem(ADMIN_SECRET_KEY) || '';
+if (!adminSecret) {
+  adminSecret = prompt('Admin secret? (paywall.html sets this; pasting here also stashes it)');
+  if (adminSecret) localStorage.setItem(ADMIN_SECRET_KEY, adminSecret);
+}
+
+let map, currentLayer, osmLayer, dotMarker;
+let activeFilter = 'pending';
+let rows = [];
+let activeRow = null;
+
+async function fetchRows() {
+  const url = `${SUPABASE_URL}/rest/v1/beach_polygons_auto_extracted_geojson?select=*&order=extracted_at.desc`;
+  const r = await fetch(url, { headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } });
+  const data = await r.json();
+  // also attach beach name via a second call
+  const fids = [...new Set(data.map(r => r.fid))];
+  if (fids.length) {
+    const url2 = `${SUPABASE_URL}/rest/v1/beaches_gold?select=fid,name,county_name&fid=in.(${fids.join(',')})`;
+    const beaches = await (await fetch(url2, { headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } })).json();
+    const byFid = new Map(beaches.map(b => [b.fid, b]));
+    data.forEach(r => Object.assign(r, byFid.get(r.fid) || {}));
+  }
+  return data;
+}
+
+async function fetchOsmPolygon(fid) {
+  // Reuse the public beach_polygons_geojson view to get OSM-tier polygon if present
+  const url = `${SUPABASE_URL}/rest/v1/beach_polygons_geojson?select=fid,source_tier,geom&fid=eq.${fid}`;
+  const r = await fetch(url, { headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } });
+  const data = await r.json();
+  return data.find(d => d.source_tier === 'osm') || null;
+}
+
+function renderList() {
+  const filtered = activeFilter === 'all'
+    ? rows
+    : rows.filter(r => r.review_status === activeFilter);
+  const el = document.getElementById('list');
+  if (!filtered.length) {
+    el.innerHTML = '<div style="color:#94a3b8; font-size:12px; padding:8px;">No rows.</div>';
+    return;
+  }
+  el.innerHTML = filtered.map(r => `
+    <div class="row ${activeRow && activeRow.id === r.id ? 'active' : ''}" data-id="${r.id}">
+      <div class="name">${(r.name || '?')}<span class="badge ${r.review_status}" style="margin-left:6px;">${r.review_status}</span></div>
+      <div class="meta">fid=${r.fid} · ${r.county_name || '?'} · ${(r.area_m2/1e3).toFixed(0)}K m² · IoU ${r.osm_iou == null ? '—' : (+r.osm_iou).toFixed(2)}</div>
+    </div>
+  `).join('');
+  el.querySelectorAll('.row').forEach(div => {
+    div.addEventListener('click', () => {
+      const r = filtered.find(x => x.id === Number(div.dataset.id));
+      selectRow(r);
+    });
+  });
+  document.getElementById('pending-count').textContent =
+    `${rows.filter(r => r.review_status === 'pending').length} pending`;
+}
+
+async function selectRow(r) {
+  if (!r) return;
+  activeRow = r;
+  renderList();
+  // Fit map to the polygon
+  if (currentLayer) map.removeLayer(currentLayer);
+  if (osmLayer)     map.removeLayer(osmLayer);
+  if (dotMarker)    map.removeLayer(dotMarker);
+
+  currentLayer = L.geoJSON(r.geom, {
+    style: { color: '#ec4899', weight: 3, fillColor: '#ec4899', fillOpacity: 0.20 },
+  }).addTo(map);
+
+  const osm = await fetchOsmPolygon(r.fid);
+  if (osm) {
+    osmLayer = L.geoJSON(osm.geom, {
+      style: { color: '#ef4444', weight: 2, fillColor: '#ef4444', fillOpacity: 0.10, dashArray: '4 4' },
+    }).addTo(map);
+  }
+
+  // Catalog lat/lon — draggable marker so the curator can move it when
+  // it's wrong (Hermosa-style: catalog point in the wrong town entirely).
+  // Uses a divIcon for the dot look; marker.dragging works only on L.marker.
+  const beachUrl = `${SUPABASE_URL}/rest/v1/beaches_gold?select=lat,lon&fid=eq.${r.fid}`;
+  const beach = await (await fetch(beachUrl, { headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } })).json();
+  if (beach[0]) {
+    const dotIcon = L.divIcon({
+      className: 'catalog-dot',
+      html: '<div class="catalog-dot-inner"></div>',
+      iconSize: [16, 16], iconAnchor: [8, 8],
+    });
+    dotMarker = L.marker([beach[0].lat, beach[0].lon],
+                         { icon: dotIcon, draggable: true,
+                           autoPan: true, title: 'Drag to fix wrong catalog point' })
+                  .addTo(map);
+    dotMarker.bindTooltip('Drag to move catalog point', { permanent: false });
+
+    dotMarker.on('dragend', async (e) => {
+      const ll = e.target.getLatLng();
+      const newLat = +ll.lat.toFixed(7);
+      const newLon = +ll.lng.toFixed(7);
+      const oldLat = beach[0].lat, oldLon = beach[0].lon;
+      const dist_m = approxDistanceM(oldLat, oldLon, newLat, newLon);
+      const ok = confirm(
+        `Move catalog point for ${r.name || 'fid '+r.fid}?\n\n` +
+        `From: ${oldLat.toFixed(5)}, ${oldLon.toFixed(5)}\n` +
+        `To:   ${newLat.toFixed(5)}, ${newLon.toFixed(5)}\n` +
+        `Distance: ${dist_m.toFixed(0)} m\n\n` +
+        `Saves to beaches_gold via admin-edit-geocode-coords.`);
+      if (!ok) {
+        // snap back
+        e.target.setLatLng([oldLat, oldLon]);
+        return;
+      }
+      const resp = await fetch(FN_MOVE_PT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${ANON_KEY}`,
+          'apikey': ANON_KEY,
+          'x-admin-secret': adminSecret,
+        },
+        body: JSON.stringify({ fid: r.fid, lat: newLat, lon: newLon }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        toast(data.error || 'Move failed', true);
+        e.target.setLatLng([oldLat, oldLon]);
+        return;
+      }
+      // Success — keep the dot at the new position; update local cache.
+      beach[0].lat = newLat; beach[0].lon = newLon;
+      // The polygon and OSM overlay were extracted/computed at the OLD lat/lon
+      // and are now stale (visually anchored ~Xm away from the new dot). Drop
+      // them so the user only sees the moved point — re-run extractor to get a
+      // fresh polygon at the new coords.
+      if (currentLayer) { map.removeLayer(currentLayer); currentLayer = null; }
+      if (osmLayer)     { map.removeLayer(osmLayer);     osmLayer     = null; }
+      // Re-center on the new dot so it's clearly visible
+      map.setView([newLat, newLon], Math.max(map.getZoom(), 15));
+      toast(`Moved to ${newLat.toFixed(5)}, ${newLon.toFixed(5)} — old polygon removed (re-run extractor for new one)`);
+    });
+  }
+
+  map.fitBounds(currentLayer.getBounds(), { padding: [40, 40] });
+
+  // Toolbar
+  document.getElementById('toolbar').style.display = '';
+  document.getElementById('t-name').innerHTML =
+    `${r.name || '?'} <span class="badge ${r.review_status}">${r.review_status}</span>`;
+  document.getElementById('t-stats').innerText =
+    `id=${r.id} · fid=${r.fid}\n` +
+    `algorithm=${r.algorithm_version} · zoom=${r.tile_zoom}\n` +
+    `area=${(r.area_m2/1e3).toFixed(1)}K m² · vertices=${r.vertex_count} · pixels=${r.pixel_count}\n` +
+    `IoU with OSM: ${r.osm_iou == null ? '—' : (+r.osm_iou).toFixed(3)}\n` +
+    `extracted: ${new Date(r.extracted_at).toLocaleString()}` +
+    (r.reviewed_at ? `\nreviewed by ${r.reviewed_by} at ${new Date(r.reviewed_at).toLocaleString()}` : '');
+  document.getElementById('t-notes').value = r.reviewer_notes || '';
+}
+
+async function review(status) {
+  if (!activeRow) return;
+  const notes = document.getElementById('t-notes').value.trim() || null;
+  const r = await fetch(FN_REVIEW, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${ANON_KEY}`,
+      'apikey': ANON_KEY,
+      'x-admin-secret': adminSecret,
+    },
+    body: JSON.stringify({ id: activeRow.id, review_status: status, reviewer_notes: notes }),
+  });
+  const data = await r.json();
+  if (!r.ok) {
+    toast(data.error || 'Update failed', true);
+    return;
+  }
+  toast(`Set ${activeRow.name || 'row'} → ${status}`);
+  // Refresh
+  rows = await fetchRows();
+  const refreshed = rows.find(x => x.id === activeRow.id);
+  activeRow = refreshed || null;
+  renderList();
+  if (refreshed) selectRow(refreshed);
+}
+
+// Approx great-circle distance in meters (haversine).
+function approxDistanceM(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2) ** 2
+          + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function toast(msg, err = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.toggle('error', !!err);
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+async function init() {
+  map = L.map('map').setView([35.5, -120.0], 6);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19,
+    attribution: 'Tiles © Esri',
+  }).addTo(map);
+
+  document.querySelectorAll('.filter-bar button').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.filter-bar button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      activeFilter = b.dataset.filter;
+      renderList();
+    });
+  });
+
+  document.getElementById('btn-approve').addEventListener('click', () => review('approved'));
+  document.getElementById('btn-reject').addEventListener('click',  () => review('rejected'));
+  document.getElementById('btn-revert').addEventListener('click',  () => review('pending'));
+
+  rows = await fetchRows();
+  renderList();
+  // Auto-select the first pending row
+  const firstPending = rows.find(r => r.review_status === 'pending');
+  if (firstPending) selectRow(firstPending);
+}
+
+init();
+</script>
+</body>
+</html>

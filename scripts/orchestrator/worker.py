@@ -129,7 +129,7 @@ def advance_one(fid: int) -> str:
     phase = p.get('phase', 'unknown')
     print(f'\nfid={fid}  {name}  phase={phase}')
 
-    if phase in ('00_inactive', '00_not_scoreable', '06_complete'):
+    if phase in ('00_inactive', '06_complete', '05_terminal_no_dogs'):
         return f'{phase} -- nothing to do'
 
     if phase == '01_no_evidence':
@@ -146,11 +146,11 @@ def advance_one(fid: int) -> str:
         """)
         return 'kicked dogs-chain manually'
 
-    if phase == '04_dogs_allowed_only':
+    if phase == '04_dogs_resolved_no_zones':
         rc = fire_zone_rules_repass([fid])
         return 'zone_rules repassed' if rc == 0 else 'zone_rules FAILED'
 
-    if phase == '05_zone_rules_no_score':
+    if phase == '05_zone_rules_pending_score':
         loc = p.get('location_id')
         if not loc:
             return 'no location_id -- cannot fire scoring'
@@ -161,11 +161,19 @@ def advance_one(fid: int) -> str:
 
 
 def find_stuck_fids(limit: int = 25) -> list[int]:
-    """Return fids in is_scoreable + active + non-complete phases."""
+    """Return fids in active + non-terminal phases.
+
+    Terminal phases per the 2026-05-06 gating rule:
+      06_complete           - dogs!='no' beaches that have been scored
+      05_terminal_no_dogs   - dogs='no' beaches (no scoring by design)
+      00_inactive           - dropped from the catalog
+    """
     rows = supabase_query(f"""
         select fid from public.beach_pipeline_status
-         where is_active and is_scoreable
-           and phase not in ('06_complete', '00_inactive', '00_not_scoreable')
+         where is_active
+           and phase not in (
+             '06_complete', '00_inactive', '05_terminal_no_dogs'
+           )
          order by phase, fid
          limit {limit}
     """)

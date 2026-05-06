@@ -39,14 +39,14 @@
   .phase-count { font-family: monospace; font-size: 12px; color: #475569;
                  text-align: right; }
 
-  .phase-bar-fill.p00_inactive          { background: #cbd5e1; }
-  .phase-bar-fill.p00_not_scoreable     { background: #94a3b8; }
-  .phase-bar-fill.p01_no_evidence       { background: #ef4444; }
-  .phase-bar-fill.p02_evidence_only     { background: #f59e0b; }
-  .phase-bar-fill.p03_canonical_pending { background: #f59e0b; }
-  .phase-bar-fill.p04_dogs_allowed_only { background: #fbbf24; }
-  .phase-bar-fill.p05_zone_rules_no_score { background: #38bdf8; }
-  .phase-bar-fill.p06_complete          { background: #15803d; }
+  .phase-bar-fill.p00_inactive               { background: #cbd5e1; }
+  .phase-bar-fill.p01_no_evidence            { background: #ef4444; }
+  .phase-bar-fill.p02_evidence_only          { background: #f59e0b; }
+  .phase-bar-fill.p03_canonical_pending      { background: #f59e0b; }
+  .phase-bar-fill.p04_dogs_resolved_no_zones { background: #fbbf24; }
+  .phase-bar-fill.p05_terminal_no_dogs       { background: #64748b; }
+  .phase-bar-fill.p05_zone_rules_pending_score { background: #38bdf8; }
+  .phase-bar-fill.p06_complete               { background: #15803d; }
 
   /* Beach list */
   .beach-list { max-height: 600px; overflow-y: auto; }
@@ -104,13 +104,14 @@
     text-overflow: ellipsis; max-width: 100%;
   }
 
-  .pl-p01_no_evidence       { background: #ef4444; }
-  .pl-p02_evidence_only     { background: #f59e0b; }
-  .pl-p03_canonical_pending { background: #f59e0b; }
-  .pl-p04_dogs_allowed_only { background: #fbbf24; }
-  .pl-p05_zone_rules_no_score { background: #38bdf8; }
-  .pl-p06_complete          { background: #15803d; }
-  .pl-p00_inactive, .pl-p00_not_scoreable { background: #94a3b8; }
+  .pl-p01_no_evidence            { background: #ef4444; }
+  .pl-p02_evidence_only          { background: #f59e0b; }
+  .pl-p03_canonical_pending      { background: #f59e0b; }
+  .pl-p04_dogs_resolved_no_zones { background: #fbbf24; }
+  .pl-p05_terminal_no_dogs       { background: #64748b; }
+  .pl-p05_zone_rules_pending_score { background: #38bdf8; }
+  .pl-p06_complete               { background: #15803d; }
+  .pl-p00_inactive               { background: #94a3b8; }
 
   /* Delta chip showing change since last refresh */
   .delta {
@@ -215,14 +216,14 @@ const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
 const HEADERS = { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` };
 
 const PHASE_LABELS = {
-  '00_inactive':            'Inactive',
-  '00_not_scoreable':       'Not scoreable',
-  '01_no_evidence':         'No evidence',
-  '02_evidence_only':       'Evidence only',
-  '03_canonical_pending':   'Canonical pending',
-  '04_dogs_allowed_only':   'Dogs_allowed only',
-  '05_zone_rules_no_score': 'Zone_rules · no score',
-  '06_complete':            'Complete (consumer-ready)',
+  '00_inactive':                 'Inactive',
+  '01_no_evidence':              'No evidence',
+  '02_evidence_only':            'Evidence only',
+  '03_canonical_pending':        'Canonical pending',
+  '04_dogs_resolved_no_zones':   'Dogs resolved · no zones',
+  '05_terminal_no_dogs':         'Terminal · no dogs (done)',
+  '05_zone_rules_pending_score': 'Zone_rules · pending score',
+  '06_complete':                 'Complete (consumer-ready)',
 };
 
 let allBeaches = [];
@@ -273,12 +274,13 @@ function renderPipelineBar(counts) {
   const wrap = document.getElementById('pipeline-bar');
 
   const PHASE_SHORT = {
-    '01_no_evidence':         'No evidence',
-    '02_evidence_only':       'Evidence only',
-    '03_canonical_pending':   'Canonical pending',
-    '04_dogs_allowed_only':   'Has dog policy',
-    '05_zone_rules_no_score': 'Has zone rules',
-    '06_complete':            '✓ Complete',
+    '01_no_evidence':              'No evidence',
+    '02_evidence_only':            'Evidence only',
+    '03_canonical_pending':        'Canonical pending',
+    '04_dogs_resolved_no_zones':   'Has dog policy',
+    '05_terminal_no_dogs':         'Terminal (no dogs)',
+    '05_zone_rules_pending_score': 'Has zone rules',
+    '06_complete':                 '✓ Complete',
   };
 
   wrap.innerHTML = inScope.map(c => {

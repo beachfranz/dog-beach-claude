@@ -80,6 +80,59 @@
   .empty { color: #94a3b8; font-style: italic; text-align: center;
            padding: 24px; font-size: 12px; }
 
+  /* Big stacked-bar overview of the entire pipeline */
+  .pipeline-bar {
+    display: flex; height: 56px; border-radius: 8px; overflow: hidden;
+    background: #f1f5f9; box-shadow: inset 0 1px 3px rgba(0,0,0,0.06);
+    margin-bottom: 14px;
+  }
+  .pl-segment {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; color: #fff; font-weight: 600;
+    transition: flex 0.6s ease, background 0.3s; cursor: pointer;
+    overflow: hidden; padding: 0 4px; min-width: 0;
+  }
+  .pl-segment:hover { filter: brightness(1.1); }
+  .pl-segment.active { box-shadow: inset 0 0 0 3px #fff; }
+  .pl-segment .pl-count {
+    font-size: 18px; font-family: 'DM Mono', monospace; line-height: 1;
+  }
+  .pl-segment .pl-label {
+    font-size: 10px; opacity: 0.85; text-transform: uppercase;
+    letter-spacing: 0.05em; margin-top: 2px; line-height: 1.1;
+    text-align: center; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; max-width: 100%;
+  }
+
+  .pl-p01_no_evidence       { background: #ef4444; }
+  .pl-p02_evidence_only     { background: #f59e0b; }
+  .pl-p03_canonical_pending { background: #f59e0b; }
+  .pl-p04_dogs_allowed_only { background: #fbbf24; }
+  .pl-p05_zone_rules_no_score { background: #38bdf8; }
+  .pl-p06_complete          { background: #15803d; }
+  .pl-p00_inactive, .pl-p00_not_scoreable { background: #94a3b8; }
+
+  /* Delta chip showing change since last refresh */
+  .delta {
+    display: inline-block; font-size: 11px; font-family: 'DM Mono', monospace;
+    padding: 1px 6px; border-radius: 999px; margin-left: 6px;
+    transition: opacity 0.4s; opacity: 0;
+  }
+  .delta.show { opacity: 1; }
+  .delta.up   { background: rgba(34,197,94,0.2); color: #15803d; }
+  .delta.down { background: rgba(239,68,68,0.2); color: #991b1b; }
+
+  /* Run-in-progress indicator (pulsing dot) */
+  .live-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: #ef4444; margin-right: 6px;
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.4; transform: scale(1.3); }
+  }
+
   .filter-bar { display: flex; gap: 8px; margin-bottom: 10px; }
   .filter-bar input { flex: 1; padding: 6px 10px; font-size: 12px;
                        border: 1px solid #cbd5e1; border-radius: 4px;
@@ -103,7 +156,13 @@
 <div class="container">
   <div class="col-main">
     <div class="card">
-      <h2>Pipeline phases (804 active gold fids)</h2>
+      <h2>Pipeline overview <span id="overview-stamp" style="font-weight:400; color:#64748b; font-size:11px;"></span></h2>
+      <div class="pipeline-bar" id="pipeline-bar"></div>
+      <div style="font-size:11px; color:#64748b; margin-top:-4px; margin-bottom:14px;">
+        Stacked by phase. Click a segment to filter the list. Auto-refresh every 8s.
+      </div>
+
+      <h2>Per-phase counts</h2>
       <div class="phases" id="phases"></div>
       <div style="margin-top:8px; font-size:11px; color:#64748b;">
         Click a phase to filter the list below. Counts auto-refresh every 30s.
@@ -196,11 +255,68 @@ async function refresh() {
     fetchJson(`${SUPABASE_URL}/rest/v1/beach_pipeline_activity_recent?select=*`),
   ]);
   allBeaches = beaches;
+  renderPipelineBar(counts);
   renderPhases(counts);
   renderActivity(activity);
   renderBeaches();
   document.getElementById('stamp').textContent =
     `last refresh ${new Date().toLocaleTimeString()}`;
+}
+
+// Track previous counts so we can show delta chips
+let prevCounts = {};
+
+function renderPipelineBar(counts) {
+  // Use only active+scoreable phases (exclude 00_*) for the in-scope bar
+  const inScope = counts.filter(c => !c.phase.startsWith('00_'));
+  const total = inScope.reduce((s, c) => s + Number(c.n), 0) || 1;
+  const wrap = document.getElementById('pipeline-bar');
+
+  const PHASE_SHORT = {
+    '01_no_evidence':         'No evidence',
+    '02_evidence_only':       'Evidence only',
+    '03_canonical_pending':   'Canonical pending',
+    '04_dogs_allowed_only':   'Has dog policy',
+    '05_zone_rules_no_score': 'Has zone rules',
+    '06_complete':            '✓ Complete',
+  };
+
+  wrap.innerHTML = inScope.map(c => {
+    const n = Number(c.n);
+    const pct = (n / total) * 100;
+    const prev = prevCounts[c.phase] ?? n;
+    const delta = n - prev;
+    const deltaHtml = delta !== 0
+      ? `<span class="delta show ${delta>0?'up':'down'}">${delta>0?'+':''}${delta}</span>`
+      : '';
+    const isActive = activeFilter === c.phase;
+    return `
+      <div class="pl-segment pl-p${c.phase} ${isActive?'active':''}"
+           style="flex:${pct};" data-phase="${c.phase}"
+           title="${PHASE_SHORT[c.phase] || c.phase} — ${n} beaches (${pct.toFixed(1)}%)">
+        <div class="pl-count">${n}${deltaHtml}</div>
+        <div class="pl-label">${PHASE_SHORT[c.phase] || c.phase}</div>
+      </div>`;
+  }).join('');
+
+  wrap.querySelectorAll('.pl-segment').forEach(seg => {
+    seg.addEventListener('click', () => {
+      const ph = seg.dataset.phase;
+      activeFilter = (activeFilter === ph) ? null : ph;
+      renderPipelineBar(counts);
+      renderPhases(counts);
+      renderBeaches();
+    });
+  });
+
+  // Stash for next-tick delta computation
+  prevCounts = Object.fromEntries(inScope.map(c => [c.phase, Number(c.n)]));
+
+  // Stamp
+  const totalBeaches = inScope.reduce((s, c) => s + Number(c.n), 0);
+  const completePct = ((Number(inScope.find(c=>c.phase==='06_complete')?.n||0) / total) * 100).toFixed(0);
+  document.getElementById('overview-stamp').innerHTML =
+    `· ${totalBeaches} in scope · ${completePct}% complete`;
 }
 
 function renderPhases(counts) {
@@ -285,7 +401,7 @@ document.getElementById('clear').addEventListener('click', () => {
 });
 
 refresh();
-setInterval(refresh, 30_000);
+setInterval(refresh, 8_000);  // tighter loop while runs are happening
 </script>
 </body>
 </html>

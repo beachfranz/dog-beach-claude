@@ -1,10 +1,10 @@
-"""scripts/orchestrator/worker.py — phase advancer.
+"""scripts/orchestrator/worker.py -- phase advancer.
 
 Takes a list of fids; for each one, queries beach_pipeline_status and
 advances the beach by one phase using whatever tooling exists today.
 
 Phases:
-  01_no_evidence         needs extraction (no per-fid extractor wired yet — see TODO)
+  01_no_evidence         needs extraction (no per-fid extractor wired yet -- see TODO)
   02/03 evidence/canonical_pending  trigger should auto-handle; falls back to manual chain
   04_dogs_allowed_only   needs zone_rules text-repass (wired)
   05_zone_rules_no_score needs scoring run (wired via daily-beach-refresh edge fn)
@@ -59,21 +59,20 @@ def supabase_query(sql: str) -> list[dict]:
 
 def query_phase(fid: int) -> dict:
     rows = supabase_query(f"""
-        select fid, name, phase, location_id,
-               has_bep_dogs, has_policy_row, has_dogs_allowed,
-               has_zone_rules, has_recent_score
+        select s.fid, s.name, s.phase, s.location_id,
+               s.has_bep_dogs, s.has_policy_row, s.has_dogs_allowed,
+               s.has_zone_rules, s.has_recent_score
           from public.beach_pipeline_status s
-          left join public.beaches_gold bg on bg.fid = s.fid
          where s.fid = {fid}
     """)
     return rows[0] if rows else {}
 
 
 def fire_zone_rules_repass(fids: list[int]) -> int:
-    """Run scripts/repass_zone_rules.py --fids X — wraps via the
+    """Run scripts/repass_zone_rules.py --fids X -- wraps via the
     orchestrator runner so it ends up in pipeline_runs."""
     fid_str = ','.join(str(f) for f in fids)
-    print(f'  → zone_rules repass for fid(s) {fid_str}')
+    print(f'  -> zone_rules repass for fid(s) {fid_str}')
     proc = subprocess.run(
         [sys.executable, 'scripts/repass_zone_rules.py', '--fids', fid_str],
         cwd=str(REPO_ROOT), capture_output=True, text=True,
@@ -93,7 +92,7 @@ def fire_score(location_ids: list[str]) -> int:
     url = os.environ['SUPABASE_URL'] + '/functions/v1/daily-beach-refresh'
     admin_secret = os.environ['ADMIN_SECRET']
     anon = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk'
-    print(f'  → daily-beach-refresh for location_id(s) {location_ids}')
+    print(f'  -> daily-beach-refresh for location_id(s) {location_ids}')
 
     body = json.dumps({'location_ids': location_ids}).encode()
     req = urllib.request.Request(
@@ -111,7 +110,7 @@ def fire_score(location_ids: list[str]) -> int:
     try:
         with urllib.request.urlopen(req, context=ctx, timeout=300) as r:
             data = json.loads(r.read())
-        print(f'    OK — refreshed {data.get("refreshed", "?")} beaches')
+        print(f'    OK -- refreshed {data.get("refreshed", "?")} beaches')
         return 0
     except urllib.error.HTTPError as e:
         print(f'    FAILED ({e.code}): {e.read()[:500].decode()}')
@@ -131,10 +130,10 @@ def advance_one(fid: int) -> str:
     print(f'\nfid={fid}  {name}  phase={phase}')
 
     if phase in ('00_inactive', '00_not_scoreable', '06_complete'):
-        return f'{phase} — nothing to do'
+        return f'{phase} -- nothing to do'
 
     if phase == '01_no_evidence':
-        return ('NEEDS_EXTRACTION — no per-fid extraction script wired. '
+        return ('NEEDS_EXTRACTION -- no per-fid extraction script wired. '
                 'Add --fids support to extract_beach_policies.py or build '
                 'extract_for_fid.py to advance beaches at this phase.')
 
@@ -154,7 +153,7 @@ def advance_one(fid: int) -> str:
     if phase == '05_zone_rules_no_score':
         loc = p.get('location_id')
         if not loc:
-            return 'no location_id — cannot fire scoring'
+            return 'no location_id -- cannot fire scoring'
         rc = fire_score([loc])
         return 'score fired' if rc == 0 else 'score FAILED'
 
@@ -202,7 +201,7 @@ def main():
         all_done = True
         for fid in fids:
             result = advance_one(fid)
-            print(f'  → {result}')
+            print(f'  -> {result}')
             if 'nothing to do' not in result and 'NEEDS' not in result:
                 all_done = False
         if all_done:

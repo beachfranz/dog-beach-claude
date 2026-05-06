@@ -110,6 +110,7 @@ Deno.serve(async (req: Request) => {
     // Best-effort: if no arena_group_id (e.g., OR beach), or no extraction
     // yet, fields are simply null.
     let metadata: Record<string, unknown> | null = null;
+    let zoneRules: Record<string, unknown> | null = null;
     if (beach.arena_group_id) {
       const { data: meta } = await supabase
         .from("arena_beach_metadata")
@@ -124,6 +125,15 @@ Deno.serve(async (req: Request) => {
         .eq("arena_group_id", beach.arena_group_id)
         .maybeSingle();
       metadata = meta ?? null;
+
+      // Section-aware dog policy v2 — separate fetch from beach_dog_policy.
+      // 442 beaches as of 2026-05-06; null elsewhere.
+      const { data: zr } = await supabase
+        .from("beach_dog_policy")
+        .select("zone_rules")
+        .eq("arena_group_id", beach.arena_group_id)
+        .maybeSingle();
+      zoneRules = (zr?.zone_rules as Record<string, unknown>) ?? null;
     }
 
     // For today: find best remaining window and override is_in_best_window + day label
@@ -151,7 +161,7 @@ Deno.serve(async (req: Request) => {
       };
     }
 
-    return json({ beach, day: finalDay, hours: finalHours, metadata });
+    return json({ beach, day: finalDay, hours: finalHours, metadata, zone_rules: zoneRules });
 
   } catch (err) {
     return json({ error: String(err) }, 500);

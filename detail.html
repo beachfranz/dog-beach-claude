@@ -326,6 +326,82 @@
     .policy-badge.leash-no-dogs   { color: #ef4444; background: rgba(239,68,68,0.08); }
     .policy-badge.hours           { color: var(--text-muted); background: rgba(0,0,0,0.04); border-color: var(--text-muted); }
 
+    /* ── Zone rules — section-aware dog policy v2 (442 beaches) ─────
+       Locked color/icon system per project_zone_rules_design_locked.md:
+       🟢 off_leash · ⚪ on_leash · 🔴 not_allowed · 🟡 time-restricted
+       🟠 seasonal · ❓ unknown */
+    .zr-card {
+      background: #fff; border: 1px solid var(--border); border-radius: 12px;
+      padding: 14px 16px; margin: 12px 16px;
+      font-family: 'DM Sans', system-ui, sans-serif;
+    }
+    .zr-header {
+      font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 2px;
+    }
+    .zr-sub {
+      font-size: 11px; color: var(--text-muted); font-weight: 500; margin-left: 6px;
+    }
+    .zr-season-tabs { display: flex; gap: 4px; margin: 10px 0 6px; flex-wrap: wrap; }
+    .zr-season-tab {
+      font-size: 11px; padding: 4px 10px; border-radius: 999px;
+      background: rgba(0,0,0,0.04); border: 1px solid var(--border);
+      color: var(--text-muted); cursor: pointer; font-family: inherit;
+    }
+    .zr-season-tab.active { background: #1e293b; color: #fff; border-color: #1e293b; }
+
+    .zr-region { margin-top: 10px; padding-top: 10px;
+                 border-top: 1px dashed rgba(0,0,0,0.08); }
+    .zr-region:first-of-type { border-top: none; padding-top: 0; }
+    .zr-region-name {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 4px;
+    }
+    .zr-region-time {
+      display: inline-block; font-size: 11px; color: #92400e;
+      background: rgba(245, 158, 11, 0.1); padding: 2px 8px; border-radius: 4px;
+      margin-bottom: 6px;
+    }
+
+    .zr-sections {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 6px 12px; margin-top: 4px;
+    }
+    .zr-section {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 4px 0; font-size: 13px; cursor: pointer;
+      border-bottom: 1px solid transparent;
+      transition: border-color 0.1s;
+    }
+    .zr-section:hover { border-bottom-color: var(--border); }
+    .zr-section-name { color: var(--text); }
+    .zr-rule {
+      font-size: 11px; padding: 2px 8px; border-radius: 999px;
+      font-weight: 600; white-space: nowrap;
+    }
+    .zr-rule.off_leash   { background: rgba(34,197,94,0.12);  color: #15803d; }
+    .zr-rule.on_leash    { background: rgba(0,0,0,0.06);      color: #475569; }
+    .zr-rule.not_allowed { background: rgba(239,68,68,0.12);  color: #991b1b; }
+    .zr-rule.time_window { background: rgba(245,158,11,0.12); color: #92400e; }
+    .zr-rule.unknown     { background: rgba(0,0,0,0.04);      color: #94a3b8; }
+
+    .zr-section-evidence {
+      grid-column: 1 / -1;
+      font-size: 11px; color: var(--text-muted);
+      font-style: italic; padding: 6px 10px;
+      background: rgba(0,0,0,0.02); border-left: 3px solid var(--border);
+      border-radius: 0 4px 4px 0;
+      margin: 2px 0;
+      display: none;
+    }
+    .zr-section.open + .zr-section-evidence,
+    .zr-section.open .zr-section-evidence { display: block; }
+
+    .zr-notes {
+      font-size: 12px; color: var(--text-muted); margin-top: 10px;
+      padding-top: 10px; border-top: 1px dashed rgba(0,0,0,0.08);
+      line-height: 1.5;
+    }
+
     /* ── Tooltip ─────────────────────────────────────────────────── */
     .bar-col { position: relative; }
 
@@ -493,7 +569,7 @@
   }
 
   // ── Render ────────────────────────────────────────────────────────
-  function render({ beach, day, hours, metadata }) {
+  function render({ beach, day, hours, metadata, zone_rules }) {
     // Header
     const dateObj  = new Date(date + 'T12:00:00');
     const dayName  = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
@@ -530,6 +606,14 @@
       badgeRow.className = 'policy-badges';
       badgeRow.innerHTML = policyBadges;
       document.getElementById('header-left').appendChild(badgeRow);
+    }
+
+    // Zone rules — section-aware policy v2. Only renders if backend provided.
+    const zrHtml = buildZoneRulesHtml(zone_rules);
+    if (zrHtml) {
+      const zrCard = document.createElement('div');
+      zrCard.innerHTML = zrHtml;
+      document.getElementById('main-content').prepend(zrCard.firstElementChild);
     }
 
     // Hydrate the outer locationId from the API response so chat (which
@@ -1021,6 +1105,119 @@
   }
 
   // ── Policy badges (LLM-extracted) ──────────────────────────────────
+  // ── Zone rules render — section-aware policy v2 ────────────────
+  // Reads beach_dog_policy.zone_rules (jsonb) — schema locked
+  // 2026-05-04 (project_zone_rules_design_locked.md). Renders the
+  // active season's regions and sections with rule chips.
+  const ZR_SECTION_LABEL = {
+    sand: '🏖️ Sand', trails: '🥾 Trails', boardwalk: '🚶 Boardwalk',
+    bluff: '🏔️ Bluff', dunes: '🏜️ Dunes', picnic_area: '🧺 Picnic area',
+    campground: '🏕️ Campground', playground: '🤸 Playground',
+    tide_pools: '🐚 Tide pools', nesting_zones: '🪺 Nesting zones',
+    water_swim: '🌊 Water', parking_lot: '🅿️ Parking',
+    restrooms_showers: '🚿 Restrooms',
+  };
+  const ZR_RULE_LABEL = {
+    off_leash: '🟢 Off-leash', on_leash: '⚪ On-leash',
+    not_allowed: '🔴 Not allowed', unknown: '❓ Unknown',
+  };
+
+  function fmtSeasonDates(d) {
+    if (!d) return null;
+    if (typeof d.start === 'string' && typeof d.end === 'string') {
+      // "MM-DD" pretty-print: "06-15" → "Jun 15"
+      const months = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const fmt = (md) => {
+        const [m, day] = md.split('-').map(Number);
+        return `${months[m] || m} ${day}`;
+      };
+      return `${fmt(d.start)} – ${fmt(d.end)}`;
+    }
+    return null;
+  }
+
+  function fmtTimeWindow(tw) {
+    if (!tw) return '';
+    const start = tw.start || '';
+    const end   = tw.end   || '';
+    const rule  = tw.rule  || '';
+    const ruleLabel = ZR_RULE_LABEL[rule]?.replace(/^[^\s]+\s/, '') || rule;
+    return `${start}–${end} ${ruleLabel.toLowerCase()}`;
+  }
+
+  function buildZoneRulesHtml(zr) {
+    if (!zr || !zr.seasons || !Array.isArray(zr.seasons) || zr.seasons.length === 0) {
+      return '';
+    }
+
+    const seasons = zr.seasons;
+    const seasonTabs = seasons.length > 1
+      ? `<div class="zr-season-tabs">${seasons.map((s, i) => `
+           <button class="zr-season-tab ${i === 0 ? 'active' : ''}"
+                   data-zr-season="${i}">${escHtml(s.name || `Season ${i+1}`)}${
+             fmtSeasonDates(s.dates) ? ` · ${fmtSeasonDates(s.dates)}` : ''
+           }</button>`).join('')}</div>`
+      : '';
+
+    const seasonPanes = seasons.map((season, sIdx) => {
+      const regions = Array.isArray(season.regions) ? season.regions : [];
+      const regionsHtml = regions.map((reg, rIdx) => {
+        const sections = reg.sections || {};
+        const sectionList = Object.entries(sections);
+        if (sectionList.length === 0) return '';
+
+        const regionTimeWindow = Array.isArray(reg.time_windows) && reg.time_windows.length
+          ? `<div class="zr-region-time">⏰ ${escHtml(fmtTimeWindow(reg.time_windows[0]))}</div>` : '';
+
+        const sectionRows = sectionList.map(([name, sec]) => {
+          const rule = sec?.rule || 'unknown';
+          // Time-restricted: section has its own time_windows OR region has a time-window cascade
+          const hasTime = Array.isArray(sec?.time_windows) && sec.time_windows.length > 0;
+          const ruleClass = hasTime ? 'time_window' : rule;
+          const ruleText = hasTime ? `🟡 ${escHtml(fmtTimeWindow(sec.time_windows[0]))}`
+                                   : (ZR_RULE_LABEL[rule] || rule);
+          const evidence = sec?.evidence?.quote ? `<div class="zr-section-evidence">${escHtml(sec.evidence.quote)}</div>` : '';
+          return `<div class="zr-section" onclick="this.classList.toggle('open')">
+                    <span class="zr-section-name">${ZR_SECTION_LABEL[name] || escHtml(name)}</span>
+                    <span class="zr-rule ${ruleClass}">${ruleText}</span>
+                  </div>${evidence}`;
+        }).join('');
+
+        const regionName = reg.name && regions.length > 1
+          ? `<div class="zr-region-name">${escHtml(reg.name)}</div>` : '';
+
+        return `<div class="zr-region">
+                  ${regionName}${regionTimeWindow}
+                  <div class="zr-sections">${sectionRows}</div>
+                </div>`;
+      }).join('');
+
+      return `<div class="zr-season-pane" data-zr-season-pane="${sIdx}"
+                   style="${sIdx === 0 ? '' : 'display:none;'}">${regionsHtml}</div>`;
+    }).join('');
+
+    const notes = zr.global_notes
+      ? `<div class="zr-notes">${escHtml(zr.global_notes)}</div>` : '';
+
+    return `<div class="zr-card">
+              <div class="zr-header">🐾 Zone rules <span class="zr-sub">where dogs can go</span></div>
+              ${seasonTabs}
+              ${seasonPanes}
+              ${notes}
+            </div>`;
+  }
+
+  // Wire season-tab clicks once at load (delegated)
+  document.addEventListener('click', (e) => {
+    const tab = e.target.closest('.zr-season-tab');
+    if (!tab) return;
+    const idx = tab.dataset.zrSeason;
+    document.querySelectorAll('.zr-season-tab').forEach(t => t.classList.toggle('active', t === tab));
+    document.querySelectorAll('[data-zr-season-pane]').forEach(p => {
+      p.style.display = p.dataset.zrSeasonPane === idx ? '' : 'none';
+    });
+  });
+
   // Reads metadata.dogs_leash_required + metadata.hours_text from the
   // arena_beach_metadata view. Returns '' if nothing meaningful to show.
   function buildPolicyBadgesHtml(metadata) {

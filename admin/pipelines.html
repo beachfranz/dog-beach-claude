@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pipelines · Dog Beach Scout</title>
+<style>
+  body { margin: 0; padding: 24px; background: #f1f5f9; color: #0f2742;
+         font-family: 'DM Sans', system-ui, sans-serif; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .sub { color: #64748b; font-size: 13px; margin-bottom: 20px; }
+
+  table { width: 100%; max-width: 1300px; border-collapse: collapse;
+          background: #fff; border: 1px solid #cbd5e1; border-radius: 8px;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.05); overflow: hidden; }
+  th, td { text-align: left; padding: 10px 14px; font-size: 13px;
+           border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+  th { background: #f8fafc; font-size: 11px; text-transform: uppercase;
+       letter-spacing: 0.05em; color: #475569; font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+
+  .name { font-weight: 600; color: #0f2742; font-family: monospace;
+          font-size: 12px; }
+  .desc { color: #475569; font-size: 12px; max-width: 380px; }
+  .schedule { font-family: monospace; font-size: 11px; color: #64748b; }
+  .cost { font-family: monospace; font-size: 11px; }
+  .cost.expensive { color: #b91c1c; font-weight: 600; }
+  .cost.medium    { color: #c2410c; }
+  .cost.cheap     { color: #15803d; }
+  .cost.free      { color: #94a3b8; }
+
+  .status { display: inline-block; padding: 2px 8px; border-radius: 999px;
+            font-size: 11px; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 0.04em; }
+  .status.success { background: #dcfce7; color: #166534; }
+  .status.failed  { background: #fee2e2; color: #991b1b; }
+  .status.running { background: #fef9c3; color: #854d0e; }
+  .status.never   { background: #f1f5f9; color: #94a3b8; }
+
+  .ago { font-size: 11px; color: #64748b; }
+  .duration { font-size: 11px; color: #64748b; font-family: monospace; }
+
+  .cmd { font-family: monospace; font-size: 11px; background: #f8fafc;
+         padding: 4px 8px; border-radius: 4px; border: 1px solid #e2e8f0;
+         display: inline-flex; align-items: center; gap: 6px;
+         max-width: 100%; }
+  .cmd code { color: #475569; word-break: break-all; }
+  .copy-btn { background: none; border: none; color: #2563eb;
+              font-size: 11px; cursor: pointer; padding: 0; font-family: inherit; }
+  .copy-btn:hover { text-decoration: underline; }
+  .copy-btn.copied { color: #15803d; }
+
+  .legend { font-size: 11px; color: #64748b; margin-top: 16px; }
+  .legend code { background: #fff; padding: 1px 5px; border-radius: 3px;
+                 border: 1px solid #cbd5e1; }
+
+  details { margin-top: 4px; font-size: 11px; }
+  details summary { cursor: pointer; color: #64748b; }
+  details pre { background: #f8fafc; padding: 8px; border-radius: 4px;
+                font-size: 10px; overflow-x: auto; white-space: pre-wrap;
+                color: #475569; max-height: 200px; }
+</style>
+</head>
+<body>
+
+<h1>🛠️ Pipelines</h1>
+<div class="sub">
+  Homegrown orchestrator. Manual scripts at <code>scripts/orchestrator/run.py</code>.
+  Audit log: <code>public.pipeline_runs</code>.
+</div>
+
+<table id="pipeline-table">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Description</th>
+      <th>Schedule</th>
+      <th>Cost</th>
+      <th>Last run</th>
+      <th>Status</th>
+      <th>Run command</th>
+    </tr>
+  </thead>
+  <tbody id="rows"></tbody>
+</table>
+
+<div class="legend">
+  <strong>How to run a pipeline:</strong> click the copy button → paste into PowerShell.
+  Status updates here as soon as the run finishes.<br>
+  <strong>List of pipelines is hardcoded in this file</strong> (mirror of
+  <code>scripts/orchestrator/registry.py</code>). Update both together.
+</div>
+
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+// Mirrors scripts/orchestrator/registry.py — keep in sync when you edit.
+const PIPELINES = [
+  { name: 'zone_rules_repass_anchors',
+    description: 'Section-aware text-repass on 8 anchor beaches (smoke test)',
+    schedule: '(manual)', cost: '$0.05', cost_class: 'cheap' },
+  { name: 'zone_rules_repass_full',
+    description: 'Full text-repass on all eligible beaches (~600)',
+    schedule: '(manual)', cost: '$3.00', cost_class: 'expensive' },
+  { name: 'extract_beach_policies',
+    description: 'Bulk LLM extraction over scoreable beaches missing recent BEP rows',
+    schedule: '(manual)', cost: 'varies', cost_class: 'medium' },
+  { name: 'extract_for_orphans',
+    description: 'Per-orphan policy extraction (rare-source URLs)',
+    schedule: '(manual)', cost: 'varies', cost_class: 'medium' },
+  { name: 'discover_urls',
+    description: 'Brave/Anthropic URL discovery for orphan beaches',
+    schedule: '(manual)', cost: 'varies', cost_class: 'medium' },
+  { name: 'load_osm_beach_polys',
+    description: 'Refresh OSM natural=beach polygons via Overpass API',
+    schedule: '0 3 1 * *', cost: '$0', cost_class: 'free' },
+  { name: 'load_dog_policy_zones',
+    description: 'Refresh NPS Point Reyes pet-allowed carve-outs',
+    schedule: '(manual)', cost: '$0', cost_class: 'free' },
+  { name: 'daily_beach_refresh',
+    description: '7-day forecast refresh (wired via pg_cron, listed for visibility)',
+    schedule: '0 9 * * *', cost: '~$0.20/run', cost_class: 'cheap' },
+];
+
+function timeAgo(ts) {
+  if (!ts) return 'never';
+  const d = new Date(ts);
+  const sec = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (sec < 60)        return `${sec}s ago`;
+  if (sec < 3600)      return `${Math.floor(sec/60)}m ago`;
+  if (sec < 86400)     return `${Math.floor(sec/3600)}h ago`;
+  return `${Math.floor(sec/86400)}d ago`;
+}
+
+function fmtDuration(s) {
+  if (s == null) return '';
+  if (s < 1)    return `${Math.round(s*1000)}ms`;
+  if (s < 60)   return `${s.toFixed(1)}s`;
+  if (s < 3600) return `${Math.floor(s/60)}m ${Math.round(s%60)}s`;
+  return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`;
+}
+
+async function fetchLatest() {
+  const url = `${SUPABASE_URL}/rest/v1/pipeline_runs_latest?select=*`;
+  const r = await fetch(url, { headers: {
+    apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } });
+  return r.ok ? await r.json() : [];
+}
+
+async function fetchRecent(name) {
+  const url = `${SUPABASE_URL}/rest/v1/pipeline_runs` +
+              `?select=started_at,status,duration_seconds,exit_code,stdout_tail,stderr_tail` +
+              `&pipeline_name=eq.${encodeURIComponent(name)}` +
+              `&order=started_at.desc&limit=5`;
+  const r = await fetch(url, { headers: {
+    apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } });
+  return r.ok ? await r.json() : [];
+}
+
+async function render() {
+  const latest = await fetchLatest();
+  const byName = new Map(latest.map(r => [r.pipeline_name, r]));
+  const tbody = document.getElementById('rows');
+  tbody.innerHTML = PIPELINES.map(p => {
+    const last = byName.get(p.name);
+    const status   = last?.last_status ?? 'never';
+    const ts       = last?.last_finished_at || last?.last_started_at;
+    const duration = fmtDuration(last?.last_duration_seconds);
+    const cmd = `python -m scripts.orchestrator.run ${p.name}`;
+    return `
+      <tr>
+        <td class="name">${p.name}</td>
+        <td class="desc">${p.description}</td>
+        <td class="schedule">${p.schedule}</td>
+        <td class="cost ${p.cost_class}">${p.cost}</td>
+        <td>
+          <div class="ago">${timeAgo(ts)}</div>
+          ${duration ? `<div class="duration">${duration}</div>` : ''}
+        </td>
+        <td>
+          <span class="status ${status}">${status}</span>
+          ${last?.last_exit_code != null && last.last_exit_code !== 0
+              ? `<div class="duration">exit ${last.last_exit_code}</div>` : ''}
+        </td>
+        <td>
+          <div class="cmd">
+            <code>${cmd}</code>
+            <button class="copy-btn" data-cmd="${cmd}">copy</button>
+          </div>
+        </td>
+      </tr>`;
+  }).join('');
+
+  document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(btn.dataset.cmd);
+      const orig = btn.textContent;
+      btn.textContent = 'copied!';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1200);
+    });
+  });
+}
+
+render();
+// Auto-refresh every 30s so a freshly-finished run shows up
+setInterval(render, 30_000);
+</script>
+</body>
+</html>

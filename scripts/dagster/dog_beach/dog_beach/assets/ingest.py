@@ -310,6 +310,80 @@ def operator_dogs_policy_run(context: AssetExecutionContext,
     )
 
 
+# --- zone_rules text-repass (closed_zones_v3) ---------------------------
+# Wraps scripts/repass_zone_rules.py. The _run flavor here defaults to
+# --anchors (~$0.05, 8 beaches) so an accidental click in the Dagster UI
+# doesn't burn API budget. To run --full (~$3, ~600 beaches) execute the
+# script directly: `python scripts/repass_zone_rules.py --full`.
+
+@asset(
+    description="Section-aware dog-policy v2 evidence rows. "
+                "source='text_repass_v1' rows in beach_enrichment_provenance, "
+                "produced by the closed_zones_v3 prompt. Promoted to "
+                "beach_dog_policy.zone_rules via the AFTER INSERT trigger "
+                "tg_after_change_promote_zone_rules (migration "
+                "20260506_beach_dog_policy_zone_rules.sql). Cheap "
+                "observation: SELECTs row counts + last run time.",
+    group_name="ingest",
+    kinds={"sql", "table"},
+)
+def zone_rules_repass(context: AssetExecutionContext,
+                      supabase_db: SupabaseDbResource):
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            select count(*),
+                   count(distinct gold_fid),
+                   max(updated_at)
+              from public.beach_enrichment_provenance
+             where source = 'text_repass_v1'
+        """)
+        total, distinct_fids, max_ts = cur.fetchone()
+        cur.execute("""
+            select count(*)
+              from public.beach_dog_policy
+             where zone_rules is not null
+        """)
+        promoted = cur.fetchone()[0]
+    return Output(
+        None,
+        metadata={
+            "bep_rows":            MetadataValue.int(total),
+            "distinct_fids":       MetadataValue.int(distinct_fids),
+            "promoted_to_policy":  MetadataValue.int(promoted),
+            "last_repass_at":      MetadataValue.text(str(max_ts)),
+        },
+    )
+
+
+@asset(
+    description="EXPENSIVE — runs the closed_zones_v3 text-repass to produce "
+                "structured zone_rules jsonb on top of existing dogs prose "
+                "evidence. Default mode is --anchors (8 beaches, ~$0.05) "
+                "so accidental UI clicks don't burn budget. For broader "
+                "runs, invoke scripts/repass_zone_rules.py directly with "
+                "--pilot N or --full. The auto-promote trigger lifts new "
+                "rows into beach_dog_policy.zone_rules immediately.",
+    group_name="ingest_heavy",
+    kinds={"python", "anthropic"},
+)
+def zone_rules_repass_run(context: AssetExecutionContext,
+                          supabase_db: SupabaseDbResource):
+    out = _run_python(context, "scripts/repass_zone_rules.py", "--anchors")
+    with supabase_db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""
+            select count(*) from public.beach_enrichment_provenance
+             where source = 'text_repass_v1'
+        """)
+        total = cur.fetchone()[0]
+    return Output(
+        None,
+        metadata={
+            "total_text_repass_rows": MetadataValue.int(total),
+            "stdout_tail":            MetadataValue.text(out),
+        },
+    )
+
+
 # --- 805 spine sources ----------------------------------------------------
 # Cheap observations + heavy _run variants for the four sources that feed
 # public.beach_locations: UBP, CPAD, OSM, CCC. Only UBP and CPAD have

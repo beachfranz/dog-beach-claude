@@ -246,6 +246,76 @@ def load_variants() -> list[dict]:
     """)
 
 
+def load_fid_work(fids: list[int]) -> list[dict]:
+    """Per-fid mode: resolve each fid to its city via jurisdictions, load
+    that city's sources, but FILTER the fan-out to only the requested fids
+    (instead of every beach in the city). For fids whose city isn't in
+    city_policy_sources, no extraction can run -- they're skipped with a
+    note and the caller sees them in the dry-run summary.
+
+    Returns the same shape as load_city_work() so the main loop is unchanged.
+    """
+    if not fids:
+        return []
+    fid_csv = ','.join(str(f) for f in fids)
+
+    # Resolve each fid → its city's place_fips. Fids in beaches_gold join
+    # via c1_jurisdiction_id; fids only in us_beach_points use place_fips
+    # directly.
+    rows = run_sql(f"""
+        select g.fid, j.fips_state || j.fips_place as place_fips, j.name as city
+          from public.beaches_gold g
+          join public.jurisdictions j on j.id = g.c1_jurisdiction_id
+         where g.fid in ({fid_csv}) and g.is_active = true
+        union
+        select u.fid, u.place_fips, j.name as city
+          from public.us_beach_points u
+          left join public.jurisdictions j
+            on j.fips_state || j.fips_place = u.place_fips
+         where u.fid in ({fid_csv}) and u.is_active = true
+           and u.place_fips is not null
+    """)
+    if not rows:
+        print(f"!! no jurisdiction match for any of {len(fids)} fids -- skipping")
+        return []
+
+    # Group fids by city (place_fips)
+    by_fips: dict[str, dict] = {}
+    for r in rows:
+        f = by_fips.setdefault(r['place_fips'], {
+            'city': r['city'], 'fips': r['place_fips'], 'fids': set(),
+        })
+        f['fids'].add(r['fid'])
+
+    # Pull this city's sources
+    out = []
+    for fips, data in by_fips.items():
+        srcs = run_sql(f"""
+            select id, source_type, url
+              from public.city_policy_sources
+             where place_fips = {sql_literal(fips)}
+        """)
+        if not srcs:
+            print(f"!! city {data['city']} (fips={fips}) has no sources in "
+                  f"city_policy_sources -- {len(data['fids'])} fid(s) skipped")
+            continue
+        # Determine arena_fids subset (fids backed by beaches_gold rows)
+        arena_check = run_sql(f"""
+            select fid from public.beaches_gold
+             where fid in ({','.join(str(f) for f in data['fids'])})
+        """)
+        arena_fids = {r['fid'] for r in arena_check}
+
+        out.append({
+            'city': data['city'],
+            'fips': fips,
+            'sources': srcs,
+            'beach_fids': sorted(data['fids']),
+            'arena_fids': arena_fids,
+        })
+    return out
+
+
 def load_city_work(city_filter: str | None) -> list[dict]:
     """Return list of {city, fips, sources: [...], beach_fids: [...]}"""
     where = f"and j.name = {sql_literal(city_filter)}" if city_filter else ""
@@ -378,12 +448,17 @@ def main():
     ap.add_argument("--city", help="Exact city name (e.g. 'Laguna Beach')")
     ap.add_argument("--all-ca", action="store_true",
                     help="Run all CA cities in city_policy_sources")
+    ap.add_argument("--fids", help="Comma-separated list of fids to extract for "
+                                    "(per-fid mode -- resolves each fid to its "
+                                    "city's sources but only emits BEP rows for "
+                                    "the listed fids)")
     ap.add_argument("--dry-run", action="store_true",
                     help="Plan the run without hitting LLM or DB")
     args = ap.parse_args()
 
-    if not args.city and not args.all_ca:
-        ap.error("specify --city or --all-ca")
+    n_modes = sum(bool(x) for x in (args.city, args.all_ca, args.fids))
+    if n_modes != 1:
+        ap.error("specify exactly one of --city, --all-ca, --fids")
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not args.dry_run:
@@ -394,7 +469,11 @@ def main():
     client = Anthropic(api_key=api_key) if not args.dry_run else None
 
     variants = load_variants()
-    cities   = load_city_work(args.city if not args.all_ca else None)
+    if args.fids:
+        fids = [int(f) for f in args.fids.split(',') if f.strip()]
+        cities = load_fid_work(fids)
+    else:
+        cities = load_city_work(args.city if not args.all_ca else None)
 
     total_llm_calls = 0
     total_rows      = 0

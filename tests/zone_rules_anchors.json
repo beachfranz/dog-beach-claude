@@ -1,13 +1,25 @@
 {
-  "_doc": "Hand-curated zone_rules anchors for the section-aware dog-policy spec. See project_zone_rules_design_locked.md and docs/unified-pipeline.md. Each anchor is a real beach with two interpretations of how its zone_rules jsonb could look — Variant A (conservative: less structure, region-level modifier cascade, evidence on load-bearing rules only) vs Variant B (rich: more named regions, section-level modifiers, evidence on every rule, fuller global_notes). Used as fixture for: UI mock, prompt-engineering target for closed_zones_v3, calibration regression check.",
+  "_doc": "Hand-curated zone_rules anchors for the section-aware dog-policy spec. See project_zone_rules_design_locked.md and docs/closed_zones_v3.md. Each anchor is a real beach with two interpretations of how its zone_rules jsonb could look — Variant A (conservative: less structure, region-level modifier cascade, evidence on load-bearing rules only) vs Variant B (rich: more named regions, section-level modifiers, evidence on every rule, fuller global_notes). Used as fixture for: UI mock, prompt-engineering target for closed_zones_v3, calibration regression check.",
   "spec_version": "1.0",
   "spec_locked_at": "2026-05-04",
   "section_taxonomy": [
-    "sand", "water_swim", "trails", "boardwalk", "bluff", "dunes",
-    "picnic_area", "parking_lot", "campground", "playground",
-    "restrooms_showers", "tide_pools"
+    "sand",
+    "trails",
+    "boardwalk",
+    "bluff",
+    "dunes",
+    "picnic_area",
+    "campground",
+    "playground",
+    "tide_pools",
+    "nesting_zones"
   ],
-  "rule_values": ["not_allowed", "on_leash", "off_leash", "unknown"],
+  "rule_values": [
+    "not_allowed",
+    "on_leash",
+    "off_leash",
+    "unknown"
+  ],
   "anchors": [
     {
       "fid": 6202,
@@ -19,14 +31,8 @@
             {
               "name": null,
               "sections": {
-                "sand":        { "rule": "off_leash" },
-                "water_swim":  { "rule": "off_leash" },
-                "parking_lot": {
-                  "rule": "on_leash",
-                  "evidence": {
-                    "quote": "must be on-leash at all points before reaching the beach",
-                    "source": "research"
-                  }
+                "sand": {
+                  "rule": "off_leash"
                 }
               }
             }
@@ -43,22 +49,6 @@
                   "rule": "off_leash",
                   "evidence": {
                     "quote": "Dogs may be off-leash in this designated dog beach area",
-                    "source": "research",
-                    "source_url": "https://www.coronado.ca.us/757/Dogs"
-                  }
-                },
-                "water_swim": {
-                  "rule": "off_leash",
-                  "evidence": {
-                    "quote": "where they can freely roam in the sea and sand",
-                    "source": "park_url",
-                    "source_url": "https://www.sandiego.com/beaches/coronado-beach"
-                  }
-                },
-                "parking_lot": {
-                  "rule": "on_leash",
-                  "evidence": {
-                    "quote": "must be on-leash at all points before reaching the beach",
                     "source": "research",
                     "source_url": "https://www.coronado.ca.us/757/Dogs"
                   }
@@ -81,10 +71,17 @@
             {
               "name": null,
               "time_windows": [
-                { "start": "22:00", "end": "04:00", "rule": "not_allowed" }
+                {
+                  "start": "22:00",
+                  "end": "04:00",
+                  "rule": "not_allowed"
+                }
               ],
               "seasonal": [
-                { "months": "Apr-Sep", "reason": "Least Tern nesting — some zones closed; primary off-leash area remains open" }
+                {
+                  "months": "Apr-Sep",
+                  "reason": "Least Tern nesting — some zones closed; primary off-leash area remains open"
+                }
               ],
               "evidence": {
                 "quote": "Dogs are allowed off-leash at Dog Beach and Fiesta Island (4am–10pm)",
@@ -92,10 +89,12 @@
                 "source_url": "https://www.sandiego.gov/park-and-recreation/parks/dogs/bchdog"
               },
               "sections": {
-                "sand":        { "rule": "off_leash" },
-                "water_swim":  { "rule": "off_leash" },
-                "trails":      { "rule": "off_leash" },
-                "parking_lot": { "rule": "on_leash" }
+                "sand": {
+                  "rule": "off_leash"
+                },
+                "trails": {
+                  "rule": "off_leash"
+                }
               }
             }
           ],
@@ -110,10 +109,17 @@
                 "sand": {
                   "rule": "off_leash",
                   "time_windows": [
-                    { "start": "22:00", "end": "04:00", "rule": "not_allowed" }
+                    {
+                      "start": "22:00",
+                      "end": "04:00",
+                      "rule": "not_allowed"
+                    }
                   ],
                   "seasonal": [
-                    { "months": "Apr-Sep", "reason": "Least Tern nesting closes some zones; primary off-leash area remains open" }
+                    {
+                      "months": "Apr-Sep",
+                      "reason": "Least Tern nesting closes some zones; primary off-leash area remains open"
+                    }
                   ],
                   "evidence": {
                     "quote": "Dogs are allowed off-leash at Dog Beach and Fiesta Island (4am–10pm)",
@@ -121,17 +127,15 @@
                     "source_url": "https://www.sandiego.gov/park-and-recreation/parks/dogs/bchdog"
                   }
                 },
-                "water_swim": {
-                  "rule": "off_leash",
-                  "time_windows": [{ "start": "22:00", "end": "04:00", "rule": "not_allowed" }]
-                },
                 "trails": {
                   "rule": "off_leash",
-                  "time_windows": [{ "start": "22:00", "end": "04:00", "rule": "not_allowed" }]
-                },
-                "parking_lot": {
-                  "rule": "on_leash",
-                  "time_windows": [{ "start": "22:00", "end": "04:00", "rule": "not_allowed" }]
+                  "time_windows": [
+                    {
+                      "start": "22:00",
+                      "end": "04:00",
+                      "rule": "not_allowed"
+                    }
+                  ]
                 }
               }
             }
@@ -151,7 +155,11 @@
             {
               "name": null,
               "time_windows": [
-                { "start": "10:00", "end": "16:30", "rule": "not_allowed" }
+                {
+                  "start": "10:00",
+                  "end": "16:30",
+                  "rule": "not_allowed"
+                }
               ],
               "evidence": {
                 "quote": "Dogs not allowed on the beach or any beachfront sidewalk between 10 a.m. and 4:30 p.m.",
@@ -159,10 +167,15 @@
                 "source_url": "http://www.parks.ca.gov/default.asp?page_id=652"
               },
               "sections": {
-                "sand":        { "rule": "on_leash" },
-                "water_swim":  { "rule": "on_leash" },
-                "boardwalk":   { "rule": "on_leash" },
-                "tide_pools":  { "rule": "not_allowed" }
+                "sand": {
+                  "rule": "on_leash"
+                },
+                "boardwalk": {
+                  "rule": "on_leash"
+                },
+                "tide_pools": {
+                  "rule": "not_allowed"
+                }
               }
             }
           ],
@@ -176,19 +189,27 @@
               "sections": {
                 "sand": {
                   "rule": "on_leash",
-                  "time_windows": [{ "start": "10:00", "end": "16:30", "rule": "not_allowed" }],
+                  "time_windows": [
+                    {
+                      "start": "10:00",
+                      "end": "16:30",
+                      "rule": "not_allowed"
+                    }
+                  ],
                   "evidence": {
                     "quote": "Dogs not allowed on the beach... between 10 a.m. and 4:30 p.m.",
                     "source": "park_url"
                   }
                 },
-                "water_swim": {
-                  "rule": "on_leash",
-                  "time_windows": [{ "start": "10:00", "end": "16:30", "rule": "not_allowed" }]
-                },
                 "boardwalk": {
                   "rule": "on_leash",
-                  "time_windows": [{ "start": "10:00", "end": "16:30", "rule": "not_allowed" }],
+                  "time_windows": [
+                    {
+                      "start": "10:00",
+                      "end": "16:30",
+                      "rule": "not_allowed"
+                    }
+                  ],
                   "evidence": {
                     "quote": "any beachfront sidewalk between 10 a.m. and 4:30 p.m.",
                     "source": "park_url"
@@ -219,10 +240,12 @@
             {
               "name": null,
               "sections": {
-                "sand":        { "rule": "off_leash" },
-                "water_swim":  { "rule": "off_leash" },
-                "bluff":       { "rule": "on_leash" },
-                "parking_lot": { "rule": "on_leash" }
+                "sand": {
+                  "rule": "off_leash"
+                },
+                "bluff": {
+                  "rule": "on_leash"
+                }
               }
             }
           ],
@@ -241,24 +264,10 @@
                     "source": "manual_curator"
                   }
                 },
-                "water_swim": {
-                  "rule": "off_leash",
-                  "evidence": {
-                    "quote": "Off-leash from the sand to the ocean",
-                    "source": "manual_curator"
-                  }
-                },
                 "bluff": {
                   "rule": "on_leash",
                   "evidence": {
                     "quote": "leashed... on the upper bluff",
-                    "source": "manual_curator"
-                  }
-                },
-                "parking_lot": {
-                  "rule": "on_leash",
-                  "evidence": {
-                    "quote": "Dogs must be leashed in the parking lot... until reaching the sand",
                     "source": "manual_curator"
                   }
                 }
@@ -283,7 +292,10 @@
                 "sand": {
                   "rule": "not_allowed",
                   "sub_zones": [
-                    { "name": "Gate 19 beach (south end of park)", "rule": "on_leash" }
+                    {
+                      "name": "Gate 19 beach (south end of park)",
+                      "rule": "on_leash"
+                    }
                   ],
                   "evidence": {
                     "quote": "Dogs on leash are only allowed on the beach at Gate 19 (south end of park)",
@@ -291,19 +303,22 @@
                     "source_url": "https://www.parks.ca.gov/?page_id=579"
                   }
                 },
-                "water_swim": { "rule": "not_allowed" },
                 "trails": {
                   "rule": "not_allowed",
                   "sub_zones": [
-                    { "name": "Trails leading to Gate 19 beach", "rule": "on_leash" }
+                    {
+                      "name": "Trails leading to Gate 19 beach",
+                      "rule": "on_leash"
+                    }
                   ],
                   "evidence": {
                     "quote": "trails leading to it [Gate 19]... not allowed in all other areas, including across Highway 1 in the Soberanes Canyon Trail area",
                     "source": "park_url"
                   }
                 },
-                "bluff":       { "rule": "not_allowed" },
-                "parking_lot": { "rule": "on_leash" }
+                "bluff": {
+                  "rule": "not_allowed"
+                }
               }
             }
           ],
@@ -335,23 +350,24 @@
             {
               "name": "Rest of park (incl. Soberanes Canyon Trail across Highway 1)",
               "sections": {
-                "sand":       { "rule": "not_allowed" },
-                "water_swim": { "rule": "not_allowed" },
-                "trails":     {
+                "sand": {
+                  "rule": "not_allowed"
+                },
+                "trails": {
                   "rule": "not_allowed",
                   "evidence": {
                     "quote": "Dogs are not allowed in all other areas, including across Highway 1 in the Soberanes Canyon Trail area",
                     "source": "park_url"
                   }
                 },
-                "bluff":      { "rule": "not_allowed" }
+                "bluff": {
+                  "rule": "not_allowed"
+                }
               }
             },
             {
               "name": null,
-              "sections": {
-                "parking_lot": { "rule": "on_leash" }
-              }
+              "sections": {}
             }
           ],
           "global_notes": "California State Park, strictly enforced as a wildlife protection area. Dogs on leash only at Gate 19 (south end of park) and the trails leading to it. The rest of the park beach + bluff + connecting trails prohibit dogs (including the Soberanes Canyon Trail across Highway 1). Parking on-leash per CDPR developed-areas policy.",
@@ -369,8 +385,12 @@
             {
               "name": null,
               "sections": {
-                "sand":        { "rule": "not_allowed" },
-                "picnic_area": { "rule": "on_leash" },
+                "sand": {
+                  "rule": "not_allowed"
+                },
+                "picnic_area": {
+                  "rule": "on_leash"
+                },
                 "campground": {
                   "rule": "on_leash",
                   "evidence": {
@@ -398,19 +418,11 @@
                     "source_url": "https://www.parks.ca.gov/?page_id=599"
                   }
                 },
-                "water_swim": { "rule": "not_allowed" },
                 "picnic_area": {
                   "rule": "on_leash",
                   "evidence": {
                     "quote": "Dogs allowed in... day-use area",
                     "source": "park_url"
-                  }
-                },
-                "parking_lot": {
-                  "rule": "on_leash",
-                  "evidence": {
-                    "quote": "must be leashed at all times in public areas per city ordinance",
-                    "source": "old_school_llm"
                   }
                 },
                 "campground": {
@@ -421,8 +433,9 @@
                     "source_url": "https://www.parks.ca.gov/?page_id=599"
                   }
                 },
-                "restrooms_showers": { "rule": "on_leash" },
-                "trails":            { "rule": "on_leash" }
+                "trails": {
+                  "rule": "on_leash"
+                }
               }
             }
           ],
@@ -441,7 +454,11 @@
             {
               "name": null,
               "time_windows": [
-                { "start": "09:00", "end": "18:00", "rule": "not_allowed" }
+                {
+                  "start": "09:00",
+                  "end": "18:00",
+                  "rule": "not_allowed"
+                }
               ],
               "evidence": {
                 "quote": "Dogs allowed on beach shoreline and adjacent park areas only during night hours and early morning until 9 a.m.; must be leashed during these hours",
@@ -449,10 +466,12 @@
                 "source_url": "https://www.sandiego.gov/park-and-recreation/parks/dogs/bchdog"
               },
               "sections": {
-                "sand":        { "rule": "on_leash" },
-                "water_swim":  { "rule": "on_leash" },
-                "boardwalk":   { "rule": "on_leash" },
-                "parking_lot": { "rule": "on_leash" }
+                "sand": {
+                  "rule": "on_leash"
+                },
+                "boardwalk": {
+                  "rule": "on_leash"
+                }
               }
             }
           ],
@@ -466,32 +485,34 @@
               "sections": {
                 "sand": {
                   "rule": "on_leash",
-                  "time_windows": [{ "start": "09:00", "end": "18:00", "rule": "not_allowed" }],
+                  "time_windows": [
+                    {
+                      "start": "09:00",
+                      "end": "18:00",
+                      "rule": "not_allowed"
+                    }
+                  ],
                   "evidence": {
                     "quote": "Dogs allowed on Mission Beach shoreline and sand during designated hours (night and early morning until 9 a.m.)",
                     "source": "research"
                   }
                 },
-                "water_swim": {
-                  "rule": "on_leash",
-                  "time_windows": [{ "start": "09:00", "end": "18:00", "rule": "not_allowed" }]
-                },
                 "boardwalk": {
                   "rule": "on_leash",
-                  "time_windows": [{ "start": "09:00", "end": "18:00", "rule": "not_allowed" }],
+                  "time_windows": [
+                    {
+                      "start": "09:00",
+                      "end": "18:00",
+                      "rule": "not_allowed"
+                    }
+                  ],
                   "evidence": {
                     "quote": "and adjacent park areas during those same times when leashed",
                     "source": "research"
                   }
                 },
-                "parking_lot": {
-                  "rule": "on_leash",
-                  "time_windows": [{ "start": "09:00", "end": "18:00", "rule": "not_allowed" }]
-                },
-                "playground":        { "rule": "not_allowed" },
-                "restrooms_showers": {
-                  "rule": "on_leash",
-                  "time_windows": [{ "start": "09:00", "end": "18:00", "rule": "not_allowed" }]
+                "playground": {
+                  "rule": "not_allowed"
                 }
               }
             }
@@ -511,10 +532,15 @@
             {
               "name": null,
               "sections": {
-                "sand":       { "rule": "not_allowed" },
-                "water_swim": { "rule": "not_allowed" },
-                "trails":     { "rule": "not_allowed" },
-                "bluff":      { "rule": "not_allowed" }
+                "sand": {
+                  "rule": "not_allowed"
+                },
+                "trails": {
+                  "rule": "not_allowed"
+                },
+                "bluff": {
+                  "rule": "not_allowed"
+                }
               }
             }
           ],
@@ -534,7 +560,6 @@
                     "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
                   }
                 },
-                "water_swim": { "rule": "not_allowed" },
                 "trails": {
                   "rule": "not_allowed",
                   "evidence": {
@@ -542,7 +567,9 @@
                     "source": "research"
                   }
                 },
-                "bluff": { "rule": "not_allowed" }
+                "bluff": {
+                  "rule": "not_allowed"
+                }
               }
             }
           ],

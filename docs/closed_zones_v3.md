@@ -25,19 +25,25 @@ INPUT
 
 Your output describes dog rules at THIS specific beach only.
 
-SECTION TAXONOMY (closed list of 12 — use only these section names)
+SECTION TAXONOMY (closed list of 10 — use only these section names)
 - sand              open beach / sand surface
-- water_swim        ocean or lake water
 - trails            footpaths, hiking trails, multi-use paths
 - boardwalk         boardwalk surface (distinct from trails)
 - bluff             elevated bluff or cliff terrain
-- dunes             dune areas (often plover-protected)
+- dunes             dune areas (broader than nesting; can be plover-adjacent)
 - picnic_area       picnic tables, day-use lawns, designated picnic spots
-- parking_lot       parking lots and the path between car and beach
 - campground        overnight camping zones
 - playground        kids' playground equipment
-- restrooms_showers restroom or shower buildings
 - tide_pools        tide pool zones (often marine-protected)
+- nesting_zones     snowy-plover, least-tern, or other species nesting closures
+                    (typically a marked strip on sand or in dunes, seasonally
+                    closed Mar–Sep most commonly; year-round buffer at some)
+
+(Excluded from dog-policy extraction: `water_swim` (duplicative of sand;
+reserved for water-quality overlay), `restrooms_showers` (dogs don't enter
+restrooms), `parking_lot` (rule is functionally universal `on_leash`).
+Parking and restroom *presence* are captured as flat amenity checks in
+scoring, not as sections.)
 
 RULE VALUES (closed list of 4 — use only these)
 - not_allowed   dogs prohibited

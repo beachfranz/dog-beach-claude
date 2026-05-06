@@ -68,19 +68,28 @@ INPUT
 
 Your output describes dog rules at THIS specific beach only.
 
-SECTION TAXONOMY (closed list of 12 - use only these section names)
+SECTION TAXONOMY (closed list of 10 - use only these section names)
 - sand              open beach / sand surface
-- water_swim        ocean or lake water
 - trails            footpaths, hiking trails, multi-use paths
 - boardwalk         boardwalk surface (distinct from trails)
 - bluff             elevated bluff or cliff terrain
-- dunes             dune areas (often plover-protected)
+- dunes             dune areas (broader than nesting; can be plover-adjacent)
 - picnic_area       picnic tables, day-use lawns, designated picnic spots
-- parking_lot       parking lots and the path between car and beach
 - campground        overnight camping zones
 - playground        kids' playground equipment
-- restrooms_showers restroom or shower buildings
 - tide_pools        tide pool zones (often marine-protected)
+- nesting_zones     snowy-plover, least-tern, or other species nesting
+                    closures. Typically a marked strip on sand or in dunes,
+                    seasonally closed (Mar-Sep most common). Use this when
+                    the source mentions a specific named/marked nesting
+                    closure even if the source doesn't use the words
+                    "nesting" or "plover" -- e.g. "fenced bird protection
+                    area" or "wildlife closure zone" qualifies.
+
+(Excluded: water_swim (duplicative of sand; reserved for water-quality
+overlay), restrooms_showers (dogs don't enter restrooms), parking_lot
+(rule is universally on_leash). Parking and restroom presence are flat
+amenity checks in scoring, not dog-policy sections.)
 
 RULE VALUES (closed list of 4 - use only these)
 - not_allowed   dogs prohibited
@@ -90,30 +99,65 @@ RULE VALUES (closed list of 4 - use only these)
 
 OUTPUT SHAPE (valid JSON only, no prose, no markdown fences)
 {{
-  "regions": [
+  "seasons": [
     {{
-      "name": null,
-      "time_windows": [{{"start": "HH:MM", "end": "HH:MM", "rule": "<rule_value>"}}],
-      "seasonal":     [{{"months": "<MMM-MMM>", "reason": "<short text>"}}],
-      "evidence":     {{"quote": "<verbatim>", "source": "<src>", "source_url": "<url>"}},
-      "sections": {{
-        "<section_name>": {{
-          "rule": "<rule_value>",
-          "time_windows": [],
-          "seasonal":     [],
-          "sub_zones":    [{{"name": "<short>", "rule": "<rule_value>"}}],
-          "evidence":     {{}}
+      "name": "All year",
+      "dates": null,
+      "regions": [
+        {{
+          "name": null,
+          "evidence":  {{"quote": "<verbatim>", "source": "<src>", "source_url": "<url>"}},
+          "sections": {{
+            "<section_name>": {{
+              "rule": "<rule_value>",
+              "time_windows": [{{"start": "HH:MM", "end": "HH:MM", "rule": "<rule_value>"}}],
+              "sub_zones":    [{{"name": "<short>", "rule": "<rule_value>"}}],
+              "evidence":     {{}}
+            }}
+          }}
         }}
-      }}
+      ]
     }}
   ],
   "global_notes": "<plain-prose summary for moderators>",
   "extraction_method": "closed_zones_v3"
 }}
 
-All fields under time_windows, seasonal, sub_zones, evidence are optional.
-Omit a key entirely rather than emitting null/empty - except `name` on regions
-(use null for the default unnamed region).
+HIERARCHY (top to bottom):
+  seasons[] -> regions[] -> sections{{}} -> sub_zones[]
+
+All fields under time_windows, sub_zones, evidence are optional. Omit a key
+entirely rather than emitting null/empty -- except `name` on regions (use null
+for the default unnamed region).
+
+SEASON COVERAGE INVARIANT:
+- If the source text describes NO seasonal differences, emit ONE season with
+  `name: "All year"` and `dates: null`. The default for most beaches.
+- If multiple seasons are declared (peak vs off-season etc.), all entries
+  together MUST cover the full calendar year. No silent gaps.
+- If only ONE season is named in source text (e.g. "snowy plover Mar-Sep:
+  prohibited"), emit it AND an explicit "Rest of year" complement carrying
+  the off-protection rules. NEVER leave part of the year uncovered.
+- Time_windows live INSIDE sections within seasons. Don't put `seasonal`
+  fields on time_windows -- the containing season provides that scope.
+
+SEASON DATES FORMAT:
+- `dates: null` for "All year" (the default season). Required for the unnamed
+  "All year" season; permitted on any season with no formal date bounds.
+- `dates: {{"start": "MM-DD", "end": "MM-DD"}}` for date-bounded seasons.
+  MM-DD is month-day, year-agnostic since seasons recur. Examples:
+    Peak season (Jun 16 to Labor Day):  {{"start": "06-16", "end": "09-04"}}
+    Snowy plover season (Mar 1-Sep 30): {{"start": "03-01", "end": "09-30"}}
+    Off-season (Sep 5 to Jun 15):       {{"start": "09-05", "end": "06-15"}}
+  When `end` is calendar-earlier than `start` (e.g. "09-05" to "06-15"), the
+  season WRAPS the new year — covers Sep 5 through Dec 31 AND Jan 1 through
+  Jun 15. This is normal for "off-season" entries.
+- Resolve named holidays (Labor Day, Memorial Day, etc.) to approximate dates
+  using the current year as reference. Labor Day 2026 = first Monday of Sep
+  ~= 09-07, but for season boundaries treat it as 09-04 (end of week before).
+- Do NOT use month-integer arrays. Calendar months can't represent mid-month
+  boundaries (Jun 16 is in the middle of June; both peak and off-season
+  would claim June). Use explicit MM-DD dates.
 
 EDITORIAL HEURISTICS (apply in this order)
 
@@ -141,6 +185,36 @@ EDITORIAL HEURISTICS (apply in this order)
    prohibited" and the input beach is Wildcat (not Kehoe), output the
    prohibition rules. First identify which bucket THIS beach falls into,
    THEN extract rules for that bucket.
+
+   2a. CATALOG-VS-ZONES DISCIPLINE. CRITICAL — read carefully.
+
+       The input may include a `sibling_beaches` list. These are SEPARATE
+       beach records in our catalog that exist in their own right. When a
+       sibling exists for an area, that area is NOT a region of THIS beach
+       — it's its own beach with its own zone_rules elsewhere.
+
+       Hard rule: if the source text describes a sub-area that corresponds
+       to ANY sibling (by any descriptive name — "Main Beach," "rest of
+       [parent]," "south end," etc.), DO NOT emit a region for it. ONLY
+       output regions for areas that are part of THIS beach's footprint.
+
+       The match between sibling names and descriptive sub-area names
+       requires spatial/geographic reasoning, not literal string match.
+       "Main Beach" in source text + "Del Mar Beach" in siblings = SAME
+       AREA = OMIT.
+
+       Strong heuristic: if the input beach name contains "Dog Beach,"
+       "Off-Leash," "Pet Beach," or similar carve-out terminology, your
+       output should describe ONLY the carve-out footprint. Any region you
+       would label "rest of," "main," "south of," or "outside the dog
+       beach" is a sibling and must be omitted.
+
+       Example for THIS exact case: input "Del Mar Dog Beach"; sibling
+       includes "Del Mar Beach". Source describes "Del Mar's two-zone
+       policy: Dog Beach (north end) allowed, Main Beach prohibited."
+       CORRECT output: ONE region for the Dog Beach footprint with
+       seasonal/time rules. INCORRECT: two regions including "Main Beach
+       and South."
 
 3. AGENCY-DEFAULT INFERENCE. When the source text doesn't address every
    existing section but the operator's agency-class policy is well known,
@@ -174,14 +248,14 @@ EDITORIAL HEURISTICS (apply in this order)
        "rest of park" prohibits), NOT as `sand.rule = on_leash` with a
        sub_zone "all other areas: not_allowed".
 
-5. MODIFIER PLACEMENT: REGION-LEVEL CASCADE BY DEFAULT. Citywide ordinances
-   or operator-wide time/seasonal patterns that apply to ALL sections of a
-   region go at the REGION level - they cascade to every section. Put a
-   modifier at the SECTION level only when ONE section bucks the cascade.
-   Section-level rules and modifiers TERMINALLY OVERRIDE the region cascade
-   (e.g. a playground prohibited 24/7 in a city beach with a 9am-6pm dogs-
-   prohibited window: section gets `rule = not_allowed` with NO time_windows -
-   the cascade does not extend it).
+5. MODIFIER PLACEMENT: SEASON-LEVEL THEN REGION-LEVEL CASCADE. Time-of-year
+   logic lives in the seasons[] array at the top. Citywide time-of-day
+   ordinances or operator-wide region patterns nest inside the season at the
+   region level. Put time_windows at the SECTION level only when ONE section
+   bucks its season+region context. Section-level rules and modifiers
+   TERMINALLY OVERRIDE inherited cascades (e.g. a playground prohibited 24/7
+   in a city beach with a 9am-6pm dogs-prohibited window: section gets
+   `rule = not_allowed` with NO time_windows -- the cascade does not extend).
 
 6. EVIDENCE. When a section rule comes from a specific source quote, attach
    an `evidence` field with the verbatim quote (no paraphrasing). When the
@@ -189,12 +263,37 @@ EDITORIAL HEURISTICS (apply in this order)
    fabricate quotes. Inferred rules from agency-class defaults need no
    evidence.
 
+SPATIAL CONTEXT (authoritative — overrides ambiguous source text):
+
+When `pet_allowed_carveout` is non-empty, this beach IS on an authoritative
+list of explicit dog-allowed zones within a larger prohibition area. Emit
+allowed rules with confidence (on_leash for sand/trails). Even if the source
+text is ambiguous about THIS specific beach, the spatial overlay is ground
+truth — the beach falls inside a known carve-out polygon.
+
+When `pet_prohibited_zone` is non-empty, this beach IS in an explicit
+prohibition zone. Emit not_allowed for sand/trails/dunes regardless of
+ambient prose.
+
+When `wildlife_critical_habitat` is non-empty, this beach overlaps designated
+species critical habitat (snowy plover, least tern, etc.). ALWAYS emit a
+nesting_zones section with seasonal closure (default Mar 1 - Sep 30 if no
+species-specific dates given). Even if the source text doesn't mention
+nesting, the spatial overlay is authoritative.
+
+When all three are empty, you have no spatial ground truth — fall back to
+the source text and per-beach scope discipline (heuristic 2).
+
 NOW EXTRACT FOR THE INPUT BELOW
 
 INPUT
 beach_name: {beach_name}
 operator_name: {operator_name}
 county: {county}
+sibling_beaches: {sibling_beaches}
+pet_allowed_carveout: {pet_allowed_carveout}
+pet_prohibited_zone: {pet_prohibited_zone}
+wildlife_critical_habitat: {wildlife_critical_habitat}
 source_text:
 {source_text}
 
@@ -206,7 +305,8 @@ OUTPUT (valid JSON only, no prose, no markdown fences):"""
 # ============================================================================
 
 def pull_beach_inputs(conn, fid):
-    """Pull beach metadata + canonical operator name + all dogs evidence rows.
+    """Pull beach metadata + canonical operator name + all dogs evidence rows
+    + sibling beaches (other catalog records sharing a name root + nearby).
 
     Operator lookup priority:
       1. canonical governance evidence in BEP (governing_body_name) — most authoritative
@@ -241,6 +341,65 @@ def pull_beach_inputs(conn, fid):
             (fid,),
         )
         beach = dict(cur.fetchone())
+
+        # Sibling beaches: same county + within ~2km + sharing a name token of
+        # length>=4 (e.g. "Del Mar Dog Beach" + "Del Mar Beach" share "Del Mar").
+        # Used by the prompt's catalog-vs-zones discipline (heuristic 2a).
+        cur.execute(
+            """
+            with this_beach as (
+              select fid, name, county_name, lat, lon,
+                     (select array_agg(t)
+                        from unnest(regexp_split_to_array(lower(name), '[^a-z]+')) t
+                       where length(t) >= 4) as tokens
+                from public.beaches_gold where fid = %s
+            )
+            select g.fid, g.name
+              from public.beaches_gold g, this_beach t
+             where g.is_active and g.fid <> t.fid
+               and g.county_name = t.county_name
+               and (
+                 -- share at least one ≥4-char token
+                 (select bool_or(tk = any(t.tokens))
+                    from unnest(regexp_split_to_array(lower(g.name), '[^a-z]+')) tk
+                   where length(tk) >= 4)
+               )
+               and abs(g.lat - t.lat) < 0.05    -- ~5km lat
+               and abs(g.lon - t.lon) < 0.05
+             order by g.name
+             limit 8
+            """,
+            (fid,),
+        )
+        siblings = [f"{r['name']} (fid {r['fid']})" for r in cur.fetchall()]
+        beach["sibling_beaches"] = ", ".join(siblings) if siblings else "(none)"
+
+        # Spatial overlay context — authoritative ground truth from
+        # public.dog_policy_zones via the beach_dog_policy_zones view
+        cur.execute(
+            """
+            select category, zone_name, source_agency,
+                   effective_dates, notes
+              from public.beach_dog_policy_zones
+             where fid = %s
+             order by category, zone_name
+            """,
+            (fid,),
+        )
+        carveouts, prohibits, habitats = [], [], []
+        for r in cur.fetchall():
+            label = f"{r['zone_name']} ({r['source_agency']})"
+            if r["effective_dates"]:
+                label += f" dates={r['effective_dates']}"
+            if r["category"] == "pet_allowed_carveout":
+                carveouts.append(label)
+            elif r["category"] == "pet_prohibited_zone":
+                prohibits.append(label)
+            elif r["category"] == "wildlife_critical_habitat":
+                habitats.append(label)
+        beach["pet_allowed_carveout"] = "; ".join(carveouts) if carveouts else "(none)"
+        beach["pet_prohibited_zone"] = "; ".join(prohibits) if prohibits else "(none)"
+        beach["wildlife_critical_habitat"] = "; ".join(habitats) if habitats else "(none)"
 
         cur.execute(
             """
@@ -384,6 +543,10 @@ def main():
             beach_name=beach["name"],
             operator_name=beach.get("operator_name") or "(unknown)",
             county=beach.get("county_name") or "",
+            sibling_beaches=beach.get("sibling_beaches") or "(none)",
+            pet_allowed_carveout=beach.get("pet_allowed_carveout") or "(none)",
+            pet_prohibited_zone=beach.get("pet_prohibited_zone") or "(none)",
+            wildlife_critical_habitat=beach.get("wildlife_critical_habitat") or "(none)",
             source_text=source_text,
         )
 

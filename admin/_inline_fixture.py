@@ -1,9 +1,9 @@
 """Inline the fixture + LIVE BEP evidence into zone-rules-editor.html.
 
 Pulls every dogs-field-group BEP row for the 8 anchor fids and embeds them
-as evidence cards. This makes the mock UI reflect actual production data
-shape (including json_explode rows that have only structured fields and
-no prose, and is_canonical winners highlighted).
+as evidence cards. Also appends a section-heavy sample of production
+text_repass_v1 outputs so the mock can browse what the LLM actually
+produced across the 440-beach repass.
 """
 import json
 import os
@@ -24,6 +24,19 @@ PG = dict(host=p.hostname, port=p.port or 5432, user=p.username,
           dbname=(p.path or "/postgres").lstrip("/"), sslmode="require")
 
 ANCHORS = [6202, 9716, 8339, 9717, 3407, 8673, 8356, 8740]
+
+# Section-heavy production samples — top N text_repass_v1 rows by section count
+# (mix of multi-region and many-section beaches). Pulled live below.
+PRODUCTION_SAMPLE_LIMIT = 25
+PRODUCTION_SAMPLE_MIN_SECTIONS = 6
+
+# Force-include these fids in the production-samples picker regardless of
+# section count. Useful for following a specific cluster (Huntington Beach,
+# Coronado complex, Point Reyes carve-outs) end-to-end across the mock.
+FORCE_INCLUDE_FIDS = [
+    8901,   # Huntington City Beach
+    8453,   # Huntington State Beach
+]
 
 fixture = json.loads((ROOT / "tests" / "zone_rules_anchors.json").read_text(encoding="utf-8"))
 
@@ -90,12 +103,101 @@ for r in rows:
         "source_url": r["source_url"],
     })
 
-print(f"BEP evidence rows pulled:")
+print(f"BEP evidence rows pulled (anchors):")
 for fid in ANCHORS:
     print(f"  fid={fid:>5}  rows={len(evidence.get(fid, []))}")
 
-fixture_js = json.dumps(fixture, indent=2)
-evidence_js = json.dumps(evidence, indent=2)
+# ============================================================================
+# Production samples — section-heavy text_repass_v1 outputs
+# ============================================================================
+print(f"\nPulling section-heavy production samples (text_repass_v1)...")
+
+with psycopg2.connect(**PG) as conn:
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        cur.execute(
+            """
+            with z as (
+              select bep.gold_fid as fid, g.name, g.county_name,
+                     bep.claimed_values->'zone_rules' as zr,
+                     bep.confidence::float as confidence,
+                     jsonb_array_length(bep.claimed_values->'zone_rules'->'regions') as n_regions,
+                     (select count(*)
+                        from jsonb_array_elements(bep.claimed_values->'zone_rules'->'regions') r,
+                             lateral jsonb_each(coalesce(r->'sections','{}'::jsonb))) as n_sections
+                from public.beach_enrichment_provenance bep
+                join public.beaches_gold g on g.fid = bep.gold_fid
+               where bep.source = 'text_repass_v1' and bep.field_group = 'dogs'
+                 and bep.gold_fid != all(%s)
+            )
+            select fid, name, county_name, zr, n_regions, n_sections, confidence
+              from z
+             where n_sections >= %s or fid = any(%s)
+             order by
+               case when fid = any(%s) then 0 else 1 end,
+               n_regions desc, n_sections desc
+             limit %s
+            """,
+            (ANCHORS, PRODUCTION_SAMPLE_MIN_SECTIONS, FORCE_INCLUDE_FIDS,
+             FORCE_INCLUDE_FIDS, PRODUCTION_SAMPLE_LIMIT + len(FORCE_INCLUDE_FIDS)),
+        )
+        prod_rows = [dict(r) for r in cur.fetchall()]
+
+# Pull evidence for each production sample
+for r in prod_rows:
+    fid = r["fid"]
+    if fid in evidence:
+        continue  # already loaded as an anchor
+    with psycopg2.connect(**PG) as conn:
+        _b, _rows = None, []
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            cur.execute(
+                """
+                select source, confidence::float as confidence, is_canonical,
+                       claimed_values->>'allowed' as allowed,
+                       claimed_values->>'leash_required' as leash,
+                       claimed_values->>'notes' as notes,
+                       claimed_values->>'zone_description' as zone_desc,
+                       claimed_values->>'designated_dog_zones' as designated,
+                       claimed_values->>'prohibited_areas' as prohibited,
+                       source_url
+                  from public.beach_enrichment_provenance
+                 where gold_fid = %s and field_group = 'dogs'
+                 order by is_canonical desc, confidence desc, source
+                """,
+                (fid,),
+            )
+            for row in cur.fetchall():
+                evidence.setdefault(fid, []).append({
+                    "source": row["source"],
+                    "confidence": float(row["confidence"]) if row["confidence"] is not None else 0.5,
+                    "is_canonical": bool(row["is_canonical"]),
+                    "allowed": row["allowed"],
+                    "leash": row["leash"],
+                    "quote": quote_from_row(row),
+                    "source_url": row["source_url"],
+                })
+
+# Append production samples to the fixture as additional anchors
+# with a single variant 'text_repass_v1'
+for r in prod_rows:
+    fixture["anchors"].append({
+        "fid": r["fid"],
+        "name": r["name"],
+        "what_it_tests": (
+            f"Production text_repass_v1 sample · {r['county_name']} County · "
+            f"{r['n_regions']} region(s), {r['n_sections']} section(s) · "
+            f"conf {r['confidence']:.2f}"
+        ),
+        "is_production_sample": True,
+        "variants": {
+            "text_repass_v1": r["zr"],
+        },
+    })
+
+print(f"  added {len(prod_rows)} production samples; total anchors now {len(fixture['anchors'])}")
+
+fixture_js = json.dumps(fixture, indent=2, default=str)
+evidence_js = json.dumps(evidence, indent=2, default=str)
 
 path = ROOT / "admin" / "zone-rules-editor.html"
 html = path.read_text(encoding="utf-8")

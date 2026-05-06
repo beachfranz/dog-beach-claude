@@ -145,11 +145,22 @@ def select_targets(conn, args):
 
 def derive_flat(zone_rules):
     """Derive flat allowed/leash_required values from the zone_rules jsonb,
-    so legacy consensus voting on those fields includes the repass output."""
+    so legacy consensus voting on those fields includes the repass output.
+
+    Handles both the new top-level seasons[] hierarchy AND the legacy flat
+    regions[] (for backwards compat during the transition).
+    """
     sections_seen = []
-    for region in zone_rules.get("regions", []):
-        for sec, body in (region.get("sections") or {}).items():
-            sections_seen.append((sec, body.get("rule")))
+    # New shape: seasons -> regions -> sections
+    for season in zone_rules.get("seasons", []) or []:
+        for region in season.get("regions", []) or []:
+            for sec, body in (region.get("sections") or {}).items():
+                sections_seen.append((sec, body.get("rule")))
+    # Legacy shape fallback: regions -> sections (no top-level seasons)
+    if not sections_seen:
+        for region in zone_rules.get("regions", []) or []:
+            for sec, body in (region.get("sections") or {}).items():
+                sections_seen.append((sec, body.get("rule")))
 
     if not sections_seen:
         return {"allowed": "unknown", "leash_required": None}
@@ -199,14 +210,19 @@ def derive_source_url(rows):
 # ============================================================================
 
 def write_repass(conn, gold_fid, zone_rules, derived, confidence, source_url):
-    """Upsert a BEP row for source='text_repass_v1' on this fid."""
+    """Upsert a BEP row for source='text_repass_v1' on this fid.
+
+    NOTE 2026-05-07: deliberately does NOT write `leash_required`.
+    The flat derivation here is binary (on_leash | off_leash) and was
+    swamping the consensus with binary votes that could not speak `mixed`.
+    The same zone_rules data drives `_emit_evidence_from_zone_rules_derived`
+    in-DB, which votes with mixed-capable vocabulary. One BEP row, one vote.
+    """
     claimed = {
         "zone_rules": zone_rules,
         "allowed": derived["allowed"],
         "notes": zone_rules.get("global_notes", ""),
     }
-    if derived["leash_required"] is not None:
-        claimed["leash_required"] = derived["leash_required"]
 
     with conn.cursor() as cur:
         cur.execute(
@@ -288,6 +304,10 @@ def main():
             beach_name=beach["name"],
             operator_name=beach.get("operator_name") or "(unknown)",
             county=beach.get("county_name") or "",
+            sibling_beaches=beach.get("sibling_beaches") or "(none)",
+            pet_allowed_carveout=beach.get("pet_allowed_carveout") or "(none)",
+            pet_prohibited_zone=beach.get("pet_prohibited_zone") or "(none)",
+            wildlife_critical_habitat=beach.get("wildlife_critical_habitat") or "(none)",
             source_text=source_text,
         )
 
@@ -325,11 +345,20 @@ def main():
             failed += 1
             continue
 
-        # Summary count of what we got
-        n_regions = len(zone_rules.get("regions", []))
-        n_sections = sum(len(r.get("sections") or {}) for r in zone_rules.get("regions", []))
+        # Summary count of what we got (new shape: seasons -> regions -> sections)
+        seasons = zone_rules.get("seasons") or []
+        if seasons:
+            n_seasons = len(seasons)
+            n_regions = sum(len(s.get("regions") or []) for s in seasons)
+            n_sections = sum(len((r.get("sections") or {}))
+                             for s in seasons for r in (s.get("regions") or []))
+        else:
+            n_seasons = 0
+            n_regions = len(zone_rules.get("regions") or [])
+            n_sections = sum(len(r.get("sections") or {})
+                             for r in (zone_rules.get("regions") or []))
         print(f"  [{i}/{len(targets)}] fid={fid} {beach['name'][:35]:<35} "
-              f"regions={n_regions} sections={n_sections} "
+              f"seasons={n_seasons} regions={n_regions} sections={n_sections} "
               f"allowed={derived['allowed']} conf={confidence}")
         succeeded += 1
 

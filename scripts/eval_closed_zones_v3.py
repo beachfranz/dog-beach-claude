@@ -78,13 +78,12 @@ SECTION TAXONOMY (closed list of 10 - use only these section names)
 - campground        overnight camping zones
 - playground        kids' playground equipment
 - tide_pools        tide pool zones (often marine-protected)
-- nesting_zones     snowy-plover, least-tern, or other species nesting
-                    closures. Typically a marked strip on sand or in dunes,
-                    seasonally closed (Mar-Sep most common). Use this when
-                    the source mentions a specific named/marked nesting
-                    closure even if the source doesn't use the words
-                    "nesting" or "plover" -- e.g. "fenced bird protection
-                    area" or "wildlife closure zone" qualifies.
+- (nesting_zones retired 2026-05-07 — too few applicable beaches; species
+                    critical habitat is a regulatory footnote, not an
+                    operational dog-policy gate. If source mentions a named
+                    nesting closure, capture it as a sand-section rule with
+                    time_window or seasonal_closure rather than a separate
+                    section.)
 
 (Excluded: water_swim (duplicative of sand; reserved for water-quality
 overlay), restrooms_showers (dogs don't enter restrooms), parking_lot
@@ -275,13 +274,11 @@ When `pet_prohibited_zone` is non-empty, this beach IS in an explicit
 prohibition zone. Emit not_allowed for sand/trails/dunes regardless of
 ambient prose.
 
-When `wildlife_critical_habitat` is non-empty, this beach overlaps designated
-species critical habitat (snowy plover, least tern, etc.). ALWAYS emit a
-nesting_zones section with seasonal closure (default Mar 1 - Sep 30 if no
-species-specific dates given). Even if the source text doesn't mention
-nesting, the spatial overlay is authoritative.
+(wildlife_critical_habitat input retired 2026-05-07. Federal critical-habitat
+designation is a regulatory footnote, not an operational dog-policy gate.
+Rely on operator-published rules in the source text for any nesting closure.)
 
-When all three are empty, you have no spatial ground truth — fall back to
+When the prohibition / carve-out spatial inputs are empty, fall back to
 the source text and per-beach scope discipline (heuristic 2).
 
 NOW EXTRACT FOR THE INPUT BELOW
@@ -293,7 +290,6 @@ county: {county}
 sibling_beaches: {sibling_beaches}
 pet_allowed_carveout: {pet_allowed_carveout}
 pet_prohibited_zone: {pet_prohibited_zone}
-wildlife_critical_habitat: {wildlife_critical_habitat}
 source_text:
 {source_text}
 
@@ -386,7 +382,7 @@ def pull_beach_inputs(conn, fid):
             """,
             (fid,),
         )
-        carveouts, prohibits, habitats = [], [], []
+        carveouts, prohibits = [], []
         for r in cur.fetchall():
             label = f"{r['zone_name']} ({r['source_agency']})"
             if r["effective_dates"]:
@@ -395,11 +391,10 @@ def pull_beach_inputs(conn, fid):
                 carveouts.append(label)
             elif r["category"] == "pet_prohibited_zone":
                 prohibits.append(label)
-            elif r["category"] == "wildlife_critical_habitat":
-                habitats.append(label)
+            # wildlife_critical_habitat category retired 2026-05-07 — see
+            # project_nesting_zones_gis_load.md for rationale.
         beach["pet_allowed_carveout"] = "; ".join(carveouts) if carveouts else "(none)"
         beach["pet_prohibited_zone"] = "; ".join(prohibits) if prohibits else "(none)"
-        beach["wildlife_critical_habitat"] = "; ".join(habitats) if habitats else "(none)"
 
         cur.execute(
             """
@@ -546,7 +541,6 @@ def main():
             sibling_beaches=beach.get("sibling_beaches") or "(none)",
             pet_allowed_carveout=beach.get("pet_allowed_carveout") or "(none)",
             pet_prohibited_zone=beach.get("pet_prohibited_zone") or "(none)",
-            wildlife_critical_habitat=beach.get("wildlife_critical_habitat") or "(none)",
             source_text=source_text,
         )
 

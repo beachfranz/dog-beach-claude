@@ -311,22 +311,10 @@ SOURCES: dict[str, Source] = {
         mapper=map_pad_us,
         ttl_days=90,
     ),
-    "usfws_critical_habitat": Source(
-        name="usfws_critical_habitat",
-        description="USFWS designated critical habitat — all federally listed species, national.",
-        fetcher_kind="arcgis_rest",
-        endpoint=("https://services.arcgis.com/QVENGdaPbd4LUkLV/ArcGIS/rest/services/"
-                  "USFWS_Critical_Habitat/FeatureServer/0"),
-        where_template="1=1",
-        requires_state=False,
-        target_table="wildlife_critical_habitat",
-        id_columns=["unit_id"],
-        columns=USFWS_COLUMNS,
-        mapper=map_usfws_critical_habitat,
-        ttl_days=30,
-        page_size=100,
-        max_offset_deg=0.0001,
-    ),
+    # usfws_critical_habitat retired 2026-05-07 (see project_nesting_zones_gis_load.md).
+    # Endpoint + mapper preserved in version control; re-add this entry
+    # if priorities change. Endpoint:
+    # https://services.arcgis.com/QVENGdaPbd4LUkLV/ArcGIS/rest/services/USFWS_Critical_Habitat/FeatureServer/0
     "osm_amenities": Source(
         name="osm_amenities",
         description="OSM amenity nodes/ways (parking, toilets, showers, picnic, lifeguard, food, etc.) per-state via Overpass.",

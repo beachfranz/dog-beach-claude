@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pipeline monitor · Dog Beach Scout</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 0; background: #f1f5f9; color: #0f2742;
+         font-family: 'DM Sans', system-ui, sans-serif; font-size: 13px; }
+  header { padding: 16px 24px; background: #0f2742; color: #fff;
+           display: flex; align-items: center; gap: 16px; }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header .stamp { color: #94a3b8; font-size: 11px; margin-left: auto;
+                  font-family: monospace; }
+
+  .container { display: grid; grid-template-columns: 1fr 360px;
+               gap: 16px; padding: 16px 24px; max-width: 1500px; margin: 0 auto; }
+  .col-main { display: flex; flex-direction: column; gap: 16px; }
+  .col-side { display: flex; flex-direction: column; gap: 16px; }
+
+  .card { background: #fff; border: 1px solid #cbd5e1; border-radius: 8px;
+          padding: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.04); }
+  .card h2 { margin: 0 0 12px; font-size: 13px; font-weight: 600;
+             color: #475569; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  /* Phase bars — horizontal stacked bar showing each phase */
+  .phases { display: flex; flex-direction: column; gap: 6px; }
+  .phase-row { display: grid; grid-template-columns: 200px 1fr 60px;
+               gap: 10px; align-items: center; cursor: pointer;
+               padding: 4px 8px; border-radius: 4px;
+               transition: background 0.1s; }
+  .phase-row:hover { background: #f1f5f9; }
+  .phase-row.active { background: #dbeafe; }
+  .phase-name { font-family: monospace; font-size: 12px; color: #0f2742; }
+  .phase-bar-track { background: #f1f5f9; border-radius: 4px; height: 18px;
+                     overflow: hidden; position: relative; }
+  .phase-bar-fill { height: 100%; transition: width 0.4s ease; }
+  .phase-count { font-family: monospace; font-size: 12px; color: #475569;
+                 text-align: right; }
+
+  .phase-bar-fill.p00_inactive          { background: #cbd5e1; }
+  .phase-bar-fill.p00_not_scoreable     { background: #94a3b8; }
+  .phase-bar-fill.p01_no_evidence       { background: #ef4444; }
+  .phase-bar-fill.p02_evidence_only     { background: #f59e0b; }
+  .phase-bar-fill.p03_canonical_pending { background: #f59e0b; }
+  .phase-bar-fill.p04_dogs_allowed_only { background: #fbbf24; }
+  .phase-bar-fill.p05_zone_rules_no_score { background: #38bdf8; }
+  .phase-bar-fill.p06_complete          { background: #15803d; }
+
+  /* Beach list */
+  .beach-list { max-height: 600px; overflow-y: auto; }
+  .beach-list table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .beach-list th { background: #f8fafc; padding: 6px 10px; text-align: left;
+                   font-size: 10px; text-transform: uppercase;
+                   color: #475569; font-weight: 600; letter-spacing: 0.04em;
+                   position: sticky; top: 0; }
+  .beach-list td { padding: 6px 10px; border-bottom: 1px solid #f1f5f9; }
+  .beach-list tr:hover { background: #f8fafc; }
+  .beach-list .fid { font-family: monospace; color: #94a3b8; }
+  .beach-list .ago { font-family: monospace; color: #64748b; font-size: 11px; }
+
+  /* Activity feed */
+  .activity-list { display: flex; flex-direction: column; gap: 6px;
+                   max-height: 700px; overflow-y: auto; }
+  .activity-item { padding: 8px 10px; border-left: 3px solid #cbd5e1;
+                   background: #f8fafc; border-radius: 0 4px 4px 0;
+                   font-size: 12px; }
+  .activity-item.evidence_added         { border-left-color: #38bdf8; }
+  .activity-item.zone_rules_promoted    { border-left-color: #15803d; }
+  .activity-item.recommendation_landed  { border-left-color: #fbbf24; }
+  .activity-event { font-size: 10px; text-transform: uppercase;
+                    letter-spacing: 0.04em; color: #64748b; font-weight: 600; }
+  .activity-beach { color: #0f2742; font-weight: 600; margin-top: 2px; }
+  .activity-detail { color: #475569; font-size: 11px; margin-top: 2px;
+                     font-family: monospace; }
+  .activity-time { color: #94a3b8; font-size: 11px; margin-top: 2px;
+                   font-family: monospace; }
+
+  .empty { color: #94a3b8; font-style: italic; text-align: center;
+           padding: 24px; font-size: 12px; }
+
+  .filter-bar { display: flex; gap: 8px; margin-bottom: 10px; }
+  .filter-bar input { flex: 1; padding: 6px 10px; font-size: 12px;
+                       border: 1px solid #cbd5e1; border-radius: 4px;
+                       font-family: inherit; }
+  .filter-bar button { padding: 6px 12px; font-size: 11px; border-radius: 4px;
+                       border: 1px solid #cbd5e1; background: #fff;
+                       color: #475569; cursor: pointer; font-family: inherit; }
+  .filter-bar button:hover { background: #f1f5f9; }
+  .filter-bar button.active { background: #1e40af; color: #fff;
+                              border-color: #1e40af; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🛠️ Pipeline monitor</h1>
+  <div>landing tables → consumer surface, per beach</div>
+  <div class="stamp" id="stamp">loading…</div>
+</header>
+
+<div class="container">
+  <div class="col-main">
+    <div class="card">
+      <h2>Pipeline phases (804 active gold fids)</h2>
+      <div class="phases" id="phases"></div>
+      <div style="margin-top:8px; font-size:11px; color:#64748b;">
+        Click a phase to filter the list below. Counts auto-refresh every 30s.
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>
+        Beaches in selected phase
+        <span id="filter-label" style="font-family:monospace; color:#1e40af;
+                                        font-weight:500; text-transform:none;
+                                        letter-spacing:0; margin-left:8px;"></span>
+      </h2>
+      <div class="filter-bar">
+        <input type="text" id="search" placeholder="Filter by name or county…" />
+        <button id="clear" type="button">Clear filter</button>
+      </div>
+      <div class="beach-list">
+        <table>
+          <thead>
+            <tr>
+              <th>fid</th>
+              <th>Name</th>
+              <th>County</th>
+              <th>BEP</th>
+              <th>Policy</th>
+              <th>dogs_allowed</th>
+              <th>zone_rules</th>
+              <th>Score</th>
+              <th>Last touched</th>
+            </tr>
+          </thead>
+          <tbody id="beaches"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-side">
+    <div class="card">
+      <h2>Recent activity</h2>
+      <div class="activity-list" id="activity"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+const HEADERS = { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` };
+
+const PHASE_LABELS = {
+  '00_inactive':            'Inactive',
+  '00_not_scoreable':       'Not scoreable',
+  '01_no_evidence':         'No evidence',
+  '02_evidence_only':       'Evidence only',
+  '03_canonical_pending':   'Canonical pending',
+  '04_dogs_allowed_only':   'Dogs_allowed only',
+  '05_zone_rules_no_score': 'Zone_rules · no score',
+  '06_complete':            'Complete (consumer-ready)',
+};
+
+let allBeaches = [];
+let activeFilter = null;
+
+function timeAgo(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  const sec = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (sec < 60)        return `${sec}s ago`;
+  if (sec < 3600)      return `${Math.floor(sec/60)}m ago`;
+  if (sec < 86400)     return `${Math.floor(sec/3600)}h ago`;
+  return `${Math.floor(sec/86400)}d ago`;
+}
+
+function checkmark(val) {
+  return val ? '<span style="color:#15803d;">✓</span>'
+             : '<span style="color:#cbd5e1;">·</span>';
+}
+
+async function fetchJson(url) {
+  const r = await fetch(url, { headers: HEADERS });
+  return r.ok ? await r.json() : [];
+}
+
+async function refresh() {
+  const [counts, beaches, activity] = await Promise.all([
+    fetchJson(`${SUPABASE_URL}/rest/v1/beach_pipeline_phase_counts?select=*&order=phase`),
+    fetchJson(`${SUPABASE_URL}/rest/v1/beach_pipeline_status?select=*&order=fid`),
+    fetchJson(`${SUPABASE_URL}/rest/v1/beach_pipeline_activity_recent?select=*`),
+  ]);
+  allBeaches = beaches;
+  renderPhases(counts);
+  renderActivity(activity);
+  renderBeaches();
+  document.getElementById('stamp').textContent =
+    `last refresh ${new Date().toLocaleTimeString()}`;
+}
+
+function renderPhases(counts) {
+  const total = counts.reduce((s, c) => s + Number(c.n), 0);
+  const max = Math.max(...counts.map(c => Number(c.n)), 1);
+  const wrap = document.getElementById('phases');
+  wrap.innerHTML = counts.map(c => {
+    const pct = (Number(c.n) / max) * 100;
+    const phaseClass = 'p' + c.phase;
+    const isActive = activeFilter === c.phase;
+    return `
+      <div class="phase-row ${isActive ? 'active' : ''}" data-phase="${c.phase}">
+        <div class="phase-name">${c.phase}</div>
+        <div class="phase-bar-track">
+          <div class="phase-bar-fill ${phaseClass}" style="width:${pct}%"></div>
+        </div>
+        <div class="phase-count">${c.n}</div>
+      </div>`;
+  }).join('');
+  wrap.querySelectorAll('.phase-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const ph = row.dataset.phase;
+      activeFilter = (activeFilter === ph) ? null : ph;
+      renderPhases(counts);
+      renderBeaches();
+    });
+  });
+}
+
+function renderBeaches() {
+  const filterText = document.getElementById('search').value.trim().toLowerCase();
+  let rows = allBeaches;
+  if (activeFilter) rows = rows.filter(b => b.phase === activeFilter);
+  if (filterText) rows = rows.filter(b =>
+    (b.name || '').toLowerCase().includes(filterText) ||
+    (b.county_name || '').toLowerCase().includes(filterText));
+
+  document.getElementById('filter-label').textContent =
+    activeFilter ? `${PHASE_LABELS[activeFilter]} · ${rows.length} of ${allBeaches.filter(b => b.phase === activeFilter).length}`
+                 : `all phases · ${rows.length} of ${allBeaches.length}`;
+
+  const tbody = document.getElementById('beaches');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="empty">No beaches match filter.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.slice(0, 200).map(b => `
+    <tr>
+      <td class="fid">${b.fid}</td>
+      <td>${(b.name || '').replace(/</g,'&lt;')}</td>
+      <td>${(b.county_name || '').replace(/</g,'&lt;')}</td>
+      <td style="text-align:center;">${checkmark(b.has_bep_dogs)}</td>
+      <td style="text-align:center;">${checkmark(b.has_policy_row)}</td>
+      <td style="text-align:center;">${checkmark(b.has_dogs_allowed)}</td>
+      <td style="text-align:center;">${checkmark(b.has_zone_rules)}</td>
+      <td style="text-align:center;">${checkmark(b.has_recent_score)}</td>
+      <td class="ago">${timeAgo(b.last_touched_at)}</td>
+    </tr>`).join('') +
+    (rows.length > 200 ? `<tr><td colspan="9" class="empty">… ${rows.length-200} more (refine filter to narrow).</td></tr>` : '');
+}
+
+function renderActivity(items) {
+  const wrap = document.getElementById('activity');
+  if (!items.length) {
+    wrap.innerHTML = '<div class="empty">No recent activity.</div>';
+    return;
+  }
+  wrap.innerHTML = items.map(a => `
+    <div class="activity-item ${a.event}">
+      <div class="activity-event">${a.event.replace(/_/g, ' ')}</div>
+      <div class="activity-beach">${(a.beach_name || ('fid ' + a.fid)).replace(/</g,'&lt;')}</div>
+      ${a.detail ? `<div class="activity-detail">${a.detail.replace(/</g,'&lt;')}</div>` : ''}
+      <div class="activity-time">${timeAgo(a.event_at)}</div>
+    </div>`).join('');
+}
+
+document.getElementById('search').addEventListener('input', renderBeaches);
+document.getElementById('clear').addEventListener('click', () => {
+  document.getElementById('search').value = '';
+  activeFilter = null;
+  refresh();
+});
+
+refresh();
+setInterval(refresh, 30_000);
+</script>
+</body>
+</html>

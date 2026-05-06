@@ -435,6 +435,17 @@
   const SUPABASE_URL  = 'https://ehlzbwtrsxaaukurekau.supabase.co';
   const ANON_KEY      = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
 
+  // Stable anonymous client id for view tracking (no PII; rotates if
+  // localStorage is cleared). Sent as x-client-id on read endpoints.
+  function getClientId() {
+    let id = localStorage.getItem('dbs_client_id');
+    if (!id) {
+      id = (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      localStorage.setItem('dbs_client_id', id);
+    }
+    return id;
+  }
+
   // Ultimate fallback when the user won't share geolocation: centre the
   // "nearest" query on Huntington Dog Beach so a new user still gets a
   // meaningful list.
@@ -769,7 +780,11 @@
     try {
       const res = await fetch(
         `${SUPABASE_URL}/functions/v1/get-beach-summary?${beachKeyQs(locationId)}`,
-        { headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' } }
+        { headers: {
+            'Authorization': `Bearer ${ANON_KEY}`,
+            'Content-Type': 'application/json',
+            'x-client-id':  getClientId(),
+        } }
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();

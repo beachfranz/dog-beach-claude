@@ -226,22 +226,27 @@
 </style>
 </head>
 <body>
-<h1>Zone Rules Editor <span style="font-size:13px; color:var(--text-muted); font-weight: normal;">(mock — step 3)</span></h1>
+<h1>Zone Rules Editor</h1>
 <div class="sub">
   Click a rule to cycle. Hover the icon for time/seasonal/sub-zone hints.
   Click a [pin to: …] button on an evidence card to attach a quote to a section.
-  No backend — Save writes to localStorage.
+  Production mode writes back to <code>beach_dog_policy.zone_rules</code>; fixture mode is QA only.
 </div>
 
 <div class="top">
   <label>Beach</label>
   <select id="beach-picker"></select>
-  <span class="grow"></span>
-  <span class="variant-toggle">
-    <label>Variant</label>
-    <button class="variant active" data-variant="A_conservative">A conservative</button>
-    <button class="variant" data-variant="B_rich">B rich</button>
+  <span style="border-left: 1px solid var(--border); padding-left: 10px; margin-left: 4px;">
+    <label>Production fid</label>
+    <input id="prod-fid-input" type="number" placeholder="e.g. 8236" style="width: 90px;">
+    <button id="load-prod-btn" style="font-size: 12px; padding: 3px 8px;">Load</button>
   </span>
+  <span class="grow"></span>
+  <span class="variant-toggle" id="variant-section">
+    <label>Variant</label>
+    <span id="variant-buttons"></span>
+  </span>
+  <span id="mode-pill" style="padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; background: var(--gray-bg); color: var(--text-muted);">fixture</span>
   <span class="disagreement-flag" id="disagreement">⚠ disagreement detected</span>
   <button class="save" id="save-btn">Save (mock)</button>
 </div>
@@ -276,12 +281,11 @@
 // 2 variants each). Real impl would fetch from the file or from BEP.
 // ============================================================================
 const FIXTURE = {
-  "_doc": "Hand-curated zone_rules anchors for the section-aware dog-policy spec. See project_zone_rules_design_locked.md and docs/unified-pipeline.md. Each anchor is a real beach with two interpretations of how its zone_rules jsonb could look \u2014 Variant A (conservative: less structure, region-level modifier cascade, evidence on load-bearing rules only) vs Variant B (rich: more named regions, section-level modifiers, evidence on every rule, fuller global_notes). Used as fixture for: UI mock, prompt-engineering target for closed_zones_v3, calibration regression check.",
+  "_doc": "Hand-curated zone_rules anchors for the section-aware dog-policy spec. See project_zone_rules_design_locked.md and docs/closed_zones_v3.md. Each anchor is a real beach with two interpretations of how its zone_rules jsonb could look \u2014 Variant A (conservative: less structure, region-level modifier cascade, evidence on load-bearing rules only) vs Variant B (rich: more named regions, section-level modifiers, evidence on every rule, fuller global_notes). Used as fixture for: UI mock, prompt-engineering target for closed_zones_v3, calibration regression check.",
   "spec_version": "1.0",
   "spec_locked_at": "2026-05-04",
   "section_taxonomy": [
     "sand",
-    "water_swim",
     "trails",
     "boardwalk",
     "bluff",
@@ -313,9 +317,6 @@ const FIXTURE = {
                 "sand": {
                   "rule": "off_leash"
                 },
-                "water_swim": {
-                  "rule": "off_leash"
-                },
                 "parking_lot": {
                   "rule": "on_leash",
                   "evidence": {
@@ -340,14 +341,6 @@ const FIXTURE = {
                     "quote": "Dogs may be off-leash in this designated dog beach area",
                     "source": "research",
                     "source_url": "https://www.coronado.ca.us/757/Dogs"
-                  }
-                },
-                "water_swim": {
-                  "rule": "off_leash",
-                  "evidence": {
-                    "quote": "where they can freely roam in the sea and sand",
-                    "source": "park_url",
-                    "source_url": "https://www.sandiego.com/beaches/coronado-beach"
                   }
                 },
                 "parking_lot": {
@@ -397,9 +390,6 @@ const FIXTURE = {
                 "sand": {
                   "rule": "off_leash"
                 },
-                "water_swim": {
-                  "rule": "off_leash"
-                },
                 "trails": {
                   "rule": "off_leash"
                 },
@@ -437,16 +427,6 @@ const FIXTURE = {
                     "source": "city_policy",
                     "source_url": "https://www.sandiego.gov/park-and-recreation/parks/dogs/bchdog"
                   }
-                },
-                "water_swim": {
-                  "rule": "off_leash",
-                  "time_windows": [
-                    {
-                      "start": "22:00",
-                      "end": "04:00",
-                      "rule": "not_allowed"
-                    }
-                  ]
                 },
                 "trails": {
                   "rule": "off_leash",
@@ -501,10 +481,7 @@ const FIXTURE = {
                 "sand": {
                   "rule": "on_leash"
                 },
-                "water_swim": {
-                  "rule": "on_leash"
-                },
-                "parking_lot": {
+                "boardwalk": {
                   "rule": "on_leash"
                 },
                 "tide_pools": {
@@ -535,17 +512,7 @@ const FIXTURE = {
                     "source": "park_url"
                   }
                 },
-                "water_swim": {
-                  "rule": "on_leash",
-                  "time_windows": [
-                    {
-                      "start": "10:00",
-                      "end": "16:30",
-                      "rule": "not_allowed"
-                    }
-                  ]
-                },
-                "parking_lot": {
+                "boardwalk": {
                   "rule": "on_leash",
                   "time_windows": [
                     {
@@ -587,9 +554,6 @@ const FIXTURE = {
                 "sand": {
                   "rule": "off_leash"
                 },
-                "water_swim": {
-                  "rule": "off_leash"
-                },
                 "bluff": {
                   "rule": "on_leash"
                 },
@@ -611,13 +575,6 @@ const FIXTURE = {
                   "rule": "off_leash",
                   "evidence": {
                     "quote": "Beach sand is leash-optional",
-                    "source": "manual_curator"
-                  }
-                },
-                "water_swim": {
-                  "rule": "off_leash",
-                  "evidence": {
-                    "quote": "Off-leash from the sand to the ocean",
                     "source": "manual_curator"
                   }
                 },
@@ -646,7 +603,7 @@ const FIXTURE = {
     {
       "fid": 3407,
       "name": "Garrapata State Beach",
-      "what_it_tests": "Multi-region beach with named geographic carve-outs. Conservative collapses to single region with sub_zones; rich splits into 3 named regions (Gate 19 area / rest of park / Soberanes Canyon Trail across Highway 1). This is the spec's most contested case.",
+      "what_it_tests": "Multi-region beach with named geographic carve-out. Conservative collapses to single region with sub_zones; rich splits into 2 named regions (Gate 19 area allows / rest of park including Soberanes Canyon prohibits). Eval found that 4-region splits (separating Soberanes from rest-of-park when both share rules) over-engineer the structure \u2014 collapse same-rule areas into one region.",
       "variants": {
         "A_conservative": {
           "regions": [
@@ -667,19 +624,12 @@ const FIXTURE = {
                     "source_url": "https://www.parks.ca.gov/?page_id=579"
                   }
                 },
-                "water_swim": {
-                  "rule": "not_allowed"
-                },
                 "trails": {
                   "rule": "not_allowed",
                   "sub_zones": [
                     {
                       "name": "Trails leading to Gate 19 beach",
                       "rule": "on_leash"
-                    },
-                    {
-                      "name": "Soberanes Canyon Trail (across Highway 1)",
-                      "rule": "not_allowed"
                     }
                   ],
                   "evidence": {
@@ -722,31 +672,20 @@ const FIXTURE = {
               }
             },
             {
-              "name": "Rest of park (north of Gate 19)",
+              "name": "Rest of park (incl. Soberanes Canyon Trail across Highway 1)",
               "sections": {
                 "sand": {
                   "rule": "not_allowed"
                 },
-                "water_swim": {
-                  "rule": "not_allowed"
-                },
-                "trails": {
-                  "rule": "not_allowed"
-                },
-                "bluff": {
-                  "rule": "not_allowed"
-                }
-              }
-            },
-            {
-              "name": "Soberanes Canyon Trail (across Highway 1)",
-              "sections": {
                 "trails": {
                   "rule": "not_allowed",
                   "evidence": {
-                    "quote": "across Highway 1 in the Soberanes Canyon Trail area",
+                    "quote": "Dogs are not allowed in all other areas, including across Highway 1 in the Soberanes Canyon Trail area",
                     "source": "park_url"
                   }
+                },
+                "bluff": {
+                  "rule": "not_allowed"
                 }
               }
             },
@@ -759,7 +698,7 @@ const FIXTURE = {
               }
             }
           ],
-          "global_notes": "California State Park, strictly enforced as a wildlife protection area. Dogs on leash only at Gate 19 (south end of park) and the trails leading to it. The rest of the park beach + bluff + connecting trails prohibit dogs. Soberanes Canyon Trail (across Highway 1, part of the same state park unit) also prohibits dogs.",
+          "global_notes": "California State Park, strictly enforced as a wildlife protection area. Dogs on leash only at Gate 19 (south end of park) and the trails leading to it. The rest of the park beach + bluff + connecting trails prohibit dogs (including the Soberanes Canyon Trail across Highway 1). Parking on-leash per CDPR developed-areas policy.",
           "extraction_method": "manual_curator"
         }
       }
@@ -806,9 +745,6 @@ const FIXTURE = {
                     "source": "park_url",
                     "source_url": "https://www.parks.ca.gov/?page_id=599"
                   }
-                },
-                "water_swim": {
-                  "rule": "not_allowed"
                 },
                 "picnic_area": {
                   "rule": "on_leash",
@@ -871,9 +807,6 @@ const FIXTURE = {
                 "sand": {
                   "rule": "on_leash"
                 },
-                "water_swim": {
-                  "rule": "on_leash"
-                },
                 "boardwalk": {
                   "rule": "on_leash"
                 },
@@ -904,16 +837,6 @@ const FIXTURE = {
                     "quote": "Dogs allowed on Mission Beach shoreline and sand during designated hours (night and early morning until 9 a.m.)",
                     "source": "research"
                   }
-                },
-                "water_swim": {
-                  "rule": "on_leash",
-                  "time_windows": [
-                    {
-                      "start": "09:00",
-                      "end": "18:00",
-                      "rule": "not_allowed"
-                    }
-                  ]
                 },
                 "boardwalk": {
                   "rule": "on_leash",
@@ -973,9 +896,6 @@ const FIXTURE = {
                 "sand": {
                   "rule": "not_allowed"
                 },
-                "water_swim": {
-                  "rule": "not_allowed"
-                },
                 "trails": {
                   "rule": "not_allowed"
                 },
@@ -1001,9 +921,6 @@ const FIXTURE = {
                     "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
                   }
                 },
-                "water_swim": {
-                  "rule": "not_allowed"
-                },
                 "trails": {
                   "rule": "not_allowed",
                   "evidence": {
@@ -1019,6 +936,2072 @@ const FIXTURE = {
           ],
           "global_notes": "Remote backcountry beach within Point Reyes National Seashore (Marin County). Strictly prohibited to dogs under NPS Point Reyes Pet Policy. Park-wide, only Kehoe Beach Trail, Great Beach/North Beach (south of North Beach parking lot), Limantour Beach (southeast of parking lot), parking lots, and public roads permit leashed dogs \u2014 Wildcat is not on that list. The source text describes the whole park's rules; per-beach disambiguation requires recognizing that Wildcat falls into the 'all other beaches' prohibition bucket.",
           "extraction_method": "manual_curator"
+        }
+      }
+    },
+    {
+      "fid": 8453,
+      "name": "Huntington State Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Orange County \u00b7 1 region(s), 6 section(s) \u00b7 conf 0.81",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Pets are NOT allowed on the sand or in the water, with the exception of service animals.",
+                    "source": "park_url"
+                  }
+                },
+                "trails": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs must be on a leash and under control when on the multi-use trail or in parking lots.",
+                    "source": "park_url"
+                  }
+                },
+                "water_swim": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Pets are NOT allowed on the sand or in the water, with the exception of service animals.",
+                    "source": "park_url"
+                  }
+                },
+                "parking_lot": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs must be on a leash and under control when on the multi-use trail or in parking lots.",
+                    "source": "park_url"
+                  }
+                },
+                "picnic_area": {
+                  "rule": "on_leash"
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              }
+            }
+          ],
+          "global_notes": "Huntington State Beach prohibits dogs on sand and in water (except service animals). Dogs are allowed on multi-use trails and in parking lots only, and must be leashed and under control in those areas. The operator explicitly directs dog owners to Huntington Dog Beach as an alternative for off-leash beach access. Developed areas (picnic areas, restrooms) follow California State Parks default of on_leash.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 8901,
+      "name": "Huntington City Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Orange County \u00b7 1 region(s), 5 section(s) \u00b7 conf 0.81",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs not allowed on sand, in water, or near the Snowy Plover Reserve.",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=643"
+                  },
+                  "sub_zones": [
+                    {
+                      "name": "Dog Beach at 100 Goldenwest St.",
+                      "rule": "off_leash"
+                    }
+                  ]
+                },
+                "trails": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Pets must be on leash and under control on multi-use trail and in parking lots.",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=643"
+                  }
+                },
+                "tide_pools": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs not allowed on sand, in water, or near the Snowy Plover Reserve.",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=643"
+                  }
+                },
+                "water_swim": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs not allowed on sand, in water, or near the Snowy Plover Reserve.",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=643"
+                  }
+                },
+                "parking_lot": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Pets must be on leash and under control on multi-use trail and in parking lots.",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=643"
+                  }
+                }
+              }
+            }
+          ],
+          "global_notes": "Huntington City Beach operated by California Department of Parks and Recreation (CDPR) has a primary restriction: dogs prohibited on sand and water except at a designated Dog Beach area at 100 Goldenwest St. where off-leash play is allowed. Leashed dogs are permitted on multi-use trails and in parking lots. Source material contains some conflicting geographic detail regarding a 22nd Street to Seapoint Avenue zone from city policy; however, the authoritative state parks source (conf 0.95) establishes the statewide rule structure. The city_policy source (conf 0.66) references a Water Activity Zone with leash restrictions but conflicts with the primary state parks authority; in case of conflict, the higher-confidence park_url (state parks) governs. Service animals are excepted from all restrictions per state parks policy.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 6001,
+      "name": "Danburg Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Mono County \u00b7 3 region(s), 12 section(s) \u00b7 conf 0.70",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "on_leash"
+                },
+                "trails": {
+                  "rule": "on_leash"
+                },
+                "water_swim": {
+                  "rule": "on_leash"
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "picnic_area": {
+                  "rule": "on_leash"
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              }
+            },
+            {
+              "name": "State Reserve Boardwalk",
+              "sections": {
+                "boardwalk": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs allowed in most areas, except for the State Reserve Boardwalk and the County Park.",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=514"
+                  }
+                }
+              }
+            },
+            {
+              "name": "County Park",
+              "evidence": {
+                "quote": "Dogs allowed in most areas, except for the State Reserve Boardwalk and the County Park.",
+                "source": "park_url",
+                "source_url": "https://www.parks.ca.gov/?page_id=514"
+              },
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed"
+                },
+                "water_swim": {
+                  "rule": "not_allowed"
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "picnic_area": {
+                  "rule": "not_allowed"
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              }
+            }
+          ],
+          "global_notes": "Danburg Beach permits leashed dogs in most areas. Two specific zones prohibit dogs: the State Reserve Boardwalk (boardwalk section only) and the County Park (which restricts dogs from sand, water, and picnic areas but allows them on leash in parking and facility areas).",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 1873,
+      "name": "Regan Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 El Dorado County \u00b7 3 region(s), 8 section(s) \u00b7 conf 0.72",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": "Eastern dog section",
+              "sections": {
+                "sand": {
+                  "rule": "off_leash",
+                  "evidence": {
+                    "quote": "Dogs are permitted off-leash in the dog water park section on the eastern end of Regan Beach, with strict voice control required",
+                    "source": "research",
+                    "source_url": "https://visitlaketahoe.com/beaches/regan-beach/"
+                  }
+                },
+                "water_swim": {
+                  "rule": "off_leash",
+                  "evidence": {
+                    "quote": "dogs can be off-leash in the dog water park area with voice control",
+                    "source": "research",
+                    "source_url": "https://visitlaketahoe.com/beaches/regan-beach/"
+                  }
+                }
+              }
+            },
+            {
+              "name": "Main beach areas",
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs are not permitted on the main beach areas outside of the designated dog section",
+                    "source": "research",
+                    "source_url": "https://visitlaketahoe.com/beaches/regan-beach/"
+                  }
+                },
+                "water_swim": {
+                  "rule": "not_allowed"
+                }
+              }
+            },
+            {
+              "name": null,
+              "sections": {
+                "playground": {
+                  "rule": "not_allowed"
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "picnic_area": {
+                  "rule": "on_leash"
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              }
+            }
+          ],
+          "global_notes": "Regan Beach has a bifurcated dog policy: a dedicated off-leash dog water park section on the eastern end where voice control is required, and main beach areas where dogs are prohibited. The two named regions reflect this fundamental geographic split. Developed areas (parking, picnic, restrooms) inferred as on_leash per typical county beach management; playgrounds inferred as not_allowed per standard policy. The research source (confidence 0.85) provides the primary rules; the older LLM source (0.50) confirms the dog park's eastern location.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 8894,
+      "name": "Harbor Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Santa Cruz County \u00b7 3 region(s), 8 section(s) \u00b7 conf 0.72",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs may not be left unattended and must be on a leash no longer than six feet.",
+                    "source": "park_url",
+                    "source_url": "http://www.parks.ca.gov/default.asp?page_id=547"
+                  }
+                },
+                "water_swim": {
+                  "rule": "on_leash"
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              }
+            },
+            {
+              "name": "East side of Santa Cruz Yacht Harbor (Seabright Beach area)",
+              "sections": {
+                "sand": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs are allowed on the east side of the Santa Cruz Yacht Harbor.",
+                    "source": "park_url",
+                    "source_url": "http://www.parks.ca.gov/default.asp?page_id=547"
+                  }
+                },
+                "water_swim": {
+                  "rule": "on_leash"
+                }
+              }
+            },
+            {
+              "name": "Mitchell's Cove Beach",
+              "sections": {
+                "sand": {
+                  "rule": "off_leash",
+                  "evidence": {
+                    "quote": "off-leash allowed at Mitchell's Cove before 10am and after 4pm only.",
+                    "source": "city_policy",
+                    "source_url": "https://www.santacruzca.gov/Government/City-Departments/Parks-Recreation/Parks-Beaches-Open-Spaces/Dog-Off-Leash-Areas"
+                  },
+                  "time_windows": [
+                    {
+                      "end": "10:00",
+                      "rule": "off_leash",
+                      "start": "00:00"
+                    },
+                    {
+                      "end": "23:59",
+                      "rule": "off_leash",
+                      "start": "16:00"
+                    },
+                    {
+                      "end": "16:00",
+                      "rule": "on_leash",
+                      "start": "10:00"
+                    }
+                  ]
+                },
+                "water_swim": {
+                  "rule": "off_leash",
+                  "time_windows": [
+                    {
+                      "end": "10:00",
+                      "rule": "off_leash",
+                      "start": "00:00"
+                    },
+                    {
+                      "end": "23:59",
+                      "rule": "off_leash",
+                      "start": "16:00"
+                    },
+                    {
+                      "end": "16:00",
+                      "rule": "on_leash",
+                      "start": "10:00"
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "global_notes": "Harbor Beach spans multiple distinct zones with different rules. The default rule for the unnamed primary region is on-leash (CDPR standard). The east side of Santa Cruz Yacht Harbor (Seabright Beach area) explicitly allows dogs on-leash. Mitchell's Cove is the only zone allowing off-leash access, but only before 10am and after 4pm; during 10am\u20134pm dogs must be leashed. Cowell Beach and Main Beach are mentioned as dog-banned in city policy but are separate beaches and not included in this Harbor Beach extraction.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 8338,
+      "name": "Treasure Island Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Orange County \u00b7 2 region(s), 14 section(s) \u00b7 conf 0.83",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "evidence": {
+                "quote": "Dogs allowed on Laguna Beach year-round on leash, but only before 9am/after 6pm June 15\u2013Sept 10",
+                "source": "city_policy",
+                "source_url": "https://www.lagunabeachcity.net/our-beaches/dogs-on-the-beach"
+              },
+              "seasonal": [
+                {
+                  "months": "JUN-SEP",
+                  "reason": "Summer restriction period (June 15 \u2013 Sept 10)"
+                }
+              ],
+              "sections": {
+                "sand": {
+                  "rule": "on_leash",
+                  "seasonal": [
+                    {
+                      "months": "JUN-SEP",
+                      "reason": "Summer restriction period (June 15 \u2013 Sept 10)"
+                    }
+                  ],
+                  "time_windows": [
+                    {
+                      "end": "09:00",
+                      "rule": "on_leash",
+                      "start": "00:00"
+                    },
+                    {
+                      "end": "23:59",
+                      "rule": "on_leash",
+                      "start": "18:00"
+                    },
+                    {
+                      "end": "18:00",
+                      "rule": "not_allowed",
+                      "start": "09:00"
+                    }
+                  ]
+                },
+                "trails": {
+                  "rule": "on_leash"
+                },
+                "playground": {
+                  "rule": "not_allowed"
+                },
+                "water_swim": {
+                  "rule": "on_leash",
+                  "seasonal": [
+                    {
+                      "months": "JUN-SEP",
+                      "reason": "Summer restriction period (June 15 \u2013 Sept 10)"
+                    }
+                  ],
+                  "time_windows": [
+                    {
+                      "end": "09:00",
+                      "rule": "on_leash",
+                      "start": "00:00"
+                    },
+                    {
+                      "end": "23:59",
+                      "rule": "on_leash",
+                      "start": "18:00"
+                    },
+                    {
+                      "end": "18:00",
+                      "rule": "not_allowed",
+                      "start": "09:00"
+                    }
+                  ]
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "picnic_area": {
+                  "rule": "on_leash"
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              },
+              "time_windows": [
+                {
+                  "end": "09:00",
+                  "rule": "on_leash",
+                  "start": "00:00"
+                },
+                {
+                  "end": "23:59",
+                  "rule": "on_leash",
+                  "start": "18:00"
+                },
+                {
+                  "end": "18:00",
+                  "rule": "not_allowed",
+                  "start": "09:00"
+                }
+              ]
+            },
+            {
+              "name": "Thousand Steps Beach",
+              "evidence": {
+                "quote": "banned always at Thousand Steps Beach",
+                "source": "city_policy",
+                "source_url": "https://www.lagunabeachcity.net/our-beaches/dogs-on-the-beach"
+              },
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed"
+                },
+                "trails": {
+                  "rule": "on_leash"
+                },
+                "playground": {
+                  "rule": "not_allowed"
+                },
+                "water_swim": {
+                  "rule": "not_allowed"
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "picnic_area": {
+                  "rule": "on_leash"
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              }
+            }
+          ],
+          "global_notes": "Treasure Island Beach is subject to Laguna Beach's citywide dog policy. Dogs are allowed year-round on leash, but with severe summer restrictions (June 15\u2013Sept 10): dogs prohibited 9am\u20136pm, allowed only before 9am and after 6pm. Thousand Steps Beach is an exception\u2014dogs banned completely year-round. The source text does not directly mention Treasure Island Beach by name, but the city_policy and old_school_llm sources describe the general Laguna Beach dog rules applicable to this beach as a city-operated beach. Developed infrastructure areas (parking, picnic, restrooms, trails) default to on_leash per municipal practice. Playgrounds are prohibited year-round per standard city policy.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 8260,
+      "name": "Baker Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 San Francisco County \u00b7 2 region(s), 12 section(s) \u00b7 conf 0.72",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": "North of Lobos Creek",
+              "sections": {
+                "sand": {
+                  "rule": "off_leash",
+                  "evidence": {
+                    "quote": "Dogs are prohibited south of Lobos Creek but allowed off-leash under voice control north of the creek at Baker Beach.",
+                    "source": "research",
+                    "source_url": "https://accessca.org/access-california/explore/explore-detail-view/?site_id=508"
+                  }
+                },
+                "trails": {
+                  "rule": "unknown"
+                },
+                "water_swim": {
+                  "rule": "off_leash",
+                  "evidence": {
+                    "quote": "Dogs are prohibited south of Lobos Creek but allowed off-leash under voice control north of the creek at Baker Beach.",
+                    "source": "research",
+                    "source_url": "https://accessca.org/access-california/explore/explore-detail-view/?site_id=508"
+                  }
+                },
+                "parking_lot": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "leashes are required in parking lots, picnic areas, and most developed zones",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.nps.gov/goga/planyourvisit/dog-friendly-areas.htm"
+                  }
+                },
+                "picnic_area": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "leashes are required in parking lots, picnic areas, and most developed zones",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.nps.gov/goga/planyourvisit/dog-friendly-areas.htm"
+                  }
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              }
+            },
+            {
+              "name": "South of Lobos Creek",
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs are prohibited south of Lobos Creek but allowed off-leash under voice control north of the creek at Baker Beach.",
+                    "source": "research",
+                    "source_url": "https://accessca.org/access-california/explore/explore-detail-view/?site_id=508"
+                  }
+                },
+                "trails": {
+                  "rule": "unknown"
+                },
+                "water_swim": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs are prohibited south of Lobos Creek but allowed off-leash under voice control north of the creek at Baker Beach.",
+                    "source": "research",
+                    "source_url": "https://accessca.org/access-california/explore/explore-detail-view/?site_id=508"
+                  }
+                },
+                "parking_lot": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "leashes are required in parking lots, picnic areas, and most developed zones",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.nps.gov/goga/planyourvisit/dog-friendly-areas.htm"
+                  }
+                },
+                "picnic_area": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "leashes are required in parking lots, picnic areas, and most developed zones",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.nps.gov/goga/planyourvisit/dog-friendly-areas.htm"
+                  }
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              }
+            }
+          ],
+          "global_notes": "Baker Beach is split by Lobos Creek into two distinct dog zones managed by Golden Gate National Recreation Area (NPS). North of the creek allows off-leash dogs under voice control; south of the creek prohibits dogs entirely from sand and water. Developed facilities (parking, picnic areas, restrooms) require leashes in both zones per GGNRA policy. Trail rules not specified in source material.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 8732,
+      "name": "County Line Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Ventura County \u00b7 2 region(s), 9 section(s) \u00b7 conf 0.77",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": "North Beach (north of Lifeguard Tower 3)",
+              "sections": {
+                "sand": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Leashed dogs (maximum 6 feet) are allowed on North Beach west of lifeguard tower 3",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.rover.com/blog/top-dog-beach-leo-carrillo-state-park/"
+                  }
+                },
+                "campground": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs allowed in day-use areas, campground and North Beach (north of Lifeguard Tower 3)",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=616"
+                  }
+                },
+                "water_swim": {
+                  "rule": "on_leash"
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "picnic_area": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Leashed dogs (maximum 6 feet) are allowed on North Beach west of lifeguard tower 3, in the campground, and in picnic areas",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.rover.com/blog/top-dog-beach-leo-carrillo-state-park/"
+                  }
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              }
+            },
+            {
+              "name": "South Beach (south of Lifeguard Tower 3)",
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs not allowed on backcountry trails or South Beach (south of Lifeguard Tower 3)",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=616"
+                  }
+                },
+                "trails": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs not allowed on backcountry trails or South Beach (south of Lifeguard Tower 3)",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=616"
+                  }
+                },
+                "water_swim": {
+                  "rule": "not_allowed"
+                }
+              }
+            }
+          ],
+          "global_notes": "County Line Beach is divided at Lifeguard Tower 3. North Beach permits leashed dogs in day-use areas (sand, picnic areas, parking), campground, and developed facilities. South Beach and backcountry trails prohibit dogs entirely. Maximum leash length is 6 feet where allowed. California State Parks agency default applied to sections not explicitly mentioned (e.g., restrooms_showers in North Beach region).",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 8231,
+      "name": "Morro Strand State Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 San Luis Obispo County \u00b7 2 region(s), 9 section(s) \u00b7 conf 0.81",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs are prohibited on the beach.",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=593"
+                  }
+                },
+                "trails": {
+                  "rule": "on_leash"
+                },
+                "campground": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs must be monitored and leashed within the campground.",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=593"
+                  }
+                },
+                "water_swim": {
+                  "rule": "not_allowed"
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "picnic_area": {
+                  "rule": "on_leash"
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              }
+            },
+            {
+              "name": "Toro Creek Dog Beach",
+              "sections": {
+                "sand": {
+                  "rule": "off_leash",
+                  "evidence": {
+                    "quote": "Dogs are permitted off-leash on the beach at Toro Creek Dog Beach",
+                    "source": "research",
+                    "source_url": "https://www.morrobay.org/directory/toro-creek-dog-beach/"
+                  }
+                },
+                "water_swim": {
+                  "rule": "off_leash"
+                }
+              }
+            }
+          ],
+          "global_notes": "Morro Strand State Beach is a California State Parks facility with a general prohibition on dogs on the main beach and in water. However, Toro Creek Dog Beach (located between the north and south sections of the state beach) is a designated off-leash dog area. Within the campground, dogs are permitted on-leash with monitoring. Default CDPR inference applied to parking lot, picnic area, trails, and restrooms/showers as on-leash developed-area amenities.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 8319,
+      "name": "Victoria Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Orange County \u00b7 2 region(s), 9 section(s) \u00b7 conf 0.83",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "evidence": {
+                "quote": "Dogs allowed on Laguna Beach year-round on leash, but only before 9am/after 6pm June 15\u2013Sept 10",
+                "source": "city_policy",
+                "source_url": "https://www.lagunabeachcity.net/our-beaches/dogs-on-the-beach"
+              },
+              "seasonal": [
+                {
+                  "months": "JUN-SEP",
+                  "reason": "June 15\u2013Sept 10 time restrictions apply (9am\u20136pm prohibition)"
+                }
+              ],
+              "sections": {
+                "sand": {
+                  "rule": "on_leash",
+                  "seasonal": [
+                    {
+                      "months": "JUN-SEP",
+                      "reason": "June 15\u2013Sept 10: 9am\u20136pm prohibition"
+                    }
+                  ],
+                  "time_windows": [
+                    {
+                      "end": "18:00",
+                      "rule": "not_allowed",
+                      "start": "09:00"
+                    }
+                  ]
+                },
+                "trails": {
+                  "rule": "on_leash"
+                },
+                "playground": {
+                  "rule": "not_allowed"
+                },
+                "water_swim": {
+                  "rule": "on_leash",
+                  "seasonal": [
+                    {
+                      "months": "JUN-SEP",
+                      "reason": "June 15\u2013Sept 10: 9am\u20136pm prohibition"
+                    }
+                  ],
+                  "time_windows": [
+                    {
+                      "end": "18:00",
+                      "rule": "not_allowed",
+                      "start": "09:00"
+                    }
+                  ]
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "picnic_area": {
+                  "rule": "on_leash"
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              },
+              "time_windows": [
+                {
+                  "end": "09:00",
+                  "rule": "on_leash",
+                  "start": "00:00"
+                },
+                {
+                  "end": "23:59",
+                  "rule": "on_leash",
+                  "start": "18:00"
+                }
+              ]
+            },
+            {
+              "name": "Thousand Steps Beach",
+              "evidence": {
+                "quote": "banned always at Thousand Steps Beach",
+                "source": "city_policy",
+                "source_url": "https://www.lagunabeachcity.net/our-beaches/dogs-on-the-beach"
+              },
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed"
+                },
+                "water_swim": {
+                  "rule": "not_allowed"
+                }
+              }
+            }
+          ],
+          "global_notes": "Victoria Beach is part of Laguna Beach city beaches. The primary rule is on-leash year-round, except during summer (June 15\u2013Sept 10) when dogs are prohibited 9am\u20136pm on sand and water areas. Outside those summer hours, dogs are allowed on-leash before 9am and after 6pm. Thousand Steps Beach prohibits dogs entirely year-round. Playgrounds are not allowed (standard municipal policy). The source also mentions a designated Dog Park offering off-leash play, but that is a separate facility, not Victoria Beach itself. Developed areas (parking, picnic, restrooms, trails) default to on-leash per city policy.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 9113,
+      "name": "Kings Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Placer County \u00b7 2 region(s), 8 section(s) \u00b7 conf 0.81",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs not allowed on sandy beaches year-round.",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=511"
+                  }
+                },
+                "boardwalk": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs welcome on leash along sidewalks",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=511"
+                  }
+                },
+                "water_swim": {
+                  "rule": "not_allowed"
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "picnic_area": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs welcome on leash in picnic table areas.",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=511"
+                  }
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              }
+            },
+            {
+              "name": "Dog Beach (east of boat ramp, rocky area)",
+              "sections": {
+                "sand": {
+                  "rule": "off_leash",
+                  "evidence": {
+                    "quote": "Dogs also welcome east of the Kings Beach boat ramp (rocky area/Dog Beach).",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=511"
+                  }
+                },
+                "water_swim": {
+                  "rule": "off_leash"
+                }
+              }
+            }
+          ],
+          "global_notes": "Kings Beach has two distinct areas: the main beach where dogs are prohibited on sand year-round but allowed on-leash in developed areas (boardwalk, picnic areas, parking lot, restrooms); and a designated Dog Beach area east of the boat ramp (rocky/non-sandy terrain) where dogs are allowed off-leash. The source explicitly prohibits dogs from being left unattended in vehicles. California State Parks agency-class defaults applied for parking_lot, restrooms_showers, and water_swim pairing with sand where not explicitly stated.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 8265,
+      "name": "Manhattan Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Los Angeles County \u00b7 2 region(s), 8 section(s) \u00b7 conf 0.72",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs are prohibited on the sand and in the water at Manhattan Beach.",
+                    "source": "research",
+                    "source_url": "https://www.facebook.com/manhattanbchpd/posts/manhattan-beach-pd-psayes-we-mean-your-dog-too-no-dogs-on-the-beach-its-a-no-paw/1271387801808068/"
+                  }
+                },
+                "trails": {
+                  "rule": "on_leash"
+                },
+                "playground": {
+                  "rule": "not_allowed"
+                },
+                "water_swim": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs are prohibited on the sand and in the water at Manhattan Beach.",
+                    "source": "research",
+                    "source_url": "https://www.facebook.com/manhattanbchpd/posts/manhattan-beach-pd-psayes-we-mean-your-dog-too-no-dogs-on-the-beach-its-a-no-paw/1271387801808068/"
+                  }
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "picnic_area": {
+                  "rule": "on_leash"
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              }
+            },
+            {
+              "name": "Live Oak Park Dog Run",
+              "sections": {
+                "picnic_area": {
+                  "rule": "off_leash",
+                  "evidence": {
+                    "quote": "a designated off-leash dog run is available at Live Oak Park",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.manhattanbeach.gov/visitors/parks-and-facilities"
+                  }
+                }
+              }
+            }
+          ],
+          "global_notes": "Manhattan Beach prohibits dogs on the primary sand beach and in water. Dogs are allowed on leash in developed park areas and facilities. A notable exception is the Live Oak Park Dog Run, a designated off-leash area. Per source, dogs must be licensed and wear a city-issued tag at all times. Beach playgrounds and pools are not dog-friendly per standard city policy.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 8889,
+      "name": "Twin Lakes Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Santa Cruz County \u00b7 2 region(s), 8 section(s) \u00b7 conf 0.72",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs are allowed on-leash at Twin Lakes State Beach.",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.allstateparks.com/california/twin-lakes-sb"
+                  }
+                },
+                "playground": {
+                  "rule": "not_allowed"
+                },
+                "water_swim": {
+                  "rule": "on_leash"
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "picnic_area": {
+                  "rule": "on_leash"
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              }
+            },
+            {
+              "name": "East side of Santa Cruz Yacht Harbor",
+              "sections": {
+                "sand": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs are allowed on the east side of the Santa Cruz Yacht Harbor.",
+                    "source": "park_url"
+                  }
+                },
+                "water_swim": {
+                  "rule": "on_leash"
+                }
+              }
+            }
+          ],
+          "global_notes": "Twin Lakes Beach is a California State Parks property. The primary source (park_url) specifies that dogs must be on-leash (no longer than 6 feet) and may not be left unattended, with explicit allowance on the east side of Santa Cruz Yacht Harbor. The second source confirms on-leash rules for the beach generally. Standard CDPR inferences applied: playground prohibited, developed areas (parking, picnic, restrooms) permit on-leash dogs. No campground, trails, boardwalk, bluff, dunes, or tide pools identified at this urban beach.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 8715,
+      "name": "Coronado Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 San Diego County \u00b7 2 region(s), 8 section(s) \u00b7 conf 0.81",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": "Coronado Dog Beach (north end)",
+              "sections": {
+                "sand": {
+                  "rule": "off_leash",
+                  "evidence": {
+                    "quote": "Dogs are always permitted off-leash",
+                    "source": "city_policy",
+                    "source_url": "https://www.coronado.ca.us/757/Dogs"
+                  }
+                },
+                "water_swim": {
+                  "rule": "off_leash",
+                  "evidence": {
+                    "quote": "dogs may be off-leash on the beach itself",
+                    "source": "research",
+                    "source_url": "https://www.coronado.ca.us/757/Dogs"
+                  }
+                },
+                "parking_lot": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs must be leashed until reaching the dog beach area",
+                    "source": "research",
+                    "source_url": "https://www.coronado.ca.us/757/Dogs"
+                  }
+                }
+              }
+            },
+            {
+              "name": "Coronado Beach (south of Dog Beach)",
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs are banned from all of Coronado Beach except Dog Beach at the north end",
+                    "source": "city_policy",
+                    "source_url": "https://www.coronado.ca.us/757/Dogs"
+                  }
+                },
+                "water_swim": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs are not allowed on the remainder of Coronado Beach",
+                    "source": "research",
+                    "source_url": "https://www.coronado.ca.us/757/Dogs"
+                  }
+                },
+                "parking_lot": {
+                  "rule": "not_allowed"
+                },
+                "picnic_area": {
+                  "rule": "not_allowed"
+                },
+                "restrooms_showers": {
+                  "rule": "not_allowed"
+                }
+              }
+            }
+          ],
+          "global_notes": "Coronado Beach has a clear two-zone dog policy: Coronado Dog Beach at the north end (around 200 Ocean Boulevard near Sunset Park) permits dogs off-leash on sand and in water, but requires leashing in parking and access areas. All other areas of Coronado Beach, including the area in front of Hotel del Coronado, prohibit dogs entirely. Multiple sources confirm this consistent policy.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 8731,
+      "name": "Redondo Beach State Park",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Los Angeles County \u00b7 2 region(s), 7 section(s) \u00b7 conf 0.72",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs are prohibited on Redondo Beach itself",
+                    "source": "research"
+                  }
+                },
+                "trails": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs allowed: Official dog park area and identified walking paths in city parks",
+                    "source": "research"
+                  }
+                },
+                "boardwalk": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs are prohibited from the main Redondo Beach and pier",
+                    "source": "old_school_llm"
+                  }
+                },
+                "water_swim": {
+                  "rule": "not_allowed"
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "picnic_area": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs are prohibited on Redondo Beach itself and in city parks except for the official dog park and identified walking paths",
+                    "source": "research"
+                  }
+                }
+              }
+            },
+            {
+              "name": "Redondo Beach Dog Park (Dominguez Park)",
+              "sections": {
+                "sand": {
+                  "rule": "off_leash",
+                  "evidence": {
+                    "quote": "The Redondo Beach Dog Park is an off-leash facility established in 1992 where dogs may run free, but owners must have a leash in possession at all times",
+                    "source": "research"
+                  },
+                  "sub_zones": [
+                    {
+                      "name": "Dog Park area",
+                      "rule": "off_leash"
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "global_notes": "Redondo Beach prohibits dogs on the main beach sand, water, and city parks, with a narrow carve-out for designated walking paths (on-leash). The primary exception is the dedicated Redondo Beach Dog Park at Dominguez Park (190 Flagler Lane), an established off-leash facility where dogs may run free, though owners must carry a leash. The dog park is described as having two sectioned areas with separate obstacle courses. Parking areas near the beach are treated as accessible with leashed dogs per municipal code.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 6077,
+      "name": "Reedley Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Fresno County \u00b7 2 region(s), 7 section(s) \u00b7 conf 0.72",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs are not allowed on the sand part of the beach or in the pond",
+                    "source": "research"
+                  }
+                },
+                "trails": {
+                  "rule": "on_leash"
+                },
+                "water_swim": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs are not allowed on the sand part of the beach or in the pond",
+                    "source": "research"
+                  }
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "picnic_area": {
+                  "rule": "on_leash"
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              }
+            },
+            {
+              "name": "Mueller Park",
+              "sections": {
+                "sand": {
+                  "rule": "off_leash",
+                  "evidence": {
+                    "quote": "Mueller Park is designated as an off-leash dog park area",
+                    "source": "old_school_llm"
+                  }
+                }
+              }
+            }
+          ],
+          "global_notes": "Reedley Beach is a city beach with restricted dog access. Dogs are prohibited on the sand and in the pond/water areas at the main beach. Mueller Park, a distinct off-leash designated dog park area at or near Reedley Beach, permits dogs off-leash. In other developed areas (picnic areas, parking, restrooms, trails), dogs are inferred to be allowed on-leash per typical city beach policy, though this is not explicitly stated in sources.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 8320,
+      "name": "Moss Point",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Orange County \u00b7 2 region(s), 7 section(s) \u00b7 conf 0.83",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "evidence": {
+                "quote": "Dogs allowed on Laguna Beach year-round on leash, but only before 9am/after 6pm June 15\u2013Sept 10",
+                "source": "city_policy",
+                "source_url": "https://www.lagunabeachcity.net/our-beaches/dogs-on-the-beach"
+              },
+              "seasonal": [
+                {
+                  "months": "JUN-SEP",
+                  "reason": "Summer restriction: dogs prohibited 9am-6pm June 15\u2013Sept 10"
+                }
+              ],
+              "sections": {
+                "sand": {
+                  "rule": "on_leash",
+                  "seasonal": [
+                    {
+                      "months": "JUN-SEP",
+                      "reason": "Summer peak hours restriction"
+                    }
+                  ],
+                  "time_windows": [
+                    {
+                      "end": "18:00",
+                      "rule": "not_allowed",
+                      "start": "09:00"
+                    }
+                  ]
+                },
+                "water_swim": {
+                  "rule": "on_leash",
+                  "seasonal": [
+                    {
+                      "months": "JUN-SEP",
+                      "reason": "Summer peak hours restriction"
+                    }
+                  ],
+                  "time_windows": [
+                    {
+                      "end": "18:00",
+                      "rule": "not_allowed",
+                      "start": "09:00"
+                    }
+                  ]
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "picnic_area": {
+                  "rule": "on_leash"
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              },
+              "time_windows": [
+                {
+                  "end": "09:00",
+                  "rule": "on_leash",
+                  "start": "06:00"
+                },
+                {
+                  "end": "23:59",
+                  "rule": "on_leash",
+                  "start": "18:00"
+                }
+              ]
+            },
+            {
+              "name": "Thousand Steps Beach",
+              "evidence": {
+                "quote": "banned always at Thousand Steps Beach",
+                "source": "city_policy",
+                "source_url": "https://www.lagunabeachcity.net/our-beaches/dogs-on-the-beach"
+              },
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed"
+                },
+                "water_swim": {
+                  "rule": "not_allowed"
+                }
+              }
+            }
+          ],
+          "global_notes": "Moss Point is covered by the City of Laguna Beach's unified beach dog policy. Dogs are allowed year-round on leash except during summer peak hours (9am\u20136pm, June 15\u2013Sept 10), when they are prohibited on sand and water areas. Thousand Steps Beach is a year-round no-dogs zone and is explicitly carved out. The source mentions a designated off-leash Dog Park elsewhere in Laguna Beach, but that facility is separate from Moss Point itself and is not extracted here. Parking lot, picnic areas, and restrooms follow the standard on-leash rule for developed areas.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 9001,
+      "name": "Pistachio Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 San Mateo County \u00b7 2 region(s), 6 section(s) \u00b7 conf 0.78",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "leashed dogs are permitted on the adjacent beaches",
+                    "source": "research",
+                    "source_url": "https://pigeonpointlighthouse.com/about"
+                  }
+                },
+                "trails": {
+                  "rule": "on_leash"
+                },
+                "water_swim": {
+                  "rule": "on_leash"
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              }
+            },
+            {
+              "name": "Lighthouse grounds and park area",
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs are not permitted on the lighthouse grounds (except for service animals)",
+                    "source": "park_url",
+                    "source_url": "https://www.parks.ca.gov/?page_id=533"
+                  },
+                  "sub_zones": [
+                    {
+                      "name": "Service animals",
+                      "rule": "on_leash"
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "global_notes": "Pistachio Beach (Pigeon Point Light Station area) permits leashed dogs on the adjacent beaches and developed areas, but prohibits dogs on the lighthouse grounds and park core area itself, with an exception for service animals. The source text distinguishes between the lighthouse/grounds zone (prohibited) and adjacent beaches (on-leash permitted). CDPR default inferences applied to developed sections (parking, restrooms, trails) not explicitly mentioned.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 1327,
+      "name": "Humboldt Island",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Orange County \u00b7 2 region(s), 6 section(s) \u00b7 conf 0.68",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs are prohibited on the main city beach sand except at the dedicated Dog Beach area.",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.huntingtonbeachca.gov/departments/parks_recreation/beach_information/index.php"
+                  }
+                },
+                "trails": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "leashed dogs allowed on multi-use trail and parking lots of state beaches",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.huntingtonbeachca.gov/departments/parks_recreation/beach_information/index.php"
+                  }
+                },
+                "water_swim": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "the Pier or on or upon that Beach or Adjacent Beach Area bounded by the Beach Service Road and the Pacific Ocean, including the Water Activity Zone",
+                    "source": "city_policy",
+                    "source_url": "https://www.huntingtonbeachca.gov/departments/parks_recreation/parks_facilities/huntington_beach_park_rules.php"
+                  }
+                },
+                "parking_lot": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "leashed dogs allowed on multi-use trail and parking lots of state beaches",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.huntingtonbeachca.gov/departments/parks_recreation/beach_information/index.php"
+                  }
+                }
+              }
+            },
+            {
+              "name": "Dog Beach (100 Goldenwest St.)",
+              "sections": {
+                "sand": {
+                  "rule": "off_leash",
+                  "evidence": {
+                    "quote": "Huntington Beach has a designated off-leash Dog Beach at 100 Goldenwest St. where dogs can roam free.",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.huntingtonbeachca.gov/departments/parks_recreation/beach_information/index.php"
+                  }
+                },
+                "water_swim": {
+                  "rule": "off_leash"
+                }
+              }
+            }
+          ],
+          "global_notes": "Humboldt Island at Huntington Beach is primarily subject to a citywide prohibition on dogs on main beach sand and water. The sole exception is the designated Dog Beach at 100 Goldenwest St., where off-leash dogs are permitted. Source conflict noted: city_policy (conf 0.66) mentions a leashed-dog zone north of 22nd Street to Seapoint Avenue, but the higher-confidence old_school_llm source (0.80) and main city policy designate only the 100 Goldenwest location as a dog-allowed area. The 22nd\u2013Seapoint zone reference may apply to a different beach or may be outdated; extraction prioritizes the clearer Dog Beach carve-out. Service roads and multi-use trails allow leashed dogs; parking lots also permit leashed dogs.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 8552,
+      "name": "Riviera Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 San Diego County \u00b7 1 region(s), 12 section(s) \u00b7 conf 0.72",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "unknown"
+                },
+                "bluff": {
+                  "rule": "unknown"
+                },
+                "dunes": {
+                  "rule": "unknown"
+                },
+                "trails": {
+                  "rule": "unknown"
+                },
+                "boardwalk": {
+                  "rule": "unknown"
+                },
+                "campground": {
+                  "rule": "unknown"
+                },
+                "playground": {
+                  "rule": "unknown"
+                },
+                "tide_pools": {
+                  "rule": "unknown"
+                },
+                "water_swim": {
+                  "rule": "unknown"
+                },
+                "parking_lot": {
+                  "rule": "unknown"
+                },
+                "picnic_area": {
+                  "rule": "unknown"
+                },
+                "restrooms_showers": {
+                  "rule": "unknown"
+                }
+              }
+            }
+          ],
+          "global_notes": "No rules extracted for Riviera Beach specifically. All source text addresses Mission Bay Park (including Fiesta Island), Ocean Beach Dog Beach, Pacific Beach, Mission Beach, and La Jolla Shores\u2014none of which is Riviera Beach. Per scope discipline (heuristic 2), rules for other beaches cannot be applied to Riviera Beach. Operator is City of San Diego, but no beach-specific policy for Riviera Beach was found in the provided sources.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 8759,
+      "name": "Drakes Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Marin County \u00b7 1 region(s), 11 section(s) \u00b7 conf 0.72",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "evidence": {
+                "quote": "Pets must be on a 6-foot or shorter leash at all times",
+                "source": "park_url"
+              },
+              "seasonal": [
+                {
+                  "months": "year-round variable",
+                  "reason": "Sections of beaches or trails may temporarily be closed to dogs due to wildlife nesting and other unexpected circumstances"
+                }
+              ],
+              "sections": {
+                "sand": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs allowed: Kehoe Beach Trail and certain beach sections (including Great Beach/North Beach area from North Beach parking lot heading south)",
+                    "source": "research"
+                  },
+                  "sub_zones": [
+                    {
+                      "name": "Great Beach / North Beach area (south from North Beach parking lot)",
+                      "rule": "on_leash"
+                    },
+                    {
+                      "name": "All other beach areas",
+                      "rule": "not_allowed"
+                    }
+                  ]
+                },
+                "bluff": {
+                  "rule": "not_allowed"
+                },
+                "dunes": {
+                  "rule": "not_allowed"
+                },
+                "trails": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Most trails and beaches are closed to dogs, with only Kehoe Beach Trail and limited beach sections allowed year-round",
+                    "source": "research"
+                  },
+                  "sub_zones": [
+                    {
+                      "name": "Kehoe Beach Trail",
+                      "rule": "on_leash"
+                    }
+                  ]
+                },
+                "boardwalk": {
+                  "rule": "not_allowed"
+                },
+                "playground": {
+                  "rule": "not_allowed"
+                },
+                "tide_pools": {
+                  "rule": "not_allowed"
+                },
+                "water_swim": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Most trails and beaches are closed to dogs, with only Kehoe Beach Trail and limited beach sections allowed year-round",
+                    "source": "research"
+                  }
+                },
+                "parking_lot": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs allowed: Kehoe Beach Trail and certain beach sections (including Great Beach/North Beach area from North Beach parking lot heading south); parking lots and public roads",
+                    "source": "research"
+                  }
+                },
+                "picnic_area": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Bear Valley Picnic Area",
+                    "source": "old_school_llm"
+                  }
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              }
+            }
+          ],
+          "global_notes": "Drakes Beach is within Point Reyes National Seashore, an NPS-managed area with restrictive dog policies. Dogs are allowed on-leash only in limited designated areas: Kehoe Beach Trail and the Great Beach/North Beach area south from the North Beach parking lot, plus Bear Valley Picnic Area and parking lots. All other trails, beaches, dunes, and off-trail areas are prohibited. Seasonal closures are possible due to wildlife protection. The 6-foot leash requirement applies where dogs are permitted.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 9156,
+      "name": "Amarillo Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Los Angeles County \u00b7 1 region(s), 11 section(s) \u00b7 conf 0.43",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "evidence": {
+                "quote": "Dogs are prohibited on all Malibu beaches",
+                "source": "city_policy",
+                "source_url": "https://www.malibucity.org/FAQ.aspx?QID=64"
+              },
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed"
+                },
+                "bluff": {
+                  "rule": "not_allowed"
+                },
+                "dunes": {
+                  "rule": "not_allowed"
+                },
+                "trails": {
+                  "rule": "not_allowed"
+                },
+                "boardwalk": {
+                  "rule": "not_allowed"
+                },
+                "playground": {
+                  "rule": "not_allowed"
+                },
+                "tide_pools": {
+                  "rule": "not_allowed"
+                },
+                "water_swim": {
+                  "rule": "not_allowed"
+                },
+                "parking_lot": {
+                  "rule": "not_allowed"
+                },
+                "picnic_area": {
+                  "rule": "not_allowed"
+                },
+                "restrooms_showers": {
+                  "rule": "not_allowed"
+                }
+              }
+            }
+          ],
+          "global_notes": "Amarillo Beach is a City of Malibu beach. Per city policy, dogs are prohibited on all Malibu beaches including Amarillo Beach. Sources indicate strict no-dog enforcement across the city's beach portfolio. Leo Carrillo State Beach (a State Parks facility, not a Malibu city beach) is mentioned in sources as allowing leashed dogs in some areas, but that is outside the scope of this extraction. A dog park exists at Trancas Canyon Park (inland), not at the beach.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 8486,
+      "name": "Limantour Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Marin County \u00b7 1 region(s), 11 section(s) \u00b7 conf 0.72",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "evidence": {
+                "quote": "Dogs are permitted only in specific areas at Point Reyes National Seashore and must be leashed.",
+                "source": "research",
+                "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+              },
+              "sections": {
+                "sand": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Limantour Beach (southeast of parking lot)",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+                  },
+                  "sub_zones": [
+                    {
+                      "name": "southeast of parking lot",
+                      "rule": "on_leash"
+                    }
+                  ]
+                },
+                "bluff": {
+                  "rule": "not_allowed"
+                },
+                "dunes": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Dogs prohibited: All other trails, beaches, and off-trail lands within Point Reyes National Seashore",
+                    "source": "research",
+                    "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+                  }
+                },
+                "trails": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Most trails and beaches are closed to dogs, with only Kehoe Beach Trail and limited beach sections allowed year-round.",
+                    "source": "research",
+                    "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+                  }
+                },
+                "boardwalk": {
+                  "rule": "not_allowed"
+                },
+                "playground": {
+                  "rule": "not_allowed"
+                },
+                "tide_pools": {
+                  "rule": "not_allowed"
+                },
+                "water_swim": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs are permitted only in specific areas at Point Reyes National Seashore and must be leashed.",
+                    "source": "research",
+                    "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+                  }
+                },
+                "parking_lot": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs allowed: Kehoe Beach Trail and certain beach sections (including Great Beach/North Beach area from North Beach parking lot heading south); parking lots and public roads",
+                    "source": "research",
+                    "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+                  }
+                },
+                "picnic_area": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Bear Valley Picnic Area",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+                  }
+                },
+                "restrooms_showers": {
+                  "rule": "not_allowed"
+                }
+              }
+            }
+          ],
+          "global_notes": "Limantour Beach is located within Point Reyes National Seashore. Dogs are permitted on-leash in a limited section of the beach (southeast of the parking lot) based on NPS carve-out policy. The southeast section is the specific dog-allowed beach area at Limantour. All other areas of the beach, dunes, trails, and facilities are dog-prohibited per standard NPS wildlife protection policy. Dogs must be on a leash of 6 feet or shorter when in allowed areas. Seasonal closures may occur due to wildlife nesting or other circumstances; visitors should check current conditions before visiting.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 8865,
+      "name": "Limantour Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Marin County \u00b7 1 region(s), 11 section(s) \u00b7 conf 0.72",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "seasonal": [
+                {
+                  "months": "year-round",
+                  "reason": "Sections of beaches or trails may temporarily be closed to dogs due to unexpected circumstances such as wildlife nesting"
+                }
+              ],
+              "sections": {
+                "sand": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Leashed dogs are permitted only in specific areas including certain beaches, trails, and parking lots.",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+                  }
+                },
+                "bluff": {
+                  "rule": "not_allowed"
+                },
+                "dunes": {
+                  "rule": "not_allowed"
+                },
+                "trails": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Leashed dogs are permitted only in specific areas including certain beaches, trails, and parking lots.",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+                  }
+                },
+                "boardwalk": {
+                  "rule": "not_allowed"
+                },
+                "playground": {
+                  "rule": "not_allowed"
+                },
+                "tide_pools": {
+                  "rule": "not_allowed"
+                },
+                "water_swim": {
+                  "rule": "on_leash"
+                },
+                "parking_lot": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs allowed: Kehoe Beach Trail and certain beach sections (including Great Beach/North Beach area from North Beach parking lot heading south); parking lots and public roads",
+                    "source": "research",
+                    "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+                  }
+                },
+                "picnic_area": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Kehoe Beach Trail, North Beach (from North Beach parking lot heading south), Limantour Beach (southeast of parking lot), Bear Valley Picnic Area, most parking lots, parts of certain trails",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+                  }
+                },
+                "restrooms_showers": {
+                  "rule": "not_allowed"
+                }
+              }
+            }
+          ],
+          "global_notes": "Limantour Beach is within Point Reyes National Seashore, an NPS-managed area. The source text explicitly identifies Limantour Beach (southeast of parking lot) as one of the specific beach sections where leashed dogs are allowed year-round. Most other park areas prohibit dogs entirely. All allowed areas require dogs to be on a leash of 6 feet or shorter. Seasonal closures may occur for wildlife protection.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 6070,
+      "name": "Limantour Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Marin County \u00b7 1 region(s), 11 section(s) \u00b7 conf 0.72",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "evidence": {
+                "quote": "Dogs are permitted only in specific areas at Point Reyes National Seashore and must be leashed.",
+                "source": "research",
+                "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+              },
+              "sections": {
+                "sand": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Limantour Beach (southeast of parking lot)",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+                  },
+                  "sub_zones": [
+                    {
+                      "name": "southeast of parking lot",
+                      "rule": "on_leash"
+                    }
+                  ]
+                },
+                "bluff": {
+                  "rule": "not_allowed"
+                },
+                "dunes": {
+                  "rule": "not_allowed"
+                },
+                "trails": {
+                  "rule": "not_allowed",
+                  "evidence": {
+                    "quote": "Most trails and beaches are closed to dogs",
+                    "source": "research",
+                    "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+                  }
+                },
+                "boardwalk": {
+                  "rule": "not_allowed"
+                },
+                "playground": {
+                  "rule": "not_allowed"
+                },
+                "tide_pools": {
+                  "rule": "not_allowed"
+                },
+                "water_swim": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Limantour Beach (southeast of parking lot)",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+                  }
+                },
+                "parking_lot": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Dogs allowed: parking lots",
+                    "source": "research",
+                    "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+                  }
+                },
+                "picnic_area": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Bear Valley Picnic Area",
+                    "source": "old_school_llm",
+                    "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+                  }
+                },
+                "restrooms_showers": {
+                  "rule": "not_allowed"
+                }
+              }
+            }
+          ],
+          "global_notes": "Limantour Beach allows leashed dogs only in the southeast section near the parking lot. This is a designated dog-friendly area at Point Reyes National Seashore where leashes (6 feet or shorter) are required. Seasonal closures may occur due to wildlife nesting or other circumstances; visitors should check current park maps before visiting. All other trails and beach sections at the seashore are closed to dogs. The parking lot and picnic areas also permit leashed dogs. NPS default prohibition applied to sections without specific mention of dog access at this beach.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 684,
+      "name": "Avalis Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Marin County \u00b7 1 region(s), 11 section(s) \u00b7 conf 0.72",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "evidence": {
+                "quote": "Dogs are permitted only in specific areas at Point Reyes National Seashore and must be leashed.",
+                "source": "research",
+                "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+              },
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed",
+                  "sub_zones": [
+                    {
+                      "name": "Great Beach/North Beach area from North Beach parking lot heading south",
+                      "rule": "on_leash"
+                    }
+                  ]
+                },
+                "bluff": {
+                  "rule": "not_allowed"
+                },
+                "dunes": {
+                  "rule": "not_allowed"
+                },
+                "trails": {
+                  "rule": "not_allowed",
+                  "sub_zones": [
+                    {
+                      "name": "Kehoe Beach Trail",
+                      "rule": "on_leash"
+                    }
+                  ]
+                },
+                "boardwalk": {
+                  "rule": "not_allowed"
+                },
+                "playground": {
+                  "rule": "not_allowed"
+                },
+                "tide_pools": {
+                  "rule": "not_allowed"
+                },
+                "water_swim": {
+                  "rule": "not_allowed",
+                  "sub_zones": [
+                    {
+                      "name": "Great Beach/North Beach area from North Beach parking lot heading south",
+                      "rule": "on_leash"
+                    }
+                  ]
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "picnic_area": {
+                  "rule": "not_allowed"
+                },
+                "restrooms_showers": {
+                  "rule": "not_allowed"
+                }
+              }
+            }
+          ],
+          "global_notes": "Avalis Beach is located within Point Reyes National Seashore (NPS management). NPS policy is generally prohibitive for dogs except in explicitly named carve-outs. The source text identifies two allowed zones where dogs must be on-leash: Kehoe Beach Trail and the Great Beach/North Beach area from North Beach parking lot heading south. All other trails, beaches, dunes, and off-trail lands are closed to dogs. Parking lots and public roads allow on-leash dogs. Seasonal closures may occur due to wildlife nesting or other circumstances. The 6-foot leash requirement is stated in park guidance.",
+          "extraction_method": "closed_zones_v3"
+        }
+      }
+    },
+    {
+      "fid": 6336,
+      "name": "High Bluff Beach",
+      "what_it_tests": "Production text_repass_v1 sample \u00b7 Del Norte County \u00b7 1 region(s), 10 section(s) \u00b7 conf 0.30",
+      "is_production_sample": true,
+      "variants": {
+        "text_repass_v1": {
+          "regions": [
+            {
+              "name": null,
+              "sections": {
+                "sand": {
+                  "rule": "not_allowed"
+                },
+                "bluff": {
+                  "rule": "not_allowed"
+                },
+                "dunes": {
+                  "rule": "not_allowed"
+                },
+                "trails": {
+                  "rule": "on_leash",
+                  "evidence": {
+                    "quote": "Leashed pets can join you at Redwood\u2014in designated places only.",
+                    "source": "park_url",
+                    "source_url": "http://www.nps.gov/redw/index.htm"
+                  }
+                },
+                "boardwalk": {
+                  "rule": "on_leash"
+                },
+                "tide_pools": {
+                  "rule": "not_allowed"
+                },
+                "water_swim": {
+                  "rule": "not_allowed"
+                },
+                "parking_lot": {
+                  "rule": "on_leash"
+                },
+                "picnic_area": {
+                  "rule": "on_leash"
+                },
+                "restrooms_showers": {
+                  "rule": "on_leash"
+                }
+              }
+            }
+          ],
+          "global_notes": "High Bluff Beach is within Redwood National and State Parks (NPS operator). The source states leashed pets allowed in 'designated places only'\u2014identified as trails and developed areas. NPS default policy prohibits dogs from sand beaches, water, bluffs, dunes, and sensitive tide pool zones. On-leash access inferred for developed facilities (parking, picnic areas, restrooms, boardwalk) per NPS carve-out practice. Source confidence is low (0.35); actual designated zones should be verified with the park directly.",
+          "extraction_method": "closed_zones_v3"
         }
       }
     }
@@ -1038,6 +3021,15 @@ const EVIDENCE = {
       "allowed": "restricted",
       "leash": "required",
       "quote": "Limited access for dogs on leash. Dogs must be on leash in allowed areas.\n\n\n\n[zones] Dogs on leash are only allowed on the beach at Gate 19 (south end of park) and on the trails leading to it. Dogs are not allowed in all other areas, including across Highway 1 in the Soberanes Canyon Trail area.",
+      "source_url": "https://www.parks.ca.gov/?page_id=579"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.78,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Garrapata State Beach under CDPR management has a sharply restricted dog policy. Dogs are permitted on leash only in the Gate 19 area (south end) and trails leading to it. The rest of the park prohibits dogs entirely, including the Soberanes Canyon Trail area across Highway 1. County policy (Monterey Parks) allows leashed dogs at county parks, but this is a state beach operated by CDPR, so the more restrictive state policy applies. Parking lot and restroom areas are inferred as on_leash per CDPR developed-area defaults.",
       "source_url": "https://www.parks.ca.gov/?page_id=579"
     },
     {
@@ -1067,6 +3059,15 @@ const EVIDENCE = {
       "allowed": "no",
       "leash": "on_leash",
       "quote": "Dogs are banned from all of Coronado Beach except Dog Beach at the north end, where they are always permitted off-leash.\n\n[designated dog zones] Dog Beach (sandy area at north end of beach)\n\n[prohibited areas] any area of Coronado Beach except at Dog Beach",
+      "source_url": "https://www.coronado.ca.us/757/Dogs"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.81,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "off_leash",
+      "quote": "Coronado Dog Beach is a designated off-leash dog area at the north end of Coronado Beach (200 Ocean Boulevard, in front of Sunset Park). Dogs are prohibited from all other areas of Coronado Beach. Dogs must be on-leash in parking areas and connecting paths until they reach the Dog Beach itself. The off-leash permission applies both to the sandy beach and water areas within the designated Dog Beach zone.",
       "source_url": "https://www.coronado.ca.us/757/Dogs"
     },
     {
@@ -1126,6 +3127,15 @@ const EVIDENCE = {
       "source_url": "http://www.parks.ca.gov/default.asp?page_id=652"
     },
     {
+      "source": "text_repass_v1",
+      "confidence": 0.81,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Little Corona Del Mar Beach is operated by City of Newport Beach. Dogs are subject to strict time-of-day restrictions: prohibited 10:00am\u20134:30pm (daytime hours coinciding with peak beach crowds), and required to be leashed during all permitted hours (before 10am and after 4:30pm). The prohibition window applies to sand, water access, and beachfront sidewalks/boardwalk areas. No seasonal restrictions noted. Parking lot, restrooms, picnic areas, trails, and other developed facilities follow City of Newport Beach standard on-leash policy by default (not explicitly mentioned in source but consistent with municipal beach operations).",
+      "source_url": "https://www.newportbeachca.gov/government/departments/recreation-senior-services/marine-protection-tidepools"
+    },
+    {
       "source": "old_school_llm",
       "confidence": 0.8,
       "is_canonical": false,
@@ -1171,6 +3181,15 @@ const EVIDENCE = {
       "leash": null,
       "quote": "(no prose; structured claim only \u2014 allowed=no)",
       "source_url": null
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.78,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Mission Beach permits leashed dogs only during early morning (midnight\u20139 a.m.) and nighttime hours. The time window rule applies to sand, water access, picnic areas, parking lot, and boardwalk sections. Dogs are prohibited during daytime hours (9 a.m. to midnight). No off-leash area exists at Mission Beach; the city's only off-leash beaches are Dog Beach (Ocean Beach) and Fiesta Island. Playgrounds are universally prohibited per city policy.",
+      "source_url": "https://www.sandiego.gov/lifeguards/beaches/mb"
     },
     {
       "source": "json_explode",
@@ -1220,6 +3239,15 @@ const EVIDENCE = {
       "source_url": null
     },
     {
+      "source": "text_repass_v1",
+      "confidence": 0.78,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "on_leash",
+      "quote": "Carpinteria State Beach prohibits dogs on the sand and in water. Dogs are allowed in the campground and day-use picnic areas, but must be leashed. The park operates under California State Parks policy; developed areas default to on-leash per agency norm. City of Carpinteria ordinance requires all dogs in public areas to be leashed; no off-leash dog beach exists in city limits.",
+      "source_url": "https://www.parks.ca.gov/?page_id=599"
+    },
+    {
       "source": "json_explode",
       "confidence": 0.7,
       "is_canonical": false,
@@ -1246,6 +3274,15 @@ const EVIDENCE = {
       "allowed": "restricted",
       "leash": "required",
       "quote": "Leashed dogs are permitted only in specific areas including certain beaches, trails, and parking lots. Park rangers enforce these regulations strictly to protect wildlife and other visitors. Check current maps before visiting as beach and trail access for dogs may change seasonally.\n\n\n\n[zones] Kehoe Beach Trail, North Beach (from North Beach parking lot heading south), Limantour Beach (southeast of parking lot), Bear Valley Picnic Area, most parking lots, parts of certain trails",
+      "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.72,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "on_leash",
+      "quote": "Wildcat Beach is within Point Reyes National Seashore (NPS). The sources describe Point Reyes dog policy broadly but do not specifically name Wildcat Beach as an allowed or prohibited area. Per NPS default policy and the explicit statement that 'Most trails and beaches are closed to dogs, with only Kehoe Beach Trail and limited beach sections allowed,' Wildcat Beach itself is NOT listed among the allowed areas (which are Kehoe Beach Trail, North Beach from North Beach parking lot heading south, and Limantour Beach southeast of parking lot). Therefore, Wildcat Beach sand and trails default to not_allowed under NPS policy. Water access is prohibited by extension of sand prohibition. Parking lots and picnic areas at the park level are on_leash. Seasonal closures are noted as possible due to wildlife nesting but no specific dates are provided for Wildcat Beach. A 6-foot leash maximum applies where dogs are permitted.",
       "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
     },
     {
@@ -1276,6 +3313,15 @@ const EVIDENCE = {
       "leash": "off_leash",
       "quote": "(no prose; structured claim only \u2014 allowed=yes, leash=off_leash)",
       "source_url": null
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.81,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "off_leash",
+      "quote": "Fiesta Island is a designated off-leash dog area in San Diego, operating under a strict time window of 4am\u201310pm. Dogs must be leashed outside this window and in developed areas (parking, restrooms). The implicit pairing of sand and water_swim both inherit the off-leash rule during operational hours per heuristic 1b.",
+      "source_url": "https://www.sandiego.gov/park-and-recreation/parks/dogs/bchdog"
     }
   ],
   "9717": [
@@ -1289,6 +3335,15 @@ const EVIDENCE = {
       "source_url": null
     },
     {
+      "source": "text_repass_v1",
+      "confidence": 0.85,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "off_leash",
+      "quote": "Huntington Beach Dog Beach permits off-leash dogs on the sand and in the water within the designated Dog Beach area (north of 22nd Street to Seapoint Avenue). Dogs must be leashed in parking lots, on the upper bluff, and on paths leading to the sand. City policy designates a Water Activity Zone north of 22nd Street to Seapoint Avenue where leashed dogs (\u22646 ft leash) are allowed. Adjacent Huntington State Beach to the south prohibits dogs entirely. No campground or playground sections exist at this beach.",
+      "source_url": "https://www.huntingtonbeachca.gov/departments/parks_recreation/parks_facilities/huntington_beach_park_rules.php"
+    },
+    {
       "source": "city_policy",
       "confidence": 0.66,
       "is_canonical": false,
@@ -1297,6 +3352,942 @@ const EVIDENCE = {
       "quote": "Dogs prohibited on most of Huntington Beach; leashed dogs (\u22646 ft) allowed only in the area north of 22nd Street to Seapoint Avenue.\n\n[designated dog zones] Water Activity Zone north of 22nd Street to Seapoint Avenue (leash \u22646 ft)\n\n[prohibited areas] the Pier or on or upon that Beach or Adjacent Beach Area bounded by the Beach Service Road and the Pacific Ocean, including the Water Activity Zone",
       "source_url": "https://www.huntingtonbeachca.gov/departments/parks_recreation/parks_facilities/huntington_beach_park_rules.php"
     }
+  ],
+  "8453": [
+    {
+      "source": "park_url",
+      "confidence": 0.95,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs must be on a leash and under control when on the multi-use trail or in parking lots. The page suggests visiting Huntington Dog Beach as an alternative if seeking an area where dogs are allowed on the beach itself.\n\n\n\n[zones] Pets are allowed on the multi-use trail and parking lots only. Pets are NOT allowed on the sand or in the water, with the exception of service animals.",
+      "source_url": "https://www.parks.ca.gov/?page_id=643"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.81,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "on_leash",
+      "quote": "Huntington State Beach prohibits dogs on sand and in water (except service animals). Dogs are allowed on multi-use trails and in parking lots only, and must be leashed and under control in those areas. The operator explicitly directs dog owners to Huntington Dog Beach as an alternative for off-leash beach access. Developed areas (picnic areas, restrooms) follow California State Parks default of on_leash.",
+      "source_url": "https://www.parks.ca.gov/?page_id=643"
+    },
+    {
+      "source": "json_explode",
+      "confidence": 0.7,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "mixed_by_zone",
+      "quote": "(no prose; structured claim only \u2014 allowed=yes, leash=mixed_by_zone)",
+      "source_url": null
+    }
+  ],
+  "8901": [
+    {
+      "source": "park_url",
+      "confidence": 0.95,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Service animals are excepted from restrictions. Pets must be on leash and under control on multi-use trail and in parking lots.\n\n\n\n[zones] Dogs allowed only on the multi-use trail and parking lots. Dogs not allowed on sand, in water, or near the Snowy Plover Reserve.",
+      "source_url": "https://www.parks.ca.gov/?page_id=643"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.81,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "on_leash",
+      "quote": "Huntington City Beach operated by California Department of Parks and Recreation (CDPR) has a primary restriction: dogs prohibited on sand and water except at a designated Dog Beach area at 100 Goldenwest St. where off-leash play is allowed. Leashed dogs are permitted on multi-use trails and in parking lots. Source material contains some conflicting geographic detail regarding a 22nd Street to Seapoint Avenue zone from city policy; however, the authoritative state parks source (conf 0.95) establishes the statewide rule structure. The city_policy source (conf 0.66) references a Water Activity Zone with leash restrictions but conflicts with the primary state parks authority; in case of conflict, the higher-confidence park_url (state parks) governs. Service animals are excepted from all restrictions per state parks policy.",
+      "source_url": "https://www.parks.ca.gov/?page_id=643"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs must be leashed on regular beaches and service roads. Huntington Beach has a designated off-leash Dog Beach at 100 Goldenwest St. where dogs can roam free. Dogs are prohibited on the main city beach sand except at the dedicated Dog Beach area.\n\n\n\n[zones] Dog Beach (100 Goldenwest St.) and service road; leashed dogs allowed on multi-use trail and parking lots of state beaches",
+      "source_url": "https://www.huntingtonbeachca.gov/departments/parks_recreation/beach_information/index.php"
+    },
+    {
+      "source": "unified_v1",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "(no prose; structured claim only \u2014 allowed=yes, leash=on_leash)",
+      "source_url": null
+    },
+    {
+      "source": "json_explode",
+      "confidence": 0.7,
+      "is_canonical": false,
+      "allowed": null,
+      "leash": "unclear",
+      "quote": "(no prose; structured claim only \u2014 leash=unclear)",
+      "source_url": null
+    },
+    {
+      "source": "city_policy",
+      "confidence": 0.66,
+      "is_canonical": false,
+      "allowed": "no",
+      "leash": "on_leash",
+      "quote": "Dogs prohibited on most of Huntington Beach; leashed dogs (\u22646 ft) allowed only in the area north of 22nd Street to Seapoint Avenue.\n\n[designated dog zones] Water Activity Zone north of 22nd Street to Seapoint Avenue (leash \u22646 ft)\n\n[prohibited areas] the Pier or on or upon that Beach or Adjacent Beach Area bounded by the Beach Service Road and the Pacific Ocean, including the Water Activity Zone",
+      "source_url": "https://www.huntingtonbeachca.gov/departments/parks_recreation/parks_facilities/huntington_beach_park_rules.php"
+    }
+  ],
+  "6001": [
+    {
+      "source": "park_url",
+      "confidence": 0.82,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": null,
+      "quote": "[zones] Dogs allowed in most areas, except for the State Reserve Boardwalk and the County Park.",
+      "source_url": "https://www.parks.ca.gov/?page_id=514"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.7,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Danburg Beach permits leashed dogs in most areas. Two specific zones prohibit dogs: the State Reserve Boardwalk (boardwalk section only) and the County Park (which restricts dogs from sand, water, and picnic areas but allows them on leash in parking and facility areas).",
+      "source_url": "https://www.parks.ca.gov/?page_id=514"
+    }
+  ],
+  "1873": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "yes",
+      "leash": "mixed",
+      "quote": "Regan Beach has a dedicated dog section on its eastern end where dogs can be off-leash in the dog water park area with voice control. In other dog-friendly areas, a leash is required and owners must pick up after their pets.\n\n\n\n[zones] Dogs allowed: Dogs are permitted on dog-friendly beaches at Regan Beach, with a dedicated dog section on the far eastern end of the beach | Dogs prohibited: Dogs are not permitted on the main beach areas outside of the designated dog section | Off-leash area: Dogs are permitted off-leash in the dog water park section on the eastern end of Regan Beach, with strict voice control required",
+      "source_url": "https://visitlaketahoe.com/beaches/regan-beach/"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.72,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "off_leash",
+      "quote": "Regan Beach has a bifurcated dog policy: a dedicated off-leash dog water park section on the eastern end where voice control is required, and main beach areas where dogs are prohibited. The two named regions reflect this fundamental geographic split. Developed areas (parking, picnic, restrooms) inferred as on_leash per typical county beach management; playgrounds inferred as not_allowed per standard policy. The research source (confidence 0.85) provides the primary rules; the older LLM source (0.50) confirms the dog park's eastern location.",
+      "source_url": "https://visitlaketahoe.com/beaches/regan-beach/"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.5,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "The City of South Lake Tahoe permits dogs at Regan Beach, which has a designated water dog park on the east end. Dogs are generally prohibited at other city beaches like El Dorado Beach.\n\n\n\n[zones] Regan Beach (water dog park on east end)",
+      "source_url": "https://www.tahoepublicbeaches.org/beaches/regan-beach/"
+    }
+  ],
+  "8894": [
+    {
+      "source": "park_url",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs may not be left unattended and must be on a leash no longer than six feet.\n\n\n\n[zones] Dogs are allowed on the east side of the Santa Cruz Yacht Harbor.",
+      "source_url": "http://www.parks.ca.gov/default.asp?page_id=547"
+    },
+    {
+      "source": "city_policy",
+      "confidence": 0.84,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Dogs are banned at Cowell and Main Beach; off-leash allowed at Mitchell's Cove before 10am and after 4pm only.",
+      "source_url": "https://www.santacruzca.gov/Government/City-Departments/Parks-Recreation/Parks-Beaches-Open-Spaces/Dog-Off-Leash-Areas"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs are allowed on most City of Santa Cruz beaches but must be leashed except at Mitchell's Cove during designated hours (before 10am and after 4pm). Mitchell's Cove is the only City beach with off-leash dog access.\n\n\n\n[zones] Mitchell's Cove Beach (off-leash during restricted hours), Seabright Beach area (east side of Santa Cruz Yacht Harbor)",
+      "source_url": "https://www.santacruzca.gov/Government/City-Departments/Parks-Recreation/Parks-Beaches-Open-Spaces/Dog-Off-Leash-Areas"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.72,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Harbor Beach spans multiple distinct zones with different rules. The default rule for the unnamed primary region is on-leash (CDPR standard). The east side of Santa Cruz Yacht Harbor (Seabright Beach area) explicitly allows dogs on-leash. Mitchell's Cove is the only zone allowing off-leash access, but only before 10am and after 4pm; during 10am\u20134pm dogs must be leashed. Cowell Beach and Main Beach are mentioned as dog-banned in city policy but are separate beaches and not included in this Harbor Beach extraction.",
+      "source_url": "http://www.parks.ca.gov/default.asp?page_id=547"
+    }
+  ],
+  "8338": [
+    {
+      "source": "city_policy",
+      "confidence": 0.97,
+      "is_canonical": true,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Dogs allowed on Laguna Beach year-round on leash, but only before 9am/after 6pm June 15\u2013Sept 10; banned always at Thousand Steps Beach.\n\n[designated dog zones] dog parks (off-leash)\n\n[prohibited areas] Thousand Steps Beach",
+      "source_url": "https://www.lagunabeachcity.net/our-beaches/dogs-on-the-beach"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.83,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Treasure Island Beach is subject to Laguna Beach's citywide dog policy. Dogs are allowed year-round on leash, but with severe summer restrictions (June 15\u2013Sept 10): dogs prohibited 9am\u20136pm, allowed only before 9am and after 6pm. Thousand Steps Beach is an exception\u2014dogs banned completely year-round. The source text does not directly mention Treasure Island Beach by name, but the city_policy and old_school_llm sources describe the general Laguna Beach dog rules applicable to this beach as a city-operated beach. Developed infrastructure areas (parking, picnic, restrooms, trails) default to on_leash per municipal practice. Playgrounds are prohibited year-round per standard city policy.",
+      "source_url": "https://www.lagunabeachcity.net/our-beaches/dogs-on-the-beach"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "seasonal",
+      "leash": "required",
+      "quote": "Dogs must be leashed at all times except in the designated Dog Park. During summer (June 15 - Sept 10), dogs are prohibited on beaches from 9am to 6pm. Thousand Steps Beach prohibits dogs year-round.\n\n\n\n[zones] Main Beach Park and most beaches (with restrictions); Laguna Beach Dog Park (off-leash only)",
+      "source_url": "https://www.lagunabeachcity.net/our-beaches/dogs-on-the-beach"
+    },
+    {
+      "source": "json_explode",
+      "confidence": 0.7,
+      "is_canonical": false,
+      "allowed": "unclear",
+      "leash": null,
+      "quote": "(no prose; structured claim only \u2014 allowed=unclear)",
+      "source_url": null
+    }
+  ],
+  "8260": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": "mixed",
+      "quote": "Dogs are prohibited south of Lobos Creek but allowed off-leash under voice control north of the creek at Baker Beach.\n\n\n\n[zones] Dogs allowed: North of Lobos Creek | Dogs prohibited: South of Lobos Creek | Off-leash area: North of Lobos Creek under voice control",
+      "source_url": "https://accessca.org/access-california/explore/explore-detail-view/?site_id=508"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Golden Gate NRA uniquely allows off-leash dogs under voice and sight control in designated areas, though leashes are required in parking lots, picnic areas, and most developed zones. Check specific beach maps and the Superintendent's Compendium for detailed regulations.\n\n\n\n[zones] Stinson Beach, Crissy Field, Ocean Beach, and designated trails throughout GGNRA",
+      "source_url": "https://www.nps.gov/goga/planyourvisit/dog-friendly-areas.htm"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.72,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "off_leash",
+      "quote": "Baker Beach is split by Lobos Creek into two distinct dog zones managed by Golden Gate National Recreation Area (NPS). North of the creek allows off-leash dogs under voice control; south of the creek prohibits dogs entirely from sand and water. Developed facilities (parking, picnic areas, restrooms) require leashes in both zones per GGNRA policy. Trail rules not specified in source material.",
+      "source_url": "https://accessca.org/access-california/explore/explore-detail-view/?site_id=508"
+    },
+    {
+      "source": "json_explode",
+      "confidence": 0.7,
+      "is_canonical": false,
+      "allowed": "unclear",
+      "leash": "unclear",
+      "quote": "(no prose; structured claim only \u2014 allowed=unclear, leash=unclear)",
+      "source_url": null
+    }
+  ],
+  "8732": [
+    {
+      "source": "park_url",
+      "confidence": 0.9,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": null,
+      "quote": "[zones] Dogs allowed in day-use areas, campground and North Beach (north of Lifeguard Tower 3). Dogs not allowed on backcountry trails or South Beach (south of Lifeguard Tower 3).",
+      "source_url": "https://www.parks.ca.gov/?page_id=616"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Leashed dogs (maximum 6 feet) are allowed on North Beach west of lifeguard tower 3, in the campground, and in picnic areas, but prohibited on trails and the eastern portion of the beach.\n\n\n\n[zones] North Beach (west of lifeguard tower 3), campground, picnic areas, and paved roads",
+      "source_url": "https://www.rover.com/blog/top-dog-beach-leo-carrillo-state-park/"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.77,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "County Line Beach is divided at Lifeguard Tower 3. North Beach permits leashed dogs in day-use areas (sand, picnic areas, parking), campground, and developed facilities. South Beach and backcountry trails prohibit dogs entirely. Maximum leash length is 6 feet where allowed. California State Parks agency default applied to sections not explicitly mentioned (e.g., restrooms_showers in North Beach region).",
+      "source_url": "https://www.parks.ca.gov/?page_id=616"
+    }
+  ],
+  "8231": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "yes",
+      "leash": "off_leash_ok",
+      "quote": "Toro Creek Dog Beach is designated as an off-leash dog beach with plenty of space for dogs to run and swim. The beach is located between the north and south sections of Morro Strand State Beach.\n\n\n\n[zones] Dogs allowed: Toro Creek Beach/Dog Beach - the sandy beach area | Off-leash area: Dogs are permitted off-leash on the beach at Toro Creek Dog Beach",
+      "source_url": "https://www.morrobay.org/directory/toro-creek-dog-beach/"
+    },
+    {
+      "source": "park_url",
+      "confidence": 0.95,
+      "is_canonical": false,
+      "allowed": "no",
+      "leash": null,
+      "quote": "Dogs are prohibited on the beach. Dogs must be monitored and leashed within the campground.\n\n\n\n[zones] Dogs are prohibited on the beach. Dogs must be monitored and leashed within the campground.",
+      "source_url": "https://www.parks.ca.gov/?page_id=593"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.81,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "on_leash",
+      "quote": "Morro Strand State Beach is a California State Parks facility with a general prohibition on dogs on the main beach and in water. However, Toro Creek Dog Beach (located between the north and south sections of the state beach) is a designated off-leash dog area. Within the campground, dogs are permitted on-leash with monitoring. Default CDPR inference applied to parking lot, picnic area, trails, and restrooms/showers as on-leash developed-area amenities.",
+      "source_url": "https://www.parks.ca.gov/?page_id=593"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs must be leashed at all times in City of Morro Bay parks and beaches, except at the designated Toro Creek Dog Beach where off-leash play is permitted. Other nearby state beaches prohibit dogs or require leashes.\n\n\n\n[zones] Toro Creek Dog Beach (off-leash designated area)",
+      "source_url": "https://www.morrobayca.gov/393/Park-Guidelines"
+    }
+  ],
+  "8319": [
+    {
+      "source": "city_policy",
+      "confidence": 0.97,
+      "is_canonical": true,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Dogs allowed on Laguna Beach year-round on leash, but only before 9am/after 6pm June 15\u2013Sept 10; banned always at Thousand Steps Beach.\n\n[designated dog zones] dog parks (off-leash)\n\n[prohibited areas] Thousand Steps Beach",
+      "source_url": "https://www.lagunabeachcity.net/our-beaches/dogs-on-the-beach"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.83,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Victoria Beach is part of Laguna Beach city beaches. The primary rule is on-leash year-round, except during summer (June 15\u2013Sept 10) when dogs are prohibited 9am\u20136pm on sand and water areas. Outside those summer hours, dogs are allowed on-leash before 9am and after 6pm. Thousand Steps Beach prohibits dogs entirely year-round. Playgrounds are not allowed (standard municipal policy). The source also mentions a designated Dog Park offering off-leash play, but that is a separate facility, not Victoria Beach itself. Developed areas (parking, picnic, restrooms, trails) default to on-leash per city policy.",
+      "source_url": "https://www.lagunabeachcity.net/our-beaches/dogs-on-the-beach"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "seasonal",
+      "leash": "required",
+      "quote": "Dogs must be leashed at all times except in the designated Dog Park. During summer (June 15 - Sept 10), dogs are prohibited on beaches from 9am to 6pm. Thousand Steps Beach prohibits dogs year-round.\n\n\n\n[zones] Main Beach Park and most beaches (with restrictions); Laguna Beach Dog Park (off-leash only)",
+      "source_url": "https://www.lagunabeachcity.net/our-beaches/dogs-on-the-beach"
+    },
+    {
+      "source": "json_explode",
+      "confidence": 0.7,
+      "is_canonical": false,
+      "allowed": "unclear",
+      "leash": null,
+      "quote": "(no prose; structured claim only \u2014 allowed=unclear)",
+      "source_url": null
+    }
+  ],
+  "9113": [
+    {
+      "source": "park_url",
+      "confidence": 0.95,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs must be leashed in allowed areas. Dogs not allowed on beach year-round. Do not leave dogs in vehicles.\n\n\n\n[zones] Dogs not allowed on sandy beaches year-round. Dogs welcome on leash along sidewalks and in picnic table areas. Dogs also welcome east of the Kings Beach boat ramp (rocky area/Dog Beach).",
+      "source_url": "https://www.parks.ca.gov/?page_id=511"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.81,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "on_leash",
+      "quote": "Kings Beach has two distinct areas: the main beach where dogs are prohibited on sand year-round but allowed on-leash in developed areas (boardwalk, picnic areas, parking lot, restrooms); and a designated Dog Beach area east of the boat ramp (rocky/non-sandy terrain) where dogs are allowed off-leash. The source explicitly prohibits dogs from being left unattended in vehicles. California State Parks agency-class defaults applied for parking_lot, restrooms_showers, and water_swim pairing with sand where not explicitly stated.",
+      "source_url": "https://www.parks.ca.gov/?page_id=511"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.5,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "required",
+      "quote": "Dogs are allowed in Placer County public recreation areas and beaches but must be on a leash no longer than six feet at all times.",
+      "source_url": "https://ecode360.com/43586717"
+    }
+  ],
+  "8265": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "no",
+      "leash": null,
+      "quote": "Dogs are prohibited on the sand and in the water at Manhattan Beach. Dogs are permitted in certain parks and open spaces managed by Manhattan Beach Parks & Recreation.\n\n\n\n[zones] Dogs allowed: Manhattan Beach Parks & Recreation offers dog-friendly parks and open spaces (specific locations not detailed in sources) | Dogs prohibited: Beach sand and water at Manhattan Beach",
+      "source_url": "https://www.facebook.com/manhattanbchpd/posts/manhattan-beach-pd-psayes-we-mean-your-dog-too-no-dogs-on-the-beach-its-a-no-paw/1271387801808068/"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs are prohibited on Manhattan Beach sand and in the water, but a designated off-leash dog run is available at Live Oak Park. Dogs must be licensed and wear a city-issued tag at all times.\n\n\n\n[zones] Live Oak Dog Run (off-leash designated area)",
+      "source_url": "https://www.manhattanbeach.gov/visitors/parks-and-facilities"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.72,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "on_leash",
+      "quote": "Manhattan Beach prohibits dogs on the primary sand beach and in water. Dogs are allowed on leash in developed park areas and facilities. A notable exception is the Live Oak Park Dog Run, a designated off-leash area. Per source, dogs must be licensed and wear a city-issued tag at all times. Beach playgrounds and pools are not dog-friendly per standard city policy.",
+      "source_url": "https://www.facebook.com/manhattanbchpd/posts/manhattan-beach-pd-psayes-we-mean-your-dog-too-no-dogs-on-the-beach-its-a-no-paw/1271387801808068/"
+    }
+  ],
+  "8889": [
+    {
+      "source": "park_url",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs may not be left unattended and must be on a leash no longer than six feet.\n\n\n\n[zones] Dogs are allowed on the east side of the Santa Cruz Yacht Harbor.",
+      "source_url": "http://www.parks.ca.gov/default.asp?page_id=547"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "required",
+      "quote": "Dogs are allowed on-leash at Twin Lakes State Beach. The beach stretches approximately one mile along the shoreline and provides sandy space for walking leashed dogs.",
+      "source_url": "https://www.allstateparks.com/california/twin-lakes-sb"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.72,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Twin Lakes Beach is a California State Parks property. The primary source (park_url) specifies that dogs must be on-leash (no longer than 6 feet) and may not be left unattended, with explicit allowance on the east side of Santa Cruz Yacht Harbor. The second source confirms on-leash rules for the beach generally. Standard CDPR inferences applied: playground prohibited, developed areas (parking, picnic, restrooms) permit on-leash dogs. No campground, trails, boardwalk, bluff, dunes, or tide pools identified at this urban beach.",
+      "source_url": "http://www.parks.ca.gov/default.asp?page_id=547"
+    }
+  ],
+  "8715": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": "mixed",
+      "quote": "Dogs are prohibited from most of Coronado Beach but are welcome year-round at the designated Coronado Dog Beach at the north end. Dogs must be leashed until reaching the dog beach area.\n\n\n\n[zones] Dogs allowed: Dogs are permitted at Coronado Dog Beach (located at the north end of Coronado Municipal Beach, 200 Ocean Boulevard). Dogs may be off-leash in this designated dog beach area. | Dogs prohibited: Dogs are not allowed on the remainder of Coronado Beach (south of Dog Beach), including the area in front of Hotel del Coronado. | Off-leash area: Coronado Dog Beach (200 Ocean Boulevard) - dogs may be off-leash on the beach itself, but must be on-leash at all points before reaching the beach.",
+      "source_url": "https://www.coronado.ca.us/757/Dogs"
+    },
+    {
+      "source": "city_policy",
+      "confidence": 0.95,
+      "is_canonical": false,
+      "allowed": "no",
+      "leash": "on_leash",
+      "quote": "Dogs are banned from all of Coronado Beach except Dog Beach at the north end, where they are always permitted off-leash.\n\n[designated dog zones] Dog Beach (sandy area at north end of beach)\n\n[prohibited areas] any area of Coronado Beach except at Dog Beach",
+      "source_url": "https://www.coronado.ca.us/757/Dogs"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.81,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "off_leash",
+      "quote": "Coronado Beach has a clear two-zone dog policy: Coronado Dog Beach at the north end (around 200 Ocean Boulevard near Sunset Park) permits dogs off-leash on sand and in water, but requires leashing in parking and access areas. All other areas of Coronado Beach, including the area in front of Hotel del Coronado, prohibit dogs entirely. Multiple sources confirm this consistent policy.",
+      "source_url": "https://www.coronado.ca.us/757/Dogs"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs are only allowed at the designated Dog Beach (North Beach) at the north end of Coronado Beach where an off-leash area exists. Dogs are prohibited on all other areas of Coronado Beach and other city beaches.\n\n\n\n[zones] Dog Beach (North Beach at north end of Coronado Beach in front of Sunset Park)",
+      "source_url": "https://www.coronado.ca.us/244/Coronado-Beach"
+    },
+    {
+      "source": "park_url",
+      "confidence": 0.72,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": null,
+      "quote": "Dogs are allowed in the northern section of the beach where they can freely roam in the sea and sand\n\n\n\n[zones] northern section of the beach",
+      "source_url": "https://www.sandiego.com/beaches/coronado-beach"
+    }
+  ],
+  "8731": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "no",
+      "leash": "required",
+      "quote": "Dogs are prohibited on Redondo Beach itself and in city parks except for the official dog park and identified walking paths. The Redondo Beach Dog Park is an off-leash facility established in 1992 where dogs may run free, but owners must have a leash in possession at all times.\n\n\n\n[zones] Dogs allowed: Official dog park area and identified walking paths in city parks | Dogs prohibited: Redondo Beach sand/shore (beach), city parks except for designated dog park and walking paths | Off-leash area: Redondo Beach Dog Park (sectioned into two main areas with separate obstacle course)",
+      "source_url": "https://redondo.org/departments/police/services/animal_services.php"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs are prohibited from the main Redondo Beach and pier but are welcome at the dedicated Redondo Beach Dog Park located at Dominguez Park. The dog park is an off-leash facility established in 1992 with specific rules under RB Municipal Code 4-35.07.\n\n\n\n[zones] Redondo Beach Dog Park at Dominguez Park (190 Flagler Lane)",
+      "source_url": "https://rbdogpark.com/park-laws-%2F-rules"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.72,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "on_leash",
+      "quote": "Redondo Beach prohibits dogs on the main beach sand, water, and city parks, with a narrow carve-out for designated walking paths (on-leash). The primary exception is the dedicated Redondo Beach Dog Park at Dominguez Park (190 Flagler Lane), an established off-leash facility where dogs may run free, though owners must carry a leash. The dog park is described as having two sectioned areas with separate obstacle courses. Parking areas near the beach are treated as accessible with leashed dogs per municipal code.",
+      "source_url": "https://redondo.org/departments/police/services/animal_services.php"
+    }
+  ],
+  "6077": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": null,
+      "quote": "Dogs are permitted at Reedley Beach but are restricted from the sand and pond areas. Dog owners are legally responsible for their dogs and any injuries caused by them.\n\n\n\n[zones] Dogs allowed: Dogs are allowed in designated areas of Reedley Beach, but not on the sand or in the pond | Dogs prohibited: Dogs are not allowed on the sand part of the beach or in the pond",
+      "source_url": "https://www.facebook.com/reedleypd/posts/good-day-reedleythis-is-a-reminder-that-reedley-beach-and-cricket-hollow-will-be/2400684226649923/"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs are prohibited on the sand and in the pond at Reedley Beach and Cricket Hollow. Mueller Park is designated as an off-leash dog park area, and additional leash-free zones may be designated by City Council.\n\n\n\n[zones] Mueller Park (off-leash designated area)",
+      "source_url": "https://codelibrary.amlegal.com/codes/reedleyca/latest/reedley_ca/0-0-0-3798"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.72,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "on_leash",
+      "quote": "Reedley Beach is a city beach with restricted dog access. Dogs are prohibited on the sand and in the pond/water areas at the main beach. Mueller Park, a distinct off-leash designated dog park area at or near Reedley Beach, permits dogs off-leash. In other developed areas (picnic areas, parking, restrooms, trails), dogs are inferred to be allowed on-leash per typical city beach policy, though this is not explicitly stated in sources.",
+      "source_url": "https://www.facebook.com/reedleypd/posts/good-day-reedleythis-is-a-reminder-that-reedley-beach-and-cricket-hollow-will-be/2400684226649923/"
+    }
+  ],
+  "8320": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "yes",
+      "leash": "required",
+      "quote": "Dogs are allowed on Laguna Beach beaches year-round but must be leashed at all times. During summer months (June 15 - September 10), dogs are prohibited during peak hours (9 a.m. - 6 p.m.). The only off-leash option is the designated Dog Park. Time restrictions: Dogs prohibited on beaches 9 a.m. to 6 p.m. June 15 through September 10. Outside these hours, dogs must be leashed. Seasonal: Dogs prohibited June 15 through September 10 during daytime hours (9 a.m. - 6 p.m.)\n\n\n\n[zones] Dogs allowed: Laguna Beach beaches (including Ruby Street Park area) outside of restricted hours; designated dog park | Dogs prohibited: Thousand Steps Beach (year-round prohibition); all beaches during 9 a.m. to 6 p.m. June 15 - September 10 | Off-leash area: Laguna Beach Dog Park (open daily except Wednesdays, 6 a.m. until dusk)",
+      "source_url": "https://www.lagunabeachcity.net/our-beaches/dogs-on-the-beach"
+    },
+    {
+      "source": "city_policy",
+      "confidence": 0.97,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Dogs allowed on Laguna Beach year-round on leash, but only before 9am/after 6pm June 15\u2013Sept 10; banned always at Thousand Steps Beach.\n\n[designated dog zones] dog parks (off-leash)\n\n[prohibited areas] Thousand Steps Beach",
+      "source_url": "https://www.lagunabeachcity.net/our-beaches/dogs-on-the-beach"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.83,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Moss Point is covered by the City of Laguna Beach's unified beach dog policy. Dogs are allowed year-round on leash except during summer peak hours (9am\u20136pm, June 15\u2013Sept 10), when they are prohibited on sand and water areas. Thousand Steps Beach is a year-round no-dogs zone and is explicitly carved out. The source mentions a designated off-leash Dog Park elsewhere in Laguna Beach, but that facility is separate from Moss Point itself and is not extracted here. Parking lot, picnic areas, and restrooms follow the standard on-leash rule for developed areas.",
+      "source_url": "https://www.lagunabeachcity.net/our-beaches/dogs-on-the-beach"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "seasonal",
+      "leash": "required",
+      "quote": "Dogs must be leashed at all times except in the designated Dog Park. During summer (June 15 - Sept 10), dogs are prohibited on beaches from 9am to 6pm. Thousand Steps Beach prohibits dogs year-round.\n\n\n\n[zones] Main Beach Park and most beaches (with restrictions); Laguna Beach Dog Park (off-leash only)",
+      "source_url": "https://www.lagunabeachcity.net/our-beaches/dogs-on-the-beach"
+    },
+    {
+      "source": "json_explode",
+      "confidence": 0.7,
+      "is_canonical": false,
+      "allowed": "unclear",
+      "leash": null,
+      "quote": "(no prose; structured claim only \u2014 allowed=unclear)",
+      "source_url": null
+    }
+  ],
+  "9001": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs are not allowed on the park grounds or at the lighthouse itself, but leashed dogs are permitted on the adjacent beaches.\n\n\n\n[zones] Dogs allowed: Adjacent beaches (leashed) | Dogs prohibited: Park grounds and lighthouse area",
+      "source_url": "https://pigeonpointlighthouse.com/about"
+    },
+    {
+      "source": "park_url",
+      "confidence": 0.92,
+      "is_canonical": false,
+      "allowed": "no",
+      "leash": null,
+      "quote": "Dogs are not permitted on the lighthouse grounds (except for service animals). For a list of locations that you can take your dog to in Santa Cruz County, view Where Can I Take My Dog? brochure.",
+      "source_url": "https://www.parks.ca.gov/?page_id=533"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "no",
+      "leash": null,
+      "quote": "Dogs are not permitted on the grounds of Pigeon Point Light Station State Historic Park.",
+      "source_url": "https://www.californiabychoice.com/home/pigeon-point-light-station"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.78,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Pistachio Beach (Pigeon Point Light Station area) permits leashed dogs on the adjacent beaches and developed areas, but prohibits dogs on the lighthouse grounds and park core area itself, with an exception for service animals. The source text distinguishes between the lighthouse/grounds zone (prohibited) and adjacent beaches (on-leash permitted). CDPR default inferences applied to developed sections (parking, restrooms, trails) not explicitly mentioned.",
+      "source_url": "https://www.parks.ca.gov/?page_id=533"
+    }
+  ],
+  "1327": [
+    {
+      "source": "city_policy",
+      "confidence": 0.66,
+      "is_canonical": true,
+      "allowed": "no",
+      "leash": "on_leash",
+      "quote": "Dogs prohibited on most of Huntington Beach; leashed dogs (\u22646 ft) allowed only in the area north of 22nd Street to Seapoint Avenue.\n\n[designated dog zones] Water Activity Zone north of 22nd Street to Seapoint Avenue (leash \u22646 ft)\n\n[prohibited areas] the Pier or on or upon that Beach or Adjacent Beach Area bounded by the Beach Service Road and the Pacific Ocean, including the Water Activity Zone",
+      "source_url": "https://www.huntingtonbeachca.gov/departments/parks_recreation/parks_facilities/huntington_beach_park_rules.php"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs must be leashed on regular beaches and service roads. Huntington Beach has a designated off-leash Dog Beach at 100 Goldenwest St. where dogs can roam free. Dogs are prohibited on the main city beach sand except at the dedicated Dog Beach area.\n\n\n\n[zones] Dog Beach (100 Goldenwest St.) and service road; leashed dogs allowed on multi-use trail and parking lots of state beaches",
+      "source_url": "https://www.huntingtonbeachca.gov/departments/parks_recreation/beach_information/index.php"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.68,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "on_leash",
+      "quote": "Humboldt Island at Huntington Beach is primarily subject to a citywide prohibition on dogs on main beach sand and water. The sole exception is the designated Dog Beach at 100 Goldenwest St., where off-leash dogs are permitted. Source conflict noted: city_policy (conf 0.66) mentions a leashed-dog zone north of 22nd Street to Seapoint Avenue, but the higher-confidence old_school_llm source (0.80) and main city policy designate only the 100 Goldenwest location as a dog-allowed area. The 22nd\u2013Seapoint zone reference may apply to a different beach or may be outdated; extraction prioritizes the clearer Dog Beach carve-out. Service roads and multi-use trails allow leashed dogs; parking lots also permit leashed dogs.",
+      "source_url": "https://www.huntingtonbeachca.gov/departments/parks_recreation/beach_information/index.php"
+    }
+  ],
+  "8552": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": "mixed",
+      "quote": "Mission Bay Park has varied dog policies by area, with Fiesta Island offering leash-free access and other areas requiring leashes with time restrictions. Dogs are generally prohibited in Youth Campground and seasonally restricted nesting areas. Time restrictions: Dogs allowed on beaches from night hours until 9 a.m. and must be leashed during these times. Seasonal: Least Tern nesting sites are seasonally restricted (typically spring/summer breeding season).\n\n\n\n[zones] Dogs allowed: Dogs are allowed in most areas of Mission Bay Park, including Fiesta Island (leash-free). Dogs are also allowed on beaches during early morning and night hours until 9 a.m. when leashed. | Dogs prohibited: Youth Campground, Least Tern nesting sites (seasonal), and fenced areas within Mission Bay Park. Dogs restricted at most other beach and bay locations outside designated areas. | Off-leash area: Fiesta Island in Mission Bay Park allows dogs off-leash in most areas outside of fenced sections.",
+      "source_url": "https://www.sandiego.gov/park-and-recreation/parks/regional/missionbay/dfc"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "The City of San Diego designates Ocean Beach Dog Beach as a 24-hour off-leash area. At other city beaches (Pacific Beach, Mission Beach, La Jolla Shores), dogs are allowed only on leash during morning and evening hours, with seasonal time variations.\n\n\n\n[zones] Ocean Beach (Dog Beach), Fiesta Island, Pacific Beach, Mission Beach, La Jolla Shores",
+      "source_url": "https://www.sandiego.gov/park-and-recreation/parks/dogs/bchdog"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.72,
+      "is_canonical": false,
+      "allowed": "no",
+      "leash": null,
+      "quote": "No rules extracted for Riviera Beach specifically. All source text addresses Mission Bay Park (including Fiesta Island), Ocean Beach Dog Beach, Pacific Beach, Mission Beach, and La Jolla Shores\u2014none of which is Riviera Beach. Per scope discipline (heuristic 2), rules for other beaches cannot be applied to Riviera Beach. Operator is City of San Diego, but no beach-specific policy for Riviera Beach was found in the provided sources.",
+      "source_url": "https://www.sandiego.gov/park-and-recreation/parks/regional/missionbay/dfc"
+    },
+    {
+      "source": "city_policy",
+      "confidence": 0.36,
+      "is_canonical": false,
+      "allowed": "no",
+      "leash": "off_leash",
+      "quote": "Dogs are allowed off-leash at Dog Beach and Fiesta Island (4am\u201310pm); all other San Diego beach/bay areas restrict dogs.",
+      "source_url": "https://www.sandiego.gov/park-and-recreation/parks/dogs/bchdog"
+    }
+  ],
+  "8759": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs are permitted only in specific areas at Point Reyes National Seashore and must be leashed. Park rangers enforce these rules strictly. Most trails and beaches are closed to dogs, with only Kehoe Beach Trail and limited beach sections allowed year-round. Seasonal: Sections of beaches or trails may temporarily be closed to dogs due to unexpected circumstances (such as wildlife nesting)\n\n\n\n[zones] Dogs allowed: Kehoe Beach Trail and certain beach sections (including Great Beach/North Beach area from North Beach parking lot heading south); parking lots and public roads | Dogs prohibited: All other trails, beaches, and off-trail lands within Point Reyes National Seashore and the Northern District of Golden Gate National Recreation Area",
+      "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Leashed dogs are permitted only in specific areas including certain beaches, trails, and parking lots. Park rangers enforce these regulations strictly to protect wildlife and other visitors. Check current maps before visiting as beach and trail access for dogs may change seasonally.\n\n\n\n[zones] Kehoe Beach Trail, North Beach (from North Beach parking lot heading south), Limantour Beach (southeast of parking lot), Bear Valley Picnic Area, most parking lots, parts of certain trails",
+      "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.72,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Drakes Beach is within Point Reyes National Seashore, an NPS-managed area with restrictive dog policies. Dogs are allowed on-leash only in limited designated areas: Kehoe Beach Trail and the Great Beach/North Beach area south from the North Beach parking lot, plus Bear Valley Picnic Area and parking lots. All other trails, beaches, dunes, and off-trail areas are prohibited. Seasonal closures are possible due to wildlife protection. The 6-foot leash requirement applies where dogs are permitted.",
+      "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+    },
+    {
+      "source": "park_url",
+      "confidence": 0.65,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Pets must be on a 6-foot or shorter leash at all times\n\n\n\n[zones] Pets are welcome on only a few trails and beaches at Point Reyes",
+      "source_url": "http://www.nps.gov/pore/index.htm"
+    }
+  ],
+  "9156": [
+    {
+      "source": "city_policy",
+      "confidence": 0.49,
+      "is_canonical": true,
+      "allowed": "no",
+      "leash": null,
+      "quote": "Dogs are prohibited on all Malibu beaches; Leo Carrillo State Beach allows dogs on leash in some areas.\n\n[designated dog zones] designated dog park area located in Trancas Canyon Park\n\n[prohibited areas] any beach in Malibu",
+      "source_url": "https://www.malibucity.org/FAQ.aspx?QID=64"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.5,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Most City of Malibu beaches prohibit dogs entirely. Only limited areas allow leashed dogs; the city enforces strict no-dog rules on the majority of its beaches.\n\n\n\n[zones] Limited areas; dogs allowed on leash at certain beaches (e.g., one unnamed leash-friendly beach per locals)",
+      "source_url": "https://www.malibucity.org/CivicAlerts.asp?AID=1813&ARC=3886"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.43,
+      "is_canonical": false,
+      "allowed": "no",
+      "leash": null,
+      "quote": "Amarillo Beach is a City of Malibu beach. Per city policy, dogs are prohibited on all Malibu beaches including Amarillo Beach. Sources indicate strict no-dog enforcement across the city's beach portfolio. Leo Carrillo State Beach (a State Parks facility, not a Malibu city beach) is mentioned in sources as allowing leashed dogs in some areas, but that is outside the scope of this extraction. A dog park exists at Trancas Canyon Park (inland), not at the beach.",
+      "source_url": "https://www.malibucity.org/CivicAlerts.asp?AID=1813&ARC=3886"
+    }
+  ],
+  "8486": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs are permitted only in specific areas at Point Reyes National Seashore and must be leashed. Park rangers enforce these rules strictly. Most trails and beaches are closed to dogs, with only Kehoe Beach Trail and limited beach sections allowed year-round. Seasonal: Sections of beaches or trails may temporarily be closed to dogs due to unexpected circumstances (such as wildlife nesting)\n\n\n\n[zones] Dogs allowed: Kehoe Beach Trail and certain beach sections (including Great Beach/North Beach area from North Beach parking lot heading south); parking lots and public roads | Dogs prohibited: All other trails, beaches, and off-trail lands within Point Reyes National Seashore and the Northern District of Golden Gate National Recreation Area",
+      "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Leashed dogs are permitted only in specific areas including certain beaches, trails, and parking lots. Park rangers enforce these regulations strictly to protect wildlife and other visitors. Check current maps before visiting as beach and trail access for dogs may change seasonally.\n\n\n\n[zones] Kehoe Beach Trail, North Beach (from North Beach parking lot heading south), Limantour Beach (southeast of parking lot), Bear Valley Picnic Area, most parking lots, parts of certain trails",
+      "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.72,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Limantour Beach is located within Point Reyes National Seashore. Dogs are permitted on-leash in a limited section of the beach (southeast of the parking lot) based on NPS carve-out policy. The southeast section is the specific dog-allowed beach area at Limantour. All other areas of the beach, dunes, trails, and facilities are dog-prohibited per standard NPS wildlife protection policy. Dogs must be on a leash of 6 feet or shorter when in allowed areas. Seasonal closures may occur due to wildlife nesting or other circumstances; visitors should check current conditions before visiting.",
+      "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+    },
+    {
+      "source": "park_url",
+      "confidence": 0.65,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Pets must be on a 6-foot or shorter leash at all times\n\n\n\n[zones] Pets are welcome on only a few trails and beaches at Point Reyes",
+      "source_url": "http://www.nps.gov/pore/index.htm"
+    }
+  ],
+  "8865": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs are permitted only in specific areas at Point Reyes National Seashore and must be leashed. Park rangers enforce these rules strictly. Most trails and beaches are closed to dogs, with only Kehoe Beach Trail and limited beach sections allowed year-round. Seasonal: Sections of beaches or trails may temporarily be closed to dogs due to unexpected circumstances (such as wildlife nesting)\n\n\n\n[zones] Dogs allowed: Kehoe Beach Trail and certain beach sections (including Great Beach/North Beach area from North Beach parking lot heading south); parking lots and public roads | Dogs prohibited: All other trails, beaches, and off-trail lands within Point Reyes National Seashore and the Northern District of Golden Gate National Recreation Area",
+      "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Leashed dogs are permitted only in specific areas including certain beaches, trails, and parking lots. Park rangers enforce these regulations strictly to protect wildlife and other visitors. Check current maps before visiting as beach and trail access for dogs may change seasonally.\n\n\n\n[zones] Kehoe Beach Trail, North Beach (from North Beach parking lot heading south), Limantour Beach (southeast of parking lot), Bear Valley Picnic Area, most parking lots, parts of certain trails",
+      "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.72,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Limantour Beach is within Point Reyes National Seashore, an NPS-managed area. The source text explicitly identifies Limantour Beach (southeast of parking lot) as one of the specific beach sections where leashed dogs are allowed year-round. Most other park areas prohibit dogs entirely. All allowed areas require dogs to be on a leash of 6 feet or shorter. Seasonal closures may occur for wildlife protection.",
+      "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+    },
+    {
+      "source": "json_explode",
+      "confidence": 0.7,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "required",
+      "quote": "(no prose; structured claim only \u2014 allowed=yes, leash=required)",
+      "source_url": null
+    },
+    {
+      "source": "park_url",
+      "confidence": 0.65,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Pets must be on a 6-foot or shorter leash at all times\n\n\n\n[zones] Pets are welcome on only a few trails and beaches at Point Reyes",
+      "source_url": "http://www.nps.gov/pore/index.htm"
+    }
+  ],
+  "6070": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs are permitted only in specific areas at Point Reyes National Seashore and must be leashed. Park rangers enforce these rules strictly. Most trails and beaches are closed to dogs, with only Kehoe Beach Trail and limited beach sections allowed year-round. Seasonal: Sections of beaches or trails may temporarily be closed to dogs due to unexpected circumstances (such as wildlife nesting)\n\n\n\n[zones] Dogs allowed: Kehoe Beach Trail and certain beach sections (including Great Beach/North Beach area from North Beach parking lot heading south); parking lots and public roads | Dogs prohibited: All other trails, beaches, and off-trail lands within Point Reyes National Seashore and the Northern District of Golden Gate National Recreation Area",
+      "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+    },
+    {
+      "source": "old_school_llm",
+      "confidence": 0.8,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Leashed dogs are permitted only in specific areas including certain beaches, trails, and parking lots. Park rangers enforce these regulations strictly to protect wildlife and other visitors. Check current maps before visiting as beach and trail access for dogs may change seasonally.\n\n\n\n[zones] Kehoe Beach Trail, North Beach (from North Beach parking lot heading south), Limantour Beach (southeast of parking lot), Bear Valley Picnic Area, most parking lots, parts of certain trails",
+      "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.72,
+      "is_canonical": false,
+      "allowed": "yes",
+      "leash": "on_leash",
+      "quote": "Limantour Beach allows leashed dogs only in the southeast section near the parking lot. This is a designated dog-friendly area at Point Reyes National Seashore where leashes (6 feet or shorter) are required. Seasonal closures may occur due to wildlife nesting or other circumstances; visitors should check current park maps before visiting. All other trails and beach sections at the seashore are closed to dogs. The parking lot and picnic areas also permit leashed dogs. NPS default prohibition applied to sections without specific mention of dog access at this beach.",
+      "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+    },
+    {
+      "source": "park_url",
+      "confidence": 0.65,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Pets must be on a 6-foot or shorter leash at all times\n\n\n\n[zones] Pets are welcome on only a few trails and beaches at Point Reyes",
+      "source_url": "http://www.nps.gov/pore/index.htm"
+    }
+  ],
+  "684": [
+    {
+      "source": "research",
+      "confidence": 0.85,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Dogs are permitted only in specific areas at Point Reyes National Seashore and must be leashed. Park rangers enforce these rules strictly. Most trails and beaches are closed to dogs, with only Kehoe Beach Trail and limited beach sections allowed year-round. Seasonal: Sections of beaches or trails may temporarily be closed to dogs due to unexpected circumstances (such as wildlife nesting)\n\n\n\n[zones] Dogs allowed: Kehoe Beach Trail and certain beach sections (including Great Beach/North Beach area from North Beach parking lot heading south); parking lots and public roads | Dogs prohibited: All other trails, beaches, and off-trail lands within Point Reyes National Seashore and the Northern District of Golden Gate National Recreation Area",
+      "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.72,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "on_leash",
+      "quote": "Avalis Beach is located within Point Reyes National Seashore (NPS management). NPS policy is generally prohibitive for dogs except in explicitly named carve-outs. The source text identifies two allowed zones where dogs must be on-leash: Kehoe Beach Trail and the Great Beach/North Beach area from North Beach parking lot heading south. All other trails, beaches, dunes, and off-trail lands are closed to dogs. Parking lots and public roads allow on-leash dogs. Seasonal closures may occur due to wildlife nesting or other circumstances. The 6-foot leash requirement is stated in park guidance.",
+      "source_url": "https://www.nps.gov/pore/planyourvisit/pets.htm"
+    },
+    {
+      "source": "park_url",
+      "confidence": 0.65,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Pets must be on a 6-foot or shorter leash at all times\n\n\n\n[zones] Pets are welcome on only a few trails and beaches at Point Reyes",
+      "source_url": "http://www.nps.gov/pore/index.htm"
+    }
+  ],
+  "6336": [
+    {
+      "source": "park_url",
+      "confidence": 0.35,
+      "is_canonical": true,
+      "allowed": "restricted",
+      "leash": "required",
+      "quote": "Leashed pets can join you at Redwood\u2014in designated places only.\n\n\n\n[zones] designated places only",
+      "source_url": "http://www.nps.gov/redw/index.htm"
+    },
+    {
+      "source": "text_repass_v1",
+      "confidence": 0.3,
+      "is_canonical": false,
+      "allowed": "restricted",
+      "leash": "on_leash",
+      "quote": "High Bluff Beach is within Redwood National and State Parks (NPS operator). The source states leashed pets allowed in 'designated places only'\u2014identified as trails and developed areas. NPS default policy prohibits dogs from sand beaches, water, bluffs, dunes, and sensitive tide pool zones. On-leash access inferred for developed facilities (parking, picnic areas, restrooms, boardwalk) per NPS carve-out practice. Source confidence is low (0.35); actual designated zones should be verified with the park directly.",
+      "source_url": "http://www.nps.gov/redw/index.htm"
+    }
   ]
 };
 
@@ -1304,22 +4295,31 @@ const EVIDENCE = {
 // Section vocab + icons + status colors
 // ============================================================================
 const SECTION_VOCAB = [
-  'sand', 'water_swim', 'trails', 'boardwalk', 'bluff', 'dunes',
-  'picnic_area', 'parking_lot', 'campground', 'playground',
-  'restrooms_showers', 'tide_pools'
+  // 10 active dog-policy sections. Retired EOD 2026-05-04:
+  //   water_swim       — duplicative of sand; reserved for water-quality overlay
+  //   restrooms_showers — dogs don't enter restrooms; presence is a flat amenity check
+  //   parking_lot      — rule universally on_leash (86% of production data); presence is a flat amenity check
+  // Added 2026-05-05:
+  //   nesting_zones    — snowy plover, least tern, etc. Seasonal closures.
+  // Legacy text_repass_v1 rows still render via SECTION_ICON/SECTION_LABEL,
+  // but the "+ add section" dropdown no longer offers retired sections.
+  'sand', 'trails', 'boardwalk', 'bluff', 'dunes',
+  'picnic_area', 'campground', 'playground',
+  'tide_pools', 'nesting_zones'
 ];
 const SECTION_ICON = {
   sand: '🏖', water_swim: '🌊', trails: '🥾', boardwalk: '🛹',
   bluff: '⛰', dunes: '🏵', picnic_area: '🧺', parking_lot: '🅿',
   campground: '⛺', playground: '🛝', restrooms_showers: '🚿',
-  tide_pools: '🪨'
+  tide_pools: '🪨', nesting_zones: '🪺'
 };
 const SECTION_LABEL = {
   sand: 'sand', water_swim: 'water/swim', trails: 'trails',
   boardwalk: 'boardwalk', bluff: 'bluff', dunes: 'dunes',
   picnic_area: 'picnic area', parking_lot: 'parking lot',
   campground: 'campground', playground: 'playground',
-  restrooms_showers: 'restrooms', tide_pools: 'tide pools'
+  restrooms_showers: 'restrooms', tide_pools: 'tide pools',
+  nesting_zones: 'nesting zones'
 };
 const RULE_CYCLE = ['off_leash', 'on_leash', 'not_allowed', 'unknown'];
 
@@ -1330,28 +4330,146 @@ let currentFid = null;
 let currentVariant = 'A_conservative';
 let currentDoc = null;  // mutable working copy of the zone_rules jsonb
 let selectedSection = null;  // {regionIdx, section} — for [pin to] target
+let currentMode = 'fixture';  // 'fixture' | 'production'
+let currentBeachName = null;  // populated in production mode
+
+// ============================================================================
+// Production wire-up — auth + REST + admin POST
+// ============================================================================
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+const ADMIN_SECRET_KEY = 'db_admin_secret';
+function promptForAdminSecret(reason) {
+  const msg = reason ? `${reason}\n\nAdmin secret:` : 'Admin secret:';
+  while (true) {
+    const s = (prompt(msg) || '').trim();
+    if (s) { localStorage.setItem(ADMIN_SECRET_KEY, s); return s; }
+  }
+}
+function getAdminSecret() {
+  return localStorage.getItem(ADMIN_SECRET_KEY) || promptForAdminSecret();
+}
+function clearAdminSecret() { localStorage.removeItem(ADMIN_SECRET_KEY); }
+
+async function restGet(path) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
+  });
+  if (!r.ok) throw new Error(`REST ${r.status}: ${await r.text()}`);
+  return r.json();
+}
+
+async function edgeFn(fn, body) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const secret = getAdminSecret();
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/${fn}`, {
+      method: 'POST',
+      headers: {
+        Authorization:    `Bearer ${ANON_KEY}`,
+        'Content-Type':   'application/json',
+        'x-admin-secret': secret,
+      },
+      body: JSON.stringify(body),
+    });
+    if (r.status === 401) {
+      clearAdminSecret();
+      if (attempt === 0) {
+        promptForAdminSecret('Admin secret rejected — try again:');
+        continue;
+      }
+      return { error: 'Unauthorized' };
+    }
+    if (r.status === 429) return { error: 'Admin rate limit exceeded.' };
+    return r.json();
+  }
+  return { error: 'Unauthorized' };
+}
+
+function setMode(mode) {
+  currentMode = mode;
+  const pill = document.getElementById('mode-pill');
+  const variantSection = document.getElementById('variant-section');
+  const saveBtn = document.getElementById('save-btn');
+  if (mode === 'production') {
+    pill.textContent = currentBeachName ? `production · ${currentBeachName}` : 'production';
+    pill.style.background = '#dcfce7';
+    pill.style.color = 'var(--green)';
+    variantSection.style.display = 'none';
+    saveBtn.textContent = 'Save to production';
+  } else {
+    pill.textContent = 'fixture';
+    pill.style.background = 'var(--gray-bg)';
+    pill.style.color = 'var(--text-muted)';
+    variantSection.style.display = '';
+    saveBtn.textContent = 'Save (fixture, localStorage)';
+  }
+}
+
+async function loadBeachFromProduction(fid) {
+  fid = parseInt(fid);
+  if (!Number.isInteger(fid)) { alert('Invalid fid'); return; }
+  let beachRow, policyRow;
+  try {
+    const beachRows = await restGet(`beaches_gold?fid=eq.${fid}&select=fid,name,county_name`);
+    if (!beachRows.length) { alert(`No beach with fid=${fid}`); return; }
+    beachRow = beachRows[0];
+    const policyRows = await restGet(`beach_dog_policy?arena_group_id=eq.${fid}&select=zone_rules,dogs_allowed`);
+    policyRow = policyRows[0] || {};
+  } catch (e) {
+    alert(`Failed to load fid=${fid}: ${e.message}`); return;
+  }
+  currentFid = fid;
+  currentBeachName = `${beachRow.name} (${beachRow.county_name})`;
+  // If zone_rules is null OR has no regions, seed with an empty single-region scaffold
+  const zr = policyRow.zone_rules;
+  if (zr && (zr.regions || zr.seasons)) {
+    // Normalize seasons-shape to flat regions-shape for the editor (the editor only renders regions[]).
+    if (zr.seasons && Array.isArray(zr.seasons) && zr.seasons.length > 0) {
+      currentDoc = {
+        regions: zr.seasons[0].regions || [],
+        global_notes: zr.global_notes || '',
+        _seasons_metadata: zr.seasons,  // preserve for round-trip
+      };
+    } else {
+      currentDoc = JSON.parse(JSON.stringify(zr));
+      if (!currentDoc.regions) currentDoc.regions = [{ name: null, sections: {} }];
+      if (!('global_notes' in currentDoc)) currentDoc.global_notes = '';
+    }
+  } else {
+    currentDoc = { regions: [{ name: null, sections: {} }], global_notes: '' };
+  }
+  selectedSection = null;
+  setMode('production');
+  renderAll();
+}
 
 // ============================================================================
 // Bootstrap
 // ============================================================================
 function init() {
   const picker = document.getElementById('beach-picker');
+
+  // Two optgroups: hand-curated anchors first, production samples second
+  const anchors_group = document.createElement('optgroup');
+  anchors_group.label = 'Hand-curated anchors (gold set)';
+  const prod_group = document.createElement('optgroup');
+  prod_group.label = 'Production samples (text_repass_v1, section-heavy)';
+
   FIXTURE.anchors.forEach(a => {
     const opt = document.createElement('option');
     opt.value = a.fid;
     opt.textContent = `fid=${a.fid} · ${a.name}`;
-    picker.appendChild(opt);
+    if (a.is_production_sample) {
+      prod_group.appendChild(opt);
+    } else {
+      anchors_group.appendChild(opt);
+    }
   });
-  picker.addEventListener('change', () => loadBeach(parseInt(picker.value)));
+  picker.appendChild(anchors_group);
+  if (prod_group.children.length > 0) picker.appendChild(prod_group);
 
-  document.querySelectorAll('.variant-toggle button.variant').forEach(b => {
-    b.addEventListener('click', () => {
-      document.querySelectorAll('.variant-toggle button.variant').forEach(x => x.classList.remove('active'));
-      b.classList.add('active');
-      currentVariant = b.dataset.variant;
-      loadBeach(currentFid);
-    });
-  });
+  picker.addEventListener('change', () => loadBeach(parseInt(picker.value)));
 
   document.getElementById('add-region').addEventListener('click', addRegion);
   document.getElementById('save-btn').addEventListener('click', save);
@@ -1360,16 +4478,54 @@ function init() {
     renderJson();
   });
 
+  // Production fid loader
+  const prodInput = document.getElementById('prod-fid-input');
+  document.getElementById('load-prod-btn').addEventListener('click',
+    () => loadBeachFromProduction(prodInput.value));
+  prodInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') loadBeachFromProduction(prodInput.value);
+  });
+
+  setMode('fixture');
   loadBeach(FIXTURE.anchors[0].fid);
+}
+
+function rebuildVariantButtons(anchor) {
+  // Render one button per variant on the loaded anchor; pick the active one
+  // (preserve previous if available, else first variant).
+  const root = document.getElementById('variant-buttons');
+  root.innerHTML = '';
+  const variants = Object.keys(anchor.variants);
+  if (!variants.includes(currentVariant)) {
+    currentVariant = variants[0];
+  }
+  const labels = {
+    A_conservative: 'A conservative',
+    B_rich: 'B rich',
+    text_repass_v1: 'production',
+  };
+  variants.forEach(v => {
+    const b = document.createElement('button');
+    b.className = 'variant' + (v === currentVariant ? ' active' : '');
+    b.dataset.variant = v;
+    b.textContent = labels[v] || v;
+    b.addEventListener('click', () => {
+      currentVariant = v;
+      loadBeach(currentFid);
+    });
+    root.appendChild(b);
+  });
 }
 
 function loadBeach(fid) {
   currentFid = fid;
   const anchor = FIXTURE.anchors.find(a => a.fid === fid);
   document.getElementById('beach-picker').value = fid;
+  rebuildVariantButtons(anchor);
   // deep clone the variant doc so edits don't mutate the fixture
   currentDoc = JSON.parse(JSON.stringify(anchor.variants[currentVariant]));
   selectedSection = null;
+  setMode('fixture');
   renderAll();
 }
 
@@ -1705,10 +4861,48 @@ function addRegion() {
   renderAll();
 }
 
-function save() {
-  const key = `zone_rules_draft__${currentFid}`;
-  localStorage.setItem(key, JSON.stringify(currentDoc));
-  alert(`Saved to localStorage as "${key}".\n\nIn production this would POST to admin-update-beach-dog-policy with the zone_rules jsonb.`);
+async function save() {
+  if (currentMode === 'fixture') {
+    const key = `zone_rules_draft__${currentFid}__${currentVariant}`;
+    localStorage.setItem(key, JSON.stringify(currentDoc));
+    alert(`Saved fixture draft to localStorage as "${key}".`);
+    return;
+  }
+
+  // Production save: POST to admin-update-beach-dog-policy.
+  // Round-trip preservation: if the loaded doc had a `_seasons_metadata`
+  // we honor the shape by writing back as { seasons: [{ ... regions: [...] }] }
+  // so multi-season beaches don't lose their non-edited seasons.
+  let payload;
+  if (currentDoc._seasons_metadata && Array.isArray(currentDoc._seasons_metadata)) {
+    const seasons = currentDoc._seasons_metadata.map((s, i) =>
+      i === 0 ? { ...s, regions: currentDoc.regions } : s);
+    payload = { seasons, global_notes: currentDoc.global_notes || '' };
+  } else {
+    const { _seasons_metadata, ...rest } = currentDoc;
+    payload = rest;
+  }
+
+  const btn = document.getElementById('save-btn');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    const result = await edgeFn('admin-update-beach-dog-policy', {
+      fid: currentFid,
+      fields: { zone_rules: payload },
+    });
+    if (result.error) {
+      alert(`Save failed: ${result.error}${result.rejected?.length ? '\nRejected: ' + result.rejected.join(', ') : ''}`);
+    } else {
+      btn.textContent = 'Saved ✓';
+      setTimeout(() => { btn.textContent = 'Save to production'; }, 2000);
+    }
+  } catch (e) {
+    alert(`Network error: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    if (btn.textContent === 'Saving…') btn.textContent = 'Save to production';
+  }
 }
 
 init();

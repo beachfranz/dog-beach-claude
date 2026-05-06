@@ -186,6 +186,15 @@ Deno.serve(async (req: Request) => {
       display_name:   g.display_name_override ?? g.name,
     }));
 
+    // Fire-and-forget page-view log. Feeds the long-tail tier in the
+    // daily-refresh strategy: recently-viewed beaches get full nightly
+    // refresh, never-viewed ones get on-demand.
+    const clientId = req.headers.get("x-client-id");
+    supabase.from("beach_views").insert({
+      arena_group_id: fid, source: "index",
+      client_id: clientId,
+    }).then(() => {}).catch(() => {});
+
     return json({ beach, days: daysWithScore, allBeaches: allBeaches ?? [] });
 
   } catch (err) {

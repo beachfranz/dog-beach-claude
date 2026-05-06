@@ -154,14 +154,23 @@ Deno.serve(async (req: Request) => {
   if (authFail) return authFail;
 
   let targetLocationIds: string[] | null = null;
+  let tideWindowDays = 7;       // default: refresh fetches up to 7 days
+  let forceTideRefresh = false; // default: skip NOAA when buffer is fresh
   try {
     const body = await req.json().catch(() => ({}));
     if (Array.isArray(body?.location_ids) && body.location_ids.length > 0) {
       targetLocationIds = body.location_ids;
     }
-  } catch { /* no body — refresh all */ }
+    if (typeof body?.tide_window_days === "number" && body.tide_window_days >= 7) {
+      tideWindowDays = Math.min(body.tide_window_days, 30);
+    }
+    if (body?.force_tide_refresh === true) forceTideRefresh = true;
+  } catch { /* no body — refresh all with defaults */ }
 
-  console.log("Request received — targetLocationIds:", targetLocationIds);
+  console.log("Request received —",
+    "targetLocationIds:", targetLocationIds,
+    "tideWindowDays:",   tideWindowDays,
+    "forceTideRefresh:", forceTideRefresh);
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
   const runAt    = new Date();
@@ -265,7 +274,10 @@ Deno.serve(async (req: Request) => {
 
     // 3. Process each beach sequentially
     for (const beach of beaches as Beach[]) {
-      const result = await processBeach(beach, config, supabase, runAt);
+      const result = await processBeach(
+        beach, config, supabase, runAt,
+        { tideWindowDays, forceTideRefresh },
+      );
       results.push(result);
     }
 
@@ -290,11 +302,17 @@ interface RefreshResult {
   phases?: Record<string, "ok" | "error" | "skipped">;
 }
 
+interface RefreshOpts {
+  tideWindowDays: number;
+  forceTideRefresh: boolean;
+}
+
 async function processBeach(
   beach: Beach,
   config: ScoringConfig,
   supabase: ReturnType<typeof createClient>,
   runAt: Date,
+  opts: RefreshOpts = { tideWindowDays: 7, forceTideRefresh: false },
 ): Promise<RefreshResult> {
   const phases: Record<string, "ok" | "error" | "skipped"> = {};
   console.log(`[${beach.location_id}] Starting refresh`);
@@ -311,12 +329,27 @@ async function processBeach(
     return { locationId: beach.location_id, ok: false, error: String(err), phases };
   }
 
-  // b. Tides
+  // b. Tides — try cache first (rolling 7-day buffer), fetch only on miss.
+  // Weekly cron passes forceTideRefresh + tideWindowDays=14 to refill the
+  // buffer; daily cron uses defaults (no force, 7-day window) which means
+  // we skip NOAA whenever stored rows cover the next 7 days at <=7d age.
   let tideMap: Map<string, number>;
+  let tideFromCache = false;
   try {
-    tideMap = await fetchTides(beach, runAt);
-    phases.noaa = "ok";
-    console.log(`[${beach.location_id}] Tides OK — ${tideMap.size} hours`);
+    if (!opts.forceTideRefresh) {
+      const cached = await tryReadTideCache(supabase, beach, runAt);
+      if (cached) {
+        tideMap = cached;
+        tideFromCache = true;
+        phases.noaa = "skipped";
+        console.log(`[${beach.location_id}] Tides cached — ${tideMap.size} hours (skipping NOAA)`);
+      }
+    }
+    if (!tideFromCache) {
+      tideMap = await fetchTides(beach, runAt, opts.tideWindowDays);
+      phases.noaa = "ok";
+      console.log(`[${beach.location_id}] Tides fetched — ${tideMap.size} hours (${opts.tideWindowDays}d window)`);
+    }
   } catch (err) {
     await logError(supabase, beach.location_id, "noaa", err);
     phases.noaa = "error";
@@ -369,11 +402,13 @@ async function processBeach(
   const windows = selectBestWindows(scoredHours, config);
   applyBestWindowFlags(scoredHours, windows);
 
-  // g. Upsert hourly rows
+  // g. Upsert hourly rows.
+  // tideFromCache=true means we used cached tides; don't bump tide_refreshed_at
+  // on these rows (preserves the original fetch timestamp).
   const dates = [...new Set(scoredHours.map((h) => h.localDate))].sort();
   try {
     const hourlyRows = scoredHours.map((h) =>
-      buildHourlyRow(h, beach, config, h.hourText, runAt)
+      buildHourlyRow(h, beach, config, h.hourText, runAt, tideFromCache)
     );
     for (let i = 0; i < hourlyRows.length; i += 100) {
       const { error } = await supabase
@@ -526,6 +561,7 @@ function buildHourlyRow(
   config: ScoringConfig,
   hourText: string,
   runAt: Date,
+  tideFromCache: boolean = false,
 ) {
   return {
     location_id:           beach.location_id,
@@ -535,6 +571,11 @@ function buildHourlyRow(
     local_hour:            h.localHour,
     hour_label:            h.hourLabel,
     is_daylight:           h.isDaylight,
+    // Freshness markers — only bump tide_refreshed_at when we actually
+    // hit NOAA. weather_refreshed_at always bumps for now (Step 3 will
+    // add per-day tier logic).
+    ...(tideFromCache ? {} : { tide_refreshed_at: runAt.toISOString() }),
+    weather_refreshed_at:  runAt.toISOString(),
     is_candidate_window:   h.isCandidateWindow,
     is_in_best_window:     h.isInBestWindow,
     weather_code:          h.weatherCode,
@@ -770,6 +811,55 @@ function nonNull<T>(val: T | null | undefined): val is T {
 
 function round1(val: number | null | undefined): number | null {
   return val != null ? Math.round(val * 10) / 10 : null;
+}
+
+// Read tide values from beach_day_hourly_scores when fresh enough that
+// we don't need a NOAA fetch. Returns Map<"YYYY-MM-DD HH", height_ft>
+// matching what fetchTides returns, or null if the cache misses.
+//
+// Cache hit requires:
+//   * All 7 forecast days (today + next 6) present in the table
+//   * Every row's tide_refreshed_at is within the last 7 days
+//   * Every row has a non-null tide_height
+async function tryReadTideCache(
+  supabase: ReturnType<typeof createClient>,
+  beach: Beach,
+  runAt: Date,
+): Promise<Map<string, number> | null> {
+  const startDate = runAt.toISOString().slice(0, 10);
+  const endDate   = new Date(runAt);
+  endDate.setUTCDate(endDate.getUTCDate() + 6);
+  const endDateStr = endDate.toISOString().slice(0, 10);
+  const cutoff = new Date(runAt);
+  cutoff.setUTCDate(cutoff.getUTCDate() - 7);
+
+  const { data, error } = await supabase
+    .from("beach_day_hourly_scores")
+    .select("local_date, local_hour, tide_height, tide_refreshed_at")
+    .eq("arena_group_id", beach.arena_group_id)
+    .gte("local_date", startDate)
+    .lte("local_date", endDateStr);
+  if (error || !data || data.length === 0) return null;
+
+  // Need at least one row per day for all 7 days in the window.
+  const daysCovered = new Set<string>();
+  for (const r of data) daysCovered.add(r.local_date);
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(runAt);
+    d.setUTCDate(d.getUTCDate() + i);
+    if (!daysCovered.has(d.toISOString().slice(0, 10))) return null;
+  }
+
+  // Every row must be fresh + have tide data.
+  const tideMap = new Map<string, number>();
+  for (const r of data) {
+    if (r.tide_height == null) return null;
+    if (!r.tide_refreshed_at) return null;
+    if (new Date(r.tide_refreshed_at) < cutoff) return null;
+    const hourKey = `${r.local_date} ${String(r.local_hour).padStart(2, "0")}`;
+    tideMap.set(hourKey, Number(r.tide_height));
+  }
+  return tideMap;
 }
 
 function mostCommon<T>(arr: T[]): T | null {

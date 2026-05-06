@@ -498,6 +498,16 @@
   const SUPABASE_URL  = 'https://ehlzbwtrsxaaukurekau.supabase.co';
   const ANON_KEY      = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
 
+  // Stable anonymous client id for view tracking — see index.html.
+  function getClientId() {
+    let id = localStorage.getItem('dbs_client_id');
+    if (!id) {
+      id = (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      localStorage.setItem('dbs_client_id', id);
+    }
+    return id;
+  }
+
   // ── WMO weather code helpers ──────────────────────────────────────
   const SEVERE_WMO  = new Set([63,64,65,66,67,71,72,73,74,75,76,77,82,95,96,97,98,99]);
   const CAUTION_WMO = new Set([45,48,51,53,55,56,57,61,80,81]);
@@ -558,7 +568,11 @@
         : `location_id=${locationId}&date=${date}`;
       const res = await fetch(
         `${SUPABASE_URL}/functions/v1/get-beach-detail?${qs}`,
-        { headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' } }
+        { headers: {
+            'Authorization': `Bearer ${ANON_KEY}`,
+            'Content-Type': 'application/json',
+            'x-client-id':  getClientId(),
+        } }
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();

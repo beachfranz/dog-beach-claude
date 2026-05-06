@@ -25,8 +25,9 @@ import { logAdminWrite } from "../_shared/admin-audit.ts";
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-// 8 editable dog-policy fields. Excludes pk (arena_group_id), pipeline-
-// managed (source, curated_at — set by this endpoint).
+// Editable dog-policy fields. Excludes pk (arena_group_id), pipeline-
+// managed (source, curated_at — set by this endpoint), and the
+// zone_rules_updated_at timestamp (server-set when zone_rules changes).
 const EDITABLE_FIELDS = new Set<string>([
   "dogs_allowed",
   "leash_policy",
@@ -36,6 +37,7 @@ const EDITABLE_FIELDS = new Set<string>([
   "dogs_allowed_areas",
   "access_rule",
   "notes",
+  "zone_rules",   // jsonb — section-aware policy from the zone-rules-editor UI
 ]);
 
 Deno.serve(async (req: Request) => {
@@ -80,12 +82,15 @@ Deno.serve(async (req: Request) => {
 
   // UPSERT shape: include arena_group_id + source + curated_at on every write.
   // Manual edits override auto-promoted entries by stamping source='manual_curator'.
-  const upsertRow = {
+  // Bump zone_rules_updated_at when zone_rules is part of this write.
+  const now = new Date().toISOString();
+  const upsertRow: Record<string, unknown> = {
     arena_group_id: fid,
     ...safe,
     source: "manual_curator",
-    curated_at: new Date().toISOString(),
+    curated_at: now,
   };
+  if ("zone_rules" in safe) upsertRow.zone_rules_updated_at = now;
 
   const { data: afterRow, error } = await supabase
     .from("beach_dog_policy")

@@ -20,6 +20,7 @@ export interface NOAATideHour {
 export async function fetchTides(
   beach: Beach,
   startDate: Date,
+  windowDays: number = 7,
 ): Promise<Map<string, number>> {
   if (!beach.noaa_station_id) {
     throw new Error(
@@ -27,9 +28,11 @@ export async function fetchTides(
     );
   }
 
-  // NOAA requires YYYYMMDD format.
+  // NOAA requires YYYYMMDD format. Window is `windowDays` long (default 7).
+  // Weekly cron uses 14 to fetch ahead of the rolling window so daily
+  // refreshes can skip NOAA for ~6 days.
   const beginDate = formatNoaaDate(startDate);
-  const endDate   = formatNoaaDate(addDays(startDate, 6));
+  const endDate   = formatNoaaDate(addDays(startDate, windowDays - 1));
 
   const params = new URLSearchParams({
     station:    beach.noaa_station_id,

@@ -1,20 +1,18 @@
 """load_dog_policy_zones.py — populate public.dog_policy_zones from external sources.
 
-Two loaders today:
+Loaders:
 
-  --pore  : NPS Point Reyes pet-allowed carve-outs (Kehoe Beach / Great Beach /
-            Limantour SE-of-parking / Bear Valley Picnic). Hand-curated polygons
-            from the NPS pets.htm narrative, refinable later when better GIS
-            data lands. Addresses the Avalis-style scope-discipline question
-            directly.
+  --pore  : NPS Point Reyes pet-allowed carve-outs (hand-curated)
+  --wsp   : USFWS Western Snowy Plover critical habitat (Living Atlas REST)
+  --lt    : CDFW California least tern monitoring sites (CA Open Data REST)
+  --all   : everything above
 
-  --wsp   : USFWS Western Snowy Plover critical habitat. Pacific coast
-            populations only. Federal designation, downloads the master
-            critical-habitat shapefile from USFWS Critical Habitat Portal.
+The original --wsp loader pulled a zip from ecos.fws.gov; that URL went
+404 in 2026-05 when USFWS reorganized into FWS Open Data. Replaced with
+the Living Atlas FeatureServer query API — same pattern as
+scripts/load_pad_us_state.py.
 
-  --all   : both.
-
-Idempotent — DELETEs by source_agency before INSERT.
+Idempotent — DELETEs by source_agency + species before INSERT.
 """
 from __future__ import annotations
 import argparse
@@ -169,115 +167,71 @@ def load_pore(conn) -> int:
 
 
 # ============================================================================
-# USFWS Western Snowy Plover critical habitat
+# Generic ArcGIS REST FeatureServer query helper
 # ============================================================================
 #
-# USFWS publishes the master Critical Habitat archive at:
-#   https://ecos.fws.gov/docs/crithab/CRITHAB.zip
-# Format: zipped shapefile (CRITHAB_POLY.shp + .dbf + .shx + .prj)
-# Filter: SCI_NAME = 'Charadrius nivosus nivosus' (Western Snowy Plover)
-# OR     CMNNAME like 'Western Snowy Plover%'
-#
-# This is a large zip (~50 MB). We download to tmp/, extract, then load.
+# Used by both --wsp (USFWS Critical Habitat) and --lt (CDFW Least Tern).
+# Replaces the dead `ecos.fws.gov/docs/crithab/CRITHAB.zip` download path.
 
-USFWS_CRITHAB_URL = "https://ecos.fws.gov/docs/crithab/CRITHAB.zip"
+import ssl as _ssl
+
+_SSL_CTX = _ssl.create_default_context()
 
 
-def download_crithab_zip() -> Path:
-    """Download the USFWS Critical Habitat zip to tmp/.
+def fetch_rest_features(endpoint: str, where: str, page_size: int = 1000) -> list[dict]:
+    """Page through an ArcGIS REST FeatureServer query, return all GeoJSON features.
 
-    Uses an unverified SSL context — Windows Python ships without system
-    root certs and ecos.fws.gov is a known public source, so cert
-    verification adds no real security here. If you'd rather verify, set
-    PYTHONHTTPSVERIFY=1 + install certifi.
+    endpoint: base URL of the layer (no trailing /query).
+    where: SQL-style WHERE clause; pass '1=1' for all rows.
     """
-    import ssl
-    target = ROOT / "tmp" / "CRITHAB.zip"
-    target.parent.mkdir(exist_ok=True)
-    if target.exists() and target.stat().st_size > 1_000_000:
-        print(f"  using cached {target} ({target.stat().st_size:,} bytes)")
-        return target
-    print(f"  downloading {USFWS_CRITHAB_URL} -> {target}")
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    req = urllib.request.Request(
-        USFWS_CRITHAB_URL,
-        headers={"User-Agent": "dog-beach-scout/1.0"},
-    )
-    with urllib.request.urlopen(req, timeout=300, context=ctx) as resp, open(target, "wb") as out:
-        total = 0
-        while True:
-            chunk = resp.read(1 << 16)
-            if not chunk:
-                break
-            out.write(chunk)
-            total += len(chunk)
-            if total % (1 << 20) < (1 << 16):
-                print(f"  ...{total >> 20} MB", flush=True)
-    print(f"  downloaded {target.stat().st_size:,} bytes")
-    return target
+    feats: list[dict] = []
+    offset = 0
+    while True:
+        qs = urllib.parse.urlencode({
+            "where": where,
+            "outFields": "*",
+            "f": "geojson",
+            "outSR": 4326,
+            "resultOffset": offset,
+            "resultRecordCount": page_size,
+        })
+        url = f"{endpoint}/query?{qs}"
+        req = urllib.request.Request(url, headers={"User-Agent": "dog-beach-scout/1.0"})
+        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=120) as r:
+            page = json.loads(r.read())
+        page_feats = page.get("features", []) or []
+        feats.extend(page_feats)
+        if len(page_feats) < page_size:
+            break
+        offset += page_size
+    return feats
+
+
+# ============================================================================
+# USFWS Western Snowy Plover critical habitat (REST)
+# ============================================================================
+
+USFWS_CRITHAB_FS = (
+    "https://services.arcgis.com/QVENGdaPbd4LUkLV/ArcGIS/rest/services/"
+    "USFWS_Critical_Habitat/FeatureServer/0"
+)
 
 
 def load_wsp(conn) -> int:
-    """Download + load USFWS Western Snowy Plover critical habitat polygons."""
+    """Pull WSP critical habitat polygons from USFWS Living Atlas FeatureServer."""
+    print("  source:", USFWS_CRITHAB_FS)
     try:
-        import shapefile  # pyshp
-    except ImportError:
-        print("  ERROR: pyshp not installed. pip install pyshp")
-        return 0
-
-    try:
-        zip_path = download_crithab_zip()
+        feats = fetch_rest_features(
+            USFWS_CRITHAB_FS,
+            where="UPPER(comname) LIKE '%WESTERN SNOWY PLOVER%'",
+        )
     except Exception as e:
-        print(f"  ERROR downloading USFWS shapefile: {e}")
-        print("  Skipping WSP load. Manual download to tmp/CRITHAB.zip and re-run.")
+        print(f"  ERROR fetching WSP from REST: {e}")
+        return 0
+    print(f"  fetched {len(feats)} WSP features from REST")
+    if not feats:
         return 0
 
-    # Extract shapefile components
-    extract_dir = ROOT / "tmp" / "crithab_extracted"
-    extract_dir.mkdir(exist_ok=True)
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        zf.extractall(extract_dir)
-    shp_files = list(extract_dir.rglob("*.shp"))
-    print(f"  found {len(shp_files)} .shp file(s) in archive")
-
-    # Find the polygon shapefile (CRITHAB has separate POLY and LINE)
-    poly_shp = next((p for p in shp_files if "POLY" in p.name.upper()), None)
-    if not poly_shp:
-        # Fallback: any .shp
-        poly_shp = shp_files[0] if shp_files else None
-    if not poly_shp:
-        print("  ERROR: no .shp file found in archive")
-        return 0
-    print(f"  reading {poly_shp.name}")
-
-    sf = shapefile.Reader(str(poly_shp))
-    fields = [f[0] for f in sf.fields[1:]]  # skip deletion flag
-    print(f"  fields: {fields}")
-
-    # Filter to Western Snowy Plover. Field names vary by USFWS shapefile
-    # version: try SCINAME, CMNNAME, COMNAME, listingsta, etc.
-    sciname_idx = next((i for i, f in enumerate(fields)
-                        if f.upper() in ("SCINAME", "SCI_NAME", "SCIENTIFIC_NAME")), None)
-    common_idx = next((i for i, f in enumerate(fields)
-                       if f.upper() in ("COMNAME", "CMNNAME", "COMMON_NAME", "SPECIES")), None)
-    if sciname_idx is None and common_idx is None:
-        print(f"  ERROR: can't find species column. Available fields: {fields}")
-        return 0
-
-    matching = []
-    for shape_rec in sf.shapeRecords():
-        rec = shape_rec.record
-        sci = (rec[sciname_idx] or "").lower() if sciname_idx is not None else ""
-        common = (rec[common_idx] or "").lower() if common_idx is not None else ""
-        if "nivosus" in sci or "snowy plover" in common:
-            matching.append(shape_rec)
-    print(f"  matched {len(matching)} Western Snowy Plover records")
-    if not matching:
-        return 0
-
-    # Convert each shape to GeoJSON + insert
     with conn.cursor() as cur:
         cur.execute("""
             delete from public.dog_policy_zones
@@ -286,25 +240,23 @@ def load_wsp(conn) -> int:
         n = cur.rowcount
 
     inserts = []
-    for sr in matching:
-        shape = sr.shape
-        if not shape.points:
+    for feat in feats:
+        geom = feat.get("geometry")
+        if not geom:
             continue
-        # pyshp shape -> GeoJSON
-        geojson = shape.__geo_interface__
-        rec = sr.record
-        unit_name = ""
-        if sciname_idx is not None:
-            unit_name = f"WSP {rec[sciname_idx]}"
+        props = feat.get("properties") or {}
+        unit = props.get("unitname") or props.get("unit") or "Critical Habitat Unit"
         inserts.append({
             "category": "wildlife_critical_habitat",
-            "name": unit_name or "Western Snowy Plover Critical Habitat",
+            "name": f"WSP {unit}",
             "species": "snowy_plover",
             "source_agency": "USFWS",
             "source_url": "https://ecos.fws.gov/ecp/species/8035",
             "effective_dates": json.dumps({"start": "03-01", "end": "09-30"}),
-            "notes": "Western Snowy Plover Critical Habitat (Pacific coast). Default nesting season Mar 1 - Sep 30 — beaches in this zone should emit nesting_zones section with seasonal closure.",
-            "geom_geojson": json.dumps(geojson),
+            "notes": ("Western Snowy Plover Critical Habitat (Pacific coast). "
+                      "Default nesting season Mar 1 - Sep 30 — beaches in this zone "
+                      "should emit nesting_zones section with seasonal closure."),
+            "geom_geojson": json.dumps(geom),
         })
 
     with conn.cursor() as cur:
@@ -315,12 +267,84 @@ def load_wsp(conn) -> int:
             values (
               %(category)s, %(name)s, %(species)s, %(source_agency)s, %(source_url)s,
               %(effective_dates)s::jsonb, %(notes)s,
-              st_makevalid(st_setsrid(st_geomfromgeojson(%(geom_geojson)s), 4326)),
+              st_multi(st_makevalid(st_setsrid(st_geomfromgeojson(%(geom_geojson)s), 4326))),
               st_area(st_makevalid(st_setsrid(st_geomfromgeojson(%(geom_geojson)s), 4326))::geography)
             )
         """, inserts, page_size=50)
     conn.commit()
     print(f"  USFWS WSP: deleted {n} stale rows, inserted {len(inserts)} habitat polygons")
+    return len(inserts)
+
+
+# ============================================================================
+# CDFW California Least Tern monitoring sites (REST)
+# ============================================================================
+#
+# CDFW's BIOS dataset ds3146 — generalized colony footprints. Polygons.
+# Range: Tijuana river mouth -> Sacramento. ~50 records.
+# Nesting season is roughly Apr 15 - Sep 15.
+
+CDFW_LT_FS = (
+    "https://services2.arcgis.com/Uq9r85Potqm3MfRV/arcgis/rest/services/"
+    "biosds3146_fpu/FeatureServer/0"
+)
+
+
+def load_lt(conn) -> int:
+    """Pull CDFW California Least Tern monitoring polygons from BIOS ds3146."""
+    print("  source:", CDFW_LT_FS)
+    try:
+        feats = fetch_rest_features(CDFW_LT_FS, where="1=1")
+    except Exception as e:
+        print(f"  ERROR fetching LT from REST: {e}")
+        return 0
+    print(f"  fetched {len(feats)} LT features from REST")
+    if not feats:
+        return 0
+
+    with conn.cursor() as cur:
+        cur.execute("""
+            delete from public.dog_policy_zones
+             where source_agency = 'CDFW' and species = 'least_tern'
+        """)
+        n = cur.rowcount
+
+    inserts = []
+    for feat in feats:
+        geom = feat.get("geometry")
+        if not geom:
+            continue
+        props = feat.get("properties") or {}
+        site = props.get("Site_Name") or props.get("site_name") or "LT colony"
+        region = props.get("Region") or props.get("region") or ""
+        inserts.append({
+            "category": "wildlife_critical_habitat",
+            "name": f"LT colony: {site}" + (f" ({region})" if region else ""),
+            "species": "least_tern",
+            "source_agency": "CDFW",
+            "source_url": "https://gis.data.ca.gov/maps/CDFW::california-least-tern-monitoring-sites-generalized-cdfw-ds3146-1",
+            "effective_dates": json.dumps({"start": "04-15", "end": "09-15"}),
+            "notes": ("California Least Tern (Sternula antillarum browni) colony. "
+                      "State + federally endangered. Nesting season Apr 15 - Sep 15 — "
+                      "beaches in this zone should emit nesting_zones section with "
+                      "seasonal closure."),
+            "geom_geojson": json.dumps(geom),
+        })
+
+    with conn.cursor() as cur:
+        psycopg2.extras.execute_batch(cur, """
+            insert into public.dog_policy_zones
+              (category, name, species, source_agency, source_url,
+               effective_dates, notes, geom, area_m2)
+            values (
+              %(category)s, %(name)s, %(species)s, %(source_agency)s, %(source_url)s,
+              %(effective_dates)s::jsonb, %(notes)s,
+              st_multi(st_makevalid(st_setsrid(st_geomfromgeojson(%(geom_geojson)s), 4326))),
+              st_area(st_makevalid(st_setsrid(st_geomfromgeojson(%(geom_geojson)s), 4326))::geography)
+            )
+        """, inserts, page_size=50)
+    conn.commit()
+    print(f"  CDFW LT: deleted {n} stale rows, inserted {len(inserts)} colony polygons")
     return len(inserts)
 
 
@@ -333,11 +357,12 @@ def main():
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
     ap = argparse.ArgumentParser()
     ap.add_argument("--pore", action="store_true", help="Load NPS Point Reyes carve-outs")
-    ap.add_argument("--wsp",  action="store_true", help="Load USFWS Western Snowy Plover critical habitat")
+    ap.add_argument("--wsp",  action="store_true", help="Load USFWS Western Snowy Plover critical habitat (Living Atlas REST)")
+    ap.add_argument("--lt",   action="store_true", help="Load CDFW California Least Tern colonies (BIOS REST)")
     ap.add_argument("--all",  action="store_true", help="Load all sources")
     args = ap.parse_args()
 
-    if not (args.pore or args.wsp or args.all):
+    if not (args.pore or args.wsp or args.lt or args.all):
         ap.print_help()
         return 2
 
@@ -349,6 +374,9 @@ def main():
         if args.all or args.wsp:
             print("\n=== USFWS Western Snowy Plover critical habitat ===")
             total += load_wsp(conn)
+        if args.all or args.lt:
+            print("\n=== CDFW California Least Tern colonies ===")
+            total += load_lt(conn)
 
         with conn.cursor() as cur:
             cur.execute("""

@@ -161,6 +161,13 @@ Deno.serve(async (req: Request) => {
       };
     }
 
+    // Fire-and-forget page-view log
+    const clientId = req.headers.get("x-client-id");
+    supabase.from("beach_views").insert({
+      arena_group_id: fid, source: "detail",
+      client_id: clientId,
+    }).then(() => {}).catch(() => {});
+
     return json({ beach, day: finalDay, hours: finalHours, metadata, zone_rules: zoneRules });
 
   } catch (err) {

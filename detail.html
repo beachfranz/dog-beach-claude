@@ -608,13 +608,9 @@
       document.getElementById('header-left').appendChild(badgeRow);
     }
 
-    // Zone rules — section-aware policy v2. Only renders if backend provided.
-    const zrHtml = buildZoneRulesHtml(zone_rules);
-    if (zrHtml) {
-      const zrCard = document.createElement('div');
-      zrCard.innerHTML = zrHtml;
-      document.getElementById('main-content').prepend(zrCard.firstElementChild);
-    }
+    // Zone rules render is deferred to AFTER the innerHTML assignment
+    // below — see the second pass at the end of this function. Otherwise
+    // the prepended card gets wiped by the innerHTML reset.
 
     // Hydrate the outer locationId from the API response so chat (which
     // only knows location_id) keeps working when the caller passed ?fid=.
@@ -787,6 +783,15 @@
       </div>
       ${narrativeHtml}
     `;
+
+    // Prepend zone_rules card AFTER the innerHTML reset (otherwise it's wiped).
+    // Renders for ~442 beaches with text_repass_v1 zone_rules.
+    const zrHtml = buildZoneRulesHtml(zone_rules);
+    if (zrHtml) {
+      const zrCard = document.createElement('div');
+      zrCard.innerHTML = zrHtml;
+      document.getElementById('main-content').prepend(zrCard.firstElementChild);
+    }
   }
 
   function buildStatusBoard(hours) {

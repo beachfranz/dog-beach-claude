@@ -60,6 +60,9 @@ def main():
     ap.add_argument('--fids', type=str, default=None,
                     help='Comma-separated explicit list of fids to re-run '
                          '(bypasses the no-OSM/no-approval filter)')
+    ap.add_argument('--source', type=str, default='topo',
+                    choices=['topo', 'satellite'],
+                    help='Basemap source for extraction (default: topo)')
     args = ap.parse_args()
 
     if args.fids:
@@ -88,7 +91,7 @@ def main():
         print(f'[{i:>3}/{len(candidates)}] fid={fid} {c["name"]} ({c["county_name"]})  '
               f'elapsed={elapsed:.0f}s')
         try:
-            ip.main(str(fid))
+            ip.main(str(fid), source=args.source)
             successes.append(fid)
         except SystemExit as e:
             print(f'   skipped: {e}')

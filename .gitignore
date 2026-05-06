@@ -33,3 +33,6 @@ share/
 
 # Throwaway scratch — exploratory artifacts, tile caches, one-off CSVs
 tmp/
+
+# Per-curator QGIS project files (user-specific paths)
+QGIS/

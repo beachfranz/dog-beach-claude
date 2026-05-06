@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Auto-extracted polygons · Review</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
 <style>
   html, body { margin: 0; padding: 0; height: 100%;
                font-family: 'DM Sans', system-ui, sans-serif; color: #0f2742; }
@@ -106,6 +107,20 @@
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
   .toast.error { background: #b91c1c; }
 
+  /* Smaller vertex markers during draw/edit */
+  .leaflet-editing-icon, .leaflet-div-icon.leaflet-editing-icon {
+    width: 8px !important; height: 8px !important;
+    margin-left: -4px !important; margin-top: -4px !important;
+    border: 1.5px solid #15803d !important;
+    background: #ffffff !important;
+    border-radius: 2px !important;
+  }
+  /* Midpoint markers (the in-between "add a vertex" markers) — even smaller */
+  .leaflet-editing-icon[style*="opacity: 0.6"],
+  .leaflet-editing-icon.leaflet-marker-draggable {
+    /* keeps style overrides above */
+  }
+
   /* Draggable catalog point — small filled circle that signals it's grabbable */
   .catalog-dot { cursor: grab; }
   .catalog-dot:active { cursor: grabbing; }
@@ -151,11 +166,48 @@
       <button class="revert"  id="btn-revert">Revert</button>
       <button class="approve" id="btn-approve">Approve</button>
     </div>
+    <div class="actions" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0; gap: 6px; flex-wrap: wrap;">
+      <button id="btn-edit-truth"
+              style="flex:1 1 30%; padding:8px 6px; font-size:11px; font-weight:600;
+                     background:#fff; color:#15803d; border:1px solid #86efac;
+                     border-radius:5px; cursor:pointer; font-family:inherit;"
+              disabled>
+        Edit truth
+      </button>
+      <button id="btn-edit-auto"
+              style="flex:1 1 30%; padding:8px 6px; font-size:11px; font-weight:600;
+                     background:#fff; color:#0e7490; border:1px solid #67e8f9;
+                     border-radius:5px; cursor:pointer; font-family:inherit;"
+              disabled>
+        Edit generated
+      </button>
+      <button id="btn-draw-truth"
+              style="flex:1 1 30%; padding:8px 6px; font-size:11px; font-weight:600;
+                     background:#15803d; color:#fff; border:1px solid #15803d;
+                     border-radius:5px; cursor:pointer; font-family:inherit;">
+        ✏️ Draw new
+      </button>
+    </div>
+    <div class="actions" id="edit-actions" style="display:none; margin-top: 6px; gap: 6px;">
+      <button id="btn-edit-cancel"
+              style="flex:1; padding:6px; font-size:11px; background:#fff;
+                     color:#475569; border:1px solid #cbd5e1; border-radius:4px;
+                     cursor:pointer; font-family:inherit;">Cancel</button>
+      <button id="btn-edit-save"
+              style="flex:2; padding:6px; font-size:11px; font-weight:600;
+                     background:#15803d; color:#fff; border:1px solid #15803d;
+                     border-radius:4px; cursor:pointer; font-family:inherit;">
+        💾 Save edit
+      </button>
+    </div>
+    <div id="truth-status" style="font-size:11px; color:#64748b;
+                                   margin-top: 6px; min-height: 16px;"></div>
   </div>
 
   <div class="legend">
     <div class="row"><span class="swatch" style="background:#ef4444"></span>OSM polygon</div>
     <div class="row"><span class="swatch" style="background:#ec4899"></span>auto-extracted (this row)</div>
+    <div class="row"><span class="swatch" style="background:#15803d"></span>truth polygon</div>
     <div class="row"><span class="swatch" style="background:#1e40af"></span>catalog lat/lon</div>
   </div>
 </div>
@@ -163,11 +215,13 @@
 <div class="toast" id="toast"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
 <script>
 const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
 const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
 const FN_REVIEW    = `${SUPABASE_URL}/functions/v1/admin-review-auto-polygon`;
 const FN_MOVE_PT   = `${SUPABASE_URL}/functions/v1/admin-move-beach-point`;
+const FN_TRUTH     = `${SUPABASE_URL}/functions/v1/admin-save-truth-polygon`;
 
 // Admin secret stash (paywall.html convention)
 const ADMIN_SECRET_KEY = 'admin_secret';
@@ -178,6 +232,10 @@ if (!adminSecret) {
 }
 
 let map, currentLayer, osmLayer, dotMarker;
+let truthLayer = null;        // L.geoJSON layer rendering the saved truth polygon
+let truthGroup = null;        // L.FeatureGroup wrapping truthLayer (editable)
+let drawHandler = null;       // active L.Draw.Polygon instance while drawing
+let editHandler = null;       // active L.EditToolbar.Edit instance
 let activeFilter = 'pending';
 let rows = [];
 let activeRow = null;
@@ -206,9 +264,29 @@ async function fetchOsmPolygon(fid) {
 }
 
 function renderList() {
+  // Suppress stale pendings: if a fid has any APPROVED row, drop pendings
+  // for that fid; if a fid has multiple pendings, keep only the newest
+  // (older ones were superseded by re-extraction runs).
+  const approvedFids = new Set(rows.filter(r => r.review_status === 'approved').map(r => r.fid));
+  const newestPendingByFid = new Map();
+  for (const r of rows) {
+    if (r.review_status !== 'pending') continue;
+    if (approvedFids.has(r.fid)) continue;
+    const cur = newestPendingByFid.get(r.fid);
+    if (!cur || new Date(r.extracted_at) > new Date(cur.extracted_at)) {
+      newestPendingByFid.set(r.fid, r);
+    }
+  }
+  const visiblePendingIds = new Set([...newestPendingByFid.values()].map(r => r.id));
+
+  const visibleRows = rows.filter(r => {
+    if (r.review_status === 'pending') return visiblePendingIds.has(r.id);
+    return true;  // approved + rejected always visible (history)
+  });
+
   const filtered = activeFilter === 'all'
-    ? rows
-    : rows.filter(r => r.review_status === activeFilter);
+    ? visibleRows
+    : visibleRows.filter(r => r.review_status === activeFilter);
   const el = document.getElementById('list');
   if (!filtered.length) {
     el.innerHTML = '<div style="color:#94a3b8; font-size:12px; padding:8px;">No rows.</div>';
@@ -238,10 +316,36 @@ async function selectRow(r) {
   if (currentLayer) map.removeLayer(currentLayer);
   if (osmLayer)     map.removeLayer(osmLayer);
   if (dotMarker)    map.removeLayer(dotMarker);
+  if (truthGroup)   { map.removeLayer(truthGroup); truthGroup = null; truthLayer = null; }
+  cancelDraw();
+  cancelEdit();
 
   currentLayer = L.geoJSON(r.geom, {
     style: { color: '#ec4899', weight: 3, fillColor: '#ec4899', fillOpacity: 0.20 },
   }).addTo(map);
+  // "Edit generated" button is available whenever the row has a geom
+  const editAutoBtn = document.getElementById('btn-edit-auto');
+  if (editAutoBtn) editAutoBtn.disabled = !r.geom;
+
+  // Fetch + render existing truth polygon for this fid (bright green).
+  // Wrapped in a FeatureGroup so Leaflet.draw's edit tool can modify it.
+  const truthRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/beach_polygons_truth_geojson?select=*&fid=eq.${r.fid}`,
+    { headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } });
+  const truthRows = await truthRes.json();
+  const editBtn = document.getElementById('btn-edit-truth');
+  if (truthRows.length) {
+    truthLayer = L.geoJSON(truthRows[0].geom, {
+      style: { color: '#15803d', weight: 3, fillColor: '#15803d', fillOpacity: 0.30 },
+    });
+    truthGroup = L.featureGroup([...truthLayer.getLayers()]).addTo(map);
+    setTruthStatus(`✓ truth on file (${(truthRows[0].area_m2/1e3).toFixed(1)}K m², ` +
+                   `by ${truthRows[0].drawn_by}, ${new Date(truthRows[0].drawn_at).toLocaleDateString()}).`);
+    if (editBtn) editBtn.disabled = false;
+  } else {
+    setTruthStatus('No truth polygon yet.');
+    if (editBtn) editBtn.disabled = true;
+  }
 
   const osm = await fetchOsmPolygon(r.fid);
   if (osm) {
@@ -330,6 +434,175 @@ async function selectRow(r) {
   document.getElementById('t-notes').value = r.reviewer_notes || '';
 }
 
+// ----------------------------------------------------------------------
+// Truth-polygon drawing (Leaflet.draw)
+// ----------------------------------------------------------------------
+function setTruthStatus(msg) {
+  const el = document.getElementById('truth-status');
+  if (el) el.textContent = msg || '';
+}
+
+function cancelDraw() {
+  if (drawHandler) {
+    try { drawHandler.disable(); } catch {}
+    drawHandler = null;
+  }
+}
+
+function cancelEdit() {
+  if (editHandler) {
+    try { editHandler.revertLayers(); editHandler.disable(); } catch {}
+    editHandler = null;
+  }
+  document.getElementById('edit-actions').style.display = 'none';
+}
+
+function startDrawTruth() {
+  if (!activeRow) { toast('Select a beach first', true); return; }
+  cancelDraw();
+  cancelEdit();
+
+  setTruthStatus('Click around the sand. Right-click (or double-click) to finish. Esc to cancel.');
+
+  drawHandler = new L.Draw.Polygon(map, {
+    allowIntersection: false,
+    showArea: true,
+    shapeOptions: { color: '#15803d', weight: 3, fillColor: '#15803d', fillOpacity: 0.30 },
+  });
+  drawHandler.enable();
+}
+
+function startEditTruth() {
+  if (!activeRow || !truthGroup) {
+    toast('No truth polygon to edit', true);
+    return;
+  }
+  cancelDraw();
+  cancelEdit();
+
+  setTruthStatus('Drag white squares to move vertices. Click midpoint markers to add. Save when done.');
+
+  editHandler = new L.EditToolbar.Edit(map, {
+    featureGroup: truthGroup,
+    selectedPathOptions: {
+      color: '#15803d', weight: 3,
+      fillColor: '#15803d', fillOpacity: 0.30,
+      maintainColor: true,
+    },
+  });
+  editHandler.enable();
+
+  document.getElementById('edit-actions').style.display = 'flex';
+}
+
+function startEditAuto() {
+  // Use the auto-extracted polygon as a starting point for truth.
+  // Clone it into truthGroup, then enable the same edit flow as startEditTruth.
+  if (!activeRow || !activeRow.geom) {
+    toast('No auto-extracted polygon for this row', true);
+    return;
+  }
+  cancelDraw();
+  cancelEdit();
+
+  // Replace the existing truthGroup (if any) with a copy of the auto-extracted geom.
+  // The auto-extracted polygon is in activeRow.geom (already a GeoJSON object from
+  // the beach_polygons_auto_extracted_geojson view).
+  if (truthGroup) { map.removeLayer(truthGroup); truthGroup = null; truthLayer = null; }
+
+  truthLayer = L.geoJSON(activeRow.geom, {
+    style: { color: '#15803d', weight: 3, fillColor: '#15803d', fillOpacity: 0.30 },
+  });
+  truthGroup = L.featureGroup([...truthLayer.getLayers()]).addTo(map);
+
+  setTruthStatus('Editing copy of auto-extracted polygon. Drag vertices, then Save edit.');
+
+  editHandler = new L.EditToolbar.Edit(map, {
+    featureGroup: truthGroup,
+    selectedPathOptions: {
+      color: '#15803d', weight: 3,
+      fillColor: '#15803d', fillOpacity: 0.30,
+      maintainColor: true,
+    },
+  });
+  editHandler.enable();
+  document.getElementById('edit-actions').style.display = 'flex';
+}
+
+async function saveEditTruth() {
+  if (!editHandler || !activeRow || !truthGroup) return;
+  // Capture the modified geometry BEFORE disabling edit (which may revert)
+  const layers = truthGroup.getLayers();
+  if (!layers.length) { toast('No polygon to save', true); return; }
+  const geojson = layers[0].toGeoJSON();
+  const geom = geojson.geometry;
+
+  // Disable edit (commits visual state)
+  try { editHandler.save(); editHandler.disable(); } catch {}
+  editHandler = null;
+
+  setTruthStatus('Saving edits…');
+  const resp = await fetch(FN_TRUTH, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${ANON_KEY}`,
+      'apikey': ANON_KEY,
+      'x-admin-secret': adminSecret,
+    },
+    body: JSON.stringify({ fid: activeRow.fid, geom }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) {
+    setTruthStatus(`Save failed: ${data.error || 'unknown'}`);
+    toast(data.error || 'Truth save failed', true);
+    return;
+  }
+  toast(`Truth updated for ${activeRow.name || 'fid '+activeRow.fid}`);
+  setTruthStatus(`✓ truth updated (${(data.area_m2/1e3).toFixed(1)}K m²)`);
+  document.getElementById('edit-actions').style.display = 'none';
+}
+
+let drawCreatedHooked = false;
+function ensureDrawCreatedHandler() {
+  if (drawCreatedHooked) return;
+  drawCreatedHooked = true;
+  map.on(L.Draw.Event.CREATED, async (e) => {
+    drawHandler = null;
+    if (!activeRow) return;
+    const layer = e.layer;
+    const geojson = layer.toGeoJSON();
+    const geom = geojson.geometry;  // {type: 'Polygon', coordinates: [...]}
+
+    setTruthStatus('Saving…');
+    const resp = await fetch(FN_TRUTH, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${ANON_KEY}`,
+        'apikey': ANON_KEY,
+        'x-admin-secret': adminSecret,
+      },
+      body: JSON.stringify({ fid: activeRow.fid, geom }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      setTruthStatus(`Save failed: ${data.error || 'unknown'}`);
+      toast(data.error || 'Truth save failed', true);
+      return;
+    }
+    toast(`Truth saved for ${activeRow.name || 'fid '+activeRow.fid}`);
+    // Replace the in-memory truth feature group with the fresh polygon
+    if (truthGroup) { map.removeLayer(truthGroup); truthGroup = null; }
+    truthLayer = L.geoJSON(geom, {
+      style: { color: '#15803d', weight: 3, fillColor: '#15803d', fillOpacity: 0.30 },
+    });
+    truthGroup = L.featureGroup([...truthLayer.getLayers()]).addTo(map);
+    setTruthStatus(`✓ truth saved (${(data.area_m2/1e3).toFixed(1)}K m²)`);
+    document.getElementById('btn-edit-truth').disabled = false;
+  });
+}
+
 async function review(status) {
   if (!activeRow) return;
   const notes = document.getElementById('t-notes').value.trim() || null;
@@ -377,9 +650,17 @@ function toast(msg, err = false) {
 }
 
 async function init() {
-  map = L.map('map').setView([35.5, -120.0], 6);
+  map = L.map('map', {
+    minZoom: 2,    // zoom out to ~world view
+    maxZoom: 22,   // zoom in past native tiles (Leaflet scales them up)
+  }).setView([35.5, -120.0], 6);
+  // Esri World_Topo basemap. maxNativeZoom=19 = tile server's real tile depth;
+  // maxZoom=22 lets Leaflet scale those tiles for closer zoom (slightly blurry
+  // but useful for fine vertex placement).
   L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
-    maxZoom: 19,
+    maxNativeZoom: 19,
+    maxZoom: 22,
+    minZoom: 2,
     attribution: 'Tiles © Esri',
   }).addTo(map);
 
@@ -395,6 +676,15 @@ async function init() {
   document.getElementById('btn-approve').addEventListener('click', () => review('approved'));
   document.getElementById('btn-reject').addEventListener('click',  () => review('rejected'));
   document.getElementById('btn-revert').addEventListener('click',  () => review('pending'));
+  document.getElementById('btn-draw-truth').addEventListener('click', startDrawTruth);
+  document.getElementById('btn-edit-truth').addEventListener('click', startEditTruth);
+  document.getElementById('btn-edit-auto').addEventListener('click', startEditAuto);
+  document.getElementById('btn-edit-save').addEventListener('click', saveEditTruth);
+  document.getElementById('btn-edit-cancel').addEventListener('click', () => {
+    cancelEdit();
+    setTruthStatus('Edit cancelled.');
+  });
+  ensureDrawCreatedHandler();
 
   rows = await fetchRows();
   renderList();

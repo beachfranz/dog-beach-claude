@@ -78,17 +78,20 @@ def stitch_imagery(center_lon, center_lat, z, w, h, cache_dir):
 
 
 def detect_sand_imagery(rgb: np.ndarray) -> np.ndarray:
-    """Calibrated against actual Esri World_Imagery pixels at z=18 for Seal
-    Beach. Real sand clusters at H≈46°, S≈0.16, V≈0.83. Tight thresholds
-    around that cluster — sand looks remarkably consistent at typical
-    daytime captures. Wet sand near waterline is captured by a second
-    rule (slightly darker, slightly more saturated)."""
+    """Calibrated against multiple beach samples in Esri World_Imagery z=17/18.
+    Iteration log:
+      v1: H 38-60, S 0.08-0.28, V≥0.70  — tight; under-fit on East Beach (H=31)
+      v2: H 28-65, S 0.08-0.30, V≥0.65  — too loose; grabbed parking lots, roofs
+      v3 (this): H 32-62, S 0.08-0.30, V≥0.72; wet rule slightly looser
+        Brightness floor pulled back up to reject mid-bright stucco/concrete;
+        hue still wide enough to catch H=31° edge-cases like East Beach;
+        wet rule expanded to handle waves/wet-sand transitions Franz flagged."""
     hsv = color.rgb2hsv(rgb)
     h = hsv[..., 0] * 360.0
     s = hsv[..., 1]
     v = hsv[..., 2]
-    dry = (h >= 38) & (h <= 60) & (s >= 0.08) & (s <= 0.28) & (v >= 0.70)
-    wet = (h >= 30) & (h <= 55) & (s >= 0.15) & (s <= 0.40) & (v >= 0.45) & (v <= 0.72)
+    dry = (h >= 32) & (h <= 62) & (s >= 0.08) & (s <= 0.30) & (v >= 0.72)
+    wet = (h >= 25) & (h <= 55) & (s >= 0.15) & (s <= 0.45) & (v >= 0.38) & (v <= 0.72)
     return dry | wet
 
 

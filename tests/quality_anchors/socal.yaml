@@ -1,0 +1,181 @@
+# SoCal quality anchors — curated 2026-05-07 from research + audit.
+#
+# Each anchor is a beach we expect to be in beaches_gold (coverage check)
+# and, for Tier 1+2, classified correctly per our research (drift check).
+#
+# Tier semantics:
+#   1 = marquee, must-be-correct. CI fails if missing or drift detected.
+#   2 = regional anchor, must-be-present. Warn but don't fail on drift.
+#   3 = long-tail / caveat-heavy. Coverage-only check; no expected verdict.
+#
+# Edit policy: when an agency rule changes, update `expected` AND `notes`.
+# When a new dog beach opens, add an entry. Don't tier up Tier 3 anchors
+# without reading project_zone_rules_strategic_value.md.
+
+metadata:
+  region: SoCal
+  curator: claude+franz audit
+  last_updated: "2026-05-07"
+  source_research_date: "2026-05-06"
+
+anchors:
+  # =====================================================================
+  # Tier 1 — Marquee off-leash beaches. Must be present + correct.
+  # =====================================================================
+
+  - name: Huntington Dog Beach
+    aliases: [Huntington Beach Dog Beach]
+    county: Orange
+    state: CA
+    tier: 1
+    expected:
+      dogs_allowed: "yes"
+      leash_policy: off_leash
+    notes: "1.5mi off-leash between Goldenwest & Seapoint. OC's ONLY off-leash beach. Run by Preservation Society of Huntington Dog Beach 501c3."
+    sources: [https://www.dogbeach.org/]
+
+  - name: Ocean Beach Dog Beach
+    aliases: [The Original Dog Beach]
+    county: San Diego
+    state: CA
+    tier: 1
+    expected:
+      dogs_allowed: "yes"
+      leash_policy: off_leash
+    notes: "Off-leash since 1972 — one of the first legal off-leash beaches in the US. ~1/4 mi at north end of OB at mouth of San Diego River."
+    sources: [https://oceanbeachsandiego.com/attractions/beaches/dog-beach, https://dogbeachsd.com/history]
+
+  - name: Coronado Dog Beach
+    county: San Diego
+    state: CA
+    tier: 1
+    expected:
+      dogs_allowed: "yes"
+      leash_policy: off_leash
+    notes: "North end of Coronado near Sunset Park / NAS Coronado fence. Off-leash year-round. Postcard backdrop, high-prestige."
+    sources: [https://www.coronado.ca.us/757/Dogs]
+
+  - name: Fiesta Island
+    county: San Diego
+    state: CA
+    tier: 1
+    expected:
+      dogs_allowed: "yes"
+      leash_policy: off_leash
+    notes: "Mission Bay park (technically not an ocean beach). 90+ acres of sand, calm bay water, off-leash across most of the island."
+
+  - name: Rosie's Dog Beach
+    aliases: [Long Beach Dog Beach, Belmont Shore Dog Zone]
+    county: Los Angeles
+    state: CA
+    tier: 1
+    expected:
+      dogs_allowed: "yes"
+      leash_policy: off_leash
+    notes: "4.1 acres on Ocean Blvd between Granada and Roycroft. ONLY legal off-leash beach in all of LA County. Opened 2003."
+    sources: [https://www.longbeach.gov/park/park-and-facilities/directory/rosies-dog-beach]
+
+  # =====================================================================
+  # Tier 2 — Regional anchors. Must be present; warn on drift.
+  # =====================================================================
+
+  - name: Del Mar Dog Beach
+    aliases: [Del Mar North Beach]
+    county: San Diego
+    state: CA
+    tier: 2
+    expected:
+      dogs_allowed: mixed
+      leash_policy: on_leash
+    notes: "North of 29th St to Solana Beach border. SEASONAL: off-leash post-Labor-Day to June 15; leash dawn-8am summer Jun 16-Labor Day. 'mixed' captures the seasonal nature."
+    sources: [https://www.delmar.ca.us/206/Dog-Friendly-Beaches]
+
+  - name: Arroyo Burro Beach
+    aliases: [Hendry's Beach]
+    county: Santa Barbara
+    state: CA
+    tier: 2
+    expected:
+      dogs_allowed: "yes"
+      leash_policy: off_leash
+    notes: "Santa Barbara County's ONLY off-leash zone (east of slough/footbridge). Below Douglas Family Preserve. Self-serve dog wash."
+    sources: [https://santabarbaraca.com/businesses/arroyo-burro-beach/]
+
+  - name: Cardiff State Beach
+    county: San Diego
+    state: CA
+    tier: 2
+    expected:
+      dogs_allowed: "yes"
+      leash_policy: on_leash
+    notes: "Leashed dogs year-round. ONLY North County SD beach where dogs can touch sand (Encinitas/Carlsbad/Oceanside/Solana Beach all prohibit on city beaches)."
+
+  - name: Leo Carrillo State Beach
+    aliases: [Leo Carillo State Beach, Leo Carrillo State Park]
+    county: Los Angeles
+    state: CA
+    tier: 2
+    expected:
+      dogs_allowed: "yes"
+      leash_policy: on_leash
+    notes: "Leashed in day-use, campground, and beach NORTH of Lifeguard Tower 3. Effectively the only Malibu-area beach where dogs can touch sand."
+    sources: [https://www.parks.ca.gov/leocarrillo]
+
+  - name: Doheny State Beach
+    county: Orange
+    state: CA
+    tier: 2
+    expected:
+      dogs_allowed: mixed
+      leash_policy: on_leash
+    notes: "Leashed in campground and day-use, NOT on swim beach. OC family-camping dog beach."
+
+  - name: San Onofre State Beach
+    county: San Diego
+    state: CA
+    tier: 2
+    expected:
+      dogs_allowed: mixed
+      leash_policy: on_leash
+    notes: "Leashed dogs on Trails 1 & 6 and connected beach access points."
+
+  - name: Pacific Beach
+    county: San Diego
+    state: CA
+    tier: 2
+    expected:
+      dogs_allowed: mixed
+      leash_policy: on_leash
+    notes: "SD time-window rule: leashed pre-9am, post-6pm summer (post-4pm winter). 'mixed' captures the time-window nature."
+
+  - name: Mission Beach
+    county: San Diego
+    state: CA
+    tier: 2
+    expected:
+      dogs_allowed: mixed
+      leash_policy: on_leash
+    notes: "SD time-window rule. Iconic boardwalk + sand."
+
+  - name: La Jolla Shores
+    county: San Diego
+    state: CA
+    tier: 2
+    expected:
+      dogs_allowed: mixed
+      leash_policy: on_leash
+    notes: "SD time-window rule. Family-friendly with the time-window dog access."
+
+  # =====================================================================
+  # Tier 3 — Long-tail / caveat-heavy. Coverage-only.
+  # =====================================================================
+
+  - {name: "Tide Beach Park",         county: "San Diego",     state: CA, tier: 3, notes: "Solana Beach city carve-out. Dogs allowed at Tide Park & Del Mar Shores beaches only."}
+  - {name: "Hollywood Beach",         county: "Ventura",       state: CA, tier: 3, notes: "Channel Islands Harbor. Leashed pre-9am / post-5pm."}
+  - {name: "Silver Strand Beach",     county: "Ventura",       state: CA, tier: 3, notes: "Same time window as Hollywood Beach. Less crowded."}
+  - {name: "Sunset Cliffs",           county: "San Diego",     state: CA, tier: 3, notes: "Bluff access + SD time-window model. Adjacent to OB."}
+  - {name: "Mandalay Beach",          county: "Ventura",       state: CA, tier: 3, notes: "Multiple sources report no formal leash regulation — de facto off-leash. Verify locally."}
+  - {name: "Point Dume State Beach",  county: "Los Angeles",   state: CA, tier: 3, notes: "Below mean high tide prohibits dogs (Malibu rule). Above MHT permitted."}
+  - {name: "Little Dume Beach",       county: "Los Angeles",   state: CA, tier: 3, notes: "Partly private. Leashed dogs above mean high tide line."}
+  - {name: "West Ellwood Beach",      county: "Santa Barbara", state: CA, tier: 3, notes: "Goleta. Leashed access in otherwise dog-restricted SB County coast."}
+  - {name: "Jalama Beach",            county: "Santa Barbara", state: CA, tier: 3, notes: "Remote. Leashed dogs welcome. 107-site campground destination."}

@@ -326,6 +326,29 @@
     .policy-badge.leash-no-dogs   { color: #ef4444; background: rgba(239,68,68,0.08); }
     .policy-badge.hours           { color: var(--text-muted); background: rgba(0,0,0,0.04); border-color: var(--text-muted); }
 
+    /* Leash-status pill — single at-a-glance summary derived from
+       has_on_leash / has_off_leash binaries (2026-05-07 schema). One
+       prominent pill above the Scout blurb so the user sees the leash
+       answer first. */
+    .leash-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 999px;
+      border: 1.5px solid currentColor;
+      align-self: flex-start;
+      margin-top: 6px;
+      letter-spacing: 0.01em;
+    }
+    .leash-pill.off-leash { color: #15803d; background: rgba(22,163,74,0.10); }
+    .leash-pill.mixed     { color: #b45309; background: rgba(245,158,11,0.10); }
+    .leash-pill.on-leash  { color: #1d4ed8; background: rgba(37,99,235,0.10); }
+    .leash-pill.no-dogs   { color: #b91c1c; background: rgba(239,68,68,0.10); }
+
     /* ── Zone rules — section-aware dog policy v2 (442 beaches) ─────
        Locked color/icon system per project_zone_rules_design_locked.md:
        🟢 off_leash · ⚪ on_leash · 🔴 not_allowed · 🟡 time-restricted
@@ -595,6 +618,17 @@
       winLabel.textContent = day.best_window_label;
       winLabel.className = `window-label ${day.best_window_status ?? ''}`;
     }
+    // Leash-status pill — single prominent summary from binary fields
+    // (has_on_leash / has_off_leash). Renders only when we have signal.
+    const leashPillHtml = buildLeashPillHtml(dog_policy);
+    if (leashPillHtml) {
+      const pillWrap = document.createElement('div');
+      pillWrap.innerHTML = leashPillHtml;
+      // Single child node; pillWrap.firstElementChild IS the pill.
+      const pillEl = pillWrap.firstElementChild;
+      if (pillEl) document.getElementById('header-left').appendChild(pillEl);
+    }
+
     // Scout blurb — loads async, shows shimmer until ready
     const blurbEl = document.createElement('div');
     blurbEl.id = 'scout-blurb';
@@ -1236,6 +1270,33 @@
       p.style.display = p.dataset.zrSeasonPane === idx ? '' : 'none';
     });
   });
+
+  // Builds the prominent leash-status pill from the binary presence
+  // flags (has_on_leash / has_off_leash). One pill, one summary, four
+  // states. Returns '' when there's no signal.
+  function buildLeashPillHtml(dogPolicy) {
+    if (!dogPolicy) return '';
+    const hasOn  = dogPolicy.has_on_leash;
+    const hasOff = dogPolicy.has_off_leash;
+    const dogsAllowed = (dogPolicy.dogs_allowed || '').toLowerCase();
+
+    const noDogs = dogsAllowed === 'no'
+                || (hasOn === false && hasOff === false);
+    if (noDogs) {
+      return `<span class="leash-pill no-dogs">🚫 No dogs allowed</span>`;
+    }
+    if (hasOn === true && hasOff === true) {
+      return `<span class="leash-pill mixed">🐾 Off-leash &amp; on-leash zones</span>`;
+    }
+    if (hasOff === true) {
+      return `<span class="leash-pill off-leash">🐾 Off-leash beach</span>`;
+    }
+    if (hasOn === true) {
+      return `<span class="leash-pill on-leash">🐾 Leashed dogs welcome</span>`;
+    }
+    // No conclusive signal — don't render
+    return '';
+  }
 
   // Renders policy badges. Prefers dog_policy.has_on_leash / has_off_leash
   // (consensus-driven, from beach_dog_policy) when available — those are the

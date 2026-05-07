@@ -188,6 +188,8 @@ Deno.serve(async (req: Request) => {
         latitude:           b.latitude,
         longitude:          b.longitude,
         access_rule:        b.access_rule,
+        has_on_leash:       b.has_on_leash  ?? null,
+        has_off_leash:      b.has_off_leash ?? null,
         distance_m:         b.distance_m ?? null,
         day_status:         b.day_status  ?? "no_data",
         best_window_label:  bestWindowLabel  ?? null,
@@ -230,6 +232,8 @@ interface BeachRow {
   latitude:           number;
   longitude:          number;
   access_rule:        string | null;
+  has_on_leash:       boolean | null;
+  has_off_leash:      boolean | null;
   distance_m:         number | null;
   day_status:         string | null;
   best_window_label:  string | null;

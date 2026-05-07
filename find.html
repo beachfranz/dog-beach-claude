@@ -1166,6 +1166,22 @@
 
   function matchesLeashFilter(beach) {
     if (leashFilter === 'any') return true;
+
+    // Modern path — binary presence flags from beach_dog_policy
+    // (find_beaches RPC returns has_on_leash + has_off_leash as of 2026-05-07).
+    // Filter semantics:
+    //   "off_leash" → user wants off-leash access → has_off_leash=T (any beach where off-leash is possible)
+    //   "on_leash"  → user wants leashed-only beaches → has_on_leash=T AND has_off_leash !== T
+    //   "mixed"     → user wants both modes available → both binaries=T
+    const hasOn  = beach.has_on_leash;
+    const hasOff = beach.has_off_leash;
+    if (hasOn !== null && hasOn !== undefined && hasOff !== null && hasOff !== undefined) {
+      if (leashFilter === 'off_leash') return hasOff === true;
+      if (leashFilter === 'mixed')     return hasOn === true && hasOff === true;
+      if (leashFilter === 'on_leash')  return hasOn === true && hasOff !== true;
+    }
+
+    // Legacy fallback — for beaches not yet promoted with binaries
     return (beach.access_rule ?? 'off_leash') === leashFilter;
   }
 

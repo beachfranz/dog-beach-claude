@@ -171,19 +171,48 @@
   }
   .zone-section-block.open > .zone-evidence { display: block; }
 
-  /* Time-window tabs (reference page picks current local hour by default) */
-  .zone-time-tabs {
-    display: flex; gap: 4px; margin: 6px 0 8px; flex-wrap: wrap;
+  /* Time-block rows (chrono order, one row per distinct window) */
+  .zone-time-rows {
+    display: flex; flex-direction: column; gap: 4px; margin-top: 6px;
   }
-  .zone-time-tab {
-    font-size: 11px; padding: 4px 10px; border-radius: 999px;
-    background: rgba(0,0,0,0.04); border: 1px solid var(--border);
-    color: var(--text-muted); cursor: pointer; font-family: inherit;
+  .zone-time-row {
+    display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+    background: rgba(245,158,11,0.04);
+    border-left: 3px solid rgba(245,158,11,0.4);
+    border-radius: 0 6px 6px 0;
+    flex-wrap: wrap;
   }
-  .zone-time-tab.active {
-    background: rgba(245,158,11,0.13); color: var(--amber);
-    border-color: rgba(245,158,11,0.4); font-weight: 600;
+  .zone-time-row.is-other {
+    background: rgba(0,0,0,0.02);
+    border-left-color: var(--border);
   }
+  .zone-time-row.is-current {
+    background: rgba(245,158,11,0.10);
+    border-left-color: rgba(245,158,11,0.7);
+  }
+  .zone-time-label {
+    font-size: 11px; font-weight: 700; color: var(--amber);
+    min-width: 90px; letter-spacing: 0.02em;
+  }
+  .zone-time-row.is-other .zone-time-label { color: var(--text-muted); }
+  .zone-time-pills {
+    display: flex; flex-wrap: wrap; gap: 6px 12px; flex: 1; min-width: 0;
+  }
+  .zone-pill-pair {
+    display: flex; align-items: center; gap: 6px; font-size: 12px;
+  }
+  .zone-pill-pair .zone-section-name { color: var(--text); }
+  .zone-now-badge {
+    display: inline-block; font-size: 9px; font-weight: 700;
+    padding: 1px 6px; border-radius: 999px;
+    background: var(--amber); color: white; letter-spacing: 0.05em;
+    margin-left: 6px;
+  }
+  .zone-always {
+    display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 6px;
+    padding: 6px 0; border-bottom: 1px dashed var(--border);
+  }
+  .zone-always .zone-section-block { padding: 0; }
 
   /* Links block */
   .link-row {
@@ -483,52 +512,80 @@ function _renderSectionPill(name, rule, sec) {
   </div>`;
 }
 
-let _ZR_TAB_KEY = 0;
+function _renderTimePillPair(name, rule) {
+  const safeRule = ['off_leash','on_leash','not_allowed'].includes(rule) ? rule : 'unknown';
+  const ruleLabel = ZR_RULE_LABEL[safeRule] || rule;
+  return `<span class="zone-pill-pair">
+    <span class="zone-section-name">${ZR_SECTION_LABEL[name] || escHtml(name)}</span>
+    <span class="zone-rule ${safeRule}">${ruleLabel}</span>
+  </span>`;
+}
+
 function _renderZoneCard(reg, beachName, zoneName, seasonLabel, currentLocalHour) {
   const sections = reg.sections || {};
   const sectionList = Object.entries(sections);
   if (!sectionList.length) return '';
 
-  // Collect distinct (start,end) tuples across the region's sections
+  // Split sections into time-shifting (have time_windows) vs always
+  const timeShifting = sectionList.filter(([, s]) => Array.isArray(s?.time_windows) && s.time_windows.length);
+  const alwaysOn    = sectionList.filter(([, s]) => !Array.isArray(s?.time_windows) || !s.time_windows.length);
+
+  const header = `<div class="zone-card-header">🐾 ${escHtml(beachName || '')}<span class="zone-card-zone">${escHtml(zoneName)}</span>${seasonLabel}</div>`;
+
+  // No time-shifting sections → just render the simple grid
+  if (timeShifting.length === 0) {
+    const rows = sectionList.map(([n, s]) => _renderSectionPill(n, s?.rule || 'unknown', s)).join('');
+    return `<div class="zone-card">${header}<div class="zone-sections">${rows}</div></div>`;
+  }
+
+  // Collect distinct (start,end) windows from time-shifting sections
   const winMap = new Map();
-  for (const [, sec] of sectionList) {
-    for (const tw of (sec?.time_windows || [])) {
+  for (const [, sec] of timeShifting) {
+    for (const tw of (sec.time_windows || [])) {
       if (tw.start && tw.end) {
         const key = `${tw.start}|${tw.end}`;
         if (!winMap.has(key)) winMap.set(key, { start: tw.start, end: tw.end });
       }
     }
   }
-  const tabs = Array.from(winMap.values()).sort((a, b) => _parseHHMM(a.start) - _parseHHMM(b.start));
-  const header = `<div class="zone-card-header">🐾 ${escHtml(beachName || '')}<span class="zone-card-zone">${escHtml(zoneName)}</span>${seasonLabel}</div>`;
+  const windows = Array.from(winMap.values()).sort((a, b) => _parseHHMM(a.start) - _parseHHMM(b.start));
+  // Tolerate 5-min gap (23:59 end-of-day convention); add explicit "Other times" otherwise
+  if ((24*60) - _coverageMins(windows) > 5) windows.push({ isOther: true });
 
-  if (tabs.length === 0) {
-    const rows = sectionList.map(([n, s]) => _renderSectionPill(n, s?.rule || 'unknown', s)).join('');
-    return `<div class="zone-card">${header}<div class="zone-sections">${rows}</div></div>`;
-  }
+  // "Always" sections render once above the time rows
+  const alwaysHtml = alwaysOn.length
+    ? `<div class="zone-always">${alwaysOn.map(([n, s]) =>
+         _renderSectionPill(n, s?.rule || 'unknown', s)).join('')}</div>`
+    : '';
 
-  // Tolerate up to 5 min gap (handles 23:59 end-of-day convention)
-  if ((24*60) - _coverageMins(tabs) > 5) tabs.push({ isOther: true });
-  const activeIdx = _pickActiveTab(tabs, currentLocalHour);
-  const tabKey = `b${_ZR_TAB_KEY++}`;
+  // One row per window, in chrono order
+  const isCurrent = (w) => {
+    if (currentLocalHour == null || w.isOther || !w.start || !w.end) return false;
+    const sh = _parseHHMM(w.start) / 60, eh = _parseHHMM(w.end) / 60;
+    return sh <= eh
+      ? (currentLocalHour >= sh && currentLocalHour < eh)
+      : (currentLocalHour >= sh || currentLocalHour < eh);
+  };
+  const matchingCurrent = windows.findIndex(isCurrent);
+  const otherIsCurrent = matchingCurrent === -1
+    && currentLocalHour != null
+    && windows.some(w => w.isOther);
 
-  const tabBtns = tabs.map((t, i) => {
-    const label = t.isOther ? 'Other times' : fmtTimeRange(t.start, t.end);
-    return `<button class="zone-time-tab ${i === activeIdx ? 'active' : ''}"
-              data-zr-time-key="${tabKey}" data-zr-time-tab="${i}">${escHtml(label)}</button>`;
-  }).join('');
-
-  const tabPanes = tabs.map((t, i) => {
-    const rows = sectionList.map(([n, s]) => _renderSectionPill(n, _ruleInTab(s, t), s)).join('');
-    return `<div class="zone-time-pane" data-zr-time-key="${tabKey}" data-zr-time-pane="${i}"
-                 style="${i === activeIdx ? '' : 'display:none;'}">
-              <div class="zone-sections">${rows}</div>
-            </div>`;
+  const rows = windows.map((w, i) => {
+    const label = w.isOther ? 'Other times' : fmtTimeRange(w.start, w.end);
+    const pills = timeShifting.map(([n, s]) => _renderTimePillPair(n, _ruleInTab(s, w))).join('');
+    const cur = (i === matchingCurrent) || (w.isOther && otherIsCurrent);
+    const cls = `zone-time-row${w.isOther ? ' is-other' : ''}${cur ? ' is-current' : ''}`;
+    const nowBadge = cur ? '<span class="zone-now-badge">NOW</span>' : '';
+    return `<div class="${cls}">
+      <span class="zone-time-label">⏰ ${escHtml(label)}${nowBadge}</span>
+      <div class="zone-time-pills">${pills}</div>
+    </div>`;
   }).join('');
 
   return `<div class="zone-card">${header}
-    <div class="zone-time-tabs">${tabBtns}</div>
-    ${tabPanes}
+    ${alwaysHtml}
+    <div class="zone-time-rows">${rows}</div>
   </div>`;
 }
 

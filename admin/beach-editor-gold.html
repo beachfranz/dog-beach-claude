@@ -265,18 +265,41 @@
         </select>
       </div>
       <div class="consensus empty" data-consensus-field="leash_required"></div>
-      <div class="field"><label>off_leash_flag</label>
+      <div class="field"><label>off_leash_flag <span style="color:#94a3b8;font-size:11px;">(legacy — retiring)</span></label>
         <select data-table="dog" data-field="off_leash_flag">
           <option value="">(unchanged)</option>
           <option value="true">true</option>
           <option value="false">false</option>
         </select>
       </div>
+      <div class="hint" style="margin-top:8px;font-weight:600;color:#0f172a;">
+        Binary leash presence (modern source of truth as of 2026-05-07)
+      </div>
+      <div class="row2">
+        <div class="field"><label>has_on_leash</label>
+          <select data-table="dog" data-field="has_on_leash">
+            <option value="">(unchanged)</option>
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+        </div>
+        <div class="field"><label>has_off_leash</label>
+          <select data-table="dog" data-field="has_off_leash">
+            <option value="">(unchanged)</option>
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="consensus empty" data-consensus-field="has_on_leash"></div>
+        <div class="consensus empty" data-consensus-field="has_off_leash"></div>
+      </div>
       <div class="row2">
         <div class="field"><label>dogs_prohibited_start</label><input data-table="dog" data-field="dogs_prohibited_start" type="text" placeholder="HH:MM"></div>
         <div class="field"><label>dogs_prohibited_end</label><input data-table="dog" data-field="dogs_prohibited_end" type="text" placeholder="HH:MM"></div>
       </div>
-      <div class="field"><label>dogs_allowed_areas</label><input data-table="dog" data-field="dogs_allowed_areas" type="text"></div>
+      <div class="field"><label>dogs_allowed_areas <span style="color:#94a3b8;font-size:11px;">(legacy — superseded by zone_rules)</span></label><input data-table="dog" data-field="dogs_allowed_areas" type="text"></div>
       <div class="field"><label>access_rule</label><input data-table="dog" data-field="access_rule" type="text"></div>
       <div class="field"><label>notes</label><textarea data-table="dog" data-field="notes"></textarea></div>
     </div>

@@ -4498,7 +4498,12 @@ function renderFieldTable(b) {
       : null,
   }));
 
-  // Other beach-level consumer fields (no truth side, just informational)
+  // Other beach-level consumer fields (no truth side, just informational).
+  // Note: this page is a static snapshot of the 2026-05-05 audit; the
+  // embedded data predates the binary-leash schema (has_on_leash /
+  // has_off_leash columns added 2026-05-07). Re-running the audit
+  // generator will pick up the new fields automatically; until then,
+  // those cells would be empty.
   const otherFields = [
     ['leash_policy', b.consumer?.leash_policy],
     ['off_leash_flag', b.consumer?.off_leash_flag],

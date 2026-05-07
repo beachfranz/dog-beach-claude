@@ -30,14 +30,16 @@ const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 // zone_rules_updated_at timestamp (server-set when zone_rules changes).
 const EDITABLE_FIELDS = new Set<string>([
   "dogs_allowed",
-  "leash_policy",
-  "off_leash_flag",
+  "leash_policy",        // legacy categorical — retiring in Phase 3 of binary-leash schema migration
+  "off_leash_flag",      // admin-only legacy flag — retiring alongside leash_policy
+  "has_on_leash",        // 2026-05-07: binary presence — modern source of truth
+  "has_off_leash",       // 2026-05-07: binary presence — modern source of truth
   "dogs_prohibited_start",
   "dogs_prohibited_end",
-  "dogs_allowed_areas",
+  "dogs_allowed_areas",  // legacy flat-text per-zone summary — retiring in Phase 3 (zone_rules supersedes)
   "access_rule",
   "notes",
-  "zone_rules",   // jsonb — section-aware policy from the zone-rules-editor UI
+  "zone_rules",          // jsonb — section-aware policy from the zone-rules-editor UI
 ]);
 
 Deno.serve(async (req: Request) => {

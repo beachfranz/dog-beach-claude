@@ -193,7 +193,8 @@ def call_llm(page_text: str, unit_name: str) -> dict:
 
 def fetch_target_units(counties: list[str] | None = None) -> list[dict]:
     """CPAD units that intersect beach_locations and have a park_url.
-    If counties supplied, scope to beach_locations within those counties."""
+    If counties supplied, scope to beach_locations within those counties.
+    cpad_park_url_overrides.park_url (when present) supersedes CPAD source park_url."""
     import subprocess
     if counties:
         county_list = ",".join(f"'{c}'" for c in counties)
@@ -204,10 +205,13 @@ def fetch_target_units(counties: list[str] | None = None) -> list[dict]:
             where c.name in ({county_list})
           ),
           hits as (
-            select distinct cu.unit_id, cu.unit_name, cu.agncy_name, cu.park_url
+            select distinct cu.unit_id, cu.unit_name, cu.agncy_name,
+                   coalesce(o.park_url, cu.park_url) as park_url
             from bl_sc bl
             join public.cpad_units cu on st_intersects(cu.geom, bl.geom)
-            where cu.park_url is not null and cu.park_url <> ''
+            left join public.cpad_park_url_overrides o on o.cpad_unit_id = cu.unit_id
+            where coalesce(o.park_url, cu.park_url) is not null
+              and coalesce(o.park_url, cu.park_url) <> ''
           )
           select unit_id, unit_name, agncy_name, park_url
           from hits
@@ -216,10 +220,13 @@ def fetch_target_units(counties: list[str] | None = None) -> list[dict]:
     else:
         sql = """
           with hits as (
-            select distinct cu.unit_id, cu.unit_name, cu.agncy_name, cu.park_url
+            select distinct cu.unit_id, cu.unit_name, cu.agncy_name,
+                   coalesce(o.park_url, cu.park_url) as park_url
             from beach_locations bl
             join cpad_units cu on st_intersects(cu.geom, bl.geom)
-            where cu.park_url is not null and cu.park_url <> ''
+            left join public.cpad_park_url_overrides o on o.cpad_unit_id = cu.unit_id
+            where coalesce(o.park_url, cu.park_url) is not null
+              and coalesce(o.park_url, cu.park_url) <> ''
           )
           select unit_id, unit_name, agncy_name, park_url
           from hits
@@ -273,6 +280,39 @@ def db_upsert(rows: list[dict]) -> None:
                 print(f"    SKIP unit {row.get('cpad_unit_id')}: {rr.status_code} {rr.text[:200]}", file=sys.stderr)
 
 
+def db_upsert_exceptions(unit_id: int, unit_name: str | None, url: str,
+                         exceptions: list[dict] | None) -> int:
+    """Write LLM-extracted per-named-beach exceptions to cpad_unit_policy_exceptions.
+    Returns count of rows attempted. Idempotent on (cpad_unit_id, beach_name)."""
+    if not exceptions: return 0
+    rows = []
+    for ex in exceptions:
+        if not isinstance(ex, dict): continue
+        bname = (ex.get("beach_name") or "").strip()
+        rule  = (ex.get("rule") or "").strip().lower()
+        if not bname or rule not in ("yes","no","restricted","mixed","seasonal","unknown"):
+            continue
+        rows.append({
+            "cpad_unit_id": unit_id,
+            "unit_name":    unit_name,
+            "beach_name":   bname[:200],
+            "rule":         rule,
+            "source_quote": (ex.get("source_quote") or "")[:1000] or None,
+            "source_url":   url,
+        })
+    if not rows: return 0
+    headers = {"apikey": SERVICE_KEY, "Authorization": f"Bearer {SERVICE_KEY}",
+               "Content-Type": "application/json",
+               "Prefer": "resolution=merge-duplicates"}
+    r = httpx.post(f"{SUPABASE_URL}/rest/v1/cpad_unit_policy_exceptions",
+                   headers=headers, json=rows, timeout=30,
+                   params={"on_conflict": "cpad_unit_id,beach_name"})
+    if r.status_code >= 400:
+        print(f"    EXC upsert {r.status_code}: {r.text[:200]}", file=sys.stderr)
+        return 0
+    return len(rows)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0)
@@ -281,10 +321,20 @@ def main():
                     help="comma-separated, e.g. 'Los Angeles,Orange,San Diego'")
     ap.add_argument("--retry-failed-only", action="store_true",
                     help="only re-process rows where prior pass returned fetch_failed or dogs_allowed='unknown'; uses Playwright fallback")
+    ap.add_argument("--unit-ids", type=str, default=None,
+                    help="comma-separated cpad unit_ids to scope the run; implies --refresh for those ids")
     args = ap.parse_args()
+
+    unit_id_filter = None
+    if args.unit_ids:
+        unit_id_filter = {int(s.strip()) for s in args.unit_ids.split(",") if s.strip()}
 
     counties = [c.strip() for c in args.counties.split(",")] if args.counties else None
     units = fetch_target_units(counties=counties)
+    if unit_id_filter:
+        before = len(units)
+        units = [u for u in units if u["unit_id"] in unit_id_filter]
+        print(f"--unit-ids: kept {len(units)} of {before}")
     print(f"Loaded {len(units)} CPAD units (805 ∩ has park_url)")
 
     # Always exclude rows already populated by the CDPR master-table parse —
@@ -312,6 +362,9 @@ def main():
         before = len(units)
         units = [u for u in units if u["unit_id"] in retry_ids]
         print(f"--retry-failed-only: kept {len(units)} of {before} (rows that previously failed or returned unknown)")
+    elif unit_id_filter:
+        # --unit-ids implies --refresh for those ids; skip the already-extracted filter
+        pass
     elif not args.refresh:
         existing = db_existing_unit_ids()
         before = len(units)
@@ -356,7 +409,12 @@ def main():
 
         cls = call_llm(text, u["unit_name"] or "")
         rule = (cls.get("default_rule") or "unknown").lower()
-        if rule not in ("yes","no","restricted","unknown"):
+        # Normalize retired vocab: 'restricted' folded into 'mixed' (see
+        # project_dogs_allowed_audit_2026-05-05). LLM prompt still emits
+        # 'restricted'; consumer table enum is yes|no|mixed|unknown.
+        if rule == "restricted":
+            rule = "mixed"
+        if rule not in ("yes","no","mixed","unknown"):
             rule = "unknown"
         conf = float(cls.get("confidence") or 0)
         leash = cls.get("leash_required")
@@ -380,7 +438,6 @@ def main():
             "dogs_allowed": rule,
             "default_rule": rule,
             "leash_required": leash,
-            "exceptions": cls.get("exceptions") or None,
             "time_windows": cls.get("time_windows") or None,
             "seasonal_rules": cls.get("seasonal_rules") or None,
             "source_quote": (cls.get("source_quote") or "")[:1000],
@@ -396,6 +453,11 @@ def main():
             "designated_dog_zones": (cls.get("designated_dog_zones") or "").strip() or None,
             "prohibited_areas":     (cls.get("prohibited_areas") or "").strip() or None,
         })
+        # Fan out per-named-beach overrides to cpad_unit_policy_exceptions
+        n_exc = db_upsert_exceptions(u["unit_id"], u["unit_name"], url,
+                                     cls.get("exceptions"))
+        if n_exc:
+            print(f"      +{n_exc} exception(s) -> cpad_unit_policy_exceptions")
         if len(batch) >= 5:
             db_upsert(batch); batch.clear()
         time.sleep(SLEEP_S)

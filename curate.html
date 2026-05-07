@@ -145,21 +145,45 @@
   #trash-zone.visible { display: flex; pointer-events: auto; }
   #trash-zone.over { background: var(--red); color: #fff; transform: scale(1.1); }
 
-  .save-bar {
-    position: sticky; bottom: 0;
-    background: var(--card); border-top: 1px solid var(--border);
-    padding: 12px 16px;
-    display: flex; align-items: center; gap: 12px;
-    margin: 16px -16px -16px;
+  /* County header — second sticky bar, prominent county name + count */
+  .county-bar {
+    position: sticky; top: 49px; z-index: 90;
+    background: #f1f5f9; border-bottom: 1px solid var(--border);
+    padding: 10px 16px;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   }
-  .save-bar .summary { flex: 1; font-size: 13px; color: var(--muted); }
-  .save-bar button {
-    padding: 10px 16px; font-size: 14px; font-weight: 600;
-    border: 0; border-radius: 6px; cursor: pointer;
+  .county-name { font-size: 18px; font-weight: 700; color: var(--text); }
+  .county-count {
+    font-size: 13px; color: var(--muted);
+    padding: 3px 12px; background: white; border: 1px solid var(--border);
+    border-radius: 999px;
   }
-  .save-bar button.save { background: var(--green); color: white; }
-  .save-bar button.next { background: var(--accent); color: white; }
-  .save-bar button[disabled] { opacity: 0.4; cursor: not-allowed; }
+  .county-count.done { color: var(--green); border-color: var(--green); }
+  .county-bar .save {
+    margin-left: auto;
+    font-family: inherit; font-size: 14px; font-weight: 600;
+    padding: 8px 18px; border-radius: 6px; border: 0;
+    background: var(--green); color: white; cursor: pointer;
+  }
+  .county-bar .save[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+  /* Pending-jump buttons — between beach header and photo grid */
+  .pending-row {
+    display: flex; gap: 10px; margin: 0 0 14px;
+  }
+  .pending-row button {
+    flex: 1;
+    padding: 8px 12px; font-size: 13px; font-weight: 600;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--card); color: var(--text); cursor: pointer;
+  }
+  .pending-row button:hover { background: var(--bg); }
+  .pending-row button[disabled] { opacity: 0.3; cursor: not-allowed; }
+
+  .save-summary {
+    font-size: 13px; color: var(--muted); margin: 14px 0 0;
+    text-align: center;
+  }
 
   .empty {
     text-align: center; padding: 60px 20px; color: var(--muted);
@@ -184,11 +208,15 @@
   <div class="bar-title">Photo curator</div>
   <select id="sel-county"></select>
   <select id="sel-beach"></select>
-  <button id="btn-prev-pending" type="button" title="Jump to previous pending beach in county">‹ Pending</button>
-  <button id="btn-next-pending" type="button" title="Jump to next pending beach in county">Pending ›</button>
-  <span class="progress" id="progress"></span>
-  <button id="btn-logout" type="button" class="danger">Logout</button>
+  <button id="btn-logout" type="button" class="danger" style="margin-left:auto">Logout</button>
 </header>
+
+<!-- County header bar — name, completion count, save button -->
+<div class="county-bar" style="display:none" id="county-bar">
+  <div class="county-name" id="county-name">—</div>
+  <div class="county-count" id="county-count"></div>
+  <button id="btn-save" class="save" type="button">Save changes</button>
+</div>
 
 <main id="app" style="display:none">
   <div class="header-row">
@@ -196,17 +224,13 @@
       <h2 class="beach-name" id="beach-name">—</h2>
       <div class="beach-sub" id="beach-sub"></div>
     </div>
-    <div>
-      <label style="font-size:12px;color:var(--muted);font-weight:600">Beach-level match quality:</label>
-      <select id="beach-match" style="font-size:13px;padding:4px 8px"></select>
-    </div>
+  </div>
+  <div class="pending-row">
+    <button id="btn-prev-pending" type="button">‹ Previous pending</button>
+    <button id="btn-next-pending" type="button">Next pending ›</button>
   </div>
   <div class="photo-grid" id="photo-grid"></div>
-  <div class="save-bar">
-    <div class="summary" id="save-summary"></div>
-    <button id="btn-save" class="save" type="button">Save county changes</button>
-    <button id="btn-next" class="next" type="button">Next beach in county →</button>
-  </div>
+  <div class="save-summary" id="save-summary"></div>
 </main>
 
 <div id="trash-zone">🗑</div>
@@ -275,6 +299,7 @@ document.getElementById('btn-logout').addEventListener('click', () => {
   loginBox.style.display = '';
   document.getElementById('app').style.display = 'none';
   document.getElementById('app-bar').style.display = 'none';
+  document.getElementById('county-bar').style.display = 'none';
 });
 
 if (token) showApp();
@@ -282,6 +307,7 @@ if (token) showApp();
 async function showApp() {
   loginBox.style.display = 'none';
   document.getElementById('app-bar').style.display = '';
+  document.getElementById('county-bar').style.display = '';
   document.getElementById('app').style.display = '';
   await loadProgress();
 }
@@ -345,11 +371,15 @@ function renderBeachDropdown() {
 
 function updateProgressLabel() {
   if (!currentCounty) {
-    document.getElementById('progress').textContent = '';
+    document.getElementById('county-name').textContent = '—';
+    document.getElementById('county-count').textContent = '';
     return;
   }
-  document.getElementById('progress').textContent =
-    `${currentCounty.curated}/${currentCounty.with_photos} done in ${currentCounty.county}`;
+  document.getElementById('county-name').textContent = currentCounty.county;
+  const countEl = document.getElementById('county-count');
+  countEl.textContent = `${currentCounty.curated}/${currentCounty.with_photos} done`;
+  countEl.classList.toggle('done',
+    currentCounty.curated >= currentCounty.with_photos && currentCounty.with_photos > 0);
 }
 
 document.getElementById('btn-next-pending').onclick = () => jumpPending(+1);
@@ -390,16 +420,6 @@ function renderBeach() {
   document.getElementById('beach-name').textContent = beachData.beach.display_name;
   document.getElementById('beach-sub').textContent =
     `fid ${beachData.beach.fid} · ${beachData.beach.county_name}, ${beachData.beach.state}`;
-
-  // Beach-level match dropdown
-  const bm = document.getElementById('beach-match');
-  bm.innerHTML = '<option value="">— select —</option>';
-  for (const o of MATCH_OPTIONS) {
-    const opt = document.createElement('option');
-    opt.value = o.v; opt.textContent = o.label;
-    bm.appendChild(opt);
-  }
-  bm.value = beachData.curation_status?.match_quality || '';
 
   const grid = document.getElementById('photo-grid');
   if (!beachData.photos.length) {
@@ -559,22 +579,21 @@ function updateSummary() {
 }
 
 document.getElementById('btn-save').onclick = saveBeach;
-document.getElementById('btn-next').onclick = nextBeach;
 
 async function saveBeach() {
   if (!beachData) return;
-  // Build photos[] payload — every photo gets a sort_order + keep + match_quality
+  // Build photos[] payload — every photo gets sort_order + keep + match_quality.
+  // sort_order is set by current grid position (left-to-right show order).
   const photos = beachData.photos.map((p, i) => {
     const dirty = dirtyMap.get(p.id) || {};
     const sel = document.querySelector(`.match-select[data-id="${p.id}"]`);
     return {
       id: p.id,
-      sort_order: dirty.sort_order != null ? dirty.sort_order : (p.sort_order || (100 + i)),
+      sort_order: 100 + i,  // canonical: current grid order = show order
       keep: !dirty.deleted,
       match_quality: sel?.value || p.match_quality || p.default_match_quality || null,
     };
   });
-  const beachMatch = document.getElementById('beach-match').value || null;
   const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-curate-beach`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY,
@@ -582,7 +601,6 @@ async function saveBeach() {
     body: JSON.stringify({
       fid: beachData.beach.fid,
       photos,
-      match_quality: beachMatch,
       curated_by: curatorUser,
     }),
   });
@@ -591,21 +609,21 @@ async function saveBeach() {
     alert(`Save failed: ${j.error || res.status}`);
     return;
   }
-  // Refresh progress + reload current beach state
+  // Refresh progress, then advance to next pending beach in county.
   await loadProgress();
-  await loadBeach(currentBeach);
-  alert('Saved.');
-}
-
-function nextBeach() {
-  if (!currentCounty || !currentBeach) return;
   const beaches = currentCounty.beaches.filter(b => b.photo_count > 0);
   const idx = beaches.findIndex(b => b.fid === currentBeach);
-  if (idx < 0 || idx >= beaches.length - 1) {
-    alert('Last beach in county. Save then pick another county.');
-    return;
+  // Find next pending after current
+  for (let i = idx + 1; i < beaches.length; i++) {
+    if (!beaches[i].is_curated) { loadBeach(beaches[i].fid); return; }
   }
-  loadBeach(beaches[idx + 1].fid);
+  // None after; check before
+  for (let i = 0; i < idx; i++) {
+    if (!beaches[i].is_curated) { loadBeach(beaches[i].fid); return; }
+  }
+  // All done in county
+  await loadBeach(currentBeach);  // refresh current
+  alert(`County complete! ${currentCounty.county}: all beaches curated.`);
 }
 
 function escHtml(s) {

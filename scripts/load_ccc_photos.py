@@ -89,10 +89,11 @@ def replace_ccc_for_fids(fids):
 
     # 2. Bulk-insert via the supabase CLI db-query (we don't have a single
     # RPC for this so we run the SQL directly)
-    # Filter to access points actually tagged as a beach (sandy or rocky
-    # shore). Drops parking lots, viewpoints, museums (Adamson House
-    # pattern). Coverage drops 783 -> 523 photos catalog-wide but each
-    # one is a real beach.
+    # Loosened 2026-05-07: 400m -> 600m radius, dropped sandy/rocky
+    # filter. The curator validates each photo by hand now, so we
+    # pull more candidates (including some parking-lot/museum photos
+    # that the curator can quickly trash). The sandy/rocky tag is
+    # still passed through as source_meta so the curator can see it.
     sql = f"""
     insert into public.beach_photos
       (arena_group_id, source, external_id, image_url, thumb_url,
@@ -114,13 +115,12 @@ def replace_ccc_for_fids(fids):
                          'sandy_beach', ccc.sandy_beach, 'rocky_shore', ccc.rocky_shore)
     from public.beaches_gold g
     join public.ccc_access_points ccc
-      on st_dwithin(g.geom::geography, ccc.geom::geography, 400)
+      on st_dwithin(g.geom::geography, ccc.geom::geography, 600)
     cross join lateral (
       values (1, ccc.photo_1), (2, ccc.photo_2), (3, ccc.photo_3), (4, ccc.photo_4)
     ) as p(photo_n, photo_url)
     where g.fid in ({in_clause})
       and length(trim(p.photo_url)) > 10
-      and (ccc.sandy_beach = 'Yes' or ccc.rocky_shore = 'Yes')
     on conflict (arena_group_id, source, external_id) do nothing
     returning arena_group_id;
     """

@@ -162,17 +162,31 @@ Deno.serve(async (req: Request) => {
       // not suggest off-leash play if leash is required, must not
       // suggest sand/wave play if dogs aren't allowed on sand, etc.
       let metadata: Record<string, unknown> | null = null;
+      let dogPolicy: Record<string, unknown> | null = null;
       if (beach.arena_group_id) {
-        const { data: meta } = await supabase
-          .from("arena_beach_metadata")
-          .select(
-            "dogs_allowed, dogs_leash_required, dogs_off_leash_area, " +
-            "dogs_seasonal_restrictions, dogs_time_restrictions, " +
-            "dogs_policy_notes, dogs_allowed_areas, hours_text"
-          )
-          .eq("arena_group_id", beach.arena_group_id)
-          .maybeSingle();
-        metadata = meta ?? null;
+        const [metaRes, dpRes] = await Promise.all([
+          supabase
+            .from("arena_beach_metadata")
+            .select(
+              "dogs_allowed, dogs_leash_required, dogs_off_leash_area, " +
+              "dogs_seasonal_restrictions, dogs_time_restrictions, " +
+              "dogs_policy_notes, dogs_allowed_areas, hours_text"
+            )
+            .eq("arena_group_id", beach.arena_group_id)
+            .maybeSingle(),
+          // Modern consensus-driven dog policy. Prefer over legacy
+          // metadata when present (post-2026-05-07 binary-leash schema).
+          supabase
+            .from("beach_dog_policy")
+            .select(
+              "dogs_allowed, leash_policy, has_on_leash, has_off_leash, " +
+              "off_leash_flag, dogs_allowed_areas, zone_rules"
+            )
+            .eq("arena_group_id", beach.arena_group_id)
+            .maybeSingle(),
+        ]);
+        metadata = metaRes.data ?? null;
+        dogPolicy = dpRes.data ?? null;
       }
 
       // Get current local date + hour in the beach's timezone
@@ -219,7 +233,7 @@ Deno.serve(async (req: Request) => {
         h.local_date !== filterDate || Number(h.local_hour) >= currentLocalHour
       );
 
-      systemPrompt = buildSystemPrompt(beach, days ?? [], remainingHours, currentTimeLabel, local_date ?? null, metadata);
+      systemPrompt = buildSystemPrompt(beach, days ?? [], remainingHours, currentTimeLabel, local_date ?? null, metadata, dogPolicy);
     }
 
     const answer = await callAnthropic(systemPrompt, conversation_history, question);
@@ -247,6 +261,7 @@ function buildSystemPrompt(
   currentTimeLabel?: string,
   scopedDate: string | null = null,
   metadata: Record<string, unknown> | null = null,
+  dogPolicy: Record<string, unknown> | null = null,
 ): string {
   const hoursByDate = new Map<string, Record<string, unknown>[]>();
   for (const h of hours) {
@@ -345,48 +360,56 @@ function buildSystemPrompt(
 ${hourLines || "    (none)"}`;
   }).join("\n");
 
-  // ── Dog policy block (extracted via arena_beach_metadata) ───────────
-  // Scout MUST respect these rules. They drive activity recommendations:
-  // if dogs aren't allowed on sand, don't suggest fetch/wave play; if
-  // leash required, don't suggest letting dog run free; for mixed_by_zone,
-  // direct advice toward the off-leash zone specifically.
+  // ── Dog policy block ─────────────────────────────────────────────────
+  // Scout MUST respect these rules. They drive activity recommendations.
+  // Prefers beach_dog_policy (consensus-driven, with binary has_on_leash /
+  // has_off_leash from the 2026-05-07 schema migration) when present.
+  // Falls back to legacy arena_beach_metadata extraction for beaches not
+  // yet promoted.
   const dogPolicyLines: string[] = [];
   let dogAdviceConstraints = "";
-  if (metadata) {
-    const dogsAllowed   = (metadata.dogs_allowed as string | null) || null;
-    const leashRequired = (metadata.dogs_leash_required as string | null) || null;
-    const offLeashArea  = (metadata.dogs_off_leash_area as string | null) || null;
-    const seasonal      = (metadata.dogs_seasonal_restrictions as string | null) || null;
-    const timeRules     = (metadata.dogs_time_restrictions as string | null) || null;
-    const allowedAreas  = (metadata.dogs_allowed_areas as string | null) || null;
-    const policyNotes   = (metadata.dogs_policy_notes as string | null) || null;
 
-    if (dogsAllowed)   dogPolicyLines.push(`- dogs_allowed: ${dogsAllowed}`);
-    if (leashRequired) dogPolicyLines.push(`- leash: ${leashRequired}`);
-    if (offLeashArea)  dogPolicyLines.push(`- off_leash_area: ${trim(offLeashArea, 200)}`);
-    if (allowedAreas)  dogPolicyLines.push(`- allowed_areas: ${trim(allowedAreas, 200)}`);
-    if (seasonal)      dogPolicyLines.push(`- seasonal: ${trim(seasonal, 200)}`);
-    if (timeRules)     dogPolicyLines.push(`- time_rules: ${trim(timeRules, 200)}`);
-    if (policyNotes)   dogPolicyLines.push(`- notes: ${trim(policyNotes, 400)}`);
+  // Pull from modern source first, fall back to legacy
+  const modern = dogPolicy ?? null;
+  const dogsAllowed = (modern?.dogs_allowed as string | null)
+    ?? (metadata?.dogs_allowed as string | null) ?? null;
+  const hasOnLeash  = modern && typeof modern.has_on_leash  === "boolean" ? modern.has_on_leash  as boolean : null;
+  const hasOffLeash = modern && typeof modern.has_off_leash === "boolean" ? modern.has_off_leash as boolean : null;
+  const allowedAreas = (modern?.dogs_allowed_areas as string | null)
+    ?? (metadata?.dogs_allowed_areas as string | null) ?? null;
+  const seasonal     = (metadata?.dogs_seasonal_restrictions as string | null) || null;
+  const timeRules    = (metadata?.dogs_time_restrictions as string | null) || null;
+  const policyNotes  = (metadata?.dogs_policy_notes as string | null) || null;
+  const offLeashArea = (metadata?.dogs_off_leash_area as string | null) || null;
 
-    // Translate the structured fields into hard activity constraints
-    const constraints: string[] = [];
-    if (dogsAllowed === "no") {
-      constraints.push("Dogs are NOT allowed on the sand at this beach. Do NOT suggest fetch, swim, or any sand/wave activity. If there is an allowed_area (parking lot, multi-use trail), point the user there and make the best of it. If no allowed area exists, gently say this isn't a dog beach today.");
-    } else if (leashRequired === "required") {
-      constraints.push("Leash is REQUIRED. Never suggest letting the dog run free, off-leash fetch, or unrestrained swimming. Suggest leash-friendly activities: walks along the waterline, on-leash swim, sniff time on the dunes.");
-    } else if (leashRequired === "mixed_by_zone") {
-      constraints.push("Leash rules vary by zone. Off-leash activity is ONLY OK in the designated zone (see allowed_areas / off_leash_area / notes). Outside that zone the dog must be leashed. Always direct the user to the specific off-leash area when suggesting active play.");
-    } else if (leashRequired === "varies_by_time") {
-      constraints.push("Leash rules vary by time of day or season. Check seasonal/time_rules carefully before suggesting off-leash activity. When in doubt or outside the off-leash window, default to leashed advice.");
-    }
-    if (dogsAllowed === "seasonal" || seasonal) {
-      constraints.push("Seasonal restrictions apply. Confirm the current date is within the dog-friendly window before recommending off-leash play; if outside the window, treat as leash-required or no-dogs as appropriate.");
-    }
-    dogAdviceConstraints = constraints.length
-      ? `\nDOG POLICY CONSTRAINTS (HARD RULES — never violate):\n${constraints.map(c => `- ${c}`).join("\n")}\n`
-      : "";
+  if (dogsAllowed)              dogPolicyLines.push(`- dogs_allowed: ${dogsAllowed}`);
+  if (hasOnLeash !== null)      dogPolicyLines.push(`- has_on_leash zones: ${hasOnLeash}`);
+  if (hasOffLeash !== null)     dogPolicyLines.push(`- has_off_leash zones: ${hasOffLeash}`);
+  if (offLeashArea)             dogPolicyLines.push(`- off_leash_area: ${trim(offLeashArea, 200)}`);
+  if (allowedAreas)             dogPolicyLines.push(`- allowed_areas: ${trim(allowedAreas, 200)}`);
+  if (seasonal)                 dogPolicyLines.push(`- seasonal: ${trim(seasonal, 200)}`);
+  if (timeRules)                dogPolicyLines.push(`- time_rules: ${trim(timeRules, 200)}`);
+  if (policyNotes)              dogPolicyLines.push(`- notes: ${trim(policyNotes, 400)}`);
+
+  // Activity constraints, derived from the binary presence flags.
+  const constraints: string[] = [];
+  if (dogsAllowed === "no" || (hasOnLeash === false && hasOffLeash === false)) {
+    constraints.push("Dogs are NOT allowed at this beach. Do NOT suggest fetch, swim, or any sand/wave activity. If there is an allowed_area (parking lot, multi-use trail), point the user there. If no allowed area exists, gently say this isn't a dog beach today.");
+  } else if (hasOnLeash === true && hasOffLeash === true) {
+    constraints.push("This beach has BOTH on-leash zones AND off-leash zones. Off-leash activity (fetch, swim, run) is ONLY OK in the designated off-leash area — see allowed_areas / off_leash_area / zone_rules / notes. Outside that area the dog MUST be leashed. Always direct the user to the specific off-leash zone when suggesting active play, and remind them about the on-leash zones (paths, parking, picnic) if relevant.");
+  } else if (hasOffLeash === true && hasOnLeash !== true) {
+    constraints.push("This is an off-leash beach. The dog can run free, fetch in the waves, swim. Still suggest a leash for the walk in/out of the parking area if applicable.");
+  } else if (hasOnLeash === true && hasOffLeash !== true) {
+    constraints.push("Leash is REQUIRED at this beach. Never suggest letting the dog run free, off-leash fetch, or unrestrained swimming. Suggest leash-friendly activities: walks along the waterline, on-leash swim, sniff time on the dunes.");
+  } else if (hasOnLeash === null && hasOffLeash === null && dogsAllowed === "yes") {
+    constraints.push("Policy specifics aren't fully extracted for this beach. Default to leashed advice and recommend the user verify on-site signage before any off-leash activity.");
   }
+  if (dogsAllowed === "seasonal" || seasonal) {
+    constraints.push("Seasonal restrictions apply. Confirm the current date is within the dog-friendly window before recommending off-leash play; if outside the window, treat as leash-required or no-dogs as appropriate.");
+  }
+  dogAdviceConstraints = constraints.length
+    ? `\nDOG POLICY CONSTRAINTS (HARD RULES — never violate):\n${constraints.map(c => `- ${c}`).join("\n")}\n`
+    : "";
   const dogPolicyBlock = dogPolicyLines.length
     ? `\nDOG POLICY (extracted from official source):\n${dogPolicyLines.join("\n")}\n`
     : "";

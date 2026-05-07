@@ -2,6 +2,8 @@
 // 'null' covers local file:// development (browser sends Origin: null).
 const ALLOWED_ORIGINS = new Set([
   'https://beachfranz.github.io',
+  'https://dogbea.ch',
+  'https://www.dogbea.ch',
   'null',
 ]);
 

@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beach photo curator</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f8fafc; --card: #fff; --text: #0f2742; --muted: #64748b;
+    --border: #e2e8f0; --accent: #1d4ed8; --green: #15803d; --red: #b91c1c;
+    --amber: #b45309;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'DM Sans', system-ui, sans-serif;
+         background: var(--bg); color: var(--text); }
+  header.bar {
+    padding: 12px 16px; background: #0f2742; color: #fff;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    position: sticky; top: 0; z-index: 100;
+  }
+  .bar-title { font-weight: 700; font-size: 15px; }
+  .bar select {
+    font-family: inherit; font-size: 13px; padding: 6px 10px;
+    border-radius: 6px; border: 1px solid #1e3a5f;
+    background: #1e293b; color: #fff; min-width: 220px;
+  }
+  .bar .progress { font-size: 12px; opacity: 0.7; margin-left: auto; }
+  .bar button {
+    font-family: inherit; font-size: 13px; padding: 6px 12px;
+    border-radius: 6px; border: 0; background: var(--accent); color: #fff;
+    cursor: pointer; font-weight: 600;
+  }
+  .bar button[disabled] { opacity: 0.4; cursor: not-allowed; }
+  .bar button.danger { background: var(--red); }
+  .checkmark { color: #4ade80; }
+
+  /* Login screen */
+  #login {
+    max-width: 360px; margin: 80px auto; padding: 24px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  #login h1 { margin: 0 0 16px; font-size: 18px; }
+  #login label {
+    display: block; font-size: 12px; font-weight: 600;
+    color: var(--muted); margin: 12px 0 4px;
+  }
+  #login input {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: 6px; font-family: inherit; font-size: 14px;
+  }
+  #login button {
+    margin-top: 16px; width: 100%; padding: 10px;
+    background: var(--accent); color: white; border: 0;
+    border-radius: 6px; font-weight: 600; cursor: pointer;
+  }
+  #login .err {
+    color: var(--red); font-size: 13px; margin-top: 12px; min-height: 18px;
+  }
+
+  /* Main UI */
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  .header-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 16px;
+  }
+  .beach-name { font-size: 22px; font-weight: 700; margin: 0; }
+  .beach-sub { font-size: 13px; color: var(--muted); }
+
+  .photo-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 14px;
+  }
+  .photo-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden;
+    cursor: grab; user-select: none;
+    transition: opacity 0.15s, transform 0.15s, box-shadow 0.15s;
+  }
+  .photo-card.dragging { opacity: 0.4; }
+  .photo-card.drop-target { box-shadow: 0 0 0 3px var(--accent); }
+  .photo-card.deleted {
+    opacity: 0.35; background: #fee; border-color: #fcc;
+  }
+  .photo-card.deleted::after {
+    content: "TRASHED — click restore"; display: block;
+    text-align: center; padding: 6px; color: var(--red);
+    font-size: 11px; font-weight: 700;
+  }
+  .photo-card img {
+    width: 100%; height: 180px; object-fit: cover; display: block;
+    background: #1e293b;
+    pointer-events: none; /* let drag pass through */
+  }
+  .photo-meta { padding: 10px 12px; }
+  .photo-source {
+    display: inline-block; font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 2px 6px; border-radius: 4px;
+    background: rgba(0,0,0,0.06); color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .photo-attribution { font-size: 11px; color: var(--muted); line-height: 1.3; margin-bottom: 8px; }
+  .photo-access { font-size: 12px; color: var(--text); margin-bottom: 8px; }
+  .photo-access strong { color: var(--accent); }
+  .match-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 0;
+  }
+  .match-row label { font-size: 11px; font-weight: 600; color: var(--muted); }
+  .match-row select {
+    flex: 1; padding: 4px 8px; font-size: 12px;
+    border-radius: 6px; border: 1px solid var(--border);
+    background: var(--card); color: var(--text);
+  }
+  .match-row select.exact          { color: var(--green); font-weight: 700; }
+  .match-row select.very_likely    { color: #15803d; }
+  .match-row select.somewhat_likely{ color: var(--amber); }
+  .match-row select.unlikely       { color: #d97706; }
+  .match-row select.wtf            { color: var(--red); font-weight: 700; }
+  .photo-actions {
+    display: flex; gap: 6px; margin-top: 6px;
+  }
+  .photo-actions button {
+    flex: 1; padding: 6px 8px; font-size: 11px;
+    border-radius: 6px; border: 1px solid var(--border);
+    background: var(--card); cursor: pointer;
+  }
+  .photo-actions button.trash:hover { background: #fee; border-color: var(--red); color: var(--red); }
+  .photo-actions button.restore:hover { background: #efe; border-color: var(--green); color: var(--green); }
+
+  /* Trash zone — fixed bottom-right; show when dragging */
+  #trash-zone {
+    position: fixed; right: 24px; bottom: 24px;
+    width: 80px; height: 80px;
+    border-radius: 12px;
+    background: #fee; border: 2px dashed var(--red);
+    display: none;
+    align-items: center; justify-content: center;
+    color: var(--red); font-size: 28px;
+    z-index: 50; pointer-events: none;
+    transition: transform 0.15s, background 0.15s;
+  }
+  #trash-zone.visible { display: flex; pointer-events: auto; }
+  #trash-zone.over { background: var(--red); color: #fff; transform: scale(1.1); }
+
+  .save-bar {
+    position: sticky; bottom: 0;
+    background: var(--card); border-top: 1px solid var(--border);
+    padding: 12px 16px;
+    display: flex; align-items: center; gap: 12px;
+    margin: 16px -16px -16px;
+  }
+  .save-bar .summary { flex: 1; font-size: 13px; color: var(--muted); }
+  .save-bar button {
+    padding: 10px 16px; font-size: 14px; font-weight: 600;
+    border: 0; border-radius: 6px; cursor: pointer;
+  }
+  .save-bar button.save { background: var(--green); color: white; }
+  .save-bar button.next { background: var(--accent); color: white; }
+  .save-bar button[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+  .empty {
+    text-align: center; padding: 60px 20px; color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="login">
+  <h1>Beach photo curator</h1>
+  <label for="u">Username</label>
+  <input id="u" autocomplete="username">
+  <label for="p">Password</label>
+  <input id="p" type="password" autocomplete="current-password">
+  <button id="login-btn" type="button">Sign in</button>
+  <div class="err" id="login-err"></div>
+</div>
+
+<!-- App (hidden until logged in) -->
+<header class="bar" style="display:none" id="app-bar">
+  <div class="bar-title">Photo curator</div>
+  <select id="sel-county"></select>
+  <select id="sel-beach"></select>
+  <button id="btn-prev-pending" type="button" title="Jump to previous pending beach in county">‹ Pending</button>
+  <button id="btn-next-pending" type="button" title="Jump to next pending beach in county">Pending ›</button>
+  <span class="progress" id="progress"></span>
+  <button id="btn-logout" type="button" class="danger">Logout</button>
+</header>
+
+<main id="app" style="display:none">
+  <div class="header-row">
+    <div>
+      <h2 class="beach-name" id="beach-name">—</h2>
+      <div class="beach-sub" id="beach-sub"></div>
+    </div>
+    <div>
+      <label style="font-size:12px;color:var(--muted);font-weight:600">Beach-level match quality:</label>
+      <select id="beach-match" style="font-size:13px;padding:4px 8px"></select>
+    </div>
+  </div>
+  <div class="photo-grid" id="photo-grid"></div>
+  <div class="save-bar">
+    <div class="summary" id="save-summary"></div>
+    <button id="btn-save" class="save" type="button">Save county changes</button>
+    <button id="btn-next" class="next" type="button">Next beach in county →</button>
+  </div>
+</main>
+
+<div id="trash-zone">🗑</div>
+
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+const MATCH_OPTIONS = [
+  { v:'exact',           label:'Exact' },
+  { v:'very_likely',     label:'Very likely' },
+  { v:'somewhat_likely', label:'Somewhat likely' },
+  { v:'unlikely',        label:'Unlikely' },
+  { v:'wtf',             label:'WTF!' },
+];
+
+const SS_TOKEN = 'curator_token';
+const SS_USER  = 'curator_username';
+let token = sessionStorage.getItem(SS_TOKEN);
+let curatorUser = sessionStorage.getItem(SS_USER) || 'curator';
+let progress = null;        // get_curation_progress() result
+let currentCounty = null;
+let currentBeach = null;
+let beachData = null;       // { beach, photos, curation_status }
+let dirtyMap = new Map();   // photoId -> { sort_order, deleted, match_quality }
+let dragSrcId = null;
+
+// ─── Login ──────────────────────────────────────────────────────────
+const loginBox = document.getElementById('login');
+const errEl    = document.getElementById('login-err');
+document.getElementById('login-btn').addEventListener('click', login);
+document.getElementById('p').addEventListener('keydown', e => { if (e.key==='Enter') login(); });
+
+async function login() {
+  errEl.textContent = '';
+  const u = document.getElementById('u').value.trim();
+  const p = document.getElementById('p').value;
+  if (!u || !p) { errEl.textContent = 'Both fields required.'; return; }
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/verify-curator-login`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY,
+                 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: u, password: p }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(()=>({error:'login failed'}));
+      errEl.textContent = j.error || `HTTP ${res.status}`;
+      return;
+    }
+    const { token: t } = await res.json();
+    token = t;
+    curatorUser = u;
+    sessionStorage.setItem(SS_TOKEN, t);
+    sessionStorage.setItem(SS_USER, u);
+    showApp();
+  } catch (e) {
+    errEl.textContent = String(e);
+  }
+}
+
+document.getElementById('btn-logout').addEventListener('click', () => {
+  sessionStorage.removeItem(SS_TOKEN);
+  sessionStorage.removeItem(SS_USER);
+  token = null;
+  loginBox.style.display = '';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('app-bar').style.display = 'none';
+});
+
+if (token) showApp();
+
+async function showApp() {
+  loginBox.style.display = 'none';
+  document.getElementById('app-bar').style.display = '';
+  document.getElementById('app').style.display = '';
+  await loadProgress();
+}
+
+// ─── Load curation progress ─────────────────────────────────────────
+async function loadProgress() {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_curation_progress`, {
+    method: 'POST',
+    headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
+               'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  progress = (await res.json()) || [];
+  renderCountyDropdown();
+  if (progress.length && !currentCounty) {
+    // Auto-pick first county that has beaches with photos and isn't done
+    const next = progress.find(c => c.with_photos > 0 && !c.is_done) || progress[0];
+    if (next) selectCounty(next.county);
+  }
+}
+
+function renderCountyDropdown() {
+  const sel = document.getElementById('sel-county');
+  sel.innerHTML = '';
+  for (const c of progress) {
+    if (!c.with_photos) continue;  // skip counties with no photos
+    const opt = document.createElement('option');
+    const done = c.is_done ? ' ✓' : '';
+    opt.value = c.county;
+    opt.textContent = `${c.county} (${c.curated}/${c.with_photos})${done}`;
+    sel.appendChild(opt);
+  }
+  sel.onchange = () => selectCounty(sel.value);
+}
+
+function selectCounty(name) {
+  currentCounty = progress.find(c => c.county === name);
+  if (!currentCounty) return;
+  document.getElementById('sel-county').value = name;
+  renderBeachDropdown();
+  // Auto-pick first pending beach with photos
+  const next = (currentCounty.beaches || []).find(b => b.photo_count > 0 && !b.is_curated)
+            || (currentCounty.beaches || []).find(b => b.photo_count > 0);
+  if (next) loadBeach(next.fid);
+  updateProgressLabel();
+}
+
+function renderBeachDropdown() {
+  const sel = document.getElementById('sel-beach');
+  sel.innerHTML = '';
+  const beaches = (currentCounty?.beaches || []).filter(b => b.photo_count > 0);
+  for (const b of beaches) {
+    const opt = document.createElement('option');
+    const done = b.is_curated ? ' ✓' : '';
+    opt.value = String(b.fid);
+    opt.textContent = `${b.name} (${b.photo_count})${done}`;
+    sel.appendChild(opt);
+  }
+  sel.onchange = () => loadBeach(parseInt(sel.value, 10));
+}
+
+function updateProgressLabel() {
+  if (!currentCounty) {
+    document.getElementById('progress').textContent = '';
+    return;
+  }
+  document.getElementById('progress').textContent =
+    `${currentCounty.curated}/${currentCounty.with_photos} done in ${currentCounty.county}`;
+}
+
+document.getElementById('btn-next-pending').onclick = () => jumpPending(+1);
+document.getElementById('btn-prev-pending').onclick = () => jumpPending(-1);
+
+function jumpPending(dir) {
+  if (!currentCounty || !currentBeach) return;
+  const beaches = currentCounty.beaches.filter(b => b.photo_count > 0);
+  let idx = beaches.findIndex(b => b.fid === currentBeach);
+  while (true) {
+    idx += dir;
+    if (idx < 0 || idx >= beaches.length) break;
+    if (!beaches[idx].is_curated) { loadBeach(beaches[idx].fid); return; }
+  }
+  alert('No more pending beaches in this county.');
+}
+
+// ─── Load and render a beach ────────────────────────────────────────
+async function loadBeach(fid) {
+  currentBeach = fid;
+  document.getElementById('sel-beach').value = String(fid);
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-curate-beach?fid=${fid}`, {
+    headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY,
+               'x-admin-secret': token },
+  });
+  if (!res.ok) {
+    document.getElementById('photo-grid').innerHTML =
+      `<div class="empty">Failed to load: HTTP ${res.status}</div>`;
+    return;
+  }
+  beachData = await res.json();
+  dirtyMap = new Map();
+  renderBeach();
+}
+
+function renderBeach() {
+  if (!beachData) return;
+  document.getElementById('beach-name').textContent = beachData.beach.display_name;
+  document.getElementById('beach-sub').textContent =
+    `fid ${beachData.beach.fid} · ${beachData.beach.county_name}, ${beachData.beach.state}`;
+
+  // Beach-level match dropdown
+  const bm = document.getElementById('beach-match');
+  bm.innerHTML = '<option value="">— select —</option>';
+  for (const o of MATCH_OPTIONS) {
+    const opt = document.createElement('option');
+    opt.value = o.v; opt.textContent = o.label;
+    bm.appendChild(opt);
+  }
+  bm.value = beachData.curation_status?.match_quality || '';
+
+  const grid = document.getElementById('photo-grid');
+  if (!beachData.photos.length) {
+    grid.innerHTML = `<div class="empty">No photos for this beach.</div>`;
+    return;
+  }
+
+  grid.innerHTML = beachData.photos.map(p => renderPhotoCard(p)).join('');
+  wireCardEvents();
+  updateSummary();
+}
+
+function renderPhotoCard(p) {
+  const matchOptionsHtml = MATCH_OPTIONS.map(o =>
+    `<option value="${o.v}">${o.label}</option>`).join('');
+  const access = p.access_point_name || '(no source name)';
+  const attribution = p.attribution || '';
+  return `<div class="photo-card" data-id="${p.id}" draggable="true">
+    <img src="${p.thumb_url || p.image_url}" alt="" loading="lazy">
+    <div class="photo-meta">
+      <span class="photo-source">${escHtml(p.source)}</span>
+      <div class="photo-access"><strong>Source:</strong> ${escHtml(access)}</div>
+      <div class="photo-attribution">${escHtml(attribution)}</div>
+      <div class="match-row">
+        <label>Match:</label>
+        <select class="match-select" data-id="${p.id}">
+          ${matchOptionsHtml}
+        </select>
+      </div>
+      <div class="photo-actions">
+        <button class="trash" type="button" data-action="trash" data-id="${p.id}">🗑 Trash</button>
+        <button class="restore" type="button" data-action="restore" data-id="${p.id}" style="display:none">↩ Restore</button>
+        <a href="${p.image_url}" target="_blank" rel="noopener" style="text-decoration:none">
+          <button type="button" style="width:100%">🔍 Open</button>
+        </a>
+      </div>
+    </div>
+  </div>`;
+}
+
+function wireCardEvents() {
+  // Set initial match-quality dropdowns from beachData
+  for (const p of beachData.photos) {
+    const sel = document.querySelector(`.match-select[data-id="${p.id}"]`);
+    if (sel) {
+      sel.value = p.match_quality || p.default_match_quality || '';
+      sel.className = `match-select ${sel.value || ''}`;
+      sel.onchange = (e) => {
+        sel.className = `match-select ${sel.value || ''}`;
+        markDirty(p.id, { match_quality: sel.value });
+      };
+    }
+  }
+  // Trash / restore
+  document.querySelectorAll('[data-action="trash"]').forEach(b => {
+    b.onclick = () => trashPhoto(parseInt(b.dataset.id, 10));
+  });
+  document.querySelectorAll('[data-action="restore"]').forEach(b => {
+    b.onclick = () => restorePhoto(parseInt(b.dataset.id, 10));
+  });
+  // Drag-drop
+  document.querySelectorAll('.photo-card').forEach(card => {
+    card.ondragstart = (e) => {
+      dragSrcId = parseInt(card.dataset.id, 10);
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      document.getElementById('trash-zone').classList.add('visible');
+    };
+    card.ondragend = () => {
+      card.classList.remove('dragging');
+      document.querySelectorAll('.drop-target').forEach(c => c.classList.remove('drop-target'));
+      document.getElementById('trash-zone').classList.remove('visible', 'over');
+      dragSrcId = null;
+    };
+    card.ondragover = (e) => {
+      if (dragSrcId == null || parseInt(card.dataset.id, 10) === dragSrcId) return;
+      e.preventDefault();
+      card.classList.add('drop-target');
+    };
+    card.ondragleave = () => card.classList.remove('drop-target');
+    card.ondrop = (e) => {
+      e.preventDefault();
+      card.classList.remove('drop-target');
+      if (dragSrcId == null) return;
+      reorderPhotos(dragSrcId, parseInt(card.dataset.id, 10));
+    };
+  });
+  // Trash zone
+  const tz = document.getElementById('trash-zone');
+  tz.ondragover = (e) => { e.preventDefault(); tz.classList.add('over'); };
+  tz.ondragleave = () => tz.classList.remove('over');
+  tz.ondrop = (e) => {
+    e.preventDefault();
+    if (dragSrcId != null) trashPhoto(dragSrcId);
+    tz.classList.remove('over');
+  };
+}
+
+function trashPhoto(id) {
+  const card = document.querySelector(`.photo-card[data-id="${id}"]`);
+  if (card) card.classList.add('deleted');
+  const trashBtn = card?.querySelector('[data-action="trash"]');
+  const restoreBtn = card?.querySelector('[data-action="restore"]');
+  if (trashBtn) trashBtn.style.display = 'none';
+  if (restoreBtn) restoreBtn.style.display = '';
+  markDirty(id, { deleted: true });
+}
+function restorePhoto(id) {
+  const card = document.querySelector(`.photo-card[data-id="${id}"]`);
+  if (card) card.classList.remove('deleted');
+  const trashBtn = card?.querySelector('[data-action="trash"]');
+  const restoreBtn = card?.querySelector('[data-action="restore"]');
+  if (trashBtn) trashBtn.style.display = '';
+  if (restoreBtn) restoreBtn.style.display = 'none';
+  markDirty(id, { deleted: false });
+}
+
+function reorderPhotos(srcId, targetId) {
+  const order = beachData.photos.map(p => p.id);
+  const srcIdx = order.indexOf(srcId);
+  const tgtIdx = order.indexOf(targetId);
+  if (srcIdx < 0 || tgtIdx < 0) return;
+  order.splice(srcIdx, 1);
+  order.splice(tgtIdx, 0, srcId);
+  // Reorder beachData.photos to match
+  const byId = new Map(beachData.photos.map(p => [p.id, p]));
+  beachData.photos = order.map(id => byId.get(id));
+  // Rerender (cheap)
+  const grid = document.getElementById('photo-grid');
+  grid.innerHTML = beachData.photos.map(p => renderPhotoCard(p)).join('');
+  wireCardEvents();
+  // Mark all reordered as dirty (sort_order changes)
+  beachData.photos.forEach((p, i) => {
+    const prev = dirtyMap.get(p.id) || {};
+    markDirty(p.id, { ...prev, sort_order: 100 + i });
+    // Restore deleted state visual
+    if (prev.deleted) trashPhoto(p.id);
+  });
+}
+
+function markDirty(id, patch) {
+  const cur = dirtyMap.get(id) || {};
+  dirtyMap.set(id, { ...cur, ...patch });
+  updateSummary();
+}
+
+function updateSummary() {
+  const trashed = [...dirtyMap.values()].filter(d => d.deleted).length;
+  const reordered = [...dirtyMap.entries()].filter(([_, d]) => d.sort_order != null).length;
+  const matched = [...dirtyMap.values()].filter(d => d.match_quality).length;
+  const parts = [];
+  if (trashed)   parts.push(`${trashed} trashed`);
+  if (reordered) parts.push(`${reordered} reordered`);
+  if (matched)   parts.push(`${matched} match-rated`);
+  document.getElementById('save-summary').textContent =
+    parts.length ? parts.join(', ') : 'No pending changes.';
+}
+
+document.getElementById('btn-save').onclick = saveBeach;
+document.getElementById('btn-next').onclick = nextBeach;
+
+async function saveBeach() {
+  if (!beachData) return;
+  // Build photos[] payload — every photo gets a sort_order + keep + match_quality
+  const photos = beachData.photos.map((p, i) => {
+    const dirty = dirtyMap.get(p.id) || {};
+    const sel = document.querySelector(`.match-select[data-id="${p.id}"]`);
+    return {
+      id: p.id,
+      sort_order: dirty.sort_order != null ? dirty.sort_order : (p.sort_order || (100 + i)),
+      keep: !dirty.deleted,
+      match_quality: sel?.value || p.match_quality || p.default_match_quality || null,
+    };
+  });
+  const beachMatch = document.getElementById('beach-match').value || null;
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-curate-beach`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY,
+               'Content-Type': 'application/json', 'x-admin-secret': token },
+    body: JSON.stringify({
+      fid: beachData.beach.fid,
+      photos,
+      match_quality: beachMatch,
+      curated_by: curatorUser,
+    }),
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(()=>({error:`HTTP ${res.status}`}));
+    alert(`Save failed: ${j.error || res.status}`);
+    return;
+  }
+  // Refresh progress + reload current beach state
+  await loadProgress();
+  await loadBeach(currentBeach);
+  alert('Saved.');
+}
+
+function nextBeach() {
+  if (!currentCounty || !currentBeach) return;
+  const beaches = currentCounty.beaches.filter(b => b.photo_count > 0);
+  const idx = beaches.findIndex(b => b.fid === currentBeach);
+  if (idx < 0 || idx >= beaches.length - 1) {
+    alert('Last beach in county. Save then pick another county.');
+    return;
+  }
+  loadBeach(beaches[idx + 1].fid);
+}
+
+function escHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+</script>
+</body>
+</html>

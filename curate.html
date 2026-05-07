@@ -185,6 +185,18 @@
     text-align: center;
   }
 
+  /* Centered Save-and-Next button below the photo grid */
+  button.save-next {
+    font-family: inherit; font-size: 15px; font-weight: 700;
+    padding: 12px 28px; border-radius: 8px; border: 0;
+    background: var(--green); color: white; cursor: pointer;
+    box-shadow: 0 2px 6px rgba(21,128,61,0.25);
+    transition: background 0.15s, transform 0.1s;
+  }
+  button.save-next:hover { background: #166534; transform: translateY(-1px); }
+  button.save-next:active { transform: translateY(0); }
+  button.save-next[disabled] { opacity: 0.4; cursor: not-allowed; }
+
   .empty {
     text-align: center; padding: 60px 20px; color: var(--muted);
   }
@@ -211,11 +223,11 @@
   <button id="btn-logout" type="button" class="danger" style="margin-left:auto">Logout</button>
 </header>
 
-<!-- County header bar — name, completion count, save button -->
+<!-- County header bar — name, completion count, submit button -->
 <div class="county-bar" style="display:none" id="county-bar">
   <div class="county-name" id="county-name">—</div>
   <div class="county-count" id="county-count"></div>
-  <button id="btn-save" class="save" type="button">Save changes</button>
+  <button id="btn-save" class="save" type="button">Submit Changes to DogBeach</button>
 </div>
 
 <main id="app" style="display:none">
@@ -231,6 +243,9 @@
   </div>
   <div class="photo-grid" id="photo-grid"></div>
   <div class="save-summary" id="save-summary"></div>
+  <div style="display:flex; justify-content:center; margin: 18px 0 32px;">
+    <button id="btn-save-next" class="save-next" type="button">Save and Next →</button>
+  </div>
 </main>
 
 <div id="trash-zone">🗑</div>
@@ -313,7 +328,7 @@ async function showApp() {
 }
 
 // ─── Load curation progress ─────────────────────────────────────────
-async function loadProgress() {
+async function loadProgress(opts = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_curation_progress`, {
     method: 'POST',
     headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
@@ -322,6 +337,7 @@ async function loadProgress() {
   });
   progress = (await res.json()) || [];
   renderCountyDropdown();
+  if (opts.skipAutoSelect) return;
   if (progress.length && !currentCounty) {
     // Auto-pick first county that has beaches with photos and isn't done
     const next = progress.find(c => c.with_photos > 0 && !c.is_done) || progress[0];
@@ -579,6 +595,7 @@ function updateSummary() {
 }
 
 document.getElementById('btn-save').onclick = saveBeach;
+document.getElementById('btn-save-next').onclick = saveBeach;
 
 async function saveBeach() {
   if (!beachData) return;
@@ -609,20 +626,31 @@ async function saveBeach() {
     alert(`Save failed: ${j.error || res.status}`);
     return;
   }
-  // Refresh progress, then advance to next pending beach in county.
-  await loadProgress();
+  // Refresh progress and re-bind to the updated county (so checkmarks
+  // and counts reflect the just-saved state). loadProgress only updates
+  // the global `progress` array — we still need to re-look-up
+  // currentCounty in it and re-render the beach dropdown.
+  const savedCountyName = currentCounty?.county;
+  const savedFid = currentBeach;
+  await loadProgress({ skipAutoSelect: true });
+  if (savedCountyName) {
+    currentCounty = progress.find(c => c.county === savedCountyName) || currentCounty;
+    document.getElementById('sel-county').value = savedCountyName;
+    renderBeachDropdown();
+    updateProgressLabel();
+    document.getElementById('sel-beach').value = String(savedFid);
+  }
+  // Advance to next pending beach in county
   const beaches = currentCounty.beaches.filter(b => b.photo_count > 0);
-  const idx = beaches.findIndex(b => b.fid === currentBeach);
-  // Find next pending after current
+  const idx = beaches.findIndex(b => b.fid === savedFid);
   for (let i = idx + 1; i < beaches.length; i++) {
     if (!beaches[i].is_curated) { loadBeach(beaches[i].fid); return; }
   }
-  // None after; check before
   for (let i = 0; i < idx; i++) {
     if (!beaches[i].is_curated) { loadBeach(beaches[i].fid); return; }
   }
   // All done in county
-  await loadBeach(currentBeach);  // refresh current
+  await loadBeach(savedFid);
   alert(`County complete! ${currentCounty.county}: all beaches curated.`);
 }
 

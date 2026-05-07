@@ -130,10 +130,22 @@ Deno.serve(async (req: Request) => {
       // 442 beaches as of 2026-05-06; null elsewhere.
       const { data: zr } = await supabase
         .from("beach_dog_policy")
-        .select("zone_rules")
+        .select(
+          "zone_rules, dogs_allowed, leash_policy, has_on_leash, has_off_leash, " +
+          "off_leash_flag, dogs_allowed_areas, consensus_confidence, disagreement_flag"
+        )
         .eq("arena_group_id", beach.arena_group_id)
         .maybeSingle();
       zoneRules = (zr?.zone_rules as Record<string, unknown>) ?? null;
+      if (zr) {
+        // Modern dog-policy block from beach_dog_policy (consensus-driven).
+        // Frontends should prefer this over the legacy `metadata.dogs_*`
+        // fields (which come from arena_beach_metadata's pivot of the
+        // OLD beach_policy_extractions table). Legacy fields kept for
+        // backward compatibility; will retire alongside leash_policy in
+        // Phase 3 of the binary-leash schema migration.
+        (beach as Record<string, unknown>)._dog_policy_extra = zr;
+      }
     }
 
     // For today: find best remaining window and override is_in_best_window + day label
@@ -168,7 +180,15 @@ Deno.serve(async (req: Request) => {
       client_id: clientId,
     }).then(() => {}).catch(() => {});
 
-    return json({ beach, day: finalDay, hours: finalHours, metadata, zone_rules: zoneRules });
+    // Promote the dog-policy block to a top-level response field for clean
+    // consumer access. Strip the staging key off `beach` to avoid leaking
+    // implementation detail.
+    const dogPolicy = (beach as Record<string, unknown>)._dog_policy_extra ?? null;
+    if (beach && typeof beach === "object") {
+      delete (beach as Record<string, unknown>)._dog_policy_extra;
+    }
+
+    return json({ beach, day: finalDay, hours: finalHours, metadata, zone_rules: zoneRules, dog_policy: dogPolicy });
 
   } catch (err) {
     return json({ error: String(err) }, 500);

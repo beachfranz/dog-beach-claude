@@ -583,7 +583,7 @@
   }
 
   // ── Render ────────────────────────────────────────────────────────
-  function render({ beach, day, hours, metadata, zone_rules }) {
+  function render({ beach, day, hours, metadata, zone_rules, dog_policy }) {
     // Header
     const dateObj  = new Date(date + 'T12:00:00');
     const dayName  = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
@@ -614,7 +614,7 @@
 
     // LLM-extracted policy badges (leash + hours). Only renders if
     // arena_beach_metadata had a non-null value for the field.
-    const policyBadges = buildPolicyBadgesHtml(metadata);
+    const policyBadges = buildPolicyBadgesHtml(metadata, dog_policy);
     if (policyBadges) {
       const badgeRow = document.createElement('div');
       badgeRow.className = 'policy-badges';
@@ -1237,25 +1237,47 @@
     });
   });
 
-  // Reads metadata.dogs_leash_required + metadata.hours_text from the
-  // arena_beach_metadata view. Returns '' if nothing meaningful to show.
-  function buildPolicyBadgesHtml(metadata) {
-    if (!metadata) return '';
+  // Renders policy badges. Prefers dog_policy.has_on_leash / has_off_leash
+  // (consensus-driven, from beach_dog_policy) when available — those are the
+  // modern source of truth as of the 2026-05-07 binary-leash schema migration.
+  // Falls back to metadata.dogs_leash_required (from arena_beach_metadata's
+  // pivot of the legacy beach_policy_extractions table) when the modern block
+  // is absent. Hours come from metadata regardless.
+  function buildPolicyBadgesHtml(metadata, dogPolicy) {
+    if (!metadata && !dogPolicy) return '';
     const badges = [];
+    const tooltipNote = (metadata && metadata.dogs_policy_notes) || '';
 
-    // Leash badge — color coded by strictness
-    const leash = (metadata.dogs_leash_required || '').toLowerCase();
-    const dogs  = (metadata.dogs_allowed || '').toLowerCase();
-    if (dogs === 'no') {
-      badges.push(`<span class="policy-badge leash-no-dogs">🚫 No Dogs</span>`);
-    } else if (leash === 'required') {
-      badges.push(`<span class="policy-badge leash-required" title="${escAttr(metadata.dogs_policy_notes)}">🐾 Leashed</span>`);
-    } else if (leash === 'optional' || leash === 'off_leash' || leash === 'off-leash') {
-      badges.push(`<span class="policy-badge leash-off" title="${escAttr(metadata.dogs_policy_notes)}">🐾 Off-Leash</span>`);
-    } else if (leash === 'mixed_by_zone') {
-      badges.push(`<span class="policy-badge leash-mixed" title="${escAttr(metadata.dogs_policy_notes)}">🐾 Mixed by Zone</span>`);
-    } else if (leash === 'varies_by_time') {
-      badges.push(`<span class="policy-badge leash-mixed" title="${escAttr(metadata.dogs_policy_notes)}">🐾 Varies by Time</span>`);
+    // Modern path — binary presence flags from beach_dog_policy
+    if (dogPolicy && (dogPolicy.has_on_leash !== undefined || dogPolicy.has_off_leash !== undefined)) {
+      const hasOn  = dogPolicy.has_on_leash  === true;
+      const hasOff = dogPolicy.has_off_leash === true;
+      const noBoth = dogPolicy.has_on_leash === false && dogPolicy.has_off_leash === false;
+      if (noBoth || dogPolicy.dogs_allowed === 'no') {
+        badges.push(`<span class="policy-badge leash-no-dogs">🚫 No Dogs</span>`);
+      } else if (hasOn && hasOff) {
+        badges.push(`<span class="policy-badge leash-off" title="${escAttr(tooltipNote)}">🐾 Off-Leash Zones</span>`);
+        badges.push(`<span class="policy-badge leash-required" title="${escAttr(tooltipNote)}">🐾 On-Leash Zones</span>`);
+      } else if (hasOff) {
+        badges.push(`<span class="policy-badge leash-off" title="${escAttr(tooltipNote)}">🐾 Off-Leash</span>`);
+      } else if (hasOn) {
+        badges.push(`<span class="policy-badge leash-required" title="${escAttr(tooltipNote)}">🐾 Leashed</span>`);
+      }
+    } else {
+      // Legacy fallback path — for beaches not yet promoted to beach_dog_policy
+      const leash = (metadata && metadata.dogs_leash_required || '').toLowerCase();
+      const dogs  = (metadata && metadata.dogs_allowed || '').toLowerCase();
+      if (dogs === 'no') {
+        badges.push(`<span class="policy-badge leash-no-dogs">🚫 No Dogs</span>`);
+      } else if (leash === 'required') {
+        badges.push(`<span class="policy-badge leash-required" title="${escAttr(tooltipNote)}">🐾 Leashed</span>`);
+      } else if (leash === 'optional' || leash === 'off_leash' || leash === 'off-leash') {
+        badges.push(`<span class="policy-badge leash-off" title="${escAttr(tooltipNote)}">🐾 Off-Leash</span>`);
+      } else if (leash === 'mixed_by_zone') {
+        badges.push(`<span class="policy-badge leash-mixed" title="${escAttr(tooltipNote)}">🐾 Mixed by Zone</span>`);
+      } else if (leash === 'varies_by_time') {
+        badges.push(`<span class="policy-badge leash-mixed" title="${escAttr(tooltipNote)}">🐾 Varies by Time</span>`);
+      }
     }
 
     // Hours badge — show if we have a reasonable text, suppress if it's

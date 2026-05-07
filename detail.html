@@ -356,6 +356,33 @@
     }
     .leash-pill-row .leash-pill { margin-top: 0; }
 
+    /* Section pills — one per zone_rules section, colored by rule. */
+    .section-pills {
+      display: flex; flex-wrap: wrap;
+      gap: 4px; margin-top: 4px;
+      align-self: flex-start;
+      align-items: center;
+    }
+    .section-pills .region-label {
+      font-size: 10px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.04em;
+      color: var(--text-muted, #475569);
+      margin-right: 2px;
+    }
+    .section-pill {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 11px; font-weight: 500;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid currentColor;
+      white-space: nowrap;
+    }
+    .section-pill.off_leash   { color: #15803d; background: rgba(34,197,94,0.10); }
+    .section-pill.on_leash    { color: #1d4ed8; background: rgba(37,99,235,0.10); }
+    .section-pill.not_allowed { color: #b91c1c; background: rgba(239,68,68,0.10); }
+    .section-pill.time_window { color: #b45309; background: rgba(245,158,11,0.10); }
+    .section-pill.unknown     { color: #94a3b8; background: rgba(0,0,0,0.04); border-color: #cbd5e1; }
+
     /* ── Zone rules — section-aware dog policy v2 (442 beaches) ─────
        Locked color/icon system per project_zone_rules_design_locked.md:
        🟢 off_leash · ⚪ on_leash · 🔴 not_allowed · 🟡 time-restricted
@@ -625,15 +652,22 @@
       winLabel.textContent = day.best_window_label;
       winLabel.className = `window-label ${day.best_window_status ?? ''}`;
     }
-    // Leash-status pill — single prominent summary from binary fields
-    // (has_on_leash / has_off_leash). Renders only when we have signal.
+    // Leash-status pills (binaries) + per-section pills (zone_rules).
+    // Both render directly under the window-label in the header column.
+    const headerLeft = document.getElementById('header-left');
     const leashPillHtml = buildLeashPillHtml(dog_policy);
     if (leashPillHtml) {
       const pillWrap = document.createElement('div');
       pillWrap.innerHTML = leashPillHtml;
-      // Single child node; pillWrap.firstElementChild IS the pill.
       const pillEl = pillWrap.firstElementChild;
-      if (pillEl) document.getElementById('header-left').appendChild(pillEl);
+      if (pillEl) headerLeft.appendChild(pillEl);
+    }
+    const sectionPillsHtml = buildSectionPillsHtml(zone_rules);
+    if (sectionPillsHtml) {
+      const wrap = document.createElement('div');
+      wrap.innerHTML = sectionPillsHtml;
+      const el = wrap.firstElementChild;
+      if (el) headerLeft.appendChild(el);
     }
 
     // Scout blurb — loads async, shows shimmer until ready
@@ -1299,6 +1333,35 @@
     if (hasOn  === true) pills.push(`<span class="leash-pill on-leash">🐾 On-leash</span>`);
     if (pills.length === 0) return '';
     return `<div class="leash-pill-row">${pills.join('')}</div>`;
+  }
+
+  // Builds section pills grouped by zone_rules region. Each pill is one
+  // section (sand, water, trails, etc.) colored by its rule. When a
+  // section has time_windows, falls into the `time_window` color bucket.
+  function buildSectionPillsHtml(zoneRules) {
+    if (!zoneRules) return '';
+    const regions = zoneRules.regions;
+    if (!Array.isArray(regions) || regions.length === 0) return '';
+
+    const blocks = regions.map(r => {
+      const sections = (r && r.sections) || {};
+      const pills = Object.entries(sections).map(([name, sec]) => {
+        let rule = (sec && sec.rule) || 'unknown';
+        if (Array.isArray(sec && sec.time_windows) && sec.time_windows.length) {
+          rule = 'time_window';
+        }
+        const label = ZR_SECTION_LABEL[name] || name;
+        return `<span class="section-pill ${rule}">${label}</span>`;
+      }).join('');
+      if (!pills) return '';
+      const regionLabel = r && r.name ? `<span class="region-label">${escHtml(r.name)}:</span>` : '';
+      return regionLabel + pills;
+    }).filter(Boolean);
+
+    if (blocks.length === 0) return '';
+    // Multi-region beaches get a small gap divider between groups
+    const sep = '<span style="width:10px; display:inline-block;"></span>';
+    return `<div class="section-pills">${blocks.join(sep)}</div>`;
   }
 
   // Renders the secondary policy-badges row — currently just the hours

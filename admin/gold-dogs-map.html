@@ -13,7 +13,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Gold beaches · dogs_allowed map</title>
+<title>Gold beaches · leash-mode map</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   html, body { margin: 0; padding: 0; height: 100%;
@@ -135,7 +135,7 @@
 <div id="map"></div>
 
 <div class="panel title-panel">
-  <h1>🐕 Gold beaches — dogs_allowed</h1>
+  <h1>🐕 Gold beaches — leash modes</h1>
   <div class="sub">Click any marker for details · <span id="visible-count">…</span></div>
   <div class="search-wrap">
     <input type="text" id="search-input" placeholder="Search beach name… (Esc to clear)" autocomplete="off" />
@@ -170,7 +170,7 @@
 </div>
 
 <div class="panel legend-panel">
-  <h2>dogs_allowed</h2>
+  <h2>leash modes (TF)</h2>
   <div class="legend-row"><span class="swatch" style="background:#15803d"></span>yes</div>
   <div class="legend-row"><span class="swatch" style="background:#fbbf24"></span>restricted</div>
   <div class="legend-row"><span class="swatch" style="background:#fb923c"></span>seasonal</div>
@@ -204,15 +204,16 @@
 const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
 const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
 
+// Color by 4 TF categories from has_on_leash + has_off_leash binaries.
+// Matches the detail.html leash-pill convention.
 const STATUS_COLORS = {
-  yes:        '#15803d',
-  restricted: '#fbbf24',
-  seasonal:   '#fb923c',
-  mixed:      '#a78bfa',
-  no:         '#ef4444',
-  unknown:    '#94a3b8',
+  both:      '#b45309',  // 🟡 (T,T) — off-leash & on-leash zones (carve-outs)
+  off_leash: '#15803d',  // 🟢 (F,T) — pure off-leash
+  on_leash:  '#1d4ed8',  // 🔵 (T,F) — leashed only
+  no_dogs:   '#b91c1c',  // 🔴 (F,F) — no dogs allowed
+  unknown:   '#94a3b8',  // ⚪ null in either binary
 };
-const STATUS_ORDER = ['yes', 'restricted', 'seasonal', 'mixed', 'no', 'unknown'];
+const STATUS_ORDER = ['both', 'off_leash', 'on_leash', 'no_dogs', 'unknown'];
 
 // State
 const allBeaches = [];          // merged rows: {fid, name, lat, lon, county, state, is_scoreable, dogs_allowed, leash_policy, off_leash_flag, has_on_leash, has_off_leash}
@@ -337,7 +338,14 @@ async function restGetAll(path, page = 1000) {
 // Filter rows
 // ============================================================================
 function statusOf(b) {
-  return STATUS_ORDER.includes(b.dogs_allowed) ? b.dogs_allowed : 'unknown';
+  // 4 TF categories from binary leash flags. NULL in either flag → unknown.
+  const on  = b.has_on_leash;
+  const off = b.has_off_leash;
+  if (on === true  && off === true)  return 'both';
+  if (on === false && off === true)  return 'off_leash';
+  if (on === true  && off === false) return 'on_leash';
+  if (on === false && off === false) return 'no_dogs';
+  return 'unknown';
 }
 
 function buildFilterRows() {

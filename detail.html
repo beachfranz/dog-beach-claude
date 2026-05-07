@@ -353,6 +353,49 @@
     .policy-pill.on_leash    { color: #1d4ed8; background: rgba(37,99,235,0.10); }
     .policy-pill.not_allowed { color: #b91c1c; background: rgba(239,68,68,0.10); }
 
+    /* Alternatives card — only renders when the current beach is no-dogs
+       OR has no good windows left today. Hidden otherwise. */
+    .alt-card {
+      background: #fff; border: 1px solid var(--border, #e2e8f0);
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin: 12px 0;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .alt-card-header {
+      font-size: 14px; font-weight: 700;
+      color: #0f2742; margin-bottom: 4px;
+    }
+    .alt-card-reason {
+      font-size: 12px; color: #64748b;
+      margin-bottom: 10px;
+    }
+    .alt-list { display: flex; flex-direction: column; gap: 8px; }
+    .alt-row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 10px;
+      padding: 8px 10px;
+      border: 1px solid var(--border, #e2e8f0);
+      border-radius: 8px;
+      text-decoration: none; color: inherit;
+      transition: background 0.1s;
+    }
+    .alt-row:hover { background: #f8fafc; }
+    .alt-row-left { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .alt-name { font-weight: 600; font-size: 13px; color: #0f2742; }
+    .alt-meta { font-size: 11px; color: #64748b; }
+    .alt-row-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    .alt-status-pill {
+      font-size: 10px; font-weight: 600;
+      padding: 2px 8px; border-radius: 999px;
+      letter-spacing: 0.04em; text-transform: uppercase;
+    }
+    .alt-status-pill.go        { color: #15803d; background: rgba(22,163,74,0.10); }
+    .alt-status-pill.advisory  { color: #1d4ed8; background: rgba(37,99,235,0.10); }
+    .alt-status-pill.caution   { color: #b45309; background: rgba(245,158,11,0.10); }
+    .alt-status-pill.no_go     { color: #b91c1c; background: rgba(239,68,68,0.10); }
+    .alt-status-pill.no_data   { color: #64748b; background: rgba(0,0,0,0.04); }
+
     /* ── Zone rules — section-aware dog policy v2 (442 beaches) ─────
        Locked color/icon system per project_zone_rules_design_locked.md:
        🟢 off_leash · ⚪ on_leash · 🔴 not_allowed · 🟡 time-restricted
@@ -610,7 +653,7 @@
   }
 
   // ── Render ────────────────────────────────────────────────────────
-  function render({ beach, day, hours, metadata, zone_rules, dog_policy }) {
+  function render({ beach, day, hours, metadata, zone_rules, dog_policy, alternatives }) {
     // Header
     const dateObj  = new Date(date + 'T12:00:00');
     const dayName  = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
@@ -629,6 +672,16 @@
     if (policyPillsHtml) {
       const wrap = document.createElement('div');
       wrap.innerHTML = policyPillsHtml;
+      const el = wrap.firstElementChild;
+      if (el) document.getElementById('header-left').appendChild(el);
+    }
+
+    // Deterministic alternatives card — only renders when the current
+    // beach is no-dogs OR has no good windows left today.
+    const altCardHtml = buildAlternativesCardHtml(day, dog_policy, alternatives);
+    if (altCardHtml) {
+      const wrap = document.createElement('div');
+      wrap.innerHTML = altCardHtml;
       const el = wrap.firstElementChild;
       if (el) document.getElementById('header-left').appendChild(el);
     }
@@ -1274,6 +1327,65 @@
       p.style.display = p.dataset.zrSeasonPane === idx ? '' : 'none';
     });
   });
+
+  // Builds the alternatives card. Renders ONLY when:
+  //   (a) current beach disallows dogs (no-dogs trigger), OR
+  //   (b) current beach has day_status='no_go' (no-good-windows trigger)
+  // Card is filtered to top 3 nearby dog-friendly beaches; for trigger
+  // (b) only "go" or "advisory" alternatives qualify (sending the user
+  // to another no_go beach defeats the purpose).
+  function buildAlternativesCardHtml(day, dogPolicy, alternatives) {
+    if (!Array.isArray(alternatives) || alternatives.length === 0) return '';
+
+    const isNoDogs = !!dogPolicy && (
+      dogPolicy.dogs_allowed === 'no' ||
+      (dogPolicy.has_on_leash === false && dogPolicy.has_off_leash === false)
+    );
+    const noGoodWindows = day && day.day_status === 'no_go';
+    if (!isNoDogs && !noGoodWindows) return '';
+
+    let alts = alternatives.slice();
+    let reason = '';
+    if (noGoodWindows && !isNoDogs) {
+      // Filter to alternatives with good conditions today
+      alts = alts.filter(a => a.day_status === 'go' || a.day_status === 'advisory');
+      reason = "Conditions here are rough today. These nearby beaches look better.";
+      if (alts.length === 0) return ''; // nothing better — don't render
+    } else if (isNoDogs) {
+      reason = "Dogs aren't allowed at this beach. Try one of these nearby spots instead.";
+    }
+    alts = alts.slice(0, 3);
+    if (alts.length === 0) return '';
+
+    const STATUS_LABEL = { go: 'Go', advisory: 'Advisory', caution: 'Caution', no_go: 'No-go', no_data: '—' };
+    const rows = alts.map(a => {
+      const km = (a.distance_km || 0);
+      const miles = km * 0.621371;
+      const status = a.day_status || 'no_data';
+      const statusLabel = STATUS_LABEL[status] || status;
+      const modes = [];
+      if (a.has_off_leash === true) modes.push('off-leash');
+      if (a.has_on_leash  === true) modes.push('on-leash');
+      const window = a.best_window_label ? ` · ${escHtml(a.best_window_label)}` : '';
+      return `
+        <a class="alt-row" href="detail.html?fid=${a.fid}">
+          <div class="alt-row-left">
+            <div class="alt-name">${escHtml(a.name)}</div>
+            <div class="alt-meta">${miles.toFixed(1)} mi away · ${modes.join(' + ') || 'dogs allowed'}${window}</div>
+          </div>
+          <div class="alt-row-right">
+            <span class="alt-status-pill ${status}">${statusLabel}</span>
+          </div>
+        </a>`;
+    }).join('');
+
+    const title = isNoDogs ? '🐾 Try these instead' : '🌤 Better conditions nearby';
+    return `<div class="alt-card">
+              <div class="alt-card-header">${title}</div>
+              <div class="alt-card-reason">${reason}</div>
+              <div class="alt-list">${rows}</div>
+            </div>`;
+  }
 
   // Builds the unified policy-pill grid. Three potential rows — one per
   // leash status (off_leash, on_leash, not_allowed). Each row layout:

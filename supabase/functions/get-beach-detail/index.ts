@@ -148,6 +148,20 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // Deterministic alternatives — used by detail.html to render an
+    // "alternatives" card when the current beach is no-dogs OR has no
+    // good windows left today. The frontend decides whether to show it
+    // based on dog_policy + day status; this RPC just returns the
+    // candidates with their day_status.
+    let alternatives: unknown[] = [];
+    if (beach.fid) {
+      const { data: alts } = await supabase.rpc("find_alternatives_for_detail", {
+        p_fid: beach.fid as number,
+        p_date: date,
+      });
+      alternatives = (alts as unknown[]) ?? [];
+    }
+
     // For today: find best remaining window and override is_in_best_window + day label
     let finalDay   = day;
     let finalHours = hours ?? [];
@@ -188,7 +202,7 @@ Deno.serve(async (req: Request) => {
       delete (beach as Record<string, unknown>)._dog_policy_extra;
     }
 
-    return json({ beach, day: finalDay, hours: finalHours, metadata, zone_rules: zoneRules, dog_policy: dogPolicy });
+    return json({ beach, day: finalDay, hours: finalHours, metadata, zone_rules: zoneRules, dog_policy: dogPolicy, alternatives });
 
   } catch (err) {
     return json({ error: String(err) }, 500);

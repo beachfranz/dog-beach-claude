@@ -359,9 +359,21 @@
       background: #fff; border: 1px solid var(--border, #e2e8f0);
       border-radius: 12px;
       padding: 14px 16px;
-      margin: 12px 0;
+      margin: 12px 16px;
       box-shadow: 0 1px 3px rgba(0,0,0,0.04);
     }
+    /* Scout blurb sits as its own block in main-content (between zone
+       rules and alternatives). Styled to read as soft narrative, not a
+       card — opacity bump on hover to hint it's tappable. */
+    #scout-blurb {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px; line-height: 1.5;
+      color: var(--text-muted);
+      margin: 8px 16px 4px;
+      opacity: 0.55; cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    #scout-blurb:hover { opacity: 0.85; }
     .alt-card-header {
       font-size: 14px; font-weight: 700;
       color: #0f2742; margin-bottom: 4px;
@@ -406,8 +418,14 @@
       font-family: 'DM Sans', system-ui, sans-serif;
     }
     .zr-header {
-      font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 2px;
+      font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 6px;
+      display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
     }
+    .zr-zone-name {
+      font-size: 12px; font-weight: 500; color: var(--text-muted);
+      letter-spacing: 0.02em;
+    }
+    .zr-zone-name::before { content: '· '; opacity: 0.5; }
     .zr-sub {
       font-size: 11px; color: var(--text-muted); font-weight: 500; margin-left: 6px;
     }
@@ -418,6 +436,19 @@
       color: var(--text-muted); cursor: pointer; font-family: inherit;
     }
     .zr-season-tab.active { background: #1e293b; color: #fff; border-color: #1e293b; }
+
+    .zr-time-tabs {
+      display: flex; gap: 4px; margin: 8px 0 8px; flex-wrap: wrap;
+    }
+    .zr-time-tab {
+      font-size: 11px; padding: 4px 10px; border-radius: 999px;
+      background: rgba(0,0,0,0.04); border: 1px solid var(--border);
+      color: var(--text-muted); cursor: pointer; font-family: inherit;
+    }
+    .zr-time-tab.active {
+      background: #f59e0b22; color: #92400e; border-color: #f59e0b66;
+      font-weight: 600;
+    }
 
     .zr-region { margin-top: 10px; padding-top: 10px;
                  border-top: 1px dashed rgba(0,0,0,0.08); }
@@ -470,6 +501,22 @@
       font-size: 12px; color: var(--text-muted); margin-top: 10px;
       padding-top: 10px; border-top: 1px dashed rgba(0,0,0,0.08);
       line-height: 1.5;
+    }
+
+    /* ── Details card — bottom-of-page narrative ────────────────────
+       Carries zone_rules.global_notes (LLM operator/ordinance/sibling
+       prose). One per page, appended after charts + legend + narrative. */
+    .details-card {
+      background: #fff; border: 1px solid var(--border); border-radius: 12px;
+      padding: 14px 16px; margin: 16px 16px 24px;
+      font-family: 'DM Sans', system-ui, sans-serif;
+    }
+    .details-header {
+      font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 8px;
+    }
+    .details-body {
+      font-size: 13px; color: var(--text-muted); line-height: 1.55;
+      white-space: pre-wrap;
     }
 
     /* ── Tooltip ─────────────────────────────────────────────────── */
@@ -665,35 +712,19 @@
       winLabel.textContent = day.best_window_label;
       winLabel.className = `window-label ${day.best_window_status ?? ''}`;
     }
-    // Unified policy-pill grid: one row per leash status, with the
-    // overall (beach-level) pill on the left and per-section pills on
-    // the right. All pills same size; colored by rule.
-    const policyPillsHtml = buildPolicyPillGridHtml(dog_policy, zone_rules);
-    if (policyPillsHtml) {
-      const wrap = document.createElement('div');
-      wrap.innerHTML = policyPillsHtml;
-      const el = wrap.firstElementChild;
-      if (el) document.getElementById('header-left').appendChild(el);
-    }
+    // Policy-pill grid retired — the zone-rule cards below carry the
+    // full leash/section breakdown per zone. (buildPolicyPillGridHtml
+    // is kept around for now in case we need to revive it.)
 
-    // Deterministic alternatives card — only renders when the current
-    // beach is no-dogs OR has no good windows left today.
-    const altCardHtml = buildAlternativesCardHtml(day, dog_policy, alternatives);
-    if (altCardHtml) {
-      const wrap = document.createElement('div');
-      wrap.innerHTML = altCardHtml;
-      const el = wrap.firstElementChild;
-      if (el) document.getElementById('header-left').appendChild(el);
-    }
-
-    // Scout blurb — loads async, shows shimmer until ready
+    // Scout blurb + alternatives card live in main-content (built
+    // below), not header-left. Build the scout blurb element here so
+    // its async-loaded text can be filled in regardless of whether
+    // it's been mounted yet.
     const blurbEl = document.createElement('div');
     blurbEl.id = 'scout-blurb';
-    blurbEl.style.cssText = "font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.5;color:var(--text-muted);margin-top:6px;opacity:0.4;cursor:pointer;";
     blurbEl.title = 'Ask Scout';
     blurbEl.onclick = toggleChat;
     blurbEl.textContent = 'Getting Scout\'s take…';
-    document.getElementById('header-left').appendChild(blurbEl);
 
     // Product chip strip directly beneath the scout blurb. Replace
     // mode: chip set is conditional on the day's actual data, with the
@@ -713,14 +744,20 @@
       document.getElementById('header-left').appendChild(badgeRow);
     }
 
-    // Zone rules render is deferred to AFTER the innerHTML assignment
-    // below — see the second pass at the end of this function. Otherwise
-    // the prepended card gets wiped by the innerHTML reset.
+    // Main-content order is locked top→bottom:
+    //   1. Zone rules
+    //   2. Scout blurb
+    //   3. Alternatives card (renders only on no-dogs / no-good-window)
+    //   4. Graphs (status board + charts + legend + narrative)
+    //   5. Details card (renders only when zone_rules.global_notes set)
+    // Built below after the chartsHtml + narrativeHtml are assembled.
 
     // Hydrate the outer locationId from the API response so chat (which
     // only knows location_id) keeps working when the caller passed ?fid=.
     if (!locationId) locationId = beach.location_id;
-    loadScoutBlurb(beach.location_id, date, day, hours);
+    // NOTE: loadScoutBlurb is fired AFTER main-content rebuild (bottom
+    // of render) — the loader looks up #scout-blurb by id, so the
+    // element must be in the DOM before the call.
 
     if (hours.length === 0) {
       showError('No hourly data available for this date.');
@@ -875,7 +912,59 @@
     // Narrative
     const narrativeHtml = buildNarrative(day);
 
-    document.getElementById('main-content').innerHTML = `
+    const main = document.getElementById('main-content');
+    main.innerHTML = '';
+
+    const appendHtml = (html) => {
+      if (!html) return;
+      const wrap = document.createElement('div');
+      wrap.innerHTML = html;
+      while (wrap.firstChild) main.appendChild(wrap.firstChild);
+    };
+
+    // 1. Zone rules — section-aware dog policy. Pass context so the
+    // tab UI can pick the most relevant time-window tab (current hour
+    // when viewing today, best-window midpoint otherwise).
+    const tz = beach.timezone || 'America/Los_Angeles';
+    const _parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, year:'numeric', month:'2-digit', day:'2-digit',
+      hour:'2-digit', hour12:false,
+    }).formatToParts(new Date());
+    const _gp = (t) => _parts.find(p => p.type === t)?.value ?? '';
+    const _todayLocal = `${_gp('year')}-${_gp('month')}-${_gp('day')}`;
+    const _isToday = date === _todayLocal;
+    const _curHour = _isToday ? (parseInt(_gp('hour'), 10) % 24) : null;
+    const _hourFromTs = (ts) => {
+      if (!ts) return null;
+      const p = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz, hour: '2-digit', hour12: false,
+      }).formatToParts(new Date(ts));
+      const h = p.find(x => x.type === 'hour')?.value;
+      return h != null ? (parseInt(h, 10) % 24) : null;
+    };
+    let _bestMid = null;
+    const _sh = _hourFromTs(day?.best_window_start_ts);
+    const _eh = _hourFromTs(day?.best_window_end_ts);
+    if (Number.isFinite(_sh) && Number.isFinite(_eh)) {
+      _bestMid = _sh <= _eh ? (_sh + _eh) / 2 : ((_sh + _eh + 24) / 2) % 24;
+    }
+    // Page date as MM-DD for season-range matching.
+    const _viewMd = (date && /^\d{4}-\d{2}-\d{2}$/.test(date))
+      ? date.slice(5) : null;
+    const zrCtx = {
+      isToday: _isToday, currentLocalHour: _curHour,
+      bestWindowMidHour: _bestMid, viewMonthDay: _viewMd,
+    };
+    appendHtml(buildZoneRulesHtml(zone_rules, zrCtx, beach.display_name || beach.name || 'this beach'));
+
+    // 2. Scout blurb (async-filled by its own loader)
+    main.appendChild(blurbEl);
+
+    // 3. Alternatives card — no-dogs OR no-good-windows trigger
+    appendHtml(buildAlternativesCardHtml(day, dog_policy, alternatives));
+
+    // 4. Graphs — status board + charts + legend + narrative
+    appendHtml(`
       <div class="board-and-charts">
         <div class="charts">${chartsHtml}</div>
       </div>
@@ -887,16 +976,13 @@
         <div class="legend-item"><div class="legend-dot" style="background:var(--bar-no_go)"></div> No Go</div>
       </div>
       ${narrativeHtml}
-    `;
+    `);
 
-    // Prepend zone_rules card AFTER the innerHTML reset (otherwise it's wiped).
-    // Renders for ~442 beaches with text_repass_v1 zone_rules.
-    const zrHtml = buildZoneRulesHtml(zone_rules);
-    if (zrHtml) {
-      const zrCard = document.createElement('div');
-      zrCard.innerHTML = zrHtml;
-      document.getElementById('main-content').prepend(zrCard.firstElementChild);
-    }
+    // 5. Details card — global_notes narrative (only when set)
+    appendHtml(buildDetailsCardHtml(zone_rules));
+
+    // Now that #scout-blurb is in the DOM, kick off the async loader.
+    loadScoutBlurb(beach.location_id, date, day, hours, dog_policy);
   }
 
   function buildStatusBoard(hours) {
@@ -1225,7 +1311,8 @@
     campground: '🏕️ Campground', playground: '🤸 Playground',
     tide_pools: '🐚 Tide pools', nesting_zones: '🪺 Nesting zones',
     water_swim: '🌊 Water', parking_lot: '🅿️ Parking',
-    restrooms_showers: '🚿 Restrooms',
+    restrooms: '🚻 Restrooms', showers: '🚿 Showers',
+    restrooms_showers: '🚿 Restrooms', // legacy combined section
   };
   const ZR_RULE_LABEL = {
     off_leash: '🟢 Off-leash', on_leash: '⚪ On-leash',
@@ -1255,65 +1342,215 @@
     return `${start}–${end} ${ruleLabel.toLowerCase()}`;
   }
 
-  function buildZoneRulesHtml(zr) {
-    if (!zr || !zr.seasons || !Array.isArray(zr.seasons) || zr.seasons.length === 0) {
-      return '';
+  // Time helpers used by zone-rules tab logic.
+  function _zrParseHHMM(s) {
+    const [h, m] = String(s).split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+  }
+  function _zrPrettyRange(start, end) {
+    const fmt = (s) => {
+      const [h, m] = String(s).split(':').map(Number);
+      const hh = h === 0 ? 12 : h > 12 ? h - 12 : h;
+      const ap = h >= 12 ? 'pm' : 'am';
+      return m ? `${hh}:${String(m).padStart(2,'0')}${ap}` : `${hh}${ap}`;
+    };
+    return `${fmt(start)}–${fmt(end)}`;
+  }
+  function _zrCoverageMins(tabs) {
+    let total = 0;
+    for (const t of tabs) {
+      if (!t.start || !t.end) continue;
+      const sm = _zrParseHHMM(t.start);
+      const em = _zrParseHHMM(t.end);
+      total += em > sm ? (em - sm) : (24*60 - sm + em);
+    }
+    return total;
+  }
+  // Returns the rule a section actually has during the given tab's window.
+  function _zrRuleInTab(section, tab) {
+    if (!tab || tab.isOther || !tab.start) return section?.rule || 'unknown';
+    for (const tw of (section?.time_windows || [])) {
+      if (tw.start === tab.start && tw.end === tab.end) return tw.rule || section?.rule || 'unknown';
+    }
+    return section?.rule || 'unknown';
+  }
+  // Active tab picker — current hour today, best-window midpoint else.
+  function _zrPickActiveTab(tabs, ctx) {
+    const h = (ctx?.isToday && ctx.currentLocalHour != null)
+      ? ctx.currentLocalHour
+      : (ctx?.bestWindowMidHour != null ? ctx.bestWindowMidHour : null);
+    if (h == null) return 0;
+    for (let i = 0; i < tabs.length; i++) {
+      const t = tabs[i];
+      if (t.isOther || !t.start || !t.end) continue;
+      const sh = _zrParseHHMM(t.start) / 60;
+      const eh = _zrParseHHMM(t.end) / 60;
+      const inWindow = sh <= eh ? (h >= sh && h < eh) : (h >= sh || h < eh);
+      if (inWindow) return i;
+    }
+    const otherIdx = tabs.findIndex(t => t.isOther);
+    return otherIdx >= 0 ? otherIdx : 0;
+  }
+
+  function _zrSectionPill(name, rule, sec) {
+    const safeRule = ['off_leash','on_leash','not_allowed'].includes(rule) ? rule : 'unknown';
+    const ruleLabel = ZR_RULE_LABEL[safeRule] || rule;
+    const evidence = sec?.evidence?.quote
+      ? `<div class="zr-section-evidence">${escHtml(sec.evidence.quote)}</div>` : '';
+    return `<div class="zr-section" onclick="this.classList.toggle('open')">
+              <span class="zr-section-name">${ZR_SECTION_LABEL[name] || escHtml(name)}</span>
+              <span class="zr-rule ${safeRule}">${ruleLabel}</span>
+            </div>${evidence}`;
+  }
+
+  // Render ONE zone card. Header shows "🐾 [Beach Name] · [Zone Name]".
+  // Body shows time-window tabs (when any section has time_windows[])
+  // plus the section pill grid. Active tab picked from now/best-window.
+  function _zrRenderZoneCard(reg, ctx, beachName, seasonName, sIdx, rIdx) {
+    const sections = reg.sections || {};
+    const sectionList = Object.entries(sections);
+    if (sectionList.length === 0) return '';
+
+    const zoneName = reg.name || 'Whole beach';
+    const seasonSuffix = seasonName ? ` · ${escHtml(seasonName)}` : '';
+    const header = `<div class="zr-header">🐾 ${escHtml(beachName)}
+                      <span class="zr-zone-name">${escHtml(zoneName)}</span>${seasonSuffix}</div>`;
+
+    // Collect distinct windows across the region's sections.
+    const winMap = new Map();
+    for (const [, sec] of sectionList) {
+      for (const tw of (sec?.time_windows || [])) {
+        if (tw.start && tw.end) {
+          const key = `${tw.start}|${tw.end}`;
+          if (!winMap.has(key)) winMap.set(key, { start: tw.start, end: tw.end });
+        }
+      }
+    }
+    const tabs = Array.from(winMap.values()).sort((a, b) =>
+      _zrParseHHMM(a.start) - _zrParseHHMM(b.start));
+
+    if (tabs.length === 0) {
+      const rows = sectionList.map(([name, sec]) =>
+        _zrSectionPill(name, sec?.rule || 'unknown', sec)).join('');
+      return `<div class="zr-card">${header}
+                <div class="zr-sections">${rows}</div>
+              </div>`;
     }
 
-    const seasons = zr.seasons;
-    const seasonTabs = seasons.length > 1
-      ? `<div class="zr-season-tabs">${seasons.map((s, i) => `
-           <button class="zr-season-tab ${i === 0 ? 'active' : ''}"
-                   data-zr-season="${i}">${escHtml(s.name || `Season ${i+1}`)}${
-             fmtSeasonDates(s.dates) ? ` · ${fmtSeasonDates(s.dates)}` : ''
-           }</button>`).join('')}</div>`
-      : '';
+    if (_zrCoverageMins(tabs) < 24*60) tabs.push({ isOther: true });
+    const activeIdx = _zrPickActiveTab(tabs, ctx);
+    const tabKey = `${sIdx}-${rIdx}`;
 
-    const seasonPanes = seasons.map((season, sIdx) => {
-      const regions = Array.isArray(season.regions) ? season.regions : [];
-      const regionsHtml = regions.map((reg, rIdx) => {
-        const sections = reg.sections || {};
-        const sectionList = Object.entries(sections);
-        if (sectionList.length === 0) return '';
-
-        const regionTimeWindow = Array.isArray(reg.time_windows) && reg.time_windows.length
-          ? `<div class="zr-region-time">⏰ ${escHtml(fmtTimeWindow(reg.time_windows[0]))}</div>` : '';
-
-        const sectionRows = sectionList.map(([name, sec]) => {
-          const rule = sec?.rule || 'unknown';
-          // Time-restricted: section has its own time_windows OR region has a time-window cascade
-          const hasTime = Array.isArray(sec?.time_windows) && sec.time_windows.length > 0;
-          const ruleClass = hasTime ? 'time_window' : rule;
-          const ruleText = hasTime ? `🟡 ${escHtml(fmtTimeWindow(sec.time_windows[0]))}`
-                                   : (ZR_RULE_LABEL[rule] || rule);
-          const evidence = sec?.evidence?.quote ? `<div class="zr-section-evidence">${escHtml(sec.evidence.quote)}</div>` : '';
-          return `<div class="zr-section" onclick="this.classList.toggle('open')">
-                    <span class="zr-section-name">${ZR_SECTION_LABEL[name] || escHtml(name)}</span>
-                    <span class="zr-rule ${ruleClass}">${ruleText}</span>
-                  </div>${evidence}`;
-        }).join('');
-
-        const regionName = reg.name && regions.length > 1
-          ? `<div class="zr-region-name">${escHtml(reg.name)}</div>` : '';
-
-        return `<div class="zr-region">
-                  ${regionName}${regionTimeWindow}
-                  <div class="zr-sections">${sectionRows}</div>
-                </div>`;
-      }).join('');
-
-      return `<div class="zr-season-pane" data-zr-season-pane="${sIdx}"
-                   style="${sIdx === 0 ? '' : 'display:none;'}">${regionsHtml}</div>`;
+    const tabBtns = tabs.map((t, i) => {
+      const label = t.isOther ? 'Other times' : _zrPrettyRange(t.start, t.end);
+      return `<button class="zr-time-tab ${i === activeIdx ? 'active' : ''}"
+                data-zr-time-key="${tabKey}" data-zr-time-tab="${i}">${escHtml(label)}</button>`;
     }).join('');
 
-    const notes = zr.global_notes
-      ? `<div class="zr-notes">${escHtml(zr.global_notes)}</div>` : '';
+    const tabPanes = tabs.map((t, i) => {
+      const rows = sectionList.map(([name, sec]) =>
+        _zrSectionPill(name, _zrRuleInTab(sec, t), sec)).join('');
+      return `<div class="zr-time-pane" data-zr-time-key="${tabKey}" data-zr-time-pane="${i}"
+                   style="${i === activeIdx ? '' : 'display:none;'}">
+                <div class="zr-sections">${rows}</div>
+              </div>`;
+    }).join('');
 
     return `<div class="zr-card">
-              <div class="zr-header">🐾 Zone rules <span class="zr-sub">where dogs can go</span></div>
-              ${seasonTabs}
-              ${seasonPanes}
-              ${notes}
+              ${header}
+              <div class="zr-time-tabs">${tabBtns}</div>
+              ${tabPanes}
+            </div>`;
+  }
+
+  // Build all zone cards — one per region. Multi-season beaches expand
+  // to (season × region) cards; the season name is appended to the
+  // header so context stays clear without needing tabs.
+  //
+  // When named sub-zones exist, the unnamed "Whole beach" region gets
+  // deduped: sections present in any named zone are dropped (the named
+  // zone's pill is more specific). The Whole beach card is kept even
+  // if only perimeter sections remain — parking/restrooms still earn a
+  // pill so users see the universal admin-policy info in one place.
+  // The card is only suppressed when ZERO sections remain after dedupe.
+
+  // Returns true if MM-DD viewMd falls within the season's date range.
+  // Handles year-wrap (e.g., off-season Sep 5 → Jun 15 covers Dec/Jan).
+  function _zrSeasonContainsDate(season, viewMd) {
+    if (!season) return false;
+    const d = season.dates;
+    if (!d || !d.start || !d.end) return true; // "All year" / no bounds
+    const s = d.start, e = d.end, v = viewMd;
+    return s <= e ? (v >= s && v <= e) : (v >= s || v <= e);
+  }
+  // Pick the season(s) to render for the page's date. Prefer
+  // date-bounded matches over "All year"; fall back to first season.
+  function _zrFilterToCurrentSeason(seasons, viewMd) {
+    if (!Array.isArray(seasons) || seasons.length <= 1) return seasons;
+    const bounded = seasons.filter(s =>
+      s?.dates && s.dates.start && s.dates.end &&
+      _zrSeasonContainsDate(s, viewMd));
+    if (bounded.length) return bounded;
+    const allYear = seasons.filter(s => !s?.dates || !s.dates.start);
+    if (allYear.length) return allYear;
+    return [seasons[0]];
+  }
+
+  function buildZoneRulesHtml(zr, ctx, beachName) {
+    if (!zr) return '';
+    let seasons = (Array.isArray(zr.seasons) && zr.seasons.length)
+      ? zr.seasons
+      : (Array.isArray(zr.regions) ? [{ name: null, regions: zr.regions }] : []);
+    if (!seasons.length) return '';
+    // Filter to current season for the page's date.
+    const viewMd = ctx?.viewMonthDay;
+    if (viewMd) seasons = _zrFilterToCurrentSeason(seasons, viewMd);
+
+    const cards = [];
+    seasons.forEach((season, sIdx) => {
+      const regions = Array.isArray(season.regions) ? season.regions : [];
+      const seasonName = seasons.length > 1 ? (season.name || `Season ${sIdx+1}`) : null;
+
+      // Collect section names from NAMED zones in this season — these
+      // win over the unnamed Whole beach zone for the same section.
+      const namedSections = new Set();
+      regions.forEach(reg => {
+        if (reg && reg.name) {
+          for (const sn of Object.keys(reg.sections || {})) namedSections.add(sn);
+        }
+      });
+      const hasNamedZones = namedSections.size > 0;
+
+      regions.forEach((reg, rIdx) => {
+        if (!reg) return;
+        let regToRender = reg;
+
+        if (!reg.name && hasNamedZones) {
+          const filtered = {};
+          for (const [name, sec] of Object.entries(reg.sections || {})) {
+            if (!namedSections.has(name)) filtered[name] = sec;
+          }
+          if (Object.keys(filtered).length === 0) return; // fully covered
+          regToRender = { ...reg, sections: filtered };
+        }
+
+        const card = _zrRenderZoneCard(regToRender, ctx, beachName, seasonName, sIdx, rIdx);
+        if (card) cards.push(card);
+      });
+    });
+    return cards.join('');
+  }
+
+  // Bottom-of-page narrative card. Carries the LLM-generated
+  // zone_rules.global_notes prose (operator + ordinance + sibling
+  // context). Hidden when the field is empty.
+  function buildDetailsCardHtml(zoneRules) {
+    if (!zoneRules || typeof zoneRules !== 'object') return '';
+    const text = (zoneRules.global_notes || '').trim();
+    if (!text) return '';
+    return `<div class="details-card">
+              <div class="details-header">Details</div>
+              <div class="details-body">${escHtml(text)}</div>
             </div>`;
   }
 
@@ -1325,6 +1562,20 @@
     document.querySelectorAll('.zr-season-tab').forEach(t => t.classList.toggle('active', t === tab));
     document.querySelectorAll('[data-zr-season-pane]').forEach(p => {
       p.style.display = p.dataset.zrSeasonPane === idx ? '' : 'none';
+    });
+  });
+
+  // Wire time-window tab clicks. Scoped per region (data-zr-time-key)
+  // so a multi-region card has independent tab state per region.
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.zr-time-tab');
+    if (!btn) return;
+    const key = btn.dataset.zrTimeKey;
+    const idx = btn.dataset.zrTimeTab;
+    document.querySelectorAll(`.zr-time-tab[data-zr-time-key="${key}"]`)
+      .forEach(t => t.classList.toggle('active', t === btn));
+    document.querySelectorAll(`[data-zr-time-pane][data-zr-time-key="${key}"]`).forEach(p => {
+      p.style.display = p.dataset.zrTimePane === idx ? '' : 'none';
     });
   });
 
@@ -1513,9 +1764,26 @@
   }
 
   // ── Scout header blurb ───────────────────────────────────────────
-  async function loadScoutBlurb(locationId, date, day, hours) {
+  async function loadScoutBlurb(locationId, date, day, hours, dogPolicy) {
     const el = document.getElementById('scout-blurb');
     if (!el) return;
+
+    // Short-circuit: same triggers the alternatives card uses. When dogs
+    // aren't allowed OR no good windows remain, skip the LLM call —
+    // there's no useful pack-list / window-narrative to generate. Render
+    // a brief apology and let the alternatives card carry the redirect.
+    const isNoDogs = !!dogPolicy && (
+      dogPolicy.dogs_allowed === 'no' ||
+      (dogPolicy.has_on_leash === false && dogPolicy.has_off_leash === false)
+    );
+    const noGoodWindows = day && day.day_status === 'no_go';
+    if (isNoDogs || noGoodWindows) {
+      el.style.opacity = '1';
+      el.textContent = isNoDogs
+        ? "Sorry bud — dogs aren't allowed here. Check the alternatives below for a nearby spot that welcomes pups."
+        : "Sorry bud — today's looking rough, no go-quality hours. The alternatives below might fit better.";
+      return;
+    }
 
     const statusRank = { no_go: 3, caution: 2, advisory: 1 };
     const worstSandStatus = (hours ?? []).reduce((worst, h) => {

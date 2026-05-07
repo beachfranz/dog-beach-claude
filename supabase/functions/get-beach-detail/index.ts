@@ -154,9 +154,10 @@ Deno.serve(async (req: Request) => {
     // based on dog_policy + day status; this RPC just returns the
     // candidates with their day_status.
     let alternatives: unknown[] = [];
-    if (beach.fid) {
+    const altFid = (beach.arena_group_id ?? beach.fid) as number | null;
+    if (altFid) {
       const { data: alts } = await supabase.rpc("find_alternatives_for_detail", {
-        p_fid: beach.fid as number,
+        p_fid: altFid,
         p_date: date,
       });
       alternatives = (alts as unknown[]) ?? [];

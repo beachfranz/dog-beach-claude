@@ -262,6 +262,48 @@ EDITORIAL HEURISTICS (apply in this order)
    fabricate quotes. Inferred rules from agency-class defaults need no
    evidence.
 
+7. SECTIONS-NOT-REGIONS WITHIN ONE ZONE. If THIS beach has differing rules
+   across CO-LOCATED sub-areas (e.g., sand off-leash + access trails on-leash
+   within the same dog-beach footprint), emit ONE region with multiple
+   sections each carrying their own rule. DO NOT split into multiple regions
+   when the sub-areas are not geographically distinct — they share the same
+   place; they're different SECTIONS of one zone.
+
+   Example: Coronado Dog Beach. Source says "off-leash on sand; on-leash on
+   access routes (trails, picnic areas) within the dog beach footprint."
+   CORRECT: ONE region with sand=off_leash, trails=on_leash,
+   picnic_area=on_leash. INCORRECT: two regions, one for sand and one for
+   access points.
+
+   Test: are the differently-ruled areas at the SAME geographic place
+   (just different surface types)? → one region, multiple sections.
+   Are they at DIFFERENT geographic places? → multiple regions (heuristic 4).
+
+8. TIME-WINDOWS, NOT REGION SPLITS. When a section's rule changes by time of
+   day (e.g., "off-leash before 9am and after 6pm; otherwise leashed"), emit
+   it as a section-level `time_windows[]` entry alongside the section's
+   default `rule`. DO NOT split into multiple regions for time-of-day
+   variations. When multiple on-beach sections (sand, dunes) share the same
+   schedule, emit time_windows[] on EACH section — that's the canonical
+   shape; consumer surface dedups visually.
+
+   Example: Fiesta Island. Source says "off-leash 4am-10pm; leashed
+   otherwise." CORRECT: ONE region with sand={{rule: on_leash, time_windows:
+   [{{start: "04:00", end: "22:00", rule: "off_leash"}}]}}. INCORRECT:
+   leaving regions[] empty because the structure feels too dynamic, OR
+   splitting into a 4am-10pm region and a 10pm-4am region.
+
+9. EMIT STRUCTURE WHEN STRUCTURE EXISTS. If the source describes ANY of:
+   - a named zone within this beach,
+   - a time-of-day window,
+   - a section-specific rule,
+   - a seasonal restriction,
+   you MUST emit it as a region/section/time_window/season. Falling back to
+   `global_notes` prose alone — without a structured region — is incorrect
+   output. `global_notes` is for ADDITIONAL context AFTER the structured
+   fields are populated, not a substitute for them. If you can describe the
+   rule in prose, you can encode it in the structure.
+
 SPATIAL CONTEXT (authoritative — overrides ambiguous source text):
 
 When `pet_allowed_carveout` is non-empty, this beach IS on an authoritative

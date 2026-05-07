@@ -380,8 +380,6 @@
     .section-pill.off_leash   { color: #15803d; background: rgba(34,197,94,0.10); }
     .section-pill.on_leash    { color: #1d4ed8; background: rgba(37,99,235,0.10); }
     .section-pill.not_allowed { color: #b91c1c; background: rgba(239,68,68,0.10); }
-    .section-pill.time_window { color: #b45309; background: rgba(245,158,11,0.10); }
-    .section-pill.unknown     { color: #94a3b8; background: rgba(0,0,0,0.04); border-color: #cbd5e1; }
 
     /* ── Zone rules — section-aware dog policy v2 (442 beaches) ─────
        Locked color/icon system per project_zone_rules_design_locked.md:
@@ -1343,16 +1341,19 @@
     const regions = zoneRules.regions;
     if (!Array.isArray(regions) || regions.length === 0) return '';
 
+    // Only the 3 valid statuses drive pill colors. Unknown / missing
+    // rule sections are filtered out — pills are a positive-signal
+    // surface, not a list of every section the LLM enumerated.
+    const VALID = new Set(['on_leash', 'off_leash', 'not_allowed']);
     const blocks = regions.map(r => {
       const sections = (r && r.sections) || {};
-      const pills = Object.entries(sections).map(([name, sec]) => {
-        let rule = (sec && sec.rule) || 'unknown';
-        if (Array.isArray(sec && sec.time_windows) && sec.time_windows.length) {
-          rule = 'time_window';
-        }
-        const label = ZR_SECTION_LABEL[name] || name;
-        return `<span class="section-pill ${rule}">${label}</span>`;
-      }).join('');
+      const pills = Object.entries(sections)
+        .filter(([_, sec]) => sec && VALID.has(sec.rule))
+        .map(([name, sec]) => {
+          const rule = sec.rule;
+          const label = ZR_SECTION_LABEL[name] || name;
+          return `<span class="section-pill ${rule}">${label}</span>`;
+        }).join('');
       if (!pills) return '';
       const regionLabel = r && r.name ? `<span class="region-label">${escHtml(r.name)}:</span>` : '';
       return regionLabel + pills;

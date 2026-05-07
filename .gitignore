@@ -36,3 +36,10 @@ tmp/
 
 # Per-curator QGIS project files (user-specific paths)
 QGIS/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example

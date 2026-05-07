@@ -159,6 +159,7 @@
     border-radius: 999px;
   }
   .county-count.done { color: var(--green); border-color: var(--green); }
+  .county-count.partial { color: var(--amber); border-color: rgba(245,158,11,0.5); }
   .county-bar .save {
     /* Sits right next to the done-count pill */
     font-family: inherit; font-size: 14px; font-weight: 600;
@@ -351,9 +352,11 @@ function renderCountyDropdown() {
   for (const c of progress) {
     if (!c.with_photos) continue;  // skip counties with no photos
     const opt = document.createElement('option');
-    const done = c.is_done ? ' ✓' : '';
+    let mark = '';
+    if (c.is_done) mark = ' ✓';
+    else if (c.curated > 0) mark = ' •';   // in-progress
     opt.value = c.county;
-    opt.textContent = `${c.county} (${c.curated}/${c.with_photos})${done}`;
+    opt.textContent = `${c.county} (${c.curated}/${c.with_photos})${mark}`;
     sel.appendChild(opt);
   }
   sel.onchange = () => selectCounty(sel.value);
@@ -394,8 +397,10 @@ function updateProgressLabel() {
   document.getElementById('county-name').textContent = currentCounty.county;
   const countEl = document.getElementById('county-count');
   countEl.textContent = `${currentCounty.curated}/${currentCounty.with_photos} done`;
-  countEl.classList.toggle('done',
-    currentCounty.curated >= currentCounty.with_photos && currentCounty.with_photos > 0);
+  const fullyDone = currentCounty.curated >= currentCounty.with_photos && currentCounty.with_photos > 0;
+  const partial   = currentCounty.curated > 0 && !fullyDone;
+  countEl.classList.toggle('done',    fullyDone);
+  countEl.classList.toggle('partial', partial);
 }
 
 document.getElementById('btn-next-pending').onclick = () => jumpPending(+1);

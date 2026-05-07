@@ -1443,7 +1443,8 @@
               </div>`;
     }
 
-    if (_zrCoverageMins(tabs) < 24*60) tabs.push({ isOther: true });
+    // Tolerate up to 5 min gap (handles 23:59 end-of-day convention)
+    if ((24*60) - _zrCoverageMins(tabs) > 5) tabs.push({ isOther: true });
     const activeIdx = _zrPickActiveTab(tabs, ctx);
     const tabKey = `${sIdx}-${rIdx}`;
 

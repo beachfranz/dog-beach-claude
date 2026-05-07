@@ -507,7 +507,8 @@ function _renderZoneCard(reg, beachName, zoneName, seasonLabel, currentLocalHour
     return `<div class="zone-card">${header}<div class="zone-sections">${rows}</div></div>`;
   }
 
-  if (_coverageMins(tabs) < 24*60) tabs.push({ isOther: true });
+  // Tolerate up to 5 min gap (handles 23:59 end-of-day convention)
+  if ((24*60) - _coverageMins(tabs) > 5) tabs.push({ isOther: true });
   const activeIdx = _pickActiveTab(tabs, currentLocalHour);
   const tabKey = `b${_ZR_TAB_KEY++}`;
 

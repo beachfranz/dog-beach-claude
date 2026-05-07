@@ -326,60 +326,32 @@
     .policy-badge.leash-no-dogs   { color: #ef4444; background: rgba(239,68,68,0.08); }
     .policy-badge.hours           { color: var(--text-muted); background: rgba(0,0,0,0.04); border-color: var(--text-muted); }
 
-    /* Leash-status pill — single at-a-glance summary derived from
-       has_on_leash / has_off_leash binaries (2026-05-07 schema). One
-       prominent pill above the Scout blurb so the user sees the leash
-       answer first. */
-    .leash-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-family: 'DM Sans', sans-serif;
-      font-size: 13px;
-      font-weight: 600;
-      padding: 5px 12px;
-      border-radius: 999px;
-      border: 1.5px solid currentColor;
-      align-self: flex-start;
-      margin-top: 6px;
-      letter-spacing: 0.01em;
-    }
-    .leash-pill.off-leash { color: #15803d; background: rgba(22,163,74,0.10); }
-    .leash-pill.on-leash  { color: #1d4ed8; background: rgba(37,99,235,0.10); }
-    .leash-pill.no-dogs   { color: #b91c1c; background: rgba(239,68,68,0.10); }
-    .leash-pill-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin-top: 6px;
+    /* Policy-pill grid — one row per leash status (off_leash / on_leash /
+       not_allowed). Each row: overall leash pill on the LEFT, section
+       pills with that rule on the RIGHT. All pills same size, equal gap,
+       left-justified. */
+    .policy-pill-grid {
+      display: flex; flex-direction: column;
+      gap: 6px; margin-top: 6px;
       align-self: flex-start;
     }
-    .leash-pill-row .leash-pill { margin-top: 0; }
-
-    /* Section pills — one per zone_rules section, colored by rule. */
-    .section-pills {
+    .policy-pill-row {
       display: flex; flex-wrap: wrap;
-      gap: 4px; margin-top: 4px;
-      align-self: flex-start;
-      align-items: center;
+      gap: 6px; align-items: center;
+      justify-content: flex-start;
     }
-    .section-pills .region-label {
-      font-size: 10px; font-weight: 600;
-      text-transform: uppercase; letter-spacing: 0.04em;
-      color: var(--text-muted, #475569);
-      margin-right: 2px;
-    }
-    .section-pill {
+    .policy-pill {
       font-family: 'DM Sans', sans-serif;
-      font-size: 11px; font-weight: 500;
-      padding: 2px 8px;
+      font-size: 12px; font-weight: 500;
+      padding: 4px 12px;
       border-radius: 999px;
       border: 1px solid currentColor;
       white-space: nowrap;
+      letter-spacing: 0.01em;
     }
-    .section-pill.off_leash   { color: #15803d; background: rgba(34,197,94,0.10); }
-    .section-pill.on_leash    { color: #1d4ed8; background: rgba(37,99,235,0.10); }
-    .section-pill.not_allowed { color: #b91c1c; background: rgba(239,68,68,0.10); }
+    .policy-pill.off_leash   { color: #15803d; background: rgba(34,197,94,0.10); }
+    .policy-pill.on_leash    { color: #1d4ed8; background: rgba(37,99,235,0.10); }
+    .policy-pill.not_allowed { color: #b91c1c; background: rgba(239,68,68,0.10); }
 
     /* ── Zone rules — section-aware dog policy v2 (442 beaches) ─────
        Locked color/icon system per project_zone_rules_design_locked.md:
@@ -650,22 +622,15 @@
       winLabel.textContent = day.best_window_label;
       winLabel.className = `window-label ${day.best_window_status ?? ''}`;
     }
-    // Leash-status pills (binaries) + per-section pills (zone_rules).
-    // Both render directly under the window-label in the header column.
-    const headerLeft = document.getElementById('header-left');
-    const leashPillHtml = buildLeashPillHtml(dog_policy);
-    if (leashPillHtml) {
-      const pillWrap = document.createElement('div');
-      pillWrap.innerHTML = leashPillHtml;
-      const pillEl = pillWrap.firstElementChild;
-      if (pillEl) headerLeft.appendChild(pillEl);
-    }
-    const sectionPillsHtml = buildSectionPillsHtml(zone_rules);
-    if (sectionPillsHtml) {
+    // Unified policy-pill grid: one row per leash status, with the
+    // overall (beach-level) pill on the left and per-section pills on
+    // the right. All pills same size; colored by rule.
+    const policyPillsHtml = buildPolicyPillGridHtml(dog_policy, zone_rules);
+    if (policyPillsHtml) {
       const wrap = document.createElement('div');
-      wrap.innerHTML = sectionPillsHtml;
+      wrap.innerHTML = policyPillsHtml;
       const el = wrap.firstElementChild;
-      if (el) headerLeft.appendChild(el);
+      if (el) document.getElementById('header-left').appendChild(el);
     }
 
     // Scout blurb — loads async, shows shimmer until ready
@@ -1310,59 +1275,62 @@
     });
   });
 
-  // Builds the prominent leash-status pills from the binary presence
-  // flags. Returns up to two pills (one per binary that's true) wrapped
-  // in a flex row, OR a single "no dogs" pill when both are false / dogs
-  // explicitly disallowed. Returns '' when there's no signal.
-  function buildLeashPillHtml(dogPolicy) {
-    if (!dogPolicy) return '';
-    const hasOn  = dogPolicy.has_on_leash;
-    const hasOff = dogPolicy.has_off_leash;
-    const dogsAllowed = (dogPolicy.dogs_allowed || '').toLowerCase();
+  // Builds the unified policy-pill grid. Three potential rows — one per
+  // leash status (off_leash, on_leash, not_allowed). Each row layout:
+  //
+  //   [overall pill]   [section pill] [section pill] ...
+  //                ↑                ↑
+  //            from binaries   from zone_rules.regions[].sections.*
+  //
+  // - All pills same size + shape; only color varies (3 valid rules)
+  // - Rows hidden when neither overall nor any section qualifies
+  // - Sections with rule='unknown' or missing rule are filtered out
+  function buildPolicyPillGridHtml(dogPolicy, zoneRules) {
+    const hasOn  = dogPolicy && dogPolicy.has_on_leash;
+    const hasOff = dogPolicy && dogPolicy.has_off_leash;
+    const dogsAllowed = ((dogPolicy && dogPolicy.dogs_allowed) || '').toLowerCase();
 
-    const noDogs = dogsAllowed === 'no'
-                || (hasOn === false && hasOff === false);
-    if (noDogs) {
-      return `<div class="leash-pill-row"><span class="leash-pill no-dogs">🚫 No dogs allowed</span></div>`;
+    // Bucket all zone_rules sections by their rule.
+    const sectionsByRule = { off_leash: [], on_leash: [], not_allowed: [] };
+    if (zoneRules && Array.isArray(zoneRules.regions)) {
+      for (const r of zoneRules.regions) {
+        const sections = (r && r.sections) || {};
+        for (const [name, sec] of Object.entries(sections)) {
+          if (sec && sectionsByRule[sec.rule]) {
+            sectionsByRule[sec.rule].push(name);
+          }
+        }
+      }
     }
 
-    const pills = [];
-    if (hasOff === true) pills.push(`<span class="leash-pill off-leash">🐾 Off-leash</span>`);
-    if (hasOn  === true) pills.push(`<span class="leash-pill on-leash">🐾 On-leash</span>`);
-    if (pills.length === 0) return '';
-    return `<div class="leash-pill-row">${pills.join('')}</div>`;
-  }
+    const noDogsOverall = dogsAllowed === 'no'
+                       || (hasOn === false && hasOff === false);
 
-  // Builds section pills grouped by zone_rules region. Each pill is one
-  // section (sand, water, trails, etc.) colored by its rule. When a
-  // section has time_windows, falls into the `time_window` color bucket.
-  function buildSectionPillsHtml(zoneRules) {
-    if (!zoneRules) return '';
-    const regions = zoneRules.regions;
-    if (!Array.isArray(regions) || regions.length === 0) return '';
+    const groups = [
+      { rule: 'off_leash',
+        overallShown: hasOff === true,
+        overallLabel: '🐾 Off-leash' },
+      { rule: 'on_leash',
+        overallShown: hasOn === true,
+        overallLabel: '🐾 On-leash' },
+      { rule: 'not_allowed',
+        overallShown: noDogsOverall,
+        overallLabel: '🚫 No dogs' },
+    ];
 
-    // Only the 3 valid statuses drive pill colors. Unknown / missing
-    // rule sections are filtered out — pills are a positive-signal
-    // surface, not a list of every section the LLM enumerated.
-    const VALID = new Set(['on_leash', 'off_leash', 'not_allowed']);
-    const blocks = regions.map(r => {
-      const sections = (r && r.sections) || {};
-      const pills = Object.entries(sections)
-        .filter(([_, sec]) => sec && VALID.has(sec.rule))
-        .map(([name, sec]) => {
-          const rule = sec.rule;
-          const label = ZR_SECTION_LABEL[name] || name;
-          return `<span class="section-pill ${rule}">${label}</span>`;
-        }).join('');
-      if (!pills) return '';
-      const regionLabel = r && r.name ? `<span class="region-label">${escHtml(r.name)}:</span>` : '';
-      return regionLabel + pills;
+    const rows = groups.map(g => {
+      const overall = g.overallShown
+        ? `<span class="policy-pill ${g.rule}">${g.overallLabel}</span>`
+        : '';
+      const sectionPills = sectionsByRule[g.rule]
+        .map(name => `<span class="policy-pill ${g.rule}">${ZR_SECTION_LABEL[name] || escHtml(name)}</span>`)
+        .join('');
+      if (!overall && !sectionPills) return '';
+      return `<div class="policy-pill-row">${overall}${sectionPills}</div>`;
     }).filter(Boolean);
 
-    if (blocks.length === 0) return '';
-    // Multi-region beaches get a small gap divider between groups
-    const sep = '<span style="width:10px; display:inline-block;"></span>';
-    return `<div class="section-pills">${blocks.join(sep)}</div>`;
+    if (rows.length === 0) return '';
+    return `<div class="policy-pill-grid">${rows.join('')}</div>`;
   }
 
   // Renders the secondary policy-badges row — currently just the hours

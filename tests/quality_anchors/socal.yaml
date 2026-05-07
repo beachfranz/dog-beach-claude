@@ -140,13 +140,14 @@ anchors:
     notes: "Leashed dogs on Trails 1 & 6 and connected beach access points."
 
   - name: Pacific Beach
+    aliases: [North Pacific Beach]
     county: San Diego
     state: CA
     tier: 2
     expected:
       dogs_allowed: mixed
       leash_policy: on_leash
-    notes: "SD time-window rule: leashed pre-9am, post-6pm summer (post-4pm winter). 'mixed' captures the time-window nature."
+    notes: "SD time-window rule: leashed pre-9am, post-6pm summer (post-4pm winter). 'mixed' captures the time-window nature. Dataset stores it as 'North Pacific Beach' (the populated north-half record)."
 
   - name: Mission Beach
     county: San Diego
@@ -172,10 +173,10 @@ anchors:
 
   - {name: "Tide Beach Park",         county: "San Diego",     state: CA, tier: 3, notes: "Solana Beach city carve-out. Dogs allowed at Tide Park & Del Mar Shores beaches only."}
   - {name: "Hollywood Beach",         county: "Ventura",       state: CA, tier: 3, notes: "Channel Islands Harbor. Leashed pre-9am / post-5pm."}
-  - {name: "Silver Strand Beach",     county: "Ventura",       state: CA, tier: 3, notes: "Same time window as Hollywood Beach. Less crowded."}
-  - {name: "Sunset Cliffs",           county: "San Diego",     state: CA, tier: 3, notes: "Bluff access + SD time-window model. Adjacent to OB."}
+  - {name: "Silver Strand Beach",     aliases: ["Silver Strand State Beach"], county: "Ventura",       state: CA, tier: 3, notes: "Same time window as Hollywood Beach. Less crowded. Dataset stores it as Silver Strand State Beach."}
+  - {name: "Sunset Cliffs",           aliases: ["Sunset Cliffs Beach"],       county: "San Diego",     state: CA, tier: 3, notes: "Bluff access + SD time-window model. Adjacent to OB."}
   - {name: "Mandalay Beach",          county: "Ventura",       state: CA, tier: 3, notes: "Multiple sources report no formal leash regulation — de facto off-leash. Verify locally."}
   - {name: "Point Dume State Beach",  county: "Los Angeles",   state: CA, tier: 3, notes: "Below mean high tide prohibits dogs (Malibu rule). Above MHT permitted."}
   - {name: "Little Dume Beach",       county: "Los Angeles",   state: CA, tier: 3, notes: "Partly private. Leashed dogs above mean high tide line."}
-  - {name: "West Ellwood Beach",      county: "Santa Barbara", state: CA, tier: 3, notes: "Goleta. Leashed access in otherwise dog-restricted SB County coast."}
+  - {name: "West Ellwood Beach",      aliases: ["Ellwood Beach"], county: "Santa Barbara", state: CA, tier: 3, notes: "Goleta. Leashed access in otherwise dog-restricted SB County coast. Dataset stores it as 'Ellwood Beach' covering the broader stretch."}
   - {name: "Jalama Beach",            county: "Santa Barbara", state: CA, tier: 3, notes: "Remote. Leashed dogs welcome. 107-site campground destination."}

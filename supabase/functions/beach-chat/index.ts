@@ -392,12 +392,32 @@ ${hourLines || "    (none)"}`;
   if (timeRules)                dogPolicyLines.push(`- time_rules: ${trim(timeRules, 200)}`);
   if (policyNotes)              dogPolicyLines.push(`- notes: ${trim(policyNotes, 400)}`);
 
-  // Activity constraints, derived from the binary presence flags.
+  // Compact section-level zone summary derived from zone_rules JSONB.
+  // CRITICAL — the binary has_on_leash flag is true for any beach with
+  // an on-leash zone, including beaches where the SAND is prohibited
+  // and only the trails/parking are walkable (e.g., Newport Municipal
+  // Beach: sand=not_allowed, water=not_allowed, trails=on_leash). The
+  // flat binaries alone make Scout suggest "on-leash swim" — wrong.
+  // The section summary here gives Scout the actual per-section rules.
+  const zoneRules = (modern?.zone_rules ?? null) as Record<string, unknown> | null;
+  const zoneSummary = buildZoneSummary(zoneRules);
+  const globalNotes = (zoneRules?.global_notes as string | null) || null;
+
+  // Section-aware activity constraints — these refine the binary-based
+  // constraints below by reading the actual section rules.
+  const sandWaterProhibited = sectionsAreNotAllowed(zoneRules,
+    ["sand", "water_swim", "dunes", "tide_pools"]);
+
   const constraints: string[] = [];
   if (dogsAllowed === "no" || (hasOnLeash === false && hasOffLeash === false)) {
     constraints.push("Dogs are NOT allowed at this beach. Do NOT suggest fetch, swim, or any sand/wave activity. If there is an allowed_area (parking lot, multi-use trail), point the user there. If no allowed area exists, gently say this isn't a dog beach today.");
+  } else if (sandWaterProhibited) {
+    // Sections explicitly prohibit dogs on sand/water even though the
+    // beach has SOME on-leash zone (trails, parking). Override the
+    // generic "leash required" branch.
+    constraints.push("Dogs are PROHIBITED on the sand and in the water at this beach — only the on-leash zones noted above (trails, parking lot, picnic area) allow dogs. Do NOT suggest beach play, sand walks, fetch, or swimming. Suggest the leash-only zones (walk on the trails, hang in the picnic area) and gently note the sand is off-limits.");
   } else if (hasOnLeash === true && hasOffLeash === true) {
-    constraints.push("This beach has BOTH on-leash zones AND off-leash zones. Off-leash activity (fetch, swim, run) is ONLY OK in the designated off-leash area — see allowed_areas / off_leash_area / zone_rules / notes. Outside that area the dog MUST be leashed. Always direct the user to the specific off-leash zone when suggesting active play, and remind them about the on-leash zones (paths, parking, picnic) if relevant.");
+    constraints.push("This beach has BOTH on-leash zones AND off-leash zones. Off-leash activity (fetch, swim, run) is ONLY OK in the designated off-leash area — see zone_rules / allowed_areas / off_leash_area. Outside that area the dog MUST be leashed. Always direct the user to the specific off-leash zone when suggesting active play, and remind them about the on-leash zones (paths, parking, picnic) if relevant.");
   } else if (hasOffLeash === true && hasOnLeash !== true) {
     constraints.push("This is an off-leash beach. The dog can run free, fetch in the waves, swim. Still suggest a leash for the walk in/out of the parking area if applicable.");
   } else if (hasOnLeash === true && hasOffLeash !== true) {
@@ -413,6 +433,8 @@ ${hourLines || "    (none)"}`;
     : "";
   const dogPolicyBlock = dogPolicyLines.length
     ? `\nDOG POLICY (extracted from official source):\n${dogPolicyLines.join("\n")}\n`
+      + (zoneSummary ? `\nZONE RULES (section-by-section — authoritative; use these over the binary flags):\n${zoneSummary}\n` : "")
+      + (globalNotes ? `\nPOLICY NOTES: ${trim(globalNotes, 600)}\n` : "")
     : "";
 
   return `You are Scout — a local surfer who's been bringing your dog to ${beach.display_name} for years. You know every sandbar, every swell window, when the kooks show up, and when it's firing. You text like a surfer — laid back, uses surf/beach slang naturally (swell, glassy, onshore, sectiony, blown out, dawn patrol, dropping in, firing, going off, closeout, mushy, punchy, clean, choppy, overhead, waist-high), first-person, never formal. You're stoked to help but keep it real — if it's blown out, say it's blown out.
@@ -450,6 +472,69 @@ ${scopedDate
 
 function trim(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+// Build a compact human-readable section summary from zone_rules JSON.
+// Handles both v1 (regions[]) and v2 (seasons[].regions[]) shapes.
+function buildZoneSummary(zr: Record<string, unknown> | null): string {
+  if (!zr) return "";
+  const seasons = Array.isArray(zr.seasons) && (zr.seasons as unknown[]).length
+    ? (zr.seasons as Record<string, unknown>[])
+    : (Array.isArray(zr.regions)
+       ? [{ name: null, regions: zr.regions } as Record<string, unknown>]
+       : []);
+  if (!seasons.length) return "";
+  const lines: string[] = [];
+  for (const s of seasons) {
+    const seasonName = (s.name as string) || "All year";
+    const regions = (Array.isArray(s.regions) ? s.regions : []) as Record<string, unknown>[];
+    for (const r of regions) {
+      const sections = (r.sections as Record<string, Record<string, unknown>>) || {};
+      const entries = Object.entries(sections);
+      if (!entries.length) continue;
+      const zoneName = (r.name as string) || "Whole beach";
+      const sectionParts: string[] = [];
+      for (const [sName, sec] of entries) {
+        const rule = (sec?.rule as string) || "unknown";
+        const tw = sec?.time_windows as Array<Record<string, unknown>> | undefined;
+        if (Array.isArray(tw) && tw.length) {
+          const winText = tw.map(w =>
+            `${w.start}-${w.end}=${w.rule || rule}`).join(", ");
+          sectionParts.push(`${sName}: ${rule} (time: ${winText})`);
+        } else {
+          sectionParts.push(`${sName}: ${rule}`);
+        }
+      }
+      const seasonSuffix = (seasons.length > 1) ? ` [${seasonName}]` : "";
+      lines.push(`  ${zoneName}${seasonSuffix}: ${sectionParts.join("; ")}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+// Returns true if ANY of the listed sections is explicitly not_allowed
+// in any region of zone_rules. Used to detect "trails-only" beaches
+// where the binary has_on_leash is true but sand/water are prohibited.
+function sectionsAreNotAllowed(
+  zr: Record<string, unknown> | null,
+  sectionNames: string[],
+): boolean {
+  if (!zr) return false;
+  const seasons = Array.isArray(zr.seasons) && (zr.seasons as unknown[]).length
+    ? (zr.seasons as Record<string, unknown>[])
+    : (Array.isArray(zr.regions)
+       ? [{ regions: zr.regions } as Record<string, unknown>]
+       : []);
+  for (const s of seasons) {
+    const regions = (Array.isArray(s.regions) ? s.regions : []) as Record<string, unknown>[];
+    for (const r of regions) {
+      const sections = (r.sections as Record<string, Record<string, unknown>>) || {};
+      for (const name of sectionNames) {
+        if (sections[name]?.rule === "not_allowed") return true;
+      }
+    }
+  }
+  return false;
 }
 
 // ─── Comparative question detection ──────────────────────────────────────────

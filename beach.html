@@ -236,6 +236,34 @@
     border-left: 3px solid var(--accent);
     border-radius: 0 8px 8px 0;
   }
+
+  /* Photo strip — horizontal scroll on mobile, grid on wider screens */
+  .photo-strip {
+    margin: 0 16px 12px;
+    display: flex; gap: 8px; overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+  }
+  .photo-tile {
+    flex: 0 0 auto;
+    width: 200px; height: 150px;
+    border-radius: 8px;
+    overflow: hidden; position: relative;
+    border: 1px solid var(--border);
+    scroll-snap-align: start;
+    cursor: pointer; background: #f1f5f9;
+  }
+  .photo-tile img {
+    width: 100%; height: 100%; object-fit: cover; display: block;
+  }
+  .photo-tile-attribution {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.7), rgba(0,0,0,0));
+    color: white; font-size: 10px; padding: 14px 8px 6px;
+    line-height: 1.3; opacity: 0; transition: opacity 0.15s;
+  }
+  .photo-tile:hover .photo-tile-attribution { opacity: 1; }
 </style>
 </head>
 <body>
@@ -418,6 +446,7 @@ function render(data, beachFid) {
   // Render the body
   const sections = [];
   sections.push(buildDescriptionSection(data.description));
+  sections.push(buildPhotoStrip(data.photos));
   sections.push(buildMapSection(beach));
   sections.push(buildHoursSection(beach, amenities));
   sections.push(buildAmenitiesSection(amenities));
@@ -440,6 +469,21 @@ function buildMapsUrl(beach) {
 function buildDescriptionSection(description) {
   if (!description?.text) return '';
   return `<div class="beach-description">${escHtml(description.text)}</div>`;
+}
+
+function buildPhotoStrip(photos) {
+  if (!Array.isArray(photos) || photos.length === 0) return '';
+  const tiles = photos.map(p => {
+    const src   = p.thumb_url || p.image_url;
+    const full  = p.image_url;
+    const link  = p.page_url || full;
+    const attr  = p.attribution || '';
+    return `<a class="photo-tile" href="${escHtml(link)}" target="_blank" rel="noopener" title="${escHtml(attr)}">
+      <img src="${escHtml(src)}" alt="" loading="lazy" onerror="this.parentElement.style.display='none'">
+      <div class="photo-tile-attribution">${escHtml(attr)}</div>
+    </a>`;
+  }).join('');
+  return `<div class="photo-strip">${tiles}</div>`;
 }
 
 function buildMapSection(beach) {

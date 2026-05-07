@@ -60,7 +60,16 @@ REQUIRED:
    - sections marked NOT ALLOWED -> "stay clear of [section]"
 2. If `verified_physical_features` is non-empty, weave the facts in naturally — open or close with a short clause (e.g. "at the mouth of Aliso Creek", "backed by coastal bluffs"). Don't make it its own sentence unless natural.
 3. Mention time-windows / seasonal restrictions concretely when present.
-4. Use 2nd-person imperative voice ("Let your dog...", "Enjoy a walk...", "Pack a lunch").
+4. Mention parking ONCE somewhere natural in the prose, using `parking.type` and `parking.cost` when set:
+   - type=lot, cost=free  -> "with free parking"
+   - type=lot, cost=paid  -> "with paid parking" / "for a small fee at the lot"
+   - type=street, cost=free -> "with free street parking"
+   - type=street, cost=paid -> "with metered street parking"
+   - type=street, cost=mixed -> "with limited metered and free street parking"
+   - type=mixed, cost=paid -> "with paid lot and street parking"
+   - type set, cost=null -> just describe type ("with a parking lot", "with street parking")
+   - parking.type=null -> skip parking entirely
+5. Use 2nd-person imperative voice ("Let your dog...", "Enjoy a walk...", "Pack a lunch").
 
 VERIFIED PHYSICAL FEATURE -> CLAUSE:
 - natural=cliff (any count) -> "backed by coastal bluffs"
@@ -207,6 +216,23 @@ def build_inputs(fid: int) -> dict | None:
     })
     bdp = bdp_rows[0] if bdp_rows else {}
 
+    # Parking signal from beach_amenities. parking_cost is not yet in
+    # the schema (queued as a future extraction pass) so we only have
+    # parking_type. cost stays null until we add it.
+    amen_rows = supa("/rest/v1/beach_amenities", params={
+        "select": "parking_type,parking_notes",
+        "arena_group_id": f"eq.{g['group_id']}", "limit": "1",
+    })
+    amen = amen_rows[0] if amen_rows else {}
+    # Treat 'metered' parking_type as paid; otherwise leave cost null
+    p_type = amen.get("parking_type")
+    parking = None
+    if p_type:
+        parking = {
+            "type": p_type,
+            "cost": "paid" if p_type == "metered" else None,
+        }
+
     cpad_unit = None
     if g.get("cpad_unit_id"):
         cpad_rows = supa("/rest/v1/cpad_units", params={
@@ -235,6 +261,7 @@ def build_inputs(fid: int) -> dict | None:
         "name": g.get("display_name_override") or g["name"],
         "location": ", ".join(filter(None, [g.get("county_name"), g.get("state")])),
         "zones": fetch_zones_summary(bdp.get("zone_rules") or {}),
+        "parking": parking,
         "verified_physical_features": physical,
     }
 

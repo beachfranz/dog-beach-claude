@@ -23,8 +23,8 @@ Deno.serve(async (req: Request) => {
   const cors = { ...corsHeaders(req, "GET, POST, OPTIONS"), "Content-Type": "application/json" };
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
-  const authErr = requireAdmin(req);
-  if (authErr) return new Response(JSON.stringify({ error: authErr }), { status: 401, headers: cors });
+  const authFail = await requireAdmin(req, cors);
+  if (authFail) return authFail;
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 

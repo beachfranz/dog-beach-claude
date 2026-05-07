@@ -227,6 +227,15 @@
     font-size: 13px; color: var(--text-muted); line-height: 1.55;
     white-space: pre-wrap;
   }
+
+  /* Beach description (LLM-generated, voice-led) */
+  .beach-description {
+    font-size: 14px; color: var(--text); line-height: 1.6;
+    padding: 14px 16px; margin: 0 16px 12px;
+    background: var(--card); border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+  }
 </style>
 </head>
 <body>
@@ -408,6 +417,7 @@ function render(data, beachFid) {
 
   // Render the body
   const sections = [];
+  sections.push(buildDescriptionSection(data.description));
   sections.push(buildMapSection(beach));
   sections.push(buildHoursSection(beach, amenities));
   sections.push(buildAmenitiesSection(amenities));
@@ -425,6 +435,11 @@ function buildMapsUrl(beach) {
     ? encodeURIComponent(beach.address)
     : `${beach.lat},${beach.lng}`;
   return `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
+}
+
+function buildDescriptionSection(description) {
+  if (!description?.text) return '';
+  return `<div class="beach-description">${escHtml(description.text)}</div>`;
 }
 
 function buildMapSection(beach) {

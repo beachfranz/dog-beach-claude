@@ -147,6 +147,12 @@
     display: flex; align-items: center; justify-content: space-between;
     padding: 4px 0; font-size: 13px;
   }
+  .zone-section {
+    cursor: pointer;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.1s;
+  }
+  .zone-section:hover { border-bottom-color: var(--border); }
   .zone-section-name { color: var(--text); }
   .zone-rule {
     font-size: 11px; padding: 2px 8px; border-radius: 999px;
@@ -156,15 +162,27 @@
   .zone-rule.on_leash    { background: rgba(0,0,0,0.06);     color: #475569; }
   .zone-rule.not_allowed { background: rgba(239,68,68,0.12); color: var(--red); }
   .zone-rule.unknown     { background: rgba(0,0,0,0.04);     color: #94a3b8; }
-  .zone-time-window {
-    font-size: 11px; color: var(--amber); margin-top: 4px;
-    padding-left: 4px; line-height: 1.4;
-  }
   .zone-evidence {
     font-size: 11px; color: var(--text-muted); font-style: italic;
-    margin-top: 6px; padding: 6px 10px;
+    margin: 4px 0; padding: 6px 10px;
     background: rgba(0,0,0,0.02);
     border-left: 3px solid var(--border); border-radius: 0 4px 4px 0;
+    display: none;
+  }
+  .zone-section-block.open > .zone-evidence { display: block; }
+
+  /* Time-window tabs (reference page picks current local hour by default) */
+  .zone-time-tabs {
+    display: flex; gap: 4px; margin: 6px 0 8px; flex-wrap: wrap;
+  }
+  .zone-time-tab {
+    font-size: 11px; padding: 4px 10px; border-radius: 999px;
+    background: rgba(0,0,0,0.04); border: 1px solid var(--border);
+    color: var(--text-muted); cursor: pointer; font-family: inherit;
+  }
+  .zone-time-tab.active {
+    background: rgba(245,158,11,0.13); color: var(--amber);
+    border-color: rgba(245,158,11,0.4); font-weight: 600;
   }
 
   /* Links block */
@@ -255,6 +273,50 @@ function fmtTimeRange(start, end) {
   return `${fmt(start)}–${fmt(end)}`;
 }
 
+// Time-tab helpers (parity with detail.html)
+function _parseHHMM(s) {
+  const [h, m] = String(s).split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+function _coverageMins(tabs) {
+  let total = 0;
+  for (const t of tabs) {
+    if (!t.start || !t.end) continue;
+    const sm = _parseHHMM(t.start), em = _parseHHMM(t.end);
+    total += em > sm ? (em - sm) : (24*60 - sm + em);
+  }
+  return total;
+}
+function _ruleInTab(section, tab) {
+  if (!tab || tab.isOther || !tab.start) return section?.rule || 'unknown';
+  for (const tw of (section?.time_windows || [])) {
+    if (tw.start === tab.start && tw.end === tab.end) return tw.rule || section?.rule || 'unknown';
+  }
+  return section?.rule || 'unknown';
+}
+function _pickActiveTab(tabs, currentLocalHour) {
+  if (currentLocalHour == null) return 0;
+  for (let i = 0; i < tabs.length; i++) {
+    const t = tabs[i];
+    if (t.isOther || !t.start || !t.end) continue;
+    const sh = _parseHHMM(t.start) / 60, eh = _parseHHMM(t.end) / 60;
+    const inWindow = sh <= eh
+      ? (currentLocalHour >= sh && currentLocalHour < eh)
+      : (currentLocalHour >= sh || currentLocalHour < eh);
+    if (inWindow) return i;
+  }
+  const otherIdx = tabs.findIndex(t => t.isOther);
+  return otherIdx >= 0 ? otherIdx : 0;
+}
+function _currentLocalHour(timezone) {
+  const tz = timezone || 'America/Los_Angeles';
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour: '2-digit', hour12: false,
+  }).formatToParts(new Date());
+  const h = parts.find(p => p.type === 'hour')?.value;
+  return h != null ? (parseInt(h, 10) % 24) : null;
+}
+
 function fmtSeasonDates(d) {
   if (!d || !d.start || !d.end) return null;
   const months = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -330,7 +392,7 @@ function render(data, beachFid) {
   sections.push(buildMapSection(beach));
   sections.push(buildHoursSection(beach, amenities));
   sections.push(buildAmenitiesSection(amenities));
-  sections.push(buildZoneRulesSection(dog_policy, beach.display_name));
+  sections.push(buildZoneRulesSection(dog_policy, beach.display_name, _currentLocalHour(beach.timezone)));
   sections.push(buildDetailsSection(dog_policy));
   sections.push(buildLinksSection(beach, beachFid));
 
@@ -408,10 +470,70 @@ function buildAmenitiesSection(amenities) {
   </section>`;
 }
 
-function buildZoneRulesSection(dogPolicy, beachName) {
+function _renderSectionPill(name, rule, sec) {
+  const safeRule = ['off_leash','on_leash','not_allowed'].includes(rule) ? rule : 'unknown';
+  const ruleLabel = ZR_RULE_LABEL[safeRule] || rule;
+  const ev = sec?.evidence?.quote
+    ? `<div class="zone-evidence">${escHtml(sec.evidence.quote)}</div>` : '';
+  return `<div class="zone-section-block" onclick="this.classList.toggle('open')">
+    <div class="zone-section">
+      <span class="zone-section-name">${ZR_SECTION_LABEL[name] || escHtml(name)}</span>
+      <span class="zone-rule ${safeRule}">${ruleLabel}</span>
+    </div>${ev}
+  </div>`;
+}
+
+let _ZR_TAB_KEY = 0;
+function _renderZoneCard(reg, beachName, zoneName, seasonLabel, currentLocalHour) {
+  const sections = reg.sections || {};
+  const sectionList = Object.entries(sections);
+  if (!sectionList.length) return '';
+
+  // Collect distinct (start,end) tuples across the region's sections
+  const winMap = new Map();
+  for (const [, sec] of sectionList) {
+    for (const tw of (sec?.time_windows || [])) {
+      if (tw.start && tw.end) {
+        const key = `${tw.start}|${tw.end}`;
+        if (!winMap.has(key)) winMap.set(key, { start: tw.start, end: tw.end });
+      }
+    }
+  }
+  const tabs = Array.from(winMap.values()).sort((a, b) => _parseHHMM(a.start) - _parseHHMM(b.start));
+  const header = `<div class="zone-card-header">🐾 ${escHtml(beachName || '')}<span class="zone-card-zone">${escHtml(zoneName)}</span>${seasonLabel}</div>`;
+
+  if (tabs.length === 0) {
+    const rows = sectionList.map(([n, s]) => _renderSectionPill(n, s?.rule || 'unknown', s)).join('');
+    return `<div class="zone-card">${header}<div class="zone-sections">${rows}</div></div>`;
+  }
+
+  if (_coverageMins(tabs) < 24*60) tabs.push({ isOther: true });
+  const activeIdx = _pickActiveTab(tabs, currentLocalHour);
+  const tabKey = `b${_ZR_TAB_KEY++}`;
+
+  const tabBtns = tabs.map((t, i) => {
+    const label = t.isOther ? 'Other times' : fmtTimeRange(t.start, t.end);
+    return `<button class="zone-time-tab ${i === activeIdx ? 'active' : ''}"
+              data-zr-time-key="${tabKey}" data-zr-time-tab="${i}">${escHtml(label)}</button>`;
+  }).join('');
+
+  const tabPanes = tabs.map((t, i) => {
+    const rows = sectionList.map(([n, s]) => _renderSectionPill(n, _ruleInTab(s, t), s)).join('');
+    return `<div class="zone-time-pane" data-zr-time-key="${tabKey}" data-zr-time-pane="${i}"
+                 style="${i === activeIdx ? '' : 'display:none;'}">
+              <div class="zone-sections">${rows}</div>
+            </div>`;
+  }).join('');
+
+  return `<div class="zone-card">${header}
+    <div class="zone-time-tabs">${tabBtns}</div>
+    ${tabPanes}
+  </div>`;
+}
+
+function buildZoneRulesSection(dogPolicy, beachName, currentLocalHour) {
   const zr = dogPolicy?.zone_rules;
   if (!zr) return '';
-  // Normalize v1/v2
   const seasons = (Array.isArray(zr.seasons) && zr.seasons.length)
     ? zr.seasons
     : (Array.isArray(zr.regions) ? [{ name: null, regions: zr.regions, dates: null }] : []);
@@ -427,7 +549,6 @@ function buildZoneRulesSection(dogPolicy, beachName) {
         }</span>`
       : '';
 
-    // Build named-section index for whole-beach dedupe
     const namedSections = new Set();
     regions.forEach(r => {
       if (r?.name) for (const k of Object.keys(r.sections || {})) namedSections.add(k);
@@ -435,43 +556,24 @@ function buildZoneRulesSection(dogPolicy, beachName) {
     const hasNamedZones = namedSections.size > 0;
 
     regions.forEach(reg => {
-      const sections = reg.sections || {};
-      let entries = Object.entries(sections);
+      let regToRender = reg;
       if (!reg.name && hasNamedZones) {
-        entries = entries.filter(([n]) => !namedSections.has(n));
-        if (entries.length === 0) return;
+        const filtered = {};
+        for (const [n, s] of Object.entries(reg.sections || {})) {
+          if (!namedSections.has(n)) filtered[n] = s;
+        }
+        if (Object.keys(filtered).length === 0) return;
+        regToRender = { ...reg, sections: filtered };
       }
       const zoneName = reg.name || 'Whole beach';
-      const sectionRows = entries.map(([name, sec]) => {
-        const rule = ['off_leash','on_leash','not_allowed'].includes(sec?.rule) ? sec.rule : 'unknown';
-        const ruleLabel = ZR_RULE_LABEL[rule] || rule;
-        const tw = (Array.isArray(sec?.time_windows) && sec.time_windows.length)
-          ? `<div class="zone-time-window">⏰ ${
-              sec.time_windows.map(w => {
-                const r = ['off_leash','on_leash','not_allowed'].includes(w?.rule) ? w.rule : 'unknown';
-                return `${escHtml(fmtTimeRange(w.start, w.end))}: ${escHtml(ZR_RULE_LABEL[r] || r)}`;
-              }).join(' · ')
-            }</div>` : '';
-        const ev = sec?.evidence?.quote
-          ? `<div class="zone-evidence">${escHtml(sec.evidence.quote)}</div>` : '';
-        return `<div class="zone-section-block">
-          <div class="zone-section">
-            <span class="zone-section-name">${ZR_SECTION_LABEL[name] || escHtml(name)}</span>
-            <span class="zone-rule ${rule}">${ruleLabel}</span>
-          </div>${tw}${ev}
-        </div>`;
-      }).join('');
-
-      cards.push(`<div class="zone-card">
-        <div class="zone-card-header">🐾 ${escHtml(beachName || '')}<span class="zone-card-zone">${escHtml(zoneName)}</span>${seasonLabel}</div>
-        <div class="zone-sections">${sectionRows}</div>
-      </div>`);
+      const card = _renderZoneCard(regToRender, beachName, zoneName, seasonLabel, currentLocalHour);
+      if (card) cards.push(card);
     });
   });
 
   if (!cards.length) return '';
   return `<section class="card">
-    <h2>Zone rules <span style="font-size:12px;font-weight:500;color:var(--text-muted)">all seasons, full schedule</span></h2>
+    <h2>Zone rules</h2>
     ${cards.join('')}
   </section>`;
 }
@@ -521,6 +623,19 @@ function wireCopyButtons() {
     });
   });
 }
+
+// Time-window tab click handler — scoped per region via data-zr-time-key
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.zone-time-tab');
+  if (!btn) return;
+  const key = btn.dataset.zrTimeKey;
+  const idx = btn.dataset.zrTimeTab;
+  document.querySelectorAll(`.zone-time-tab[data-zr-time-key="${key}"]`)
+    .forEach(t => t.classList.toggle('active', t === btn));
+  document.querySelectorAll(`[data-zr-time-pane][data-zr-time-key="${key}"]`).forEach(p => {
+    p.style.display = p.dataset.zrTimePane === idx ? '' : 'none';
+  });
+});
 
 function initMap(beach) {
   if (beach.lat == null || beach.lng == null) return;

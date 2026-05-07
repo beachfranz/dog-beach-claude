@@ -180,7 +180,7 @@ Deno.serve(async (req: Request) => {
             .from("beach_dog_policy")
             .select(
               "dogs_allowed, leash_policy, has_on_leash, has_off_leash, " +
-              "off_leash_flag, dogs_allowed_areas, zone_rules"
+              "off_leash_flag, zone_rules"
             )
             .eq("arena_group_id", beach.arena_group_id)
             .maybeSingle(),
@@ -375,8 +375,9 @@ ${hourLines || "    (none)"}`;
     ?? (metadata?.dogs_allowed as string | null) ?? null;
   const hasOnLeash  = modern && typeof modern.has_on_leash  === "boolean" ? modern.has_on_leash  as boolean : null;
   const hasOffLeash = modern && typeof modern.has_off_leash === "boolean" ? modern.has_off_leash as boolean : null;
-  const allowedAreas = (modern?.dogs_allowed_areas as string | null)
-    ?? (metadata?.dogs_allowed_areas as string | null) ?? null;
+  // dogs_allowed_areas was retired from beach_dog_policy 2026-05-07 (pin #19);
+  // legacy arena_beach_metadata view still carries the field for back-compat.
+  const allowedAreas = (metadata?.dogs_allowed_areas as string | null) ?? null;
   const seasonal     = (metadata?.dogs_seasonal_restrictions as string | null) || null;
   const timeRules    = (metadata?.dogs_time_restrictions as string | null) || null;
   const policyNotes  = (metadata?.dogs_policy_notes as string | null) || null;

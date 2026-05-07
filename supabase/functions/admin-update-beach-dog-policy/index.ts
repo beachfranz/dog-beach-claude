@@ -36,7 +36,7 @@ const EDITABLE_FIELDS = new Set<string>([
   "has_off_leash",       // 2026-05-07: binary presence — modern source of truth
   "dogs_prohibited_start",
   "dogs_prohibited_end",
-  "dogs_allowed_areas",  // legacy flat-text per-zone summary — retiring in Phase 3 (zone_rules supersedes)
+  // dogs_allowed_areas retired 2026-05-07 (pin #19) — zone_rules JSONB carries the per-zone detail
   "access_rule",
   "notes",
   "zone_rules",          // jsonb — section-aware policy from the zone-rules-editor UI

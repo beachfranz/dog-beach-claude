@@ -132,7 +132,7 @@ Deno.serve(async (req: Request) => {
         .from("beach_dog_policy")
         .select(
           "zone_rules, dogs_allowed, leash_policy, has_on_leash, has_off_leash, " +
-          "off_leash_flag, dogs_allowed_areas, consensus_confidence, disagreement_flag"
+          "off_leash_flag, consensus_confidence, disagreement_flag"
         )
         .eq("arena_group_id", beach.arena_group_id)
         .maybeSingle();

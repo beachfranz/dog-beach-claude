@@ -82,7 +82,7 @@ sources:
         freshness:
           warn_after: {count: 30, period: day}
       - name: beach_dog_policy
-        description: "Hand-curated dog-access policy overlay. Keyed on arena_group_id → beaches_gold.fid. Holds dogs_allowed, leash_policy, off_leash_flag, dogs_prohibited_start/end, dogs_allowed_areas, access_rule."
+        description: "Hand-curated dog-access policy overlay. Keyed on arena_group_id → beaches_gold.fid. Holds dogs_allowed, leash_policy, has_on_leash, has_off_leash, off_leash_flag, dogs_prohibited_start/end, access_rule, zone_rules. (dogs_allowed_areas retired 2026-05-07 — superseded by zone_rules JSONB.)"
         loaded_at_field: curated_at
         freshness:
           warn_after: {count: 90, period: day}

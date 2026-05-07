@@ -299,7 +299,8 @@
         <div class="field"><label>dogs_prohibited_start</label><input data-table="dog" data-field="dogs_prohibited_start" type="text" placeholder="HH:MM"></div>
         <div class="field"><label>dogs_prohibited_end</label><input data-table="dog" data-field="dogs_prohibited_end" type="text" placeholder="HH:MM"></div>
       </div>
-      <div class="field"><label>dogs_allowed_areas <span style="color:#94a3b8;font-size:11px;">(legacy — superseded by zone_rules)</span></label><input data-table="dog" data-field="dogs_allowed_areas" type="text"></div>
+      <!-- dogs_allowed_areas retired 2026-05-07 (pin #19) — zone_rules JSONB carries the per-zone detail -->
+
       <div class="field"><label>access_rule</label><input data-table="dog" data-field="access_rule" type="text"></div>
       <div class="field"><label>notes</label><textarea data-table="dog" data-field="notes"></textarea></div>
     </div>

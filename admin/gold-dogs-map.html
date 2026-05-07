@@ -215,7 +215,7 @@ const STATUS_COLORS = {
 const STATUS_ORDER = ['yes', 'restricted', 'seasonal', 'mixed', 'no', 'unknown'];
 
 // State
-const allBeaches = [];          // merged rows: {fid, name, lat, lon, county, state, is_scoreable, dogs_allowed, leash_policy, off_leash_flag, dogs_allowed_areas}
+const allBeaches = [];          // merged rows: {fid, name, lat, lon, county, state, is_scoreable, dogs_allowed, leash_policy, off_leash_flag, has_on_leash, has_off_leash}
 const markers = [];             // {beach, marker}
 const policyZoneLayers = [];    // L.geoJSON layers for dog_policy_zones
 let map;
@@ -263,7 +263,7 @@ async function init() {
   try {
     const [gold, dogs, polys, zones] = await Promise.all([
       restGetAll('beaches_gold?select=fid,name,lat,lon,county_name,state,is_scoreable,location_id&is_active=eq.true'),
-      restGetAll('beach_dog_policy?select=arena_group_id,dogs_allowed,leash_policy,off_leash_flag,dogs_allowed_areas,access_rule,source,consensus_confidence,disagreement_flag'),
+      restGetAll('beach_dog_policy?select=arena_group_id,dogs_allowed,leash_policy,off_leash_flag,has_on_leash,has_off_leash,access_rule,source,consensus_confidence,disagreement_flag'),
       restGetAll('beach_polygons_geojson?select=fid,source_tier,is_split_loser,area_m2,geom'),
       restGetAll('dog_policy_zones_geojson?select=id,category,name,species,source_agency,source_url,effective_dates,notes,area_m2,geom'),
     ]);
@@ -292,7 +292,8 @@ async function init() {
         dogs_allowed: d.dogs_allowed,
         leash_policy: d.leash_policy,
         off_leash_flag: d.off_leash_flag,
-        dogs_allowed_areas: d.dogs_allowed_areas,
+        has_on_leash: d.has_on_leash,
+        has_off_leash: d.has_off_leash,
         access_rule: d.access_rule,
         policy_source: d.source,
         consensus_confidence: d.consensus_confidence,
@@ -532,10 +533,15 @@ function buildPopup(b) {
     <div class="popup-row">
       <span class="popup-label">leash_policy:</span> ${escapeHtml(leashLabel)}
     </div>
-    ${b.dogs_allowed_areas ? `
-      <div class="popup-row">
-        <span class="popup-label">areas:</span> ${escapeHtml(b.dogs_allowed_areas)}
-      </div>` : ''}
+    <div class="popup-row">
+      <span class="popup-label">binary:</span>
+      ${b.has_on_leash === true  ? '<span class="popup-badge badge-yes">on-leash ✓</span>' :
+        b.has_on_leash === false ? '<span class="popup-badge badge-no">on-leash ✗</span>' :
+                                   '<span class="popup-badge badge-unknown">on-leash ?</span>'}
+      ${b.has_off_leash === true  ? '<span class="popup-badge badge-yes">off-leash ✓</span>' :
+        b.has_off_leash === false ? '<span class="popup-badge badge-no">off-leash ✗</span>' :
+                                    '<span class="popup-badge badge-unknown">off-leash ?</span>'}
+    </div>
     ${b.access_rule ? `
       <div class="popup-row">
         <span class="popup-label">access:</span> ${escapeHtml(b.access_rule)}

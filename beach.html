@@ -171,42 +171,32 @@
   }
   .zone-section-block.open > .zone-evidence { display: block; }
 
-  /* Time-block rows (chrono order, one row per distinct window) */
-  .zone-time-rows {
-    display: flex; flex-direction: column; gap: 4px; margin-top: 6px;
+  /* Time-block rows — aligned grid: time-label column + one column
+     per time-shifting section. Header row carries section names. */
+  .zone-time-grid {
+    display: grid;
+    grid-template-columns: minmax(96px, max-content) repeat(var(--time-cols, 2), minmax(0, 1fr));
+    column-gap: 14px; row-gap: 4px;
+    margin-top: 8px;
+    align-items: center;
   }
-  .zone-time-row {
-    display: flex; align-items: center; gap: 10px; padding: 8px 10px;
-    background: rgba(245,158,11,0.04);
-    border-left: 3px solid rgba(245,158,11,0.4);
-    border-radius: 0 6px 6px 0;
-    flex-wrap: wrap;
-  }
-  .zone-time-row.is-other {
-    background: rgba(0,0,0,0.02);
-    border-left-color: var(--border);
-  }
-  .zone-time-row.is-current {
-    background: rgba(245,158,11,0.10);
-    border-left-color: rgba(245,158,11,0.7);
-  }
-  .zone-time-label {
+  .zone-time-grid > .zone-time-label {
     font-size: 11px; font-weight: 700; color: var(--amber);
-    min-width: 90px; letter-spacing: 0.02em;
+    letter-spacing: 0.02em; padding: 6px 0;
   }
-  .zone-time-row.is-other .zone-time-label { color: var(--text-muted); }
-  .zone-time-pills {
-    display: flex; flex-wrap: wrap; gap: 6px 12px; flex: 1; min-width: 0;
+  .zone-time-grid > .zone-time-label.is-other { color: var(--text-muted); }
+  .zone-time-grid > .zone-time-header {
+    font-size: 11px; font-weight: 600; color: var(--text-muted);
+    padding-bottom: 4px; border-bottom: 1px solid var(--border);
   }
-  .zone-pill-pair {
-    display: flex; align-items: center; gap: 6px; font-size: 12px;
+  .zone-time-grid > .zone-time-cell {
+    padding: 4px 0; border-bottom: 1px dotted var(--border);
   }
-  .zone-pill-pair .zone-section-name { color: var(--text); }
   .zone-now-badge {
-    display: inline-block; font-size: 9px; font-weight: 700;
-    padding: 1px 6px; border-radius: 999px;
+    display: inline-block; font-size: 8px; font-weight: 700;
+    padding: 1px 5px; border-radius: 999px;
     background: var(--amber); color: white; letter-spacing: 0.05em;
-    margin-left: 6px;
+    margin-left: 6px; vertical-align: middle;
   }
   .zone-always {
     display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 6px;
@@ -512,13 +502,10 @@ function _renderSectionPill(name, rule, sec) {
   </div>`;
 }
 
-function _renderTimePillPair(name, rule) {
+function _renderTimeCell(rule) {
   const safeRule = ['off_leash','on_leash','not_allowed'].includes(rule) ? rule : 'unknown';
   const ruleLabel = ZR_RULE_LABEL[safeRule] || rule;
-  return `<span class="zone-pill-pair">
-    <span class="zone-section-name">${ZR_SECTION_LABEL[name] || escHtml(name)}</span>
-    <span class="zone-rule ${safeRule}">${ruleLabel}</span>
-  </span>`;
+  return `<span class="zone-rule ${safeRule}">${ruleLabel}</span>`;
 }
 
 function _renderZoneCard(reg, beachName, zoneName, seasonLabel, currentLocalHour) {
@@ -558,7 +545,7 @@ function _renderZoneCard(reg, beachName, zoneName, seasonLabel, currentLocalHour
          _renderSectionPill(n, s?.rule || 'unknown', s)).join('')}</div>`
     : '';
 
-  // One row per window, in chrono order
+  // Row-current detection (highlight only via NOW badge — no row tinting)
   const isCurrent = (w) => {
     if (currentLocalHour == null || w.isOther || !w.start || !w.end) return false;
     const sh = _parseHHMM(w.start) / 60, eh = _parseHHMM(w.end) / 60;
@@ -571,21 +558,31 @@ function _renderZoneCard(reg, beachName, zoneName, seasonLabel, currentLocalHour
     && currentLocalHour != null
     && windows.some(w => w.isOther);
 
-  const rows = windows.map((w, i) => {
+  // Header row (empty time-label cell + section name headers)
+  const headerCells =
+    `<div class="zone-time-header"></div>` +
+    timeShifting.map(([n]) =>
+      `<div class="zone-time-header">${ZR_SECTION_LABEL[n] || escHtml(n)}</div>`
+    ).join('');
+
+  // Data rows
+  const dataCells = windows.map((w, i) => {
     const label = w.isOther ? 'Other times' : fmtTimeRange(w.start, w.end);
-    const pills = timeShifting.map(([n, s]) => _renderTimePillPair(n, _ruleInTab(s, w))).join('');
     const cur = (i === matchingCurrent) || (w.isOther && otherIsCurrent);
-    const cls = `zone-time-row${w.isOther ? ' is-other' : ''}${cur ? ' is-current' : ''}`;
     const nowBadge = cur ? '<span class="zone-now-badge">NOW</span>' : '';
-    return `<div class="${cls}">
-      <span class="zone-time-label">⏰ ${escHtml(label)}${nowBadge}</span>
-      <div class="zone-time-pills">${pills}</div>
-    </div>`;
+    const labelCell = `<div class="zone-time-label${w.isOther ? ' is-other' : ''}">⏰ ${escHtml(label)}${nowBadge}</div>`;
+    const cells = timeShifting.map(([, s]) =>
+      `<div class="zone-time-cell">${_renderTimeCell(_ruleInTab(s, w))}</div>`
+    ).join('');
+    return labelCell + cells;
   }).join('');
 
   return `<div class="zone-card">${header}
     ${alwaysHtml}
-    <div class="zone-time-rows">${rows}</div>
+    <div class="zone-time-grid" style="--time-cols:${timeShifting.length}">
+      ${headerCells}
+      ${dataCells}
+    </div>
   </div>`;
 }
 

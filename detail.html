@@ -345,9 +345,16 @@
       letter-spacing: 0.01em;
     }
     .leash-pill.off-leash { color: #15803d; background: rgba(22,163,74,0.10); }
-    .leash-pill.mixed     { color: #b45309; background: rgba(245,158,11,0.10); }
     .leash-pill.on-leash  { color: #1d4ed8; background: rgba(37,99,235,0.10); }
     .leash-pill.no-dogs   { color: #b91c1c; background: rgba(239,68,68,0.10); }
+    .leash-pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+      align-self: flex-start;
+    }
+    .leash-pill-row .leash-pill { margin-top: 0; }
 
     /* ── Zone rules — section-aware dog policy v2 (442 beaches) ─────
        Locked color/icon system per project_zone_rules_design_locked.md:
@@ -1271,9 +1278,10 @@
     });
   });
 
-  // Builds the prominent leash-status pill from the binary presence
-  // flags (has_on_leash / has_off_leash). One pill, one summary, four
-  // states. Returns '' when there's no signal.
+  // Builds the prominent leash-status pills from the binary presence
+  // flags. Returns up to two pills (one per binary that's true) wrapped
+  // in a flex row, OR a single "no dogs" pill when both are false / dogs
+  // explicitly disallowed. Returns '' when there's no signal.
   function buildLeashPillHtml(dogPolicy) {
     if (!dogPolicy) return '';
     const hasOn  = dogPolicy.has_on_leash;
@@ -1283,19 +1291,14 @@
     const noDogs = dogsAllowed === 'no'
                 || (hasOn === false && hasOff === false);
     if (noDogs) {
-      return `<span class="leash-pill no-dogs">🚫 No dogs allowed</span>`;
+      return `<div class="leash-pill-row"><span class="leash-pill no-dogs">🚫 No dogs allowed</span></div>`;
     }
-    if (hasOn === true && hasOff === true) {
-      return `<span class="leash-pill mixed">🐾 Off-leash &amp; on-leash zones</span>`;
-    }
-    if (hasOff === true) {
-      return `<span class="leash-pill off-leash">🐾 Off-leash beach</span>`;
-    }
-    if (hasOn === true) {
-      return `<span class="leash-pill on-leash">🐾 Leashed dogs welcome</span>`;
-    }
-    // No conclusive signal — don't render
-    return '';
+
+    const pills = [];
+    if (hasOff === true) pills.push(`<span class="leash-pill off-leash">🐾 Off-leash</span>`);
+    if (hasOn  === true) pills.push(`<span class="leash-pill on-leash">🐾 On-leash</span>`);
+    if (pills.length === 0) return '';
+    return `<div class="leash-pill-row">${pills.join('')}</div>`;
   }
 
   // Renders the secondary policy-badges row — currently just the hours

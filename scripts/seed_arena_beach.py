@@ -175,28 +175,48 @@ def main() -> int:
                     (arena_fid,))
         print(f"  [arena]   inserted fid={arena_fid}, group_id={arena_fid}")
 
-    # 2. beaches_gold row (idempotent on fid). Includes location_id slug
-    #    directly — public.beaches is gone.
-    cur.execute("SELECT fid FROM public.beaches_gold WHERE fid = %s", (arena_fid,))
-    if cur.fetchone():
-        print(f"  [gold]    already exists at fid={arena_fid}")
-    else:
-        cur.execute("""
-            INSERT INTO public.beaches_gold
-                (fid, location_id, name, lat, lon, county_name, source_code, source_id,
-                 group_id, nav_lat, nav_lon, nav_source, name_source,
-                 park_name, state, promoted_from, is_active,
-                 noaa_station_id, timezone, open_time, close_time)
-            VALUES
-                (%s, %s, %s, %s, %s, %s, 'manual', %s,
-                 %s, %s, %s, 'manual_seed', 'manual_seed',
-                 %s, %s, 'manual_seed_v1', true,
-                 %s, %s, %s, %s);
-        """, (arena_fid, slug, args.name, args.lat, args.lon, args.county,
-              source_id, arena_fid, args.lat, args.lon,
-              args.park_name, args.state,
-              noaa, timezone, args.open, args.close))
+    # 2. beaches_gold row. UPSERT pattern because tg_arena_auto_promote_to_gold
+    #    fires on the arena INSERT above and pre-creates a minimal stub
+    #    (group_id NULL, county-less slug). The seeder's full payload
+    #    (location_id with county, noaa_station_id, timezone, open/close,
+    #    park_name, source_id) wins via ON CONFLICT DO UPDATE. Without
+    #    this, downstream `arena_group_id = beaches_gold.group_id` joins
+    #    silently return NULL and the refresh call below uses a slug that
+    #    doesn't match what's actually in the DB.
+    cur.execute("""
+        INSERT INTO public.beaches_gold
+            (fid, location_id, name, lat, lon, county_name, source_code, source_id,
+             group_id, nav_lat, nav_lon, nav_source, name_source,
+             park_name, state, promoted_from, is_active,
+             noaa_station_id, timezone, open_time, close_time)
+        VALUES
+            (%s, %s, %s, %s, %s, %s, 'manual', %s,
+             %s, %s, %s, 'manual_seed', 'manual_seed',
+             %s, %s, 'manual_seed_v1', true,
+             %s, %s, %s, %s)
+        ON CONFLICT (fid) DO UPDATE SET
+            location_id     = EXCLUDED.location_id,
+            source_code     = EXCLUDED.source_code,
+            source_id       = EXCLUDED.source_id,
+            group_id        = COALESCE(public.beaches_gold.group_id, EXCLUDED.group_id),
+            nav_source      = EXCLUDED.nav_source,
+            name_source     = EXCLUDED.name_source,
+            park_name       = COALESCE(EXCLUDED.park_name, public.beaches_gold.park_name),
+            promoted_from   = EXCLUDED.promoted_from,
+            noaa_station_id = COALESCE(public.beaches_gold.noaa_station_id, EXCLUDED.noaa_station_id),
+            timezone        = COALESCE(public.beaches_gold.timezone, EXCLUDED.timezone),
+            open_time       = COALESCE(public.beaches_gold.open_time, EXCLUDED.open_time),
+            close_time      = COALESCE(public.beaches_gold.close_time, EXCLUDED.close_time)
+        RETURNING (xmax = 0) as inserted, location_id;
+    """, (arena_fid, slug, args.name, args.lat, args.lon, args.county,
+          source_id, arena_fid, args.lat, args.lon,
+          args.park_name, args.state,
+          noaa, timezone, args.open, args.close))
+    upsert_row = cur.fetchone()
+    if upsert_row["inserted"]:
         print(f"  [gold]    inserted fid={arena_fid}, location_id={slug}")
+    else:
+        print(f"  [gold]    upserted fid={arena_fid}, location_id={upsert_row['location_id']}")
 
     conn.commit()
 
@@ -220,10 +240,23 @@ def main() -> int:
             elif result.get("skipped"):
                 print(f"  [refresh] skipped: {result['reason']}")
             else:
-                r = (result.get("results") or [{}])[0]
-                print(f"  [refresh] {r.get('locationId')}: ok={r.get('ok')} days={r.get('daysProcessed')}")
-                if r.get("phases"):
-                    print(f"            phases: {r['phases']}")
+                # daily-beach-refresh returns {"ok": true, "results": [...]}
+                # when it processed at least one beach. If the slug doesn't
+                # match any row in beaches_gold the response can be missing
+                # `results` or have an empty array — surface that loudly
+                # rather than silently logging "None".
+                results = result.get("results")
+                if results and isinstance(results, list) and len(results) > 0:
+                    r = results[0]
+                    print(f"  [refresh] {r.get('locationId')}: ok={r.get('ok')} days={r.get('daysProcessed')}")
+                    if r.get("phases"):
+                        print(f"            phases: {r['phases']}")
+                else:
+                    print(f"  [refresh] WARNING: unexpected response shape "
+                          f"(no per-beach results). Raw: {json.dumps(result)[:400]}")
+                    print(f"  [refresh] check that location_id={slug!r} exists in "
+                          f"beaches_gold; if not, the trigger may have created the "
+                          f"stub with a different slug.")
     else:
         print(f"\n  [refresh] skipped (default). Pass --score to generate forecasts now,")
         print(f"            or run `python scripts/score_one_beach.py --location-id {slug}` later.")

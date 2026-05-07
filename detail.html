@@ -599,6 +599,8 @@
       </div>
       <div class="window-label" id="window-label"></div>
     </div>
+    <a class="close-btn" id="about-btn" href="#" title="About this beach"
+       style="margin-right: 8px; font-size: 18px; text-decoration: none;">🏖️</a>
     <a class="close-btn" id="close-btn" href="index.html">✕</a>
   </header>
 
@@ -674,6 +676,10 @@
   // Close button preserves whichever key the user came in with
   const backQs = arenaGroupId ? `fid=${arenaGroupId}` : `location=${locationId}`;
   document.getElementById('close-btn').href = `index.html?${backQs}`;
+  // About-this-beach link (reference page) — preserves fid/location_id
+  document.getElementById('about-btn').href = arenaGroupId
+    ? `beach.html?fid=${arenaGroupId}`
+    : `beach.html?location_id=${locationId}`;
 
   loadDetail(arenaGroupId, locationId, date);
 

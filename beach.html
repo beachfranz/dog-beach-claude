@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beach — Dog Beach Scout</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&family=DM+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+  crossorigin="">
+<style>
+  :root {
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --text: #0f2742;
+    --text-muted: #64748b;
+    --border: #e2e8f0;
+    --accent: #1d4ed8;
+    --green: #15803d;
+    --red: #b91c1c;
+    --amber: #b45309;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: 'DM Sans', system-ui, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.5;
+  }
+  .page { max-width: 720px; margin: 0 auto; }
+  header.hero {
+    padding: 24px 20px 16px; background: var(--card);
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: flex-start; gap: 12px;
+  }
+  .hero-main { flex: 1; min-width: 0; }
+  .beach-name {
+    font-family: 'Outfit', sans-serif;
+    font-size: 24px; font-weight: 700; color: var(--text);
+    margin: 0 0 4px;
+  }
+  .beach-context {
+    font-size: 13px; color: var(--text-muted); margin-bottom: 8px;
+  }
+  .beach-address {
+    font-size: 13px; color: var(--text); display: flex;
+    align-items: center; gap: 6px;
+  }
+  .beach-address a {
+    color: var(--accent); text-decoration: none;
+  }
+  .beach-address a:hover { text-decoration: underline; }
+  .copy-btn {
+    cursor: pointer; padding: 2px 6px; border-radius: 4px;
+    border: 1px solid var(--border); background: var(--card);
+    font-size: 11px; color: var(--text-muted);
+    transition: all 0.15s;
+  }
+  .copy-btn:hover { background: var(--bg); color: var(--text); }
+  .copy-btn.copied { color: var(--green); border-color: var(--green); }
+  .close-btn {
+    color: var(--text-muted); text-decoration: none;
+    font-size: 22px; line-height: 1; padding: 4px 6px;
+    border-radius: 6px; flex-shrink: 0;
+  }
+  .close-btn:hover { background: var(--bg); }
+
+  section.card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px; margin: 12px 16px;
+  }
+  section.card h2 {
+    font-size: 14px; font-weight: 700; margin: 0 0 10px;
+    color: var(--text);
+  }
+
+  /* Map block */
+  #map {
+    height: 200px; border-radius: 8px; border: 1px solid var(--border);
+    margin-bottom: 12px;
+  }
+  .map-actions {
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .directions-btn {
+    background: var(--accent); color: white; padding: 10px 14px;
+    border-radius: 8px; text-decoration: none; font-weight: 600;
+    font-size: 14px; text-align: center; display: block;
+  }
+  .directions-btn:hover { opacity: 0.92; }
+  .map-address {
+    font-size: 12px; color: var(--text-muted);
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+
+  /* Hours */
+  .hours-grid {
+    display: grid; grid-template-columns: max-content 1fr;
+    gap: 6px 16px; font-size: 13px;
+  }
+  .hours-grid dt { color: var(--text-muted); font-weight: 500; }
+  .hours-grid dd { margin: 0; color: var(--text); }
+
+  /* Amenities */
+  .amenity-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
+  }
+  @media (min-width: 480px) {
+    .amenity-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+  .amenity {
+    display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: 8px;
+    font-size: 13px;
+    background: var(--card);
+  }
+  .amenity.absent { opacity: 0.35; }
+  .amenity.absent .amenity-label { color: var(--text-muted); text-decoration: line-through; }
+  .amenity.unknown { opacity: 0.55; }
+  .amenity-icon { font-size: 18px; flex-shrink: 0; }
+
+  /* Zone rules — full expanded view (no tabs, no current-season filter) */
+  .zone-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 14px; margin-bottom: 10px;
+  }
+  .zone-card-header {
+    font-size: 13px; font-weight: 700; color: var(--text);
+    margin-bottom: 8px;
+  }
+  .zone-card-zone {
+    font-size: 12px; font-weight: 500; color: var(--text-muted);
+    margin-left: 4px;
+  }
+  .zone-card-zone::before { content: '· '; opacity: 0.5; }
+  .zone-card-season {
+    font-size: 11px; color: var(--amber);
+    background: rgba(245,158,11,0.08); padding: 2px 8px;
+    border-radius: 999px; margin-left: 6px;
+  }
+  .zone-sections {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 4px 12px;
+  }
+  .zone-section {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 4px 0; font-size: 13px;
+  }
+  .zone-section-name { color: var(--text); }
+  .zone-rule {
+    font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    font-weight: 600; white-space: nowrap;
+  }
+  .zone-rule.off_leash   { background: rgba(34,197,94,0.12); color: var(--green); }
+  .zone-rule.on_leash    { background: rgba(0,0,0,0.06);     color: #475569; }
+  .zone-rule.not_allowed { background: rgba(239,68,68,0.12); color: var(--red); }
+  .zone-rule.unknown     { background: rgba(0,0,0,0.04);     color: #94a3b8; }
+  .zone-time-window {
+    font-size: 11px; color: var(--amber); margin-top: 4px;
+    padding-left: 4px; line-height: 1.4;
+  }
+  .zone-evidence {
+    font-size: 11px; color: var(--text-muted); font-style: italic;
+    margin-top: 6px; padding: 6px 10px;
+    background: rgba(0,0,0,0.02);
+    border-left: 3px solid var(--border); border-radius: 0 4px 4px 0;
+  }
+
+  /* Links block */
+  .link-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border: 1px solid var(--border);
+    border-radius: 8px; text-decoration: none; color: var(--text);
+    font-size: 13px; margin-bottom: 8px;
+    transition: background 0.1s;
+  }
+  .link-row:hover { background: var(--bg); }
+  .link-row .arrow { margin-left: auto; color: var(--text-muted); }
+
+  /* Loading / error */
+  .state {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 80px 20px; gap: 12px; color: var(--text-muted);
+  }
+  .state-icon { font-size: 36px; }
+
+  /* Details narrative (global_notes) */
+  .details-prose {
+    font-size: 13px; color: var(--text-muted); line-height: 1.55;
+    white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <header class="hero">
+    <div class="hero-main">
+      <h1 class="beach-name" id="beach-name">Loading...</h1>
+      <div class="beach-context" id="beach-context"></div>
+      <div class="beach-address" id="beach-address"></div>
+    </div>
+    <a class="close-btn" id="close-btn" href="index.html">✕</a>
+  </header>
+
+  <main id="main-content">
+    <div class="state">
+      <div class="state-icon">🏖️</div>
+      <div>Loading beach info…</div>
+    </div>
+  </main>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+  crossorigin=""></script>
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+const params       = new URLSearchParams(location.search);
+const fid          = params.get('fid');
+const locationId   = params.get('location_id');
+const dateFromQs   = params.get('date');
+
+document.getElementById('close-btn').href =
+  fid ? `index.html?fid=${fid}` : (locationId ? `index.html?location=${locationId}` : 'index.html');
+
+const ZR_SECTION_LABEL = {
+  sand: '🏖️ Sand', trails: '🥾 Trails', boardwalk: '🚶 Boardwalk',
+  bluff: '🏔️ Bluff', dunes: '🏜️ Dunes', picnic_area: '🧺 Picnic area',
+  campground: '🏕️ Campground', playground: '🤸 Playground',
+  tide_pools: '🐚 Tide pools', nesting_zones: '🪺 Nesting zones',
+  water_swim: '🌊 Water', parking_lot: '🅿️ Parking',
+  restrooms: '🚻 Restrooms', showers: '🚿 Showers',
+  restrooms_showers: '🚿 Restrooms',
+};
+const ZR_RULE_LABEL = {
+  off_leash: '🟢 Off-leash', on_leash: '⚪ On-leash',
+  not_allowed: '🔴 Not allowed', unknown: '❓ Unknown',
+};
+
+const escHtml = s => String(s ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+function fmtTimeRange(start, end) {
+  const fmt = s => {
+    const [h, m] = String(s).split(':').map(Number);
+    const hh = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    const ap = h >= 12 ? 'pm' : 'am';
+    return m ? `${hh}:${String(m).padStart(2,'0')}${ap}` : `${hh}${ap}`;
+  };
+  return `${fmt(start)}–${fmt(end)}`;
+}
+
+function fmtSeasonDates(d) {
+  if (!d || !d.start || !d.end) return null;
+  const months = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const fmt = md => {
+    const [m, day] = md.split('-').map(Number);
+    return `${months[m] || m} ${day}`;
+  };
+  return `${fmt(d.start)} – ${fmt(d.end)}`;
+}
+
+async function load() {
+  if (!fid && !locationId) return showError('No beach specified.');
+  let resolvedFid = fid;
+  // Resolve location_id → fid by hitting beaches_gold via PostgREST
+  if (!resolvedFid && locationId) {
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/beaches_gold?select=fid&location_id=eq.${encodeURIComponent(locationId)}&limit=1`,
+      { headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` }});
+    const rows = await r.json();
+    if (!rows?.[0]?.fid) return showError('Beach not found.');
+    resolvedFid = rows[0].fid;
+  }
+
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_beach_info`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_fid: parseInt(resolvedFid, 10) }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    if (!data?.beach) return showError('Beach not found.');
+    render(data, resolvedFid);
+  } catch (err) {
+    console.error(err);
+    showError(`Failed to load: ${err.message}`);
+  }
+}
+
+function showError(msg) {
+  document.getElementById('beach-name').textContent = 'Beach';
+  document.getElementById('main-content').innerHTML = `
+    <div class="state"><div class="state-icon">🐕</div><div>${escHtml(msg)}</div></div>`;
+}
+
+function render(data, beachFid) {
+  const { beach, dog_policy, amenities } = data;
+  document.title = `${beach.display_name} — Dog Beach Scout`;
+  document.getElementById('beach-name').textContent = beach.display_name;
+
+  const ctx = [];
+  if (beach.county) ctx.push(beach.county);
+  if (beach.state)  ctx.push(beach.state);
+  document.getElementById('beach-context').textContent = ctx.join(' · ');
+
+  // Address with copy button + native maps deep-link
+  const addrEl = document.getElementById('beach-address');
+  if (beach.address) {
+    const mapsUrl = buildMapsUrl(beach);
+    addrEl.innerHTML = `📍 <a href="${escHtml(mapsUrl)}" target="_blank" rel="noopener">${escHtml(beach.address)}</a>
+      <button class="copy-btn" type="button" data-copy="${escHtml(beach.address)}">Copy</button>`;
+  } else if (beach.lat != null && beach.lng != null) {
+    const coordStr = `${beach.lat.toFixed(4)}°, ${beach.lng.toFixed(4)}°`;
+    addrEl.innerHTML = `📍 <span>${escHtml(coordStr)}</span>
+      <button class="copy-btn" type="button" data-copy="${escHtml(coordStr)}">Copy</button>`;
+  }
+
+  // Render the body
+  const sections = [];
+  sections.push(buildMapSection(beach));
+  sections.push(buildHoursSection(beach, amenities));
+  sections.push(buildAmenitiesSection(amenities));
+  sections.push(buildZoneRulesSection(dog_policy, beach.display_name));
+  sections.push(buildDetailsSection(dog_policy));
+  sections.push(buildLinksSection(beach, beachFid));
+
+  document.getElementById('main-content').innerHTML = sections.filter(Boolean).join('');
+  wireCopyButtons();
+  initMap(beach);
+}
+
+function buildMapsUrl(beach) {
+  const dest = beach.address
+    ? encodeURIComponent(beach.address)
+    : `${beach.lat},${beach.lng}`;
+  return `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
+}
+
+function buildMapSection(beach) {
+  if (beach.lat == null || beach.lng == null) return '';
+  const directionsUrl = buildMapsUrl(beach);
+  const addrLine = beach.address
+    ? `<span>${escHtml(beach.address)}</span>
+       <button class="copy-btn" type="button" data-copy="${escHtml(beach.address)}">Copy</button>`
+    : `<span>${beach.lat.toFixed(4)}°, ${beach.lng.toFixed(4)}°</span>`;
+  return `<section class="card">
+    <h2>Location</h2>
+    <div id="map"></div>
+    <div class="map-actions">
+      <a class="directions-btn" href="${escHtml(directionsUrl)}" target="_blank" rel="noopener">📍 Get directions</a>
+      <div class="map-address">${addrLine}</div>
+    </div>
+  </section>`;
+}
+
+function buildHoursSection(beach, amenities) {
+  const hoursText = amenities?.hours_text;
+  const open = beach.open_time, close = beach.close_time;
+  if (!hoursText && !open && !close) return '';
+  const rows = [];
+  if (hoursText) rows.push(`<dt>Posted</dt><dd>${escHtml(hoursText)}</dd>`);
+  if (open || close) {
+    const range = (open && close) ? `${escHtml(open)} – ${escHtml(close)}`
+                : (open ? `Opens ${escHtml(open)}` : `Closes ${escHtml(close)}`);
+    rows.push(`<dt>Today</dt><dd>${range}</dd>`);
+  }
+  return `<section class="card">
+    <h2>Hours</h2>
+    <dl class="hours-grid">${rows.join('')}</dl>
+  </section>`;
+}
+
+const AMENITY_DEFS = [
+  { key: 'has_parking',         icon: '🅿️',  label: 'Parking' },
+  { key: 'has_restrooms',       icon: '🚻',  label: 'Restrooms' },
+  { key: 'has_showers',         icon: '🚿',  label: 'Showers' },
+  { key: 'has_drinking_water',  icon: '💧',  label: 'Drinking water' },
+  { key: 'has_picnic_area',     icon: '🧺',  label: 'Picnic area' },
+  { key: 'has_fire_pits',       icon: '🔥',  label: 'Fire pits' },
+  { key: 'has_lifeguards',      icon: '🛟',  label: 'Lifeguards' },
+  { key: 'has_food',            icon: '🍔',  label: 'Food / concessions' },
+  { key: 'has_disabled_access', icon: '♿',  label: 'ADA access' },
+];
+
+function buildAmenitiesSection(amenities) {
+  if (!amenities) return '';
+  const cells = AMENITY_DEFS.map(({ key, icon, label }) => {
+    const v = amenities[key];
+    const cls = v === true ? '' : v === false ? 'absent' : 'unknown';
+    return `<div class="amenity ${cls}">
+      <span class="amenity-icon">${icon}</span>
+      <span class="amenity-label">${label}</span>
+    </div>`;
+  }).join('');
+  return `<section class="card">
+    <h2>Amenities</h2>
+    <div class="amenity-grid">${cells}</div>
+  </section>`;
+}
+
+function buildZoneRulesSection(dogPolicy, beachName) {
+  const zr = dogPolicy?.zone_rules;
+  if (!zr) return '';
+  // Normalize v1/v2
+  const seasons = (Array.isArray(zr.seasons) && zr.seasons.length)
+    ? zr.seasons
+    : (Array.isArray(zr.regions) ? [{ name: null, regions: zr.regions, dates: null }] : []);
+  if (!seasons.length) return '';
+
+  const cards = [];
+  seasons.forEach(season => {
+    const regions = Array.isArray(season.regions) ? season.regions : [];
+    if (!regions.length) return;
+    const seasonLabel = season.name && season.name !== 'All year'
+      ? `<span class="zone-card-season">${escHtml(season.name)}${
+          fmtSeasonDates(season.dates) ? ` · ${escHtml(fmtSeasonDates(season.dates))}` : ''
+        }</span>`
+      : '';
+
+    // Build named-section index for whole-beach dedupe
+    const namedSections = new Set();
+    regions.forEach(r => {
+      if (r?.name) for (const k of Object.keys(r.sections || {})) namedSections.add(k);
+    });
+    const hasNamedZones = namedSections.size > 0;
+
+    regions.forEach(reg => {
+      const sections = reg.sections || {};
+      let entries = Object.entries(sections);
+      if (!reg.name && hasNamedZones) {
+        entries = entries.filter(([n]) => !namedSections.has(n));
+        if (entries.length === 0) return;
+      }
+      const zoneName = reg.name || 'Whole beach';
+      const sectionRows = entries.map(([name, sec]) => {
+        const rule = ['off_leash','on_leash','not_allowed'].includes(sec?.rule) ? sec.rule : 'unknown';
+        const ruleLabel = ZR_RULE_LABEL[rule] || rule;
+        const tw = (Array.isArray(sec?.time_windows) && sec.time_windows.length)
+          ? `<div class="zone-time-window">⏰ ${
+              sec.time_windows.map(w => {
+                const r = ['off_leash','on_leash','not_allowed'].includes(w?.rule) ? w.rule : 'unknown';
+                return `${escHtml(fmtTimeRange(w.start, w.end))}: ${escHtml(ZR_RULE_LABEL[r] || r)}`;
+              }).join(' · ')
+            }</div>` : '';
+        const ev = sec?.evidence?.quote
+          ? `<div class="zone-evidence">${escHtml(sec.evidence.quote)}</div>` : '';
+        return `<div class="zone-section-block">
+          <div class="zone-section">
+            <span class="zone-section-name">${ZR_SECTION_LABEL[name] || escHtml(name)}</span>
+            <span class="zone-rule ${rule}">${ruleLabel}</span>
+          </div>${tw}${ev}
+        </div>`;
+      }).join('');
+
+      cards.push(`<div class="zone-card">
+        <div class="zone-card-header">🐾 ${escHtml(beachName || '')}<span class="zone-card-zone">${escHtml(zoneName)}</span>${seasonLabel}</div>
+        <div class="zone-sections">${sectionRows}</div>
+      </div>`);
+    });
+  });
+
+  if (!cards.length) return '';
+  return `<section class="card">
+    <h2>Zone rules <span style="font-size:12px;font-weight:500;color:var(--text-muted)">all seasons, full schedule</span></h2>
+    ${cards.join('')}
+  </section>`;
+}
+
+function buildDetailsSection(dogPolicy) {
+  const text = dogPolicy?.zone_rules?.global_notes;
+  if (!text) return '';
+  return `<section class="card">
+    <h2>Details</h2>
+    <div class="details-prose">${escHtml(text)}</div>
+  </section>`;
+}
+
+function buildLinksSection(beach, beachFid) {
+  const today = new Date().toISOString().slice(0, 10);
+  const detailHref = `detail.html?fid=${beachFid}&date=${today}`;
+  const rows = [
+    `<a class="link-row" href="${detailHref}">
+      <span style="font-size:18px">📊</span>
+      <span><strong>Today's conditions</strong><br>
+        <span style="color:var(--text-muted);font-size:12px">scoring + best window + Scout</span></span>
+      <span class="arrow">→</span>
+    </a>`,
+  ];
+  if (beach.website) {
+    rows.push(`<a class="link-row" href="${escHtml(beach.website)}" target="_blank" rel="noopener">
+      <span style="font-size:18px">🔗</span>
+      <span><strong>Operator website</strong><br>
+        <span style="color:var(--text-muted);font-size:12px">${escHtml(new URL(beach.website).hostname)}</span></span>
+      <span class="arrow">→</span>
+    </a>`);
+  }
+  return `<section class="card"><h2>More info</h2>${rows.join('')}</section>`;
+}
+
+function wireCopyButtons() {
+  document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try {
+        await navigator.clipboard.writeText(btn.dataset.copy);
+        btn.classList.add('copied');
+        const t = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.classList.remove('copied'); btn.textContent = t; }, 1500);
+      } catch {}
+    });
+  });
+}
+
+function initMap(beach) {
+  if (beach.lat == null || beach.lng == null) return;
+  const map = L.map('map', {
+    zoomControl: true, scrollWheelZoom: false,
+  }).setView([beach.lat, beach.lng], 15);
+  L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OSM</a>',
+    maxZoom: 19,
+  }).addTo(map);
+  if (beach.geom?.type === 'Polygon' || beach.geom?.type === 'MultiPolygon') {
+    const layer = L.geoJSON(beach.geom, {
+      style: { color: '#1d4ed8', weight: 2, fillOpacity: 0.15 },
+    }).addTo(map);
+    map.fitBounds(layer.getBounds(), { padding: [16, 16] });
+  } else {
+    L.marker([beach.lat, beach.lng]).addTo(map);
+  }
+}
+
+load();
+</script>
+
+</body>
+</html>

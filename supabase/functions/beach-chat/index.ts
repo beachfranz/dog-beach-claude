@@ -383,58 +383,79 @@ ${hourLines || "    (none)"}`;
   const policyNotes  = (metadata?.dogs_policy_notes as string | null) || null;
   const offLeashArea = (metadata?.dogs_off_leash_area as string | null) || null;
 
-  if (dogsAllowed)              dogPolicyLines.push(`- dogs_allowed: ${dogsAllowed}`);
-  if (hasOnLeash !== null)      dogPolicyLines.push(`- has_on_leash zones: ${hasOnLeash}`);
-  if (hasOffLeash !== null)     dogPolicyLines.push(`- has_off_leash zones: ${hasOffLeash}`);
-  if (offLeashArea)             dogPolicyLines.push(`- off_leash_area: ${trim(offLeashArea, 200)}`);
-  if (allowedAreas)             dogPolicyLines.push(`- allowed_areas: ${trim(allowedAreas, 200)}`);
-  if (seasonal)                 dogPolicyLines.push(`- seasonal: ${trim(seasonal, 200)}`);
-  if (timeRules)                dogPolicyLines.push(`- time_rules: ${trim(timeRules, 200)}`);
-  if (policyNotes)              dogPolicyLines.push(`- notes: ${trim(policyNotes, 400)}`);
-
-  // Compact section-level zone summary derived from zone_rules JSONB.
-  // CRITICAL — the binary has_on_leash flag is true for any beach with
-  // an on-leash zone, including beaches where the SAND is prohibited
-  // and only the trails/parking are walkable (e.g., Newport Municipal
-  // Beach: sand=not_allowed, water=not_allowed, trails=on_leash). The
-  // flat binaries alone make Scout suggest "on-leash swim" — wrong.
-  // The section summary here gives Scout the actual per-section rules.
+  // Zone rules are the authoritative source for what the dog can do
+  // and where. When zone_rules is present, we send ONLY zone_rules
+  // and a single per-section rule — the flat dog_policy binaries
+  // (dogs_allowed/has_on_leash/has_off_leash) are derived noise that
+  // misleads Scout for beaches like Newport Municipal where the
+  // binary has_on_leash=true reflects TRAILS being on-leash but the
+  // SAND is prohibited. The section grid is unambiguous; the flat
+  // fields aren't.
+  //
+  // Whole beach is the first-order zone. When a beach has just one
+  // zone (no named sub-zones), zone_rules represents it as a region
+  // with name=null whose sections describe the entire beach.
   const zoneRules = (modern?.zone_rules ?? null) as Record<string, unknown> | null;
   const zoneSummary = buildZoneSummary(zoneRules);
   const globalNotes = (zoneRules?.global_notes as string | null) || null;
-
-  // Section-aware activity constraints — these refine the binary-based
-  // constraints below by reading the actual section rules.
-  const sandWaterProhibited = sectionsAreNotAllowed(zoneRules,
-    ["sand", "water_swim", "dunes", "tide_pools"]);
+  const haveZoneRules = zoneSummary.length > 0;
 
   const constraints: string[] = [];
-  if (dogsAllowed === "no" || (hasOnLeash === false && hasOffLeash === false)) {
-    constraints.push("Dogs are NOT allowed at this beach. Do NOT suggest fetch, swim, or any sand/wave activity. If there is an allowed_area (parking lot, multi-use trail), point the user there. If no allowed area exists, gently say this isn't a dog beach today.");
-  } else if (sandWaterProhibited) {
-    // Sections explicitly prohibit dogs on sand/water even though the
-    // beach has SOME on-leash zone (trails, parking). Override the
-    // generic "leash required" branch.
-    constraints.push("Dogs are PROHIBITED on the sand and in the water at this beach — only the on-leash zones noted above (trails, parking lot, picnic area) allow dogs. Do NOT suggest beach play, sand walks, fetch, or swimming. Suggest the leash-only zones (walk on the trails, hang in the picnic area) and gently note the sand is off-limits.");
-  } else if (hasOnLeash === true && hasOffLeash === true) {
-    constraints.push("This beach has BOTH on-leash zones AND off-leash zones. Off-leash activity (fetch, swim, run) is ONLY OK in the designated off-leash area — see zone_rules / allowed_areas / off_leash_area. Outside that area the dog MUST be leashed. Always direct the user to the specific off-leash zone when suggesting active play, and remind them about the on-leash zones (paths, parking, picnic) if relevant.");
-  } else if (hasOffLeash === true && hasOnLeash !== true) {
-    constraints.push("This is an off-leash beach. The dog can run free, fetch in the waves, swim. Still suggest a leash for the walk in/out of the parking area if applicable.");
-  } else if (hasOnLeash === true && hasOffLeash !== true) {
-    constraints.push("Leash is REQUIRED at this beach. Never suggest letting the dog run free, off-leash fetch, or unrestrained swimming. Suggest leash-friendly activities: walks along the waterline, on-leash swim, sniff time on the dunes.");
-  } else if (hasOnLeash === null && hasOffLeash === null && dogsAllowed === "yes") {
-    constraints.push("Policy specifics aren't fully extracted for this beach. Default to leashed advice and recommend the user verify on-site signage before any off-leash activity.");
+
+  if (haveZoneRules) {
+    // Primary path: zone_rules is the truth. One clean rule.
+    constraints.push(
+      "ZONE RULES are the authoritative source for what the dog can do and where. " +
+      "Each zone (named or 'Whole beach') lists sections (sand, water_swim, trails, " +
+      "parking_lot, picnic_area, restrooms, showers, playground, dunes, tide_pools, " +
+      "boardwalk, bluff, campground) with one of these rules: " +
+      "  - off_leash: dog can be off-leash in this section " +
+      "  - on_leash: dog must be on-leash in this section " +
+      "  - not_allowed: dog cannot enter this section AT ALL — never suggest activity here. " +
+      "Recommend ONLY activities in sections marked off_leash or on_leash, and ONLY at the " +
+      "leash level the section specifies. If the user asks about an activity that requires " +
+      "a not_allowed section (e.g. swim when water_swim=not_allowed, fetch when " +
+      "sand=not_allowed), say so directly and suggest an allowed alternative on this beach " +
+      "or none if nothing fits. " +
+      "If a section has time_windows, the rule changes by time of day — apply the window " +
+      "matching the user's intended visit hour."
+    );
+  } else {
+    // Fallback path: no zone_rules. Use the legacy flat fields.
+    if (dogsAllowed)            dogPolicyLines.push(`- dogs_allowed: ${dogsAllowed}`);
+    if (hasOnLeash !== null)    dogPolicyLines.push(`- has_on_leash zones: ${hasOnLeash}`);
+    if (hasOffLeash !== null)   dogPolicyLines.push(`- has_off_leash zones: ${hasOffLeash}`);
+    if (offLeashArea)           dogPolicyLines.push(`- off_leash_area: ${trim(offLeashArea, 200)}`);
+    if (allowedAreas)           dogPolicyLines.push(`- allowed_areas: ${trim(allowedAreas, 200)}`);
+    if (seasonal)               dogPolicyLines.push(`- seasonal: ${trim(seasonal, 200)}`);
+    if (timeRules)              dogPolicyLines.push(`- time_rules: ${trim(timeRules, 200)}`);
+    if (policyNotes)            dogPolicyLines.push(`- notes: ${trim(policyNotes, 400)}`);
+
+    if (dogsAllowed === "no" || (hasOnLeash === false && hasOffLeash === false)) {
+      constraints.push("Dogs are NOT allowed at this beach. Do NOT suggest fetch, swim, or any sand/wave activity. If there is an allowed_area (parking lot, multi-use trail), point the user there. If no allowed area exists, gently say this isn't a dog beach today.");
+    } else if (hasOnLeash === true && hasOffLeash === true) {
+      constraints.push("This beach has BOTH on-leash and off-leash zones. Off-leash activity is OK only in the designated off-leash area; outside it, the dog must be leashed.");
+    } else if (hasOffLeash === true && hasOnLeash !== true) {
+      constraints.push("This is an off-leash beach. The dog can run free, fetch in the waves, swim.");
+    } else if (hasOnLeash === true && hasOffLeash !== true) {
+      constraints.push("Leash is required at this beach. Never suggest off-leash play or unrestrained swimming.");
+    } else if (hasOnLeash === null && hasOffLeash === null && dogsAllowed === "yes") {
+      constraints.push("Policy specifics aren't fully extracted. Default to leashed advice and recommend the user verify on-site signage.");
+    }
+    if (dogsAllowed === "seasonal" || seasonal) {
+      constraints.push("Seasonal restrictions apply. Confirm the current date is within the dog-friendly window before recommending off-leash play.");
+    }
   }
-  if (dogsAllowed === "seasonal" || seasonal) {
-    constraints.push("Seasonal restrictions apply. Confirm the current date is within the dog-friendly window before recommending off-leash play; if outside the window, treat as leash-required or no-dogs as appropriate.");
-  }
+
   dogAdviceConstraints = constraints.length
     ? `\nDOG POLICY CONSTRAINTS (HARD RULES — never violate):\n${constraints.map(c => `- ${c}`).join("\n")}\n`
     : "";
-  const dogPolicyBlock = dogPolicyLines.length
-    ? `\nDOG POLICY (extracted from official source):\n${dogPolicyLines.join("\n")}\n`
-      + (zoneSummary ? `\nZONE RULES (section-by-section — authoritative; use these over the binary flags):\n${zoneSummary}\n` : "")
-      + (globalNotes ? `\nPOLICY NOTES: ${trim(globalNotes, 600)}\n` : "")
+  const dogPolicyBlock = (haveZoneRules || dogPolicyLines.length)
+    ? `\nDOG POLICY:\n`
+      + (haveZoneRules
+          ? `ZONE RULES (section-by-section, authoritative):\n${zoneSummary}\n`
+          + (globalNotes ? `\nPOLICY NOTES: ${trim(globalNotes, 600)}\n` : "")
+          : `${dogPolicyLines.join("\n")}\n`)
     : "";
 
   return `You are Scout — a local surfer who's been bringing your dog to ${beach.display_name} for years. You know every sandbar, every swell window, when the kooks show up, and when it's firing. You text like a surfer — laid back, uses surf/beach slang naturally (swell, glassy, onshore, sectiony, blown out, dawn patrol, dropping in, firing, going off, closeout, mushy, punchy, clean, choppy, overhead, waist-high), first-person, never formal. You're stoked to help but keep it real — if it's blown out, say it's blown out.

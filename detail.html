@@ -1586,11 +1586,13 @@
     });
   });
 
-  // Builds the alternatives card. Renders ONLY when:
-  //   (a) current beach disallows dogs (no-dogs trigger), OR
-  //   (b) current beach has day_status='no_go' (no-good-windows trigger)
+  // Builds the alternatives card. Renders when:
+  //   (a) current beach disallows dogs entirely (no-dogs trigger), OR
+  //   (b) current beach prohibits dogs on sand/water/dunes/tide-pools
+  //       (trails-only beach — Newport Municipal pattern), OR
+  //   (c) current beach has day_status='no_go' (no-good-windows trigger)
   // Card is filtered to top 3 nearby dog-friendly beaches; for trigger
-  // (b) only "go" or "advisory" alternatives qualify (sending the user
+  // (c) only "go" or "advisory" alternatives qualify (sending the user
   // to another no_go beach defeats the purpose).
   function buildAlternativesCardHtml(day, dogPolicy, alternatives) {
     if (!Array.isArray(alternatives) || alternatives.length === 0) return '';
@@ -1599,18 +1601,21 @@
       dogPolicy.dogs_allowed === 'no' ||
       (dogPolicy.has_on_leash === false && dogPolicy.has_off_leash === false)
     );
+    const isSandWaterProhibited = _zrSandOrWaterProhibited(dogPolicy?.zone_rules);
     const noGoodWindows = day && day.day_status === 'no_go';
-    if (!isNoDogs && !noGoodWindows) return '';
+    if (!isNoDogs && !isSandWaterProhibited && !noGoodWindows) return '';
 
     let alts = alternatives.slice();
     let reason = '';
-    if (noGoodWindows && !isNoDogs) {
+    if (noGoodWindows && !isNoDogs && !isSandWaterProhibited) {
       // Filter to alternatives with good conditions today
       alts = alts.filter(a => a.day_status === 'go' || a.day_status === 'advisory');
       reason = "Conditions here are rough today. These nearby beaches look better.";
       if (alts.length === 0) return ''; // nothing better — don't render
     } else if (isNoDogs) {
       reason = "Dogs aren't allowed at this beach. Try one of these nearby spots instead.";
+    } else if (isSandWaterProhibited) {
+      reason = "Dogs can't go on the sand or in the water at this beach. These nearby spots welcome pups in the surf.";
     }
     alts = alts.slice(0, 3);
     if (alts.length === 0) return '';
@@ -1637,7 +1642,8 @@
         </a>`;
     }).join('');
 
-    const title = isNoDogs ? '🐾 Try these instead' : '🌤 Better conditions nearby';
+    const title = (isNoDogs || isSandWaterProhibited)
+      ? '🐾 Try these instead' : '🌤 Better conditions nearby';
     return `<div class="alt-card">
               <div class="alt-card-header">${title}</div>
               <div class="alt-card-reason">${reason}</div>
@@ -1770,6 +1776,28 @@
       .join('');
   }
 
+  // Walk zone_rules and return true if any region marks sand/water/
+  // dunes/tide_pools as not_allowed. Mirrors beach-chat's
+  // sectionsAreNotAllowed() helper. Used by loadScoutBlurb to
+  // short-circuit on "trails-only" beaches (Newport pattern).
+  function _zrSandOrWaterProhibited(zr) {
+    if (!zr || typeof zr !== 'object') return false;
+    const seasons = (Array.isArray(zr.seasons) && zr.seasons.length)
+      ? zr.seasons
+      : (Array.isArray(zr.regions) ? [{ regions: zr.regions }] : []);
+    const blockedSections = ['sand','water_swim','dunes','tide_pools'];
+    for (const s of seasons) {
+      const regions = Array.isArray(s.regions) ? s.regions : [];
+      for (const reg of regions) {
+        const sections = reg.sections || {};
+        for (const name of blockedSections) {
+          if (sections[name]?.rule === 'not_allowed') return true;
+        }
+      }
+    }
+    return false;
+  }
+
   // ── Scout header blurb ───────────────────────────────────────────
   async function loadScoutBlurb(locationId, date, day, hours, dogPolicy) {
     const el = document.getElementById('scout-blurb');
@@ -1779,16 +1807,29 @@
     // aren't allowed OR no good windows remain, skip the LLM call —
     // there's no useful pack-list / window-narrative to generate. Render
     // a brief apology and let the alternatives card carry the redirect.
+    //
+    // ALSO short-circuit when the BEACH SURFACE (sand/water/dunes) is
+    // explicitly prohibited even though some on-leash zone exists
+    // (Newport Municipal pattern: trails on-leash, sand=not_allowed).
+    // The blurb prompt asks for pack-list / swim gear and Sonnet
+    // pattern-matches on the question over the system-prompt zone
+    // rules, so the LLM call produces wrong gear recs even with
+    // correct zone data. Better to skip and apologize.
     const isNoDogs = !!dogPolicy && (
       dogPolicy.dogs_allowed === 'no' ||
       (dogPolicy.has_on_leash === false && dogPolicy.has_off_leash === false)
     );
+    const isSandWaterProhibited = _zrSandOrWaterProhibited(dogPolicy?.zone_rules);
     const noGoodWindows = day && day.day_status === 'no_go';
-    if (isNoDogs || noGoodWindows) {
+    if (isNoDogs || isSandWaterProhibited || noGoodWindows) {
       el.style.opacity = '1';
-      el.textContent = isNoDogs
-        ? "Sorry bud — dogs aren't allowed here. Check the alternatives below for a nearby spot that welcomes pups."
-        : "Sorry bud — today's looking rough, no go-quality hours. The alternatives below might fit better.";
+      if (isNoDogs) {
+        el.textContent = "Sorry bud — dogs aren't allowed here. Check the alternatives below for a nearby spot that welcomes pups.";
+      } else if (isSandWaterProhibited) {
+        el.textContent = "Sorry bud — dogs aren't allowed on the sand or in the water here. The trails and parking are leash-only. Check the alternatives below for a beach where pups can actually hit the surf.";
+      } else {
+        el.textContent = "Sorry bud — today's looking rough, no go-quality hours. The alternatives below might fit better.";
+      }
       return;
     }
 
@@ -1809,12 +1850,20 @@
       day.bacteria_risk && day.bacteria_risk !== 'none' ? `bacteria risk: ${day.bacteria_risk}` : null,
     ].filter(Boolean).join(', ');
 
+    // Pack-list / gear recommendations intentionally dropped 2026-05-07.
+    // The pack-list sentence pushed Sonnet to recommend swim gear ("fetch
+    // ball if tide low") even on beaches where dogs aren't allowed on
+    // the sand/water — Sonnet treated the prompt instruction as
+    // overriding the system-prompt zone rules. Accuracy > pack list.
+    // Re-enable once we can condition gear recs on the section rules
+    // (e.g., only suggest fetch ball if zone_rules has sand=off_leash AND
+    // water_swim allowed AND tide is low).
     const question =
       `Best window: ${windowLabel} (${windowStatus}). Conditions: ${signals}. ` +
-      `Write exactly three sentences of flowing prose — no headers, no bullets, no lists: ` +
+      `Write 1-2 short sentences of flowing prose — no headers, no bullets, no lists, no pack list, no gear recommendations: ` +
       `Sentence 1: when the best window is and the main reason why, using vivid descriptive language not raw numbers. ` +
-      `Sentence 2: any cautions or advisories during that window; if conditions are clean, skip this sentence entirely. ` +
-      `Sentence 3: pack list for a dog owner and their dog — lead with the dog's needs first. Always mention fresh water for the dog. Add a towel and fetch ball if tide is low and good for swimming. Add dog sunscreen if UV is high. Suggest dog booties if sand is hot. Suggest a long leash if crowds are dog_party or too_crowded. Human comfort items (hoodie, windbreaker, sunscreen) are secondary and only worth mentioning if the conditions strongly call for it — the dog comes first. One sentence, natural prose.`;
+      `Sentence 2 (optional, skip if conditions are clean): any cautions or advisories during that window. ` +
+      `STRICT: respect the DOG POLICY ZONE RULES in the system prompt. Never describe activities (fetch, swim, splashing, off-leash play) in sections marked not_allowed. Never recommend on-leash/off-leash activity in a section unless that section's rule actually permits it.`;
 
     try {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/beach-chat`, {

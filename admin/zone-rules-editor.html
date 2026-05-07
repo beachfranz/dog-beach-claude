@@ -236,9 +236,12 @@
 <div class="top">
   <label>Beach</label>
   <select id="beach-picker"></select>
-  <span style="border-left: 1px solid var(--border); padding-left: 10px; margin-left: 4px;">
-    <label>Production fid</label>
-    <input id="prod-fid-input" type="number" placeholder="e.g. 8236" style="width: 90px;">
+  <span style="border-left: 1px solid var(--border); padding-left: 10px; margin-left: 4px; position: relative;">
+    <label>Search</label>
+    <input id="prod-search-input" type="text" placeholder="Beach name…" style="width: 200px;" autocomplete="off">
+    <div id="prod-search-results" style="position: absolute; top: 100%; left: 60px; right: 0; background: white; border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.10); max-height: 280px; overflow-y: auto; z-index: 10; display: none; min-width: 320px;"></div>
+    <span style="border-left: 1px solid var(--border); padding-left: 10px; margin-left: 6px; color: var(--text-muted); font-size: 11px;">or fid</span>
+    <input id="prod-fid-input" type="number" placeholder="8236" style="width: 70px;">
     <button id="load-prod-btn" style="font-size: 12px; padding: 3px 8px;">Load</button>
   </span>
   <span class="grow"></span>
@@ -4352,6 +4355,12 @@ function getAdminSecret() {
 }
 function clearAdminSecret() { localStorage.removeItem(ADMIN_SECRET_KEY); }
 
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
 async function restGet(path) {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
@@ -4484,6 +4493,53 @@ function init() {
     () => loadBeachFromProduction(prodInput.value));
   prodInput.addEventListener('keydown', e => {
     if (e.key === 'Enter') loadBeachFromProduction(prodInput.value);
+  });
+
+  // Production name search — debounced ilike against beaches_gold
+  const searchInput = document.getElementById('prod-search-input');
+  const searchResults = document.getElementById('prod-search-results');
+  let searchTimer = null;
+  searchInput.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    const q = searchInput.value.trim();
+    if (q.length < 2) { searchResults.style.display = 'none'; return; }
+    searchTimer = setTimeout(async () => {
+      try {
+        const rows = await restGet(
+          `beaches_gold?select=fid,name,county_name,is_scoreable&is_active=eq.true&name=ilike.*${encodeURIComponent(q)}*&order=name&limit=12`
+        );
+        if (!rows.length) {
+          searchResults.innerHTML = '<div style="padding: 10px; color: var(--text-muted); font-size: 12px;">No matches</div>';
+          searchResults.style.display = 'block';
+          return;
+        }
+        searchResults.innerHTML = rows.map(r =>
+          `<div class="prod-search-row" data-fid="${r.fid}" style="padding: 8px 12px; cursor: pointer; border-bottom: 1px solid var(--border);">
+            <div style="font-weight: 600; color: var(--text);">${escapeHtml(r.name)}</div>
+            <div style="font-size: 11px; color: var(--text-muted);">${escapeHtml(r.county_name || '?')} · fid ${r.fid}${r.is_scoreable ? ' · scoreable' : ''}</div>
+          </div>`
+        ).join('');
+        searchResults.style.display = 'block';
+        searchResults.querySelectorAll('.prod-search-row').forEach(row => {
+          row.addEventListener('mouseenter', () => row.style.background = 'var(--gray-bg)');
+          row.addEventListener('mouseleave', () => row.style.background = '');
+          row.addEventListener('click', () => {
+            const fid = parseInt(row.dataset.fid);
+            searchInput.value = '';
+            searchResults.style.display = 'none';
+            loadBeachFromProduction(fid);
+          });
+        });
+      } catch (err) {
+        searchResults.innerHTML = `<div style="padding: 10px; color: var(--red); font-size: 12px;">Error: ${escapeHtml(String(err))}</div>`;
+        searchResults.style.display = 'block';
+      }
+    }, 200);
+  });
+  // Hide on blur (with delay so click still registers)
+  searchInput.addEventListener('blur', () => setTimeout(() => searchResults.style.display = 'none', 150));
+  searchInput.addEventListener('focus', () => {
+    if (searchInput.value.trim().length >= 2) searchResults.style.display = 'block';
   });
 
   setMode('fixture');

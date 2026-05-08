@@ -1,0 +1,210 @@
+"""load_state.py — Phase A of the state-launch pipeline.
+
+Single-entry-point loader for a state's external data + arena promote.
+
+Usage:
+  python scripts/load_state.py --state OR [--records 20] [--skip-overpass]
+                                          [--skip-pad-us] [--no-publish]
+
+Steps:
+  1. Load PAD-US for the state via external_sources.py (registry-driven loader)
+  2. Run Overpass query for natural=beach in the state → osm_landing
+  3. Promote landing → arena (calls SQL function promote_osm_landing_to_arena)
+  4. Run SQL run_full_pipeline_maintenance(state) — clusters, promotes to gold,
+     enqueues extractions, publishes
+  5. Optionally drain the extraction queue immediately (--drain-queue)
+
+The loader is deliberately thin — it composes existing scripts and SQL
+functions. Each step prints its result. Idempotent end-to-end.
+
+State expansion to OR/WA/etc is now: install state in state_config (for
+state_fp lookup), then `python scripts/load_state.py --state OR`. The
+existing 5 OR seeds will be joined by any new beaches found.
+"""
+from __future__ import annotations
+import argparse
+import os
+import subprocess
+import sys
+import urllib.parse
+import urllib.request
+import json
+from pathlib import Path
+
+import psycopg2
+import psycopg2.extras
+from dotenv import load_dotenv
+
+ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
+POOLER = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
+_p = urllib.parse.urlparse(POOLER)
+PG = dict(host=_p.hostname, port=_p.port or 5432, user=_p.username,
+          password=os.environ["SUPABASE_DB_PASSWORD"],
+          dbname=(_p.path or "/postgres").lstrip("/"), sslmode="require")
+
+OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+
+# State bbox catalog. Expand as needed; OR comes from the existing
+# OR seeds' rough envelope.
+STATE_BBOX = {
+    "CA": (32.50, -124.50, 42.00, -114.10),
+    "OR": (41.99, -124.60, 46.30, -116.45),
+    "WA": (45.50, -124.80, 49.00, -116.90),
+}
+
+
+def step(msg: str):
+    print(f"\n=== {msg} ===")
+
+
+def run_padus(state: str):
+    step(f"Phase A.1 — PAD-US load for {state}")
+    cmd = ["python", str(ROOT / "scripts" / "external_sources.py"),
+           "load", "pad_us", "--state", state]
+    subprocess.run(cmd, check=False)
+
+
+def fetch_overpass_beaches(state: str, max_records: int | None = None):
+    """Run Overpass query for natural=beach in state bbox and insert into osm_landing."""
+    step(f"Phase A.2 — Overpass natural=beach for {state}")
+    if state not in STATE_BBOX:
+        print(f"  no bbox catalog for {state}; skipping Overpass")
+        return 0
+    s, w, n, e = STATE_BBOX[state]
+    bbox = f"{s},{w},{n},{e}"
+    query = f"""
+[out:json][timeout:120];
+(
+  node["natural"="beach"]({bbox});
+  way["natural"="beach"]({bbox});
+  relation["natural"="beach"]({bbox});
+);
+out body geom;
+"""
+    print(f"  bbox={bbox}")
+    data = urllib.parse.urlencode({"data": query}).encode()
+    req = urllib.request.Request(OVERPASS_URL, data=data, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=130) as resp:
+            payload = json.loads(resp.read())
+    except Exception as e:
+        print(f"  Overpass error: {e}")
+        return 0
+
+    elements = payload.get("elements", [])
+    if max_records:
+        elements = elements[:max_records]
+    print(f"  fetched {len(elements)} OSM elements")
+
+    # Insert into osm_landing — append only, ON CONFLICT DO NOTHING
+    inserted = 0
+    with psycopg2.connect(**PG) as conn:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            for el in elements:
+                etype = el.get("type")
+                eid = el.get("id")
+                if not etype or eid is None:
+                    continue
+                tags = el.get("tags") or {}
+                name = tags.get("name", "")
+                # Build geom_full from the element. For nodes use the node coords,
+                # for ways/relations build from members. Simplification — for tonight,
+                # use centroid where available, geometry array where not.
+                geom_wkt = None
+                if etype == "node":
+                    if "lat" in el and "lon" in el:
+                        geom_wkt = f"POINT({el['lon']} {el['lat']})"
+                else:
+                    geom_arr = el.get("geometry", [])
+                    if geom_arr:
+                        coords = ",".join(f"{p['lon']} {p['lat']}" for p in geom_arr)
+                        if etype == "way":
+                            # Polygon if closed, else line
+                            if geom_arr[0] == geom_arr[-1]:
+                                geom_wkt = f"POLYGON(({coords}))"
+                            else:
+                                geom_wkt = f"LINESTRING({coords})"
+                if not geom_wkt:
+                    continue
+                try:
+                    cur.execute("""
+                        insert into public.osm_landing
+                          (type, id, name, tags, geom_full, fetched_at, fetched_by, is_active)
+                        values (%s, %s, %s, %s::jsonb,
+                                ST_SetSRID(ST_GeomFromText(%s), 4326),
+                                now(), 'load_state.py', true)
+                        on conflict (type, id, fetched_at) do nothing
+                    """, (etype, eid, name, json.dumps(tags), geom_wkt))
+                    inserted += cur.rowcount
+                except Exception as e:
+                    print(f"  insert failed for {etype}/{eid}: {e}")
+    print(f"  inserted {inserted} new osm_landing rows")
+    return inserted
+
+
+def call_sql(fn_call: str):
+    with psycopg2.connect(**PG) as conn:
+        conn.autocommit = True
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(f"select * from {fn_call}")
+            return cur.fetchall()
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--state", required=True, help="Two-letter state code (CA, OR, WA)")
+    ap.add_argument("--records", type=int, default=None,
+                    help="Cap Overpass to N records for testing (default: all)")
+    ap.add_argument("--skip-pad-us", action="store_true")
+    ap.add_argument("--skip-overpass", action="store_true")
+    ap.add_argument("--no-publish", action="store_true",
+                    help="Stop after extract; skip Phase D consumer-promote")
+    ap.add_argument("--drain-queue", action="store_true",
+                    help="After load, drain the extraction queue inline")
+    ap.add_argument("--queue-budget", type=float, default=5.00)
+    args = ap.parse_args()
+
+    state = args.state.upper()
+
+    # Phase A — data sources
+    if not args.skip_pad_us:
+        run_padus(state)
+    if not args.skip_overpass:
+        fetch_overpass_beaches(state, args.records)
+
+    # Phase B — promote landing → arena → gold (init only, no publish if --no-publish)
+    step(f"Phase B — promote landing → arena → gold for {state}")
+    poi_rec  = call_sql("public.promote_poi_landing_to_arena()")[0]
+    osm_rec  = call_sql("public.promote_osm_landing_to_arena()")[0]
+    name_rec = call_sql("public.refresh_arena_names_from_osm_landing()")[0]
+    print(f"  POI promoted: {poi_rec.get('promoted')}")
+    print(f"  OSM promoted: {osm_rec.get('promoted')}")
+    print(f"  Names refreshed: {name_rec.get('arena_rows_updated')}")
+
+    # Run cluster + extras + promote_to_gold (with publish gating)
+    if args.no_publish:
+        # Custom: run everything but stop before consensus
+        # (Simpler: run full pipeline minus publish_stale step)
+        print(f"  --no-publish: orchestrator stops after extraction enqueue")
+        # TODO: hook for an explicit init-only orchestrator
+        rec = call_sql(f"public.run_pipeline_for_state('{state}')")[0]
+    else:
+        rec = call_sql(f"public.run_full_pipeline_maintenance('{state}')")[0]
+
+    print(f"  Pipeline result: {dict(rec)}")
+
+    # Phase C — drain queue if requested
+    if args.drain_queue:
+        step("Phase C — drain extraction queue")
+        cmd = ["python", str(ROOT / "scripts" / "process_extraction_queue.py"),
+               "--max-fids", str(args.records or 50),
+               "--budget", str(args.queue_budget)]
+        subprocess.run(cmd, check=False)
+
+    print("\nDone.")
+
+
+if __name__ == "__main__":
+    main()

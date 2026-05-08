@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>beach.html — sample browser</title>
+<style>
+  body { margin: 0; font-family: 'DM Sans', system-ui, sans-serif; background: #f8fafc; }
+  #bar {
+    padding: 12px 16px; background: #0f2742; color: #fff;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  #bar label { font-size: 12px; opacity: 0.7; }
+  #bar select {
+    font-family: inherit; font-size: 13px; padding: 6px 10px;
+    border-radius: 6px; border: 1px solid #1e3a5f;
+    background: #1e293b; color: #fff; min-width: 360px;
+  }
+  #meta {
+    margin-left: auto; font-size: 12px; padding: 4px 10px;
+    background: rgba(255,255,255,0.08); border-radius: 999px;
+  }
+  iframe { width: 100%; height: calc(100vh - 50px); border: 0; display: block; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <label for="sel">Beach:</label>
+  <select id="sel"></select>
+  <span id="meta"></span>
+</div>
+<iframe id="frame" title="beach.html"></iframe>
+
+<script>
+const SAMPLES = [
+  // Cohort — original test set
+  { fid: 6212, name: 'Huntington Beach Dog Beach',  group: 'cohort' },
+  { fid: 6202, name: 'Coronado Dog Beach',          group: 'cohort' },
+  { fid: 8337, name: 'Aliso Beach',                  group: 'cohort' },
+  { fid:  218, name: 'Crescent Bay Beach',           group: 'cohort' },
+
+  // Famous CA beaches with descriptions filled in
+  { fid: 8260, name: 'Baker Beach (SF)',             group: 'famous' },
+  { fid: 8617, name: 'Pfeiffer Beach',               group: 'famous' },
+  { fid: 6337, name: 'Stinson Beach',                group: 'famous' },
+  { fid: 8254, name: 'Zuma Beach',                   group: 'famous' },
+  { fid: 4916, name: 'Ocean Beach Tide Pools',       group: 'famous' },
+  { fid: 8488, name: 'Surfrider Beach',              group: 'famous' },
+
+  // Variety / edge cases
+  { fid: 8359, name: 'Ocean Beach (San Diego)',      group: 'variety' },
+  { fid: 8894, name: 'Harbor Beach (Santa Cruz)',    group: 'variety' },
+  { fid: 9720, name: 'Point Dume State Beach (no-dogs)', group: 'variety' },
+  { fid: 3407, name: 'Garrapata State Beach (multi-zone)', group: 'variety' },
+  { fid: 8560, name: 'Del Mar Dog Beach (multi-season + time-windows)', group: 'variety' },
+];
+
+const sel   = document.getElementById('sel');
+const meta  = document.getElementById('meta');
+const frame = document.getElementById('frame');
+
+function groupLabel(g) {
+  return { cohort: 'Cohort (original test set)',
+           famous: 'Famous CA beaches',
+           variety: 'Variety / edge cases' }[g] || g;
+}
+
+let lastGroup = null;
+SAMPLES.forEach((b, i) => {
+  if (b.group !== lastGroup) {
+    if (lastGroup !== null) sel.appendChild(document.createElement('option')).disabled = true;
+    const og = document.createElement('optgroup');
+    og.label = groupLabel(b.group);
+    sel.appendChild(og);
+    lastGroup = b.group;
+  }
+  const opt = document.createElement('option');
+  opt.value = String(i);
+  opt.textContent = `${b.name} (fid ${b.fid})`;
+  // Append to last optgroup
+  sel.querySelector('optgroup:last-of-type').appendChild(opt);
+});
+
+function load(i) {
+  const b = SAMPLES[i];
+  if (!b) return;
+  meta.textContent = `${groupLabel(b.group)} · fid ${b.fid}`;
+  frame.src = `beach.html?fid=${b.fid}`;
+  history.replaceState(null, '', `?fid=${b.fid}`);
+}
+
+sel.addEventListener('change', () => load(parseInt(sel.value, 10)));
+
+const startFid = parseInt(new URLSearchParams(location.search).get('fid') || '0', 10);
+const startIdx = Math.max(0, SAMPLES.findIndex(b => b.fid === startFid));
+sel.value = String(startIdx);
+load(startIdx);
+</script>
+</body>
+</html>

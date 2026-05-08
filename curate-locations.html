@@ -132,6 +132,7 @@
   .map-fab .save-move    { background: var(--green); color: white; }
   .map-fab .save-confirm { background: var(--accent); color: white; }
   .map-fab .skip         { background: #475569; color: white; }
+  .map-fab .review       { background: var(--amber); color: white; }
   .map-fab .inactive     { background: var(--red); color: white; }
   .map-fab .reset        { background: white; color: var(--muted); }
   .map-fab button[disabled] { opacity: 0.4; cursor: not-allowed; }
@@ -203,11 +204,12 @@
   <div class="search-results" id="search-results"></div>
   <div class="move-status" id="move-status"></div>
   <div class="map-fab">
-    <button id="btn-reset"        class="reset"   type="button" disabled>Reset marker</button>
-    <button id="btn-skip"         class="skip"    type="button">Skip →</button>
-    <button id="btn-mark-inactive" class="inactive" type="button">Mark inactive</button>
-    <button id="btn-save-confirm" class="save-confirm" type="button">Looks correct → Next</button>
-    <button id="btn-save-move"    class="save-move"    type="button" disabled>Save move → Next</button>
+    <button id="btn-reset"          class="reset"        type="button" disabled>Reset marker</button>
+    <button id="btn-skip"           class="skip"         type="button">Skip →</button>
+    <button id="btn-mark-review"    class="review"       type="button">Mark for review</button>
+    <button id="btn-mark-inactive"  class="inactive"     type="button">Mark inactive</button>
+    <button id="btn-save-confirm"   class="save-confirm" type="button">Looks correct → Next</button>
+    <button id="btn-save-move"      class="save-move"    type="button" disabled>Save move → Next</button>
   </div>
 </div>
 
@@ -348,8 +350,9 @@ function renderBeachDropdown() {
   for (const b of (currentCounty?.beaches || [])) {
     const opt = document.createElement('option');
     let mark = '';
-    if (b.is_curated && b.was_moved) mark = ' ✓ (moved)';
-    else if (b.is_curated) mark = ' ✓';
+    if (b.needs_review)                 mark = ' ⚠ review';
+    else if (b.is_curated && b.was_moved) mark = ' ✓ (moved)';
+    else if (b.is_curated)              mark = ' ✓';
     opt.value = String(b.fid);
     opt.textContent = `${b.name}${mark}`;
     sel.appendChild(opt);
@@ -490,6 +493,41 @@ document.getElementById('btn-save-move').onclick    = () => save({ withMove: tru
 // Skip — advance without saving. Same as "next pending" but explicitly
 // keeps current beach in the unreviewed bucket.
 document.getElementById('btn-skip').onclick = () => jumpPending(+1);
+
+// Mark for review — flag the beach for someone else to double-check.
+// Records needs_review=true; advance to next.
+document.getElementById('btn-mark-review').onclick = async () => {
+  if (!currentBeach) return;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-curate-beach-location`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY,
+                 'Content-Type': 'application/json', 'x-admin-secret': token },
+      body: JSON.stringify({ fid: currentBeach.fid, needs_review: true, curated_by: curatorUser }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(()=>({error:`HTTP ${res.status}`}));
+      alert(`Mark-for-review failed: ${j.error || res.status}`);
+      return;
+    }
+    const savedCounty = currentCounty.county;
+    const savedFid = currentBeach.fid;
+    await loadProgress({ skipAutoSelect: true });
+    currentCounty = progress.find(c => c.county === savedCounty) || currentCounty;
+    document.getElementById('sel-county').value = savedCounty;
+    renderBeachDropdown();
+    updateProgressLabel();
+    const beaches = currentCounty.beaches;
+    const idx = beaches.findIndex(b => b.fid === savedFid);
+    for (let i = idx + 1; i < beaches.length; i++) {
+      if (!beaches[i].is_curated) { loadBeach(beaches[i].fid); return; }
+    }
+    for (let i = 0; i < idx; i++) {
+      if (!beaches[i].is_curated) { loadBeach(beaches[i].fid); return; }
+    }
+    alert(`County complete! ${savedCounty}: all locations confirmed.`);
+  } catch (e) { alert(`Error: ${e}`); }
+};
 
 // Mark inactive — deactivate the beach in beaches_gold via the existing
 // admin-mark-beach-inactive edge function, then advance.

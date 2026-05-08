@@ -36,13 +36,40 @@ Deno.serve(async (req: Request) => {
   if (authFail) return authFail;
 
   let body: { fid?: number; lat?: number; lng?: number; no_move?: boolean;
-              mark_inactive?: boolean; curated_by?: string; notes?: string };
+              mark_inactive?: boolean; needs_review?: boolean;
+              curated_by?: string; notes?: string };
   try { body = await req.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
 
-  const { fid, lat, lng, no_move, mark_inactive, curated_by, notes } = body;
+  const { fid, lat, lng, no_move, mark_inactive, needs_review, curated_by, notes } = body;
   if (typeof fid !== "number") return json({ error: "fid (number) required" }, 400);
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  // Mark for review — curator flags the beach as "I don't know, please
+  // check this one". Records needs_review=true; doesn't move the marker.
+  if (needs_review === true) {
+    const { error: revErr } = await supabase
+      .from("beach_location_curation_status")
+      .upsert({
+        arena_group_id: fid,
+        curated_at:     new Date().toISOString(),
+        curated_by:     curated_by ?? null,
+        was_moved:      false,
+        needs_review:   true,
+        notes:          notes ?? null,
+      });
+    if (revErr) return json({ error: `Mark-for-review failed: ${revErr.message}` }, 500);
+
+    await logAdminWrite(supabase, {
+      functionName: "admin-curate-beach-location",
+      action:       "update",
+      req,
+      before:       null,
+      after:        { __resolution_mode: "needs_review" },
+      success:      true,
+    });
+    return json({ ok: true, fid, needs_review: true });
+  }
 
   // Mark inactive path — flip beaches_gold.is_active=false. Beach drops
   // out of the catalog (RPCs that filter is_active=true won't return it).

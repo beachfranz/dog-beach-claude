@@ -90,6 +90,37 @@
     display: flex; align-items: center; gap: 6px;
     width: 320px;
   }
+  .search-overlay-google {
+    position: absolute; top: 12px; left: 392px; z-index: 800;
+    background: white; border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    display: flex; align-items: center; gap: 6px;
+    width: 320px;
+  }
+  .search-overlay-google input {
+    border: 0; outline: 0; flex: 1; font-size: 14px; font-family: inherit;
+    color: var(--text);
+  }
+  .search-overlay-google button {
+    border: 0; background: #4285f4; color: white;
+    padding: 4px 10px; border-radius: 4px; cursor: pointer;
+    font-size: 12px; font-weight: 600;
+  }
+  .search-overlay-google button:disabled { opacity: 0.5; cursor: wait; }
+  .search-results-google {
+    position: absolute; top: 50px; left: 392px; z-index: 800;
+    background: white; border: 1px solid var(--border);
+    border-radius: 8px; max-width: 320px;
+    max-height: 280px; overflow-y: auto;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+    display: none;
+  }
+  .search-results-google.visible { display: block; }
+  .search-results-google .search-result-tier {
+    color: #4285f4; font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
   .search-overlay input {
     border: 0; outline: 0; flex: 1; font-size: 14px; font-family: inherit;
     color: var(--text);
@@ -203,6 +234,11 @@
     <button id="search-btn" type="button">Find</button>
   </div>
   <div class="search-results" id="search-results"></div>
+  <div class="search-overlay-google">
+    <input id="gsearch-input" placeholder="Google Places (with county hint)" />
+    <button id="gsearch-btn" type="button">Run Google</button>
+  </div>
+  <div class="search-results-google" id="gsearch-results"></div>
   <div class="move-status" id="move-status"></div>
   <div class="map-fab">
     <button id="btn-back"           class="back"         type="button" disabled>← Back</button>
@@ -652,6 +688,73 @@ function clearSearchMarkers() {
   searchMarkers = [];
 }
 function hideSearchResults() { searchResults.classList.remove('visible'); }
+
+// ─── Google Places search (curator-side, optional, click-to-trigger) ──
+const gsearchInput   = document.getElementById('gsearch-input');
+const gsearchBtn     = document.getElementById('gsearch-btn');
+const gsearchResults = document.getElementById('gsearch-results');
+
+gsearchBtn.onclick = doGoogleSearch;
+gsearchInput.addEventListener('keydown', e => { if (e.key === 'Enter') doGoogleSearch(); });
+
+async function doGoogleSearch() {
+  if (!currentBeach) {
+    alert('Load a beach first.');
+    return;
+  }
+  const q = gsearchInput.value.trim() || currentBeach.name;
+  gsearchBtn.disabled = true;
+  gsearchResults.innerHTML = '<div class="search-result"><i>Asking Google...</i></div>';
+  gsearchResults.classList.add('visible');
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-google-places-search`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY,
+                 'Content-Type': 'application/json', 'x-admin-secret': token },
+      body: JSON.stringify({
+        name: q,
+        county: currentCounty?.county || null,
+        lat: originalLat,
+        lng: originalLng,
+      }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(()=>({error:`HTTP ${res.status}`}));
+      gsearchResults.innerHTML = `<div class="search-result">Error: ${escHtml(j.error || res.status)}</div>`;
+      return;
+    }
+    const { results = [], query = '' } = await res.json();
+    if (!results.length) {
+      gsearchResults.innerHTML = `<div class="search-result">No matches for: ${escHtml(query)}</div>`;
+      return;
+    }
+    gsearchResults.innerHTML = results.map((r, i) => `
+      <div class="search-result" data-idx="${i}">
+        <div class="search-result-tier">${escHtml(r.tier)}</div>
+        <div class="search-result-title">${escHtml(r.name)}</div>
+        <div class="search-result-sub">${escHtml(r.address)}</div>
+      </div>`).join('');
+    gsearchResults.querySelectorAll('.search-result').forEach(el => {
+      el.onclick = () => {
+        const i = parseInt(el.dataset.idx, 10);
+        const r = results[i];
+        if (!r || typeof r.lat !== 'number' || typeof r.lng !== 'number') return;
+        clearSearchMarkers();
+        const icon = L.divIcon({ className: '', html: '<div class="search-marker"></div>',
+                                 iconSize: [14, 14], iconAnchor: [7, 7] });
+        const m = L.marker([r.lat, r.lng], { icon }).addTo(map);
+        m.bindPopup(`<b>${escHtml(r.name)}</b><br><small>Drag the red beach marker here to update</small>`).openPopup();
+        searchMarkers.push(m);
+        map.flyTo([r.lat, r.lng], 17, { duration: 0.6 });
+        gsearchResults.classList.remove('visible');
+      };
+    });
+  } catch (e) {
+    gsearchResults.innerHTML = `<div class="search-result">Error: ${escHtml(String(e))}</div>`;
+  } finally {
+    gsearchBtn.disabled = false;
+  }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────
 function haversine(la1, lo1, la2, lo2) {

@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beach location curator</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+  crossorigin="">
+<style>
+  :root {
+    --bg: #f8fafc; --card: #fff; --text: #0f2742; --muted: #64748b;
+    --border: #e2e8f0; --accent: #1d4ed8; --green: #15803d; --red: #b91c1c;
+    --amber: #b45309;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--bg); color: var(--text); }
+
+  /* Top bar */
+  header.bar {
+    padding: 10px 16px; background: #0f2742; color: #fff;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    z-index: 100;
+  }
+  .bar-title { font-weight: 700; font-size: 15px; }
+  .bar select {
+    font-family: inherit; font-size: 13px; padding: 6px 10px;
+    border-radius: 6px; border: 1px solid #1e3a5f;
+    background: #1e293b; color: #fff; min-width: 200px;
+  }
+  .bar-spacer { flex: 1; }
+  .bar button {
+    font-family: inherit; font-size: 13px; padding: 6px 12px;
+    border-radius: 6px; border: 0; cursor: pointer; font-weight: 600;
+  }
+  .bar button.danger { background: var(--red); color: #fff; }
+
+  /* County progress sub-bar */
+  .county-bar {
+    background: #f1f5f9; border-bottom: 1px solid var(--border);
+    padding: 8px 16px;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  .county-name { font-size: 16px; font-weight: 700; color: var(--text); }
+  .county-count {
+    font-size: 12px; color: var(--muted);
+    padding: 2px 10px; background: white; border: 1px solid var(--border);
+    border-radius: 999px;
+  }
+  .county-count.done    { color: var(--green); border-color: var(--green); }
+  .county-count.partial { color: var(--amber); border-color: rgba(245,158,11,0.5); }
+  .beach-name-display { font-size: 14px; color: var(--text); margin-left: auto; font-weight: 600; }
+
+  /* Login */
+  #login {
+    max-width: 360px; margin: 80px auto; padding: 24px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  #login h1 { margin: 0 0 16px; font-size: 18px; }
+  #login label {
+    display: block; font-size: 12px; font-weight: 600;
+    color: var(--muted); margin: 12px 0 4px;
+  }
+  #login input {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: 6px; font-family: inherit; font-size: 14px;
+  }
+  #login button {
+    margin-top: 16px; width: 100%; padding: 10px;
+    background: var(--accent); color: white; border: 0;
+    border-radius: 6px; font-weight: 600; cursor: pointer;
+  }
+  #login .err { color: var(--red); font-size: 13px; margin-top: 12px; min-height: 18px; }
+
+  /* Map area — fills remaining viewport */
+  #map-wrap {
+    position: relative; flex: 1; height: calc(100vh - 80px);
+  }
+  #map { width: 100%; height: 100%; }
+
+  /* Search overlay */
+  .search-overlay {
+    position: absolute; top: 12px; left: 60px; z-index: 800;
+    background: white; border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    display: flex; align-items: center; gap: 6px;
+    width: 320px;
+  }
+  .search-overlay input {
+    border: 0; outline: 0; flex: 1; font-size: 14px; font-family: inherit;
+    color: var(--text);
+  }
+  .search-overlay button {
+    border: 0; background: var(--accent); color: white;
+    padding: 4px 10px; border-radius: 4px; cursor: pointer;
+    font-size: 12px; font-weight: 600;
+  }
+  .search-results {
+    position: absolute; top: 50px; left: 60px; z-index: 800;
+    background: white; border: 1px solid var(--border);
+    border-radius: 8px; max-width: 320px;
+    max-height: 280px; overflow-y: auto;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+    display: none;
+  }
+  .search-results.visible { display: block; }
+  .search-result {
+    padding: 8px 10px; cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px; line-height: 1.3;
+  }
+  .search-result:last-child { border-bottom: 0; }
+  .search-result:hover { background: var(--bg); }
+  .search-result-title { font-weight: 600; color: var(--text); }
+  .search-result-sub { color: var(--muted); font-size: 11px; }
+
+  /* Floating action buttons */
+  .map-fab {
+    position: absolute; right: 16px; bottom: 24px; z-index: 800;
+    display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+  }
+  .map-fab button {
+    padding: 10px 16px; font-size: 14px; font-weight: 600;
+    border: 0; border-radius: 8px; cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+    font-family: inherit;
+  }
+  .map-fab .save-move    { background: var(--green); color: white; }
+  .map-fab .save-confirm { background: var(--accent); color: white; }
+  .map-fab .reset        { background: white; color: var(--muted); }
+  .map-fab button[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+  /* Status pill — shown when curator has moved the marker */
+  .move-status {
+    position: absolute; left: 16px; bottom: 24px; z-index: 800;
+    background: rgba(15,39,66,0.92); color: white;
+    padding: 8px 14px; border-radius: 8px;
+    font-size: 13px; font-weight: 600;
+    display: none;
+  }
+  .move-status.visible { display: block; }
+
+  /* Custom marker — beach pin */
+  .beach-marker {
+    width: 32px; height: 32px;
+    background: #b91c1c; border: 3px solid white;
+    border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    cursor: grab;
+  }
+  .beach-marker.dragging { cursor: grabbing; }
+  .beach-marker.curated { background: var(--green); }
+  .search-marker {
+    width: 14px; height: 14px;
+    background: var(--accent); border: 2px solid white;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.25);
+  }
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="login">
+  <h1>Beach location curator</h1>
+  <label for="u">Username</label>
+  <input id="u" autocomplete="username">
+  <label for="p">Password</label>
+  <input id="p" type="password" autocomplete="current-password">
+  <button id="login-btn" type="button">Sign in</button>
+  <div class="err" id="login-err"></div>
+</div>
+
+<!-- App -->
+<header class="bar" style="display:none" id="app-bar">
+  <div class="bar-title">Location curator</div>
+  <select id="sel-county"></select>
+  <select id="sel-beach"></select>
+  <div class="bar-spacer"></div>
+  <button id="btn-prev-pending" type="button" style="background:#1e293b; color:#fff">‹ Prev pending</button>
+  <button id="btn-next-pending" type="button" style="background:#1e293b; color:#fff">Next pending ›</button>
+  <button id="btn-logout" type="button" class="danger">Logout</button>
+</header>
+
+<div class="county-bar" style="display:none" id="county-bar">
+  <div class="county-name" id="county-name">—</div>
+  <div class="county-count" id="county-count"></div>
+  <div class="beach-name-display" id="beach-display">—</div>
+</div>
+
+<div id="map-wrap" style="display:none">
+  <div id="map"></div>
+  <div class="search-overlay">
+    <input id="search-input" placeholder="Search a place name (Nominatim)" />
+    <button id="search-btn" type="button">Find</button>
+  </div>
+  <div class="search-results" id="search-results"></div>
+  <div class="move-status" id="move-status"></div>
+  <div class="map-fab">
+    <button id="btn-reset" class="reset" type="button" disabled>Reset marker</button>
+    <button id="btn-save-confirm" class="save-confirm" type="button">Looks correct → Next</button>
+    <button id="btn-save-move"    class="save-move"    type="button" disabled>Save move → Next</button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+  crossorigin=""></script>
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+const COUNTIES     = ['Orange', 'Los Angeles', 'San Diego'];
+
+const SS_TOKEN = 'curator_token';
+const SS_USER  = 'curator_username';
+let token = sessionStorage.getItem(SS_TOKEN);
+let curatorUser = sessionStorage.getItem(SS_USER) || 'curator';
+
+let progress = null;
+let currentCounty = null;
+let currentBeach  = null;        // { fid, name, lat, lng, is_curated, was_moved }
+let originalLat = null, originalLng = null;
+let currentLat  = null, currentLng  = null;
+
+let map = null;
+let beachMarker = null;
+let searchMarkers = [];
+
+// ─── Login ──────────────────────────────────────────────────────────
+const loginBox = document.getElementById('login');
+const errEl    = document.getElementById('login-err');
+document.getElementById('login-btn').addEventListener('click', login);
+document.getElementById('p').addEventListener('keydown', e => { if (e.key==='Enter') login(); });
+
+async function login() {
+  errEl.textContent = '';
+  const u = document.getElementById('u').value.trim();
+  const p = document.getElementById('p').value;
+  if (!u || !p) { errEl.textContent = 'Both fields required.'; return; }
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/verify-curator-login`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY,
+                 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: u, password: p }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(()=>({error:'login failed'}));
+      errEl.textContent = j.error || `HTTP ${res.status}`;
+      return;
+    }
+    const { token: t } = await res.json();
+    token = t; curatorUser = u;
+    sessionStorage.setItem(SS_TOKEN, t);
+    sessionStorage.setItem(SS_USER, u);
+    showApp();
+  } catch (e) { errEl.textContent = String(e); }
+}
+
+document.getElementById('btn-logout').addEventListener('click', () => {
+  sessionStorage.removeItem(SS_TOKEN);
+  sessionStorage.removeItem(SS_USER);
+  token = null;
+  loginBox.style.display = '';
+  ['app-bar','county-bar','map-wrap'].forEach(id =>
+    document.getElementById(id).style.display = 'none');
+});
+
+if (token) showApp();
+
+async function showApp() {
+  loginBox.style.display = 'none';
+  document.getElementById('app-bar').style.display = '';
+  document.getElementById('county-bar').style.display = '';
+  document.getElementById('map-wrap').style.display = '';
+  initMap();
+  await loadProgress();
+}
+
+// ─── Map ────────────────────────────────────────────────────────────
+function initMap() {
+  if (map) return;
+  map = L.map('map', { zoomControl: true, scrollWheelZoom: true })
+         .setView([34.0, -118.0], 9);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+    maxZoom: 19,
+  }).addTo(map);
+
+  // Click outside marker = clear search results
+  map.on('click', () => hideSearchResults());
+}
+
+// ─── Progress + dropdowns ──────────────────────────────────────────
+async function loadProgress(opts = {}) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_location_curation_progress`, {
+    method: 'POST',
+    headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
+               'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_state: 'CA', p_counties: COUNTIES }),
+  });
+  progress = (await res.json()) || [];
+  renderCountyDropdown();
+  if (opts.skipAutoSelect) return;
+  if (progress.length && !currentCounty) {
+    const next = progress.find(c => !c.is_done) || progress[0];
+    if (next) selectCounty(next.county);
+  }
+}
+
+function renderCountyDropdown() {
+  const sel = document.getElementById('sel-county');
+  sel.innerHTML = '';
+  for (const c of progress) {
+    const opt = document.createElement('option');
+    let mark = '';
+    if (c.is_done) mark = ' ✓';
+    else if (c.curated > 0) mark = ' •';
+    opt.value = c.county;
+    opt.textContent = `${c.county} (${c.curated}/${c.total})${mark}`;
+    sel.appendChild(opt);
+  }
+  sel.onchange = () => selectCounty(sel.value);
+}
+
+function selectCounty(name) {
+  currentCounty = progress.find(c => c.county === name);
+  if (!currentCounty) return;
+  document.getElementById('sel-county').value = name;
+  renderBeachDropdown();
+  updateProgressLabel();
+  // Auto-pick first pending
+  const next = currentCounty.beaches.find(b => !b.is_curated) || currentCounty.beaches[0];
+  if (next) loadBeach(next.fid);
+}
+
+function renderBeachDropdown() {
+  const sel = document.getElementById('sel-beach');
+  sel.innerHTML = '';
+  for (const b of (currentCounty?.beaches || [])) {
+    const opt = document.createElement('option');
+    let mark = '';
+    if (b.is_curated && b.was_moved) mark = ' ✓ (moved)';
+    else if (b.is_curated) mark = ' ✓';
+    opt.value = String(b.fid);
+    opt.textContent = `${b.name}${mark}`;
+    sel.appendChild(opt);
+  }
+  sel.onchange = () => loadBeach(parseInt(sel.value, 10));
+}
+
+function updateProgressLabel() {
+  if (!currentCounty) return;
+  document.getElementById('county-name').textContent = currentCounty.county;
+  const countEl = document.getElementById('county-count');
+  countEl.textContent = `${currentCounty.curated}/${currentCounty.total} done` +
+    (currentCounty.moved ? ` (${currentCounty.moved} moved)` : '');
+  const fully  = currentCounty.curated >= currentCounty.total && currentCounty.total > 0;
+  const partial = currentCounty.curated > 0 && !fully;
+  countEl.classList.toggle('done', fully);
+  countEl.classList.toggle('partial', partial);
+}
+
+document.getElementById('btn-next-pending').onclick = () => jumpPending(+1);
+document.getElementById('btn-prev-pending').onclick = () => jumpPending(-1);
+
+function jumpPending(dir) {
+  if (!currentCounty || !currentBeach) return;
+  const beaches = currentCounty.beaches;
+  let idx = beaches.findIndex(b => b.fid === currentBeach.fid);
+  while (true) {
+    idx += dir;
+    if (idx < 0 || idx >= beaches.length) break;
+    if (!beaches[idx].is_curated) { loadBeach(beaches[idx].fid); return; }
+  }
+  alert('No more pending beaches in this county.');
+}
+
+// ─── Beach load + map render ──────────────────────────────────────
+function loadBeach(fid) {
+  const b = currentCounty?.beaches.find(x => x.fid === fid);
+  if (!b) return;
+  currentBeach = b;
+  document.getElementById('sel-beach').value = String(fid);
+  document.getElementById('beach-display').textContent = `${b.name} (fid ${b.fid})`;
+
+  originalLat = b.lat; originalLng = b.lng;
+  currentLat  = b.lat; currentLng  = b.lng;
+
+  // Clear old marker
+  if (beachMarker) { map.removeLayer(beachMarker); beachMarker = null; }
+  clearSearchMarkers();
+  hideSearchResults();
+  hideMoveStatus();
+  document.getElementById('btn-reset').disabled = true;
+  document.getElementById('btn-save-move').disabled = true;
+
+  // Place draggable marker, fly to it at zoom 17
+  const icon = L.divIcon({
+    className: '',
+    html: `<div class="beach-marker ${b.is_curated ? 'curated' : ''}"></div>`,
+    iconSize: [32, 32], iconAnchor: [16, 32],
+  });
+  beachMarker = L.marker([b.lat, b.lng], {
+    icon, draggable: true, autoPan: true,
+  }).addTo(map);
+  map.flyTo([b.lat, b.lng], 17, { duration: 0.6 });
+
+  beachMarker.on('drag', () => {
+    const ll = beachMarker.getLatLng();
+    currentLat = ll.lat; currentLng = ll.lng;
+    showMoveStatus();
+    document.getElementById('btn-reset').disabled = false;
+    document.getElementById('btn-save-move').disabled = false;
+  });
+}
+
+function showMoveStatus() {
+  const d = haversine(originalLat, originalLng, currentLat, currentLng);
+  const el = document.getElementById('move-status');
+  el.textContent = `Moved ${d}m from original`;
+  el.classList.add('visible');
+}
+function hideMoveStatus() { document.getElementById('move-status').classList.remove('visible'); }
+
+document.getElementById('btn-reset').onclick = () => {
+  if (!beachMarker) return;
+  beachMarker.setLatLng([originalLat, originalLng]);
+  currentLat = originalLat; currentLng = originalLng;
+  hideMoveStatus();
+  document.getElementById('btn-reset').disabled = true;
+  document.getElementById('btn-save-move').disabled = true;
+};
+
+// ─── Save handlers ────────────────────────────────────────────────
+async function save({ withMove }) {
+  if (!currentBeach) return;
+  const body = withMove
+    ? { fid: currentBeach.fid, lat: currentLat, lng: currentLng, curated_by: curatorUser }
+    : { fid: currentBeach.fid, no_move: true, curated_by: curatorUser };
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-curate-beach-location`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY,
+               'Content-Type': 'application/json', 'x-admin-secret': token },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(()=>({error:`HTTP ${res.status}`}));
+    alert(`Save failed: ${j.error || res.status}`);
+    return;
+  }
+  // Refresh + advance to next pending
+  const savedCounty = currentCounty.county;
+  const savedFid = currentBeach.fid;
+  await loadProgress({ skipAutoSelect: true });
+  currentCounty = progress.find(c => c.county === savedCounty) || currentCounty;
+  document.getElementById('sel-county').value = savedCounty;
+  renderBeachDropdown();
+  updateProgressLabel();
+  // Find next pending
+  const beaches = currentCounty.beaches;
+  const idx = beaches.findIndex(b => b.fid === savedFid);
+  for (let i = idx + 1; i < beaches.length; i++) {
+    if (!beaches[i].is_curated) { loadBeach(beaches[i].fid); return; }
+  }
+  for (let i = 0; i < idx; i++) {
+    if (!beaches[i].is_curated) { loadBeach(beaches[i].fid); return; }
+  }
+  alert(`County complete! ${savedCounty}: all locations confirmed.`);
+}
+
+document.getElementById('btn-save-confirm').onclick = () => save({ withMove: false });
+document.getElementById('btn-save-move').onclick    = () => save({ withMove: true });
+
+// ─── Nominatim search ─────────────────────────────────────────────
+const searchInput   = document.getElementById('search-input');
+const searchBtn     = document.getElementById('search-btn');
+const searchResults = document.getElementById('search-results');
+
+searchBtn.onclick = doSearch;
+searchInput.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+async function doSearch() {
+  const q = searchInput.value.trim();
+  if (!q) return;
+  searchResults.innerHTML = '<div class="search-result"><i>Searching…</i></div>';
+  searchResults.classList.add('visible');
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=8&countrycodes=us`;
+    const r = await fetch(url, { headers: { 'Accept-Language': 'en-US' }});
+    const results = await r.json();
+    if (!results.length) {
+      searchResults.innerHTML = '<div class="search-result">No matches.</div>';
+      return;
+    }
+    searchResults.innerHTML = results.map((r, i) => `
+      <div class="search-result" data-idx="${i}">
+        <div class="search-result-title">${escHtml(r.display_name.split(',')[0])}</div>
+        <div class="search-result-sub">${escHtml(r.display_name)}</div>
+      </div>`).join('');
+    // Wire clicks
+    searchResults.querySelectorAll('.search-result').forEach(el => {
+      el.onclick = () => {
+        const i = parseInt(el.dataset.idx, 10);
+        const r = results[i];
+        if (!r) return;
+        const lat = parseFloat(r.lat), lon = parseFloat(r.lon);
+        // Drop a search marker, fly to it
+        clearSearchMarkers();
+        const icon = L.divIcon({ className: '', html: '<div class="search-marker"></div>',
+                                 iconSize: [14, 14], iconAnchor: [7, 7] });
+        const m = L.marker([lat, lon], { icon }).addTo(map);
+        m.bindPopup(`<b>${escHtml(r.display_name.split(',')[0])}</b><br>` +
+                    `<small>Drag the red beach marker here to update</small>`).openPopup();
+        searchMarkers.push(m);
+        map.flyTo([lat, lon], 17, { duration: 0.6 });
+        hideSearchResults();
+      };
+    });
+  } catch (e) {
+    searchResults.innerHTML = `<div class="search-result">Error: ${escHtml(String(e))}</div>`;
+  }
+}
+
+function clearSearchMarkers() {
+  searchMarkers.forEach(m => map.removeLayer(m));
+  searchMarkers = [];
+}
+function hideSearchResults() { searchResults.classList.remove('visible'); }
+
+// ─── Helpers ──────────────────────────────────────────────────────
+function haversine(la1, lo1, la2, lo2) {
+  const r = d => d * Math.PI / 180;
+  const a = Math.sin(r(la2-la1)/2)**2 + Math.cos(r(la1))*Math.cos(r(la2))*Math.sin(r(lo2-lo1)/2)**2;
+  return Math.round(2 * 6371000 * Math.asin(Math.sqrt(a)));
+}
+function escHtml(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+</script>
+</body>
+</html>

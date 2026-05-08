@@ -58,8 +58,31 @@ def step(msg: str):
     print(f"\n=== {msg} ===")
 
 
+def run_noaa_stations(state: str):
+    """Phase A.0 — load NOAA tide-prediction stations for the state.
+    Idempotent edge-function call."""
+    step(f"Phase A.0 - NOAA stations load for {state}")
+    url = os.environ["SUPABASE_URL"].rstrip("/") + "/functions/v1/admin-load-noaa-stations"
+    body = json.dumps({"state": state}).encode()
+    req = urllib.request.Request(
+        url, data=body, method="POST",
+        headers={
+            "x-admin-secret": os.environ["ADMIN_SECRET"],
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {os.environ['SUPABASE_SERVICE_KEY']}",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            print(f"  {resp.read().decode()}")
+    except urllib.error.HTTPError as e:
+        print(f"  NOAA loader failed: {e.code} {e.read().decode()[:200]}")
+    except Exception as e:
+        print(f"  NOAA loader error: {e}")
+
+
 def run_padus(state: str):
-    step(f"Phase A.1 — PAD-US load for {state}")
+    step(f"Phase A.1 - PAD-US load for {state}")
     cmd = ["python", str(ROOT / "scripts" / "external_sources.py"),
            "load", "pad_us", "--state", state]
     subprocess.run(cmd, check=False)
@@ -104,9 +127,21 @@ out body geom;
     print(f"  fetched {len(elements)} OSM elements")
 
     # Insert into osm_landing — append only, ON CONFLICT DO NOTHING
+    # Clip to state polygon: bbox can bleed across state lines (Overpass
+    # bbox=(s,w,n,e) is rectangular; OR's east edge -116.45 catches Snake
+    # River basin in ID, and -124.6 west edge catches CA Imperial).
     inserted = 0
+    skipped_oos = 0
     with psycopg2.connect(**PG) as conn:
         conn.autocommit = True
+        # Resolve state geom once. Counties union as fallback when states is missing.
+        state_fp = {"CA": "06", "OR": "41", "WA": "53"}.get(state)
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                select st_union(geom) as geom from public.counties where state_fp = %s
+            """, (state_fp,))
+            row = cur.fetchone()
+            state_geom = row["geom"] if row else None
         with conn.cursor() as cur:
             for el in elements:
                 etype = el.get("type")
@@ -132,6 +167,20 @@ out body geom;
                                 geom_wkt = f"LINESTRING({coords})"
                 if not geom_wkt:
                     continue
+                # State polygon clip: skip elements outside the requested state.
+                if state_geom is not None:
+                    try:
+                        cur.execute(
+                            "select st_contains(%s::geometry, ST_SetSRID(ST_GeomFromText(%s), 4326))",
+                            (state_geom, geom_wkt),
+                        )
+                        if not cur.fetchone()[0]:
+                            skipped_oos += 1
+                            continue
+                    except Exception as e:
+                        print(f"  containment check failed for {etype}/{eid}: {e}")
+                        conn.rollback()
+                        continue
                 try:
                     cur.execute("""
                         insert into public.osm_landing
@@ -145,6 +194,8 @@ out body geom;
                 except Exception as e:
                     print(f"  insert failed for {etype}/{eid}: {e}")
                     conn.rollback()
+    if skipped_oos:
+        print(f"  skipped {skipped_oos} out-of-state elements (bbox bleed)")
     print(f"  inserted {inserted} new osm_landing rows")
     return inserted
 
@@ -164,6 +215,7 @@ def main():
                     help="Cap Overpass to N records for testing (default: all)")
     ap.add_argument("--skip-pad-us", action="store_true")
     ap.add_argument("--skip-overpass", action="store_true")
+    ap.add_argument("--skip-noaa", action="store_true")
     ap.add_argument("--no-publish", action="store_true",
                     help="Stop after extract; skip Phase D consumer-promote")
     ap.add_argument("--drain-queue", action="store_true",
@@ -173,7 +225,9 @@ def main():
 
     state = args.state.upper()
 
-    # Phase A — data sources
+    # Phase A - data sources
+    if not args.skip_noaa:
+        run_noaa_stations(state)
     if not args.skip_pad_us:
         run_padus(state)
     if not args.skip_overpass:

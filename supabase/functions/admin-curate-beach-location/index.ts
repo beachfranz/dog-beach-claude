@@ -35,13 +35,44 @@ Deno.serve(async (req: Request) => {
   const authFail = await requireAdmin(req, cors);
   if (authFail) return authFail;
 
-  let body: { fid?: number; lat?: number; lng?: number; no_move?: boolean; curated_by?: string; notes?: string };
+  let body: { fid?: number; lat?: number; lng?: number; no_move?: boolean;
+              mark_inactive?: boolean; curated_by?: string; notes?: string };
   try { body = await req.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
 
-  const { fid, lat, lng, no_move, curated_by, notes } = body;
+  const { fid, lat, lng, no_move, mark_inactive, curated_by, notes } = body;
   if (typeof fid !== "number") return json({ error: "fid (number) required" }, 400);
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  // Mark inactive path — flip beaches_gold.is_active=false. Beach drops
+  // out of the catalog (RPCs that filter is_active=true won't return it).
+  if (mark_inactive === true) {
+    const { error: deactErr } = await supabase
+      .from("beaches_gold")
+      .update({ is_active: false })
+      .eq("fid", fid);
+    if (deactErr) return json({ error: `Deactivate failed: ${deactErr.message}` }, 500);
+
+    // Record in curation status so we have an audit trail of the
+    // curator's decision (was_moved=false; notes capture reason).
+    await supabase.from("beach_location_curation_status").upsert({
+      arena_group_id: fid,
+      curated_at:     new Date().toISOString(),
+      curated_by:     curated_by ?? null,
+      was_moved:      false,
+      notes:          (notes ?? "") + " [marked_inactive]",
+    });
+
+    await logAdminWrite(supabase, {
+      functionName: "admin-curate-beach-location",
+      action:       "delete",
+      req,
+      before:       { is_active: true },
+      after:        { is_active: false, __resolution_mode: "marked_inactive_by_curator" },
+      success:      true,
+    });
+    return json({ ok: true, fid, marked_inactive: true });
+  }
 
   // Pull current coords for before-snapshot
   const { data: beachRows } = await supabase

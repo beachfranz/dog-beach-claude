@@ -497,11 +497,11 @@ document.getElementById('btn-mark-inactive').onclick = async () => {
   if (!currentBeach) return;
   if (!confirm(`Mark "${currentBeach.name}" (fid ${currentBeach.fid}) as INACTIVE? It will be removed from the catalog.`)) return;
   try {
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-mark-beach-inactive`, {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-curate-beach-location`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY,
                  'Content-Type': 'application/json', 'x-admin-secret': token },
-      body: JSON.stringify({ fid: currentBeach.fid }),
+      body: JSON.stringify({ fid: currentBeach.fid, mark_inactive: true, curated_by: curatorUser }),
     });
     if (!res.ok) {
       const j = await res.json().catch(()=>({error:`HTTP ${res.status}`}));

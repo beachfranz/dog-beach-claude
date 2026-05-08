@@ -224,11 +224,11 @@
   <button id="btn-logout" type="button" class="danger" style="margin-left:auto">Logout</button>
 </header>
 
-<!-- County header bar — name, completion count, submit button -->
+<!-- County header bar — name + completion count only. The Save button
+     lives below the photo grid (Save and Next →). -->
 <div class="county-bar" style="display:none" id="county-bar">
   <div class="county-name" id="county-name">—</div>
   <div class="county-count" id="county-count"></div>
-  <button id="btn-save" class="save" type="button">Submit Changes to DogBeach</button>
 </div>
 
 <main id="app" style="display:none">
@@ -599,7 +599,6 @@ function updateSummary() {
     parts.length ? parts.join(', ') : 'No pending changes.';
 }
 
-document.getElementById('btn-save').onclick = saveBeach;
 document.getElementById('btn-save-next').onclick = saveBeach;
 
 async function saveBeach() {

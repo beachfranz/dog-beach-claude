@@ -131,6 +131,8 @@
   }
   .map-fab .save-move    { background: var(--green); color: white; }
   .map-fab .save-confirm { background: var(--accent); color: white; }
+  .map-fab .skip         { background: #475569; color: white; }
+  .map-fab .inactive     { background: var(--red); color: white; }
   .map-fab .reset        { background: white; color: var(--muted); }
   .map-fab button[disabled] { opacity: 0.4; cursor: not-allowed; }
 
@@ -201,7 +203,9 @@
   <div class="search-results" id="search-results"></div>
   <div class="move-status" id="move-status"></div>
   <div class="map-fab">
-    <button id="btn-reset" class="reset" type="button" disabled>Reset marker</button>
+    <button id="btn-reset"        class="reset"   type="button" disabled>Reset marker</button>
+    <button id="btn-skip"         class="skip"    type="button">Skip →</button>
+    <button id="btn-mark-inactive" class="inactive" type="button">Mark inactive</button>
     <button id="btn-save-confirm" class="save-confirm" type="button">Looks correct → Next</button>
     <button id="btn-save-move"    class="save-move"    type="button" disabled>Save move → Next</button>
   </div>
@@ -417,6 +421,13 @@ function loadBeach(fid) {
     document.getElementById('btn-reset').disabled = false;
     document.getElementById('btn-save-move').disabled = false;
   });
+
+  // Auto-search Nominatim for the beach name. Pre-populates the search
+  // bar + results dropdown so the curator can fly to a candidate
+  // location with one click. Doesn't auto-fly — the beach marker is
+  // already centered.
+  searchInput.value = b.name;
+  doSearch();
 }
 
 function showMoveStatus() {
@@ -475,6 +486,46 @@ async function save({ withMove }) {
 
 document.getElementById('btn-save-confirm').onclick = () => save({ withMove: false });
 document.getElementById('btn-save-move').onclick    = () => save({ withMove: true });
+
+// Skip — advance without saving. Same as "next pending" but explicitly
+// keeps current beach in the unreviewed bucket.
+document.getElementById('btn-skip').onclick = () => jumpPending(+1);
+
+// Mark inactive — deactivate the beach in beaches_gold via the existing
+// admin-mark-beach-inactive edge function, then advance.
+document.getElementById('btn-mark-inactive').onclick = async () => {
+  if (!currentBeach) return;
+  if (!confirm(`Mark "${currentBeach.name}" (fid ${currentBeach.fid}) as INACTIVE? It will be removed from the catalog.`)) return;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-mark-beach-inactive`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY,
+                 'Content-Type': 'application/json', 'x-admin-secret': token },
+      body: JSON.stringify({ fid: currentBeach.fid }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(()=>({error:`HTTP ${res.status}`}));
+      alert(`Mark-inactive failed: ${j.error || res.status}`);
+      return;
+    }
+    // Refresh and advance — the deactivated beach drops out of the
+    // dropdown entirely (RPC filters to is_active=true).
+    const savedCounty = currentCounty.county;
+    const savedFid = currentBeach.fid;
+    await loadProgress({ skipAutoSelect: true });
+    currentCounty = progress.find(c => c.county === savedCounty) || currentCounty;
+    document.getElementById('sel-county').value = savedCounty;
+    renderBeachDropdown();
+    updateProgressLabel();
+    // Pick the next beach in the (now smaller) list
+    const beaches = currentCounty.beaches;
+    const next = beaches.find(b => !b.is_curated) || beaches[0];
+    if (next) loadBeach(next.fid);
+    else alert(`County complete! ${savedCounty}: all locations confirmed.`);
+  } catch (e) {
+    alert(`Mark-inactive error: ${e}`);
+  }
+};
 
 // ─── Nominatim search ─────────────────────────────────────────────
 const searchInput   = document.getElementById('search-input');

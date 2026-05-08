@@ -134,6 +134,7 @@
   .map-fab .skip         { background: #475569; color: white; }
   .map-fab .review       { background: var(--amber); color: white; }
   .map-fab .inactive     { background: var(--red); color: white; }
+  .map-fab .back         { background: white; color: var(--muted); border: 1px solid #cbd5e1; }
   .map-fab .reset        { background: white; color: var(--muted); }
   .map-fab button[disabled] { opacity: 0.4; cursor: not-allowed; }
 
@@ -204,6 +205,7 @@
   <div class="search-results" id="search-results"></div>
   <div class="move-status" id="move-status"></div>
   <div class="map-fab">
+    <button id="btn-back"           class="back"         type="button" disabled>← Back</button>
     <button id="btn-reset"          class="reset"        type="button" disabled>Reset marker</button>
     <button id="btn-skip"           class="skip"         type="button">Skip →</button>
     <button id="btn-mark-review"    class="review"       type="button">Mark for review</button>
@@ -229,6 +231,7 @@ let curatorUser = sessionStorage.getItem(SS_USER) || 'curator';
 let progress = null;
 let currentCounty = null;
 let currentBeach  = null;        // { fid, name, lat, lng, is_curated, was_moved }
+let historyStack  = [];          // Previously-loaded fids; pushed on every loadBeach (except back-nav)
 let originalLat = null, originalLng = null;
 let currentLat  = null, currentLng  = null;
 
@@ -388,9 +391,15 @@ function jumpPending(dir) {
 }
 
 // ─── Beach load + map render ──────────────────────────────────────
-function loadBeach(fid) {
+function loadBeach(fid, opts = {}) {
   const b = currentCounty?.beaches.find(x => x.fid === fid);
   if (!b) return;
+  // Push previous beach onto history (unless we're navigating back).
+  if (!opts.fromBack && currentBeach && currentBeach.fid !== fid) {
+    historyStack.push(currentBeach.fid);
+    if (historyStack.length > 50) historyStack.shift();
+  }
+  document.getElementById('btn-back').disabled = historyStack.length === 0;
   currentBeach = b;
   document.getElementById('sel-beach').value = String(fid);
   document.getElementById('beach-display').textContent = `${b.name} (fid ${b.fid})`;
@@ -489,6 +498,29 @@ async function save({ withMove }) {
 
 document.getElementById('btn-save-confirm').onclick = () => save({ withMove: false });
 document.getElementById('btn-save-move').onclick    = () => save({ withMove: true });
+
+// Back — pop the previous beach from history (does not undo any save).
+document.getElementById('btn-back').onclick = () => {
+  if (historyStack.length === 0) return;
+  const prevFid = historyStack.pop();
+  document.getElementById('btn-back').disabled = historyStack.length === 0;
+  // If user backed across counties, rebuild dropdown to show prev county
+  const prevBeach = (currentCounty?.beaches || []).find(x => x.fid === prevFid);
+  if (!prevBeach) {
+    // Search across all counties in progress
+    for (const c of (progress || [])) {
+      const found = c.beaches.find(x => x.fid === prevFid);
+      if (found) {
+        currentCounty = c;
+        document.getElementById('sel-county').value = c.county;
+        renderBeachDropdown();
+        updateProgressLabel();
+        break;
+      }
+    }
+  }
+  loadBeach(prevFid, { fromBack: true });
+};
 
 // Skip — advance without saving. Same as "next pending" but explicitly
 // keeps current beach in the unreviewed bucket.

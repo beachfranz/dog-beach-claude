@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>State launcher · Dog Beach Scout</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%;
+               font-family: 'DM Sans', -apple-system, system-ui, sans-serif;
+               background: #f1f5f9; color: #0f2742; font-size: 13px; }
+
+  header {
+    padding: 14px 24px; background: #0f2742; color: #fff;
+    display: flex; align-items: center; gap: 24px;
+    border-bottom: 3px solid #fbbf24;
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: 0.02em; }
+  header .subtitle { color: #94a3b8; font-size: 12px; }
+  header .right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+  .state-pills { display: flex; gap: 6px; }
+  .state-pill {
+    padding: 6px 14px; background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.14); color: #cbd5e1;
+    border-radius: 20px; cursor: pointer; font-weight: 600;
+    font-size: 12px; transition: all 0.15s;
+  }
+  .state-pill:hover { background: rgba(255,255,255,0.15); color: #fff; }
+  .state-pill.active {
+    background: #fbbf24; color: #0f2742; border-color: #fbbf24;
+    box-shadow: 0 2px 8px rgba(251,191,36,0.3);
+  }
+
+  .container {
+    display: grid; grid-template-columns: 1fr 420px;
+    gap: 16px; padding: 16px 24px; height: calc(100vh - 65px);
+  }
+  .col-map  { display: flex; flex-direction: column; }
+  .col-side { display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
+
+  #map { flex: 1; border-radius: 8px;
+         border: 1px solid #cbd5e1; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+
+  .card {
+    background: #fff; border: 1px solid #cbd5e1; border-radius: 8px;
+    padding: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+  }
+  .card h2 {
+    margin: 0 0 12px; font-size: 11px; font-weight: 700;
+    color: #475569; text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .card h2 .badge {
+    display: inline-block; margin-left: 6px; padding: 1px 8px;
+    background: #f1f5f9; border-radius: 10px; font-size: 10px;
+    color: #475569; letter-spacing: normal; text-transform: none;
+  }
+
+  .stat-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+    background: #f1f5f9; border-radius: 4px; overflow: hidden;
+  }
+  .stat {
+    background: #fff; padding: 10px 12px;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .stat .label {
+    font-size: 10px; text-transform: uppercase; color: #64748b;
+    letter-spacing: 0.05em; font-weight: 600;
+  }
+  .stat .value {
+    font-size: 22px; font-weight: 700; color: #0f2742;
+    font-family: 'DM Mono', ui-monospace, monospace;
+  }
+  .stat .delta { font-size: 11px; color: #16a34a; font-weight: 600; }
+  .stat .delta.warn { color: #dc2626; }
+  .stat.warn .value { color: #dc2626; }
+
+  /* Process button */
+  .launch-btn {
+    width: 100%; padding: 14px 18px;
+    background: linear-gradient(180deg, #fbbf24 0%, #f59e0b 100%);
+    color: #0f2742; border: none; border-radius: 8px;
+    font-family: inherit; font-size: 15px; font-weight: 700;
+    letter-spacing: 0.02em; cursor: pointer;
+    box-shadow: 0 2px 8px rgba(251,191,36,0.4);
+    transition: transform 0.1s, box-shadow 0.15s;
+  }
+  .launch-btn:hover {
+    transform: translateY(-1px); box-shadow: 0 4px 14px rgba(251,191,36,0.5);
+  }
+  .launch-btn:active { transform: translateY(0); }
+  .launch-btn:disabled {
+    background: #cbd5e1; color: #64748b; cursor: not-allowed;
+    box-shadow: none; transform: none;
+  }
+  .launch-btn .spinner {
+    display: inline-block; width: 14px; height: 14px;
+    border: 2px solid rgba(15,39,66,0.2); border-top-color: #0f2742;
+    border-radius: 50%; animation: spin 0.7s linear infinite;
+    margin-right: 8px; vertical-align: -2px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .options {
+    display: flex; gap: 8px; align-items: center; margin-top: 10px;
+    font-size: 12px; color: #475569; flex-wrap: wrap;
+  }
+  .options label {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    padding: 4px 10px; background: #f8fafc; border: 1px solid #e2e8f0;
+    border-radius: 14px; transition: background 0.1s;
+  }
+  .options label:hover { background: #f1f5f9; }
+  .options input[type=number] {
+    width: 56px; padding: 2px 6px; border: 1px solid #cbd5e1;
+    border-radius: 4px; font-family: monospace; font-size: 12px;
+  }
+
+  /* Phase log */
+  .phase-log {
+    display: flex; flex-direction: column; gap: 6px;
+    max-height: 320px; overflow-y: auto;
+  }
+  .phase-item {
+    padding: 8px 12px; background: #f8fafc;
+    border-left: 3px solid #cbd5e1; border-radius: 0 4px 4px 0;
+    font-size: 12px; transition: all 0.2s;
+  }
+  .phase-item.running { border-left-color: #38bdf8; background: #eff6ff; }
+  .phase-item.ok      { border-left-color: #15803d; background: #f0fdf4; }
+  .phase-item.error   { border-left-color: #dc2626; background: #fef2f2; }
+  .phase-item.skip    { border-left-color: #94a3b8; background: #f8fafc; opacity: 0.7; }
+  .phase-name { font-weight: 700; color: #0f2742; font-size: 12px; }
+  .phase-detail {
+    margin-top: 3px; font-family: 'DM Mono', monospace; font-size: 11px;
+    color: #475569; line-height: 1.5;
+  }
+  .phase-detail .k { color: #64748b; }
+  .phase-detail .v { color: #0f2742; font-weight: 600; }
+  .phase-duration {
+    float: right; font-family: monospace; font-size: 10px; color: #94a3b8;
+  }
+
+  /* Map markers */
+  .leaflet-popup-content { font-size: 13px; line-height: 1.5; min-width: 240px; }
+  .popup-title { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+  .popup-fid { font-family: monospace; color: #94a3b8; font-size: 11px; margin-bottom: 6px; }
+  .popup-row { display: flex; justify-content: space-between; margin: 2px 0; }
+  .popup-row .label { color: #64748b; }
+  .popup-row .value { font-weight: 600; }
+  .pill {
+    display: inline-block; padding: 1px 8px; border-radius: 10px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.02em;
+  }
+  .pill-seed   { background: #fef3c7; color: #92400e; }
+  .pill-osm    { background: #dcfce7; color: #166534; }
+  .pill-queued { background: #dbeafe; color: #1e40af; }
+  .pill-warn   { background: #fee2e2; color: #991b1b; }
+  .pair-line { stroke: #94a3b8; stroke-width: 1.5; stroke-dasharray: 4,4; opacity: 0.55; }
+
+  .legend {
+    position: absolute; bottom: 32px; left: 32px; z-index: 500;
+    background: white; padding: 10px 14px; border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15); font-size: 12px;
+    border: 1px solid #cbd5e1;
+  }
+  .legend .row { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+  .legend .swatch {
+    width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid white; box-shadow: 0 0 2px rgba(0,0,0,0.3);
+  }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: #0f2742; color: #fff; padding: 12px 20px;
+    border-radius: 6px; box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+    font-weight: 600; z-index: 9999;
+    opacity: 0; transition: opacity 0.2s, transform 0.2s;
+    pointer-events: none;
+  }
+  .toast.visible {
+    opacity: 1; transform: translateX(-50%) translateY(-4px);
+  }
+
+  .empty {
+    text-align: center; color: #94a3b8; font-style: italic;
+    padding: 36px 12px; font-size: 12px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>State launcher</h1>
+  <span class="subtitle">Catalog ingest · landing → arena → gold → BEP</span>
+  <div class="right">
+    <span class="subtitle">state:</span>
+    <div class="state-pills">
+      <button class="state-pill" data-state="CA">CA</button>
+      <button class="state-pill active" data-state="OR">OR</button>
+      <button class="state-pill" data-state="WA">WA</button>
+    </div>
+  </div>
+</header>
+
+<div class="container">
+  <div class="col-map">
+    <div id="map"></div>
+  </div>
+
+  <div class="col-side">
+
+    <div class="card">
+      <h2>Snapshot <span class="badge" id="stats-state">OR</span></h2>
+      <div class="stat-grid" id="stats">
+        <div class="stat"><span class="label">arena (in state)</span>
+                          <span class="value" id="stat-arena">…</span></div>
+        <div class="stat"><span class="label">unpromoted</span>
+                          <span class="value" id="stat-unpromoted">…</span></div>
+        <div class="stat"><span class="label">gold rows</span>
+                          <span class="value" id="stat-gold">…</span></div>
+        <div class="stat"><span class="label">scoreable</span>
+                          <span class="value" id="stat-scoreable">…</span></div>
+        <div class="stat"><span class="label">BEP rows</span>
+                          <span class="value" id="stat-bep">…</span></div>
+        <div class="stat"><span class="label">queue pending</span>
+                          <span class="value" id="stat-queue">…</span></div>
+        <div class="stat"><span class="label">PAD-US polys</span>
+                          <span class="value" id="stat-padus">…</span></div>
+        <div class="stat"><span class="label">NOAA stations</span>
+                          <span class="value" id="stat-noaa">…</span></div>
+        <div class="stat" id="stat-worst-wrap"><span class="label">worst NOAA km</span>
+                          <span class="value" id="stat-worst">…</span></div>
+        <div class="stat"><span class="label">last refreshed</span>
+                          <span class="value" id="stat-asof"
+                                style="font-size:13px">…</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Process</h2>
+      <button class="launch-btn" id="launch-btn">
+        Process Oregon
+      </button>
+      <div class="options">
+        <label><input type="checkbox" id="opt-load-noaa"> load NOAA stations first</label>
+        <label><input type="checkbox" id="opt-skip-overpass"> skip Overpass</label>
+        <label>cap Overpass to
+          <input type="number" id="opt-max-records" value="" placeholder="all" min="1" max="2000">
+        </label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Phase log</h2>
+      <div class="phase-log" id="phase-log">
+        <div class="empty">No runs yet. Click <b>Process</b> to launch.</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="legend">
+  <div class="row"><span class="swatch" style="background:#fbbf24"></span> seed beach</div>
+  <div class="row"><span class="swatch" style="background:#4ade80"></span> OSM-promoted</div>
+  <div class="row"><span class="swatch" style="background:#38bdf8"></span> NOAA tide station</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+const STATE_NAMES  = { CA: 'California', OR: 'Oregon', WA: 'Washington' };
+const STATE_CENTER = { CA: [36.5, -119.5, 6], OR: [44.5, -123.5, 7], WA: [47.5, -123.0, 7] };
+
+const ADMIN_SECRET_KEY = 'db_admin_secret';
+function getAdminSecret() {
+  let s = localStorage.getItem(ADMIN_SECRET_KEY);
+  if (!s) {
+    s = (prompt('Admin secret:') || '').trim();
+    if (s) localStorage.setItem(ADMIN_SECRET_KEY, s);
+  }
+  return s;
+}
+function clearAdminSecret() { localStorage.removeItem(ADMIN_SECRET_KEY); }
+
+// ── REST helpers ───────────────────────────────────────────────────
+async function rpcGet(name, args = {}) {
+  const url = `${SUPABASE_URL}/rest/v1/rpc/${name}`;
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      apikey: ANON_KEY,
+      Authorization: `Bearer ${ANON_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(args),
+  });
+  if (!r.ok) throw new Error(`RPC ${name}: ${r.status}`);
+  return r.json();
+}
+
+async function restGet(path) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
+  });
+  if (!r.ok) throw new Error(`REST ${r.status}: ${await r.text()}`);
+  return r.json();
+}
+
+async function edgeFn(fn, body) {
+  const secret = getAdminSecret();
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/${fn}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${ANON_KEY}`,
+      'Content-Type': 'application/json',
+      'x-admin-secret': secret,
+    },
+    body: JSON.stringify(body),
+  });
+  if (r.status === 401) {
+    clearAdminSecret();
+    return { error: 'Admin secret rejected' };
+  }
+  return r.json();
+}
+
+// ── State ──────────────────────────────────────────────────────────
+let currentState = 'OR';
+let map, beachLayer, stationLayer;
+let prevStats = null;
+
+// ── Toast ──────────────────────────────────────────────────────────
+function toast(msg, ms = 2400) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('visible');
+  setTimeout(() => t.classList.remove('visible'), ms);
+}
+
+// ── Stats ──────────────────────────────────────────────────────────
+function fmtNum(n) {
+  if (n == null) return '—';
+  if (typeof n === 'number') return n.toLocaleString();
+  return n;
+}
+function fmtTime(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+async function loadStats(silent = false) {
+  try {
+    const stats = await rpcGet('state_launcher_stats', { p_state: currentState });
+    document.getElementById('stats-state').textContent = currentState;
+    const setStat = (id, val, prevKey) => {
+      const el = document.getElementById(id);
+      el.textContent = fmtNum(val);
+      // Delta indicator
+      if (prevStats && prevKey && prevStats[prevKey] != null && val != null) {
+        const delta = val - prevStats[prevKey];
+        if (delta !== 0) {
+          const sign = delta > 0 ? '+' : '';
+          const cls = (id === 'stat-worst' && delta > 0) ? 'delta warn' : 'delta';
+          el.insertAdjacentHTML('afterend', `<span class="${cls}">${sign}${delta}</span>`);
+        }
+      }
+    };
+    // Clear old deltas
+    document.querySelectorAll('.delta').forEach(el => el.remove());
+    setStat('stat-arena', stats.arena_in_state, 'arena_in_state');
+    setStat('stat-unpromoted', stats.arena_unpromoted, 'arena_unpromoted');
+    setStat('stat-gold', stats.gold_rows, 'gold_rows');
+    setStat('stat-scoreable', stats.gold_scoreable, 'gold_scoreable');
+    setStat('stat-bep', stats.bep_rows, 'bep_rows');
+    setStat('stat-queue', stats.queue_pending, 'queue_pending');
+    setStat('stat-padus', stats.pad_us_units, 'pad_us_units');
+    setStat('stat-noaa', stats.noaa_stations, 'noaa_stations');
+    setStat('stat-worst', stats.worst_noaa_km != null ? stats.worst_noaa_km + ' km' : '—');
+    document.getElementById('stat-asof').textContent = fmtTime(stats.as_of);
+    // worst NOAA visual cue
+    const worstEl = document.getElementById('stat-worst-wrap');
+    worstEl.classList.toggle('warn', stats.worst_noaa_km != null && stats.worst_noaa_km > 50);
+    return stats;
+  } catch (err) {
+    if (!silent) toast(`Stats failed: ${err.message}`);
+    return null;
+  }
+}
+
+// ── Map ────────────────────────────────────────────────────────────
+function initMap() {
+  map = L.map('map', { zoomControl: true });
+  L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    attribution: '© OpenStreetMap France',
+  }).addTo(map);
+  beachLayer = L.layerGroup().addTo(map);
+  stationLayer = L.layerGroup().addTo(map);
+  setMapCenter(currentState);
+}
+function setMapCenter(state) {
+  const [lat, lon, zoom] = STATE_CENTER[state];
+  map.setView([lat, lon], zoom);
+}
+
+async function loadMap() {
+  beachLayer.clearLayers();
+  stationLayer.clearLayers();
+
+  const beaches = await restGet(
+    `beaches_gold?state=eq.${currentState}&select=fid,name,county_name,lat,lon,location_id,is_scoreable,noaa_station_id,promoted_at&is_active=eq.true&order=lat`
+  );
+  if (!beaches.length) {
+    toast(`No beaches in ${STATE_NAMES[currentState]} yet — click Process to start.`);
+    return;
+  }
+
+  // Fetch NOAA stations for the state + neighbors so we can draw pair lines
+  const lat0 = Math.min(...beaches.map(b => b.lat)) - 0.5;
+  const lat1 = Math.max(...beaches.map(b => b.lat)) + 0.5;
+  const stations = await restGet(
+    `noaa_stations?latitude=gte.${lat0}&latitude=lte.${lat1}&select=station_id,name,latitude,longitude,state,station_type`
+  );
+  const stationById = Object.fromEntries(stations.map(s => [s.station_id, s]));
+
+  // BEP + queue counts in bulk
+  const fids = beaches.map(b => b.fid).join(',');
+  const bepCounts = {};
+  const bepRows = await restGet(
+    `beach_enrichment_provenance?gold_fid=in.(${fids})&select=gold_fid,source,field_group,claimed_values`
+  ).catch(() => []);
+  bepRows.forEach(r => {
+    if (!bepCounts[r.gold_fid]) bepCounts[r.gold_fid] = { count: 0, sources: new Set(), gov: null };
+    bepCounts[r.gold_fid].count++;
+    bepCounts[r.gold_fid].sources.add(r.source);
+    if (r.field_group === 'governance' && r.claimed_values) {
+      bepCounts[r.gold_fid].gov = r.claimed_values;
+    }
+  });
+
+  const queueCounts = {};
+  const queueRows = await restGet(
+    `beach_extraction_queue?fid=in.(${fids})&completed_at=is.null&select=fid`
+  ).catch(() => []);
+  queueRows.forEach(r => { queueCounts[r.fid] = (queueCounts[r.fid] || 0) + 1; });
+
+  const usedStations = new Set();
+  beaches.forEach(b => {
+    const station = stationById[b.noaa_station_id];
+    let kmToStation = null;
+    if (station) {
+      kmToStation = haversine(b.lat, b.lon, station.latitude, station.longitude);
+      L.polyline([[b.lat, b.lon], [station.latitude, station.longitude]],
+        { className: 'pair-line', interactive: false }).addTo(beachLayer);
+      usedStations.add(b.noaa_station_id);
+    }
+
+    const promotedDate = b.promoted_at ? new Date(b.promoted_at) : null;
+    const isFresh = promotedDate && (Date.now() - promotedDate.getTime() < 24*3600*1000);
+    const isSeed = b.location_id && b.location_id.startsWith(currentState.toLowerCase() + '-');
+    const fill = isSeed ? '#fbbf24' : '#4ade80';
+
+    const m = L.circleMarker([b.lat, b.lon], {
+      radius: 8, fillColor: fill, fillOpacity: 0.95,
+      color: 'white', weight: 2,
+    }).addTo(beachLayer);
+
+    const bep = bepCounts[b.fid] || { count: 0, sources: new Set(), gov: null };
+    const queueN = queueCounts[b.fid] || 0;
+
+    const distPill = (kmToStation != null && kmToStation > 50)
+      ? `<span class="pill pill-warn">${kmToStation.toFixed(1)} km</span>`
+      : (kmToStation != null ? `${kmToStation.toFixed(1)} km` : '—');
+    const govLine = bep.gov
+      ? `<div class="popup-row"><span class="label">governance</span><span class="value">${bep.gov.type || '—'}: ${bep.gov.name || '—'}</span></div>`
+      : '';
+
+    m.bindPopup(`
+      <div class="popup-title">
+        ${b.name}
+        ${isSeed ? '<span class="pill pill-seed">seed</span>' : '<span class="pill pill-osm">osm</span>'}
+        ${queueN > 0 ? `<span class="pill pill-queued">${queueN} queued</span>` : ''}
+        ${isFresh ? '<span class="pill pill-queued">fresh</span>' : ''}
+      </div>
+      <div class="popup-fid">fid ${b.fid} · ${b.location_id || '—'}</div>
+      <div class="popup-row"><span class="label">county</span><span class="value">${b.county_name || '—'}</span></div>
+      <div class="popup-row"><span class="label">scoreable</span><span class="value">${b.is_scoreable ? '✓' : '—'}</span></div>
+      <div class="popup-row"><span class="label">NOAA</span><span class="value">${station ? station.name + ' (' + station.state + ')' : '—'}</span></div>
+      <div class="popup-row"><span class="label">distance</span><span class="value">${distPill}</span></div>
+      ${govLine}
+      <div class="popup-row"><span class="label">BEP</span><span class="value">${bep.count} rows · ${[...bep.sources].slice(0, 3).join(', ') || '—'}</span></div>
+      <div class="popup-row"><span class="label">lat / lon</span><span class="value" style="font-family:monospace;font-size:11px">${b.lat.toFixed(4)}, ${b.lon.toFixed(4)}</span></div>
+    `);
+  });
+
+  // Stations (only those used + same-state)
+  stations.forEach(s => {
+    const used = usedStations.has(s.station_id);
+    const isCurrentState = s.state === currentState;
+    if (!used && !isCurrentState) return;
+    L.circleMarker([s.latitude, s.longitude], {
+      radius: used ? 5 : 3,
+      fillColor: '#38bdf8',
+      fillOpacity: used ? 0.95 : 0.4,
+      color: 'white', weight: 1.5,
+    }).bindPopup(`
+      <div class="popup-title">${s.name}</div>
+      <div class="popup-fid">station ${s.station_id} · ${s.state} · ${s.station_type || ''}</div>
+    `).addTo(stationLayer);
+  });
+
+  if (beaches.length > 0) {
+    const bounds = L.latLngBounds(beaches.map(b => [b.lat, b.lon]));
+    map.fitBounds(bounds, { padding: [40, 40] });
+  }
+}
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) ** 2 +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// ── Phase log ──────────────────────────────────────────────────────
+function clearPhaseLog() {
+  document.getElementById('phase-log').innerHTML = '';
+}
+function addPhase(name, status, body, durationMs) {
+  const log = document.getElementById('phase-log');
+  if (log.querySelector('.empty')) log.innerHTML = '';
+  const item = document.createElement('div');
+  item.className = `phase-item ${status}`;
+  let detailHtml = '';
+  if (body) {
+    const parts = Object.entries(body)
+      .filter(([k]) => !['phase','status','duration_ms'].includes(k))
+      .map(([k, v]) => `<span class="k">${k}</span> <span class="v">${v}</span>`);
+    detailHtml = `<div class="phase-detail">${parts.join(' &middot; ')}</div>`;
+  }
+  const dur = durationMs != null ? `<span class="phase-duration">${durationMs} ms</span>` : '';
+  item.innerHTML = `<span class="phase-name">${name}</span>${dur}${detailHtml}`;
+  log.appendChild(item);
+  log.scrollTop = log.scrollHeight;
+  return item;
+}
+
+// ── Launch ─────────────────────────────────────────────────────────
+async function launchState() {
+  const btn = document.getElementById('launch-btn');
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span>Processing ${STATE_NAMES[currentState]}…`;
+
+  prevStats = await loadStats(true);
+  clearPhaseLog();
+
+  const loadNoaa = document.getElementById('opt-load-noaa').checked;
+  const skipOverpass = document.getElementById('opt-skip-overpass').checked;
+  const maxRecords = parseInt(document.getElementById('opt-max-records').value) || null;
+
+  // Phase A.0 — NOAA
+  if (loadNoaa) {
+    const item = addPhase(`A.0 NOAA stations · ${currentState}`, 'running');
+    const t0 = Date.now();
+    const r = await edgeFn('admin-load-noaa-stations', { state: currentState });
+    item.classList.remove('running');
+    if (r.error) {
+      item.classList.add('error');
+      item.querySelector('.phase-name').insertAdjacentHTML('afterend',
+        `<div class="phase-detail" style="color:#dc2626">${r.error}</div>`);
+    } else {
+      item.classList.add('ok');
+      item.querySelector('.phase-name').insertAdjacentHTML('afterend',
+        `<span class="phase-duration">${Date.now()-t0} ms</span>` +
+        `<div class="phase-detail">` +
+        `<span class="k">affected</span> <span class="v">${r.affected ?? 0}</span>` +
+        ` &middot; <span class="k">nationwide</span> <span class="v">${r.nationwide ?? 0}</span>` +
+        `</div>`);
+    }
+  }
+
+  // Phase A.2 + B + C — main launch
+  const launchItem = addPhase(`launching admin-launch-state…`, 'running');
+  const r = await edgeFn('admin-launch-state', {
+    state: currentState,
+    max_records: maxRecords,
+    skip_overpass: skipOverpass,
+  });
+  launchItem.remove();
+
+  if (r.error) {
+    addPhase('launch failed', 'error', { message: r.error });
+  } else {
+    (r.phases || []).forEach(p => {
+      addPhase(p.phase, p.status, p, p.duration_ms);
+    });
+    addPhase(`done · total ${r.total_ms} ms`, 'ok');
+  }
+
+  await loadStats();
+  await loadMap();
+
+  btn.disabled = false;
+  btn.innerHTML = `Process ${STATE_NAMES[currentState]}`;
+  toast(`${STATE_NAMES[currentState]} processed.`);
+}
+
+// ── Wire UI ────────────────────────────────────────────────────────
+document.querySelectorAll('.state-pill').forEach(p => {
+  p.addEventListener('click', async () => {
+    document.querySelectorAll('.state-pill').forEach(x => x.classList.remove('active'));
+    p.classList.add('active');
+    currentState = p.dataset.state;
+    document.getElementById('launch-btn').textContent = `Process ${STATE_NAMES[currentState]}`;
+    prevStats = null;
+    setMapCenter(currentState);
+    await loadStats();
+    await loadMap();
+  });
+});
+document.getElementById('launch-btn').addEventListener('click', launchState);
+
+// ── Boot ───────────────────────────────────────────────────────────
+initMap();
+loadStats().then(() => loadMap());
+</script>
+</body>
+</html>

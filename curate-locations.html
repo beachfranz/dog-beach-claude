@@ -257,7 +257,7 @@
 <script>
 const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
 const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
-const COUNTIES     = ['Orange', 'Los Angeles', 'San Diego', 'Ventura', 'Santa Barbara', 'San Luis Obispo'];
+const COUNTIES     = ['Orange', 'Los Angeles', 'San Diego', 'Ventura', 'Santa Barbara', 'San Luis Obispo', 'Monterey', 'Santa Cruz'];
 
 // County bboxes used to bound Nominatim searches. [W, S, E, N] from public.counties.
 // Channel Islands extend southern bounds for LA/Ventura/Santa Barbara — that's correct.
@@ -268,6 +268,8 @@ const COUNTY_BBOX = {
   'Ventura':          [-119.6363, 33.1635, -118.6325, 34.9012],
   'Santa Barbara':    [-120.7344, 33.4110, -118.9627, 35.1147],
   'San Luis Obispo':  [-121.4382, 34.8975, -119.4725, 35.7967],
+  'Monterey':         [-122.0519, 35.7890, -120.2140, 36.9197],
+  'Santa Cruz':       [-122.3177, 36.8196, -121.5812, 37.2861],
 };
 
 const SS_TOKEN = 'curator_token';

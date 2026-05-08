@@ -84,7 +84,13 @@ out body geom;
 """
     print(f"  bbox={bbox}")
     data = urllib.parse.urlencode({"data": query}).encode()
-    req = urllib.request.Request(OVERPASS_URL, data=data, method="POST")
+    req = urllib.request.Request(
+        OVERPASS_URL, data=data, method="POST",
+        headers={
+            "User-Agent": "dog-beach-scout/1.0 (load_state.py)",
+            "Accept": "application/json",
+        },
+    )
     try:
         with urllib.request.urlopen(req, timeout=130) as resp:
             payload = json.loads(resp.read())
@@ -108,20 +114,18 @@ out body geom;
                 if not etype or eid is None:
                     continue
                 tags = el.get("tags") or {}
-                name = tags.get("name", "")
-                # Build geom_full from the element. For nodes use the node coords,
-                # for ways/relations build from members. Simplification — for tonight,
-                # use centroid where available, geometry array where not.
+                # `name` is a generated column on osm_landing (tags->>'name'); skip it.
                 geom_wkt = None
+                lat_v = lon_v = None
                 if etype == "node":
                     if "lat" in el and "lon" in el:
-                        geom_wkt = f"POINT({el['lon']} {el['lat']})"
+                        lat_v, lon_v = el["lat"], el["lon"]
+                        geom_wkt = f"POINT({lon_v} {lat_v})"
                 else:
                     geom_arr = el.get("geometry", [])
                     if geom_arr:
                         coords = ",".join(f"{p['lon']} {p['lat']}" for p in geom_arr)
                         if etype == "way":
-                            # Polygon if closed, else line
                             if geom_arr[0] == geom_arr[-1]:
                                 geom_wkt = f"POLYGON(({coords}))"
                             else:
@@ -131,15 +135,16 @@ out body geom;
                 try:
                     cur.execute("""
                         insert into public.osm_landing
-                          (type, id, name, tags, geom_full, fetched_at, fetched_by, is_active)
-                        values (%s, %s, %s, %s::jsonb,
+                          (type, id, lat, lon, tags, geom_full, fetched_at, fetched_by, is_active)
+                        values (%s, %s, %s, %s, %s::jsonb,
                                 ST_SetSRID(ST_GeomFromText(%s), 4326),
                                 now(), 'load_state.py', true)
                         on conflict (type, id, fetched_at) do nothing
-                    """, (etype, eid, name, json.dumps(tags), geom_wkt))
+                    """, (etype, eid, lat_v, lon_v, json.dumps(tags), geom_wkt))
                     inserted += cur.rowcount
                 except Exception as e:
                     print(f"  insert failed for {etype}/{eid}: {e}")
+                    conn.rollback()
     print(f"  inserted {inserted} new osm_landing rows")
     return inserted
 
@@ -174,8 +179,8 @@ def main():
     if not args.skip_overpass:
         fetch_overpass_beaches(state, args.records)
 
-    # Phase B — promote landing → arena → gold (init only, no publish if --no-publish)
-    step(f"Phase B — promote landing → arena → gold for {state}")
+    # Phase B - promote landing -> arena -> gold (init only, no publish if --no-publish)
+    step(f"Phase B - promote landing -> arena -> gold for {state}")
     poi_rec  = call_sql("public.promote_poi_landing_to_arena()")[0]
     osm_rec  = call_sql("public.promote_osm_landing_to_arena()")[0]
     name_rec = call_sql("public.refresh_arena_names_from_osm_landing()")[0]
@@ -183,15 +188,14 @@ def main():
     print(f"  OSM promoted: {osm_rec.get('promoted')}")
     print(f"  Names refreshed: {name_rec.get('arena_rows_updated')}")
 
-    # Run cluster + extras + promote_to_gold (with publish gating)
+    # Run cluster + extras + promote_to_gold for THIS state's fids only.
+    # run_full_pipeline_maintenance also calls refire_missing_bep across all
+    # states' backlog, which can timeout when launching a new state. Stick to
+    # the state-scoped orchestrator here; the nightly maintenance cron handles
+    # cross-state cleanup separately.
+    rec = call_sql(f"public.run_pipeline_for_state('{state}')")[0]
     if args.no_publish:
-        # Custom: run everything but stop before consensus
-        # (Simpler: run full pipeline minus publish_stale step)
-        print(f"  --no-publish: orchestrator stops after extraction enqueue")
-        # TODO: hook for an explicit init-only orchestrator
-        rec = call_sql(f"public.run_pipeline_for_state('{state}')")[0]
-    else:
-        rec = call_sql(f"public.run_full_pipeline_maintenance('{state}')")[0]
+        print(f"  --no-publish: state-scoped orchestrator already stops after BEP enrichment")
 
     print(f"  Pipeline result: {dict(rec)}")
 

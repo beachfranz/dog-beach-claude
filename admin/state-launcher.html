@@ -77,9 +77,10 @@
   .stat .delta.warn { color: #dc2626; }
   .stat.warn .value { color: #dc2626; }
 
-  /* Process button */
+  /* Process buttons */
+  .btn-row { display: flex; gap: 8px; }
   .launch-btn {
-    width: 100%; padding: 14px 18px;
+    flex: 1; padding: 14px 18px;
     background: linear-gradient(180deg, #fbbf24 0%, #f59e0b 100%);
     color: #0f2742; border: none; border-radius: 8px;
     font-family: inherit; font-size: 15px; font-weight: 700;
@@ -94,6 +95,19 @@
   .launch-btn:disabled {
     background: #cbd5e1; color: #64748b; cursor: not-allowed;
     box-shadow: none; transform: none;
+  }
+  .test-btn {
+    padding: 14px 18px; min-width: 100px;
+    background: #fff; color: #0f2742;
+    border: 2px solid #cbd5e1; border-radius: 8px;
+    font-family: inherit; font-size: 13px; font-weight: 700;
+    letter-spacing: 0.02em; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .test-btn:hover { border-color: #38bdf8; color: #0369a1; background: #f0f9ff; }
+  .test-btn:active { transform: translateY(1px); }
+  .test-btn:disabled {
+    border-color: #e2e8f0; color: #94a3b8; cursor: not-allowed; background: #f8fafc;
   }
   .launch-btn .spinner {
     display: inline-block; width: 14px; height: 14px;
@@ -241,9 +255,14 @@
 
     <div class="card">
       <h2>Process</h2>
-      <button class="launch-btn" id="launch-btn">
-        Process Oregon
-      </button>
+      <div class="btn-row">
+        <button class="launch-btn" id="launch-btn">
+          Process Oregon
+        </button>
+        <button class="test-btn" id="test10-btn" title="Cap Overpass to 10 records — fast smoke test">
+          Test 10
+        </button>
+      </div>
       <div class="options">
         <label><input type="checkbox" id="opt-load-noaa"> load NOAA stations first</label>
         <label><input type="checkbox" id="opt-skip-overpass"> skip Overpass</label>
@@ -556,17 +575,29 @@ function addPhase(name, status, body, durationMs) {
 }
 
 // ── Launch ─────────────────────────────────────────────────────────
-async function launchState() {
-  const btn = document.getElementById('launch-btn');
-  btn.disabled = true;
-  btn.innerHTML = `<span class="spinner"></span>Processing ${STATE_NAMES[currentState]}…`;
+async function launchState(opts = {}) {
+  const launchBtn = document.getElementById('launch-btn');
+  const testBtn   = document.getElementById('test10-btn');
+  const isTest = opts.test === true;
+  const activeBtn = isTest ? testBtn : launchBtn;
+  const restingLabel = isTest
+    ? 'Test 10'
+    : `Process ${STATE_NAMES[currentState]}`;
+  const runningLabel = isTest
+    ? `Testing ${currentState} (10)…`
+    : `Processing ${STATE_NAMES[currentState]}…`;
+  launchBtn.disabled = true;
+  testBtn.disabled = true;
+  activeBtn.innerHTML = `<span class="spinner"></span>${runningLabel}`;
 
   prevStats = await loadStats(true);
   clearPhaseLog();
 
   const loadNoaa = document.getElementById('opt-load-noaa').checked;
-  const skipOverpass = document.getElementById('opt-skip-overpass').checked;
-  const maxRecords = parseInt(document.getElementById('opt-max-records').value) || null;
+  const skipOverpass = !isTest && document.getElementById('opt-skip-overpass').checked;
+  const maxRecords = isTest
+    ? 10
+    : (parseInt(document.getElementById('opt-max-records').value) || null);
 
   // Phase A.0 — NOAA
   if (loadNoaa) {
@@ -610,9 +641,13 @@ async function launchState() {
   await loadStats();
   await loadMap();
 
-  btn.disabled = false;
-  btn.innerHTML = `Process ${STATE_NAMES[currentState]}`;
-  toast(`${STATE_NAMES[currentState]} processed.`);
+  launchBtn.disabled = false;
+  testBtn.disabled = false;
+  launchBtn.innerHTML = `Process ${STATE_NAMES[currentState]}`;
+  testBtn.innerHTML = 'Test 10';
+  toast(isTest
+    ? `${currentState} test (10 records) done.`
+    : `${STATE_NAMES[currentState]} processed.`);
 }
 
 // ── Wire UI ────────────────────────────────────────────────────────
@@ -628,7 +663,8 @@ document.querySelectorAll('.state-pill').forEach(p => {
     await loadMap();
   });
 });
-document.getElementById('launch-btn').addEventListener('click', launchState);
+document.getElementById('launch-btn').addEventListener('click', () => launchState());
+document.getElementById('test10-btn').addEventListener('click', () => launchState({ test: true }));
 
 // ── Boot ───────────────────────────────────────────────────────────
 initMap();

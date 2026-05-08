@@ -85,23 +85,11 @@ def mark_failed(conn, qid: int, err: str):
 
 def dispatch(kind: str, fid: int) -> bool:
     """Run the right extractor. Returns True on success, False on error."""
-    # NOTE: stub today. Wire to actual extractors when their --fid mode is
-    # ready. extract_for_orphans.py is the closest existing entry point;
-    # extract_for_gold_v3 targets a specific 25-beach set, not arbitrary fids.
-    if kind == "dogs_extraction":
-        cmd = ["python", str(ROOT / "scripts" / "extract_for_orphans.py"),
-               "--fid", str(fid), "--apply"]
-    elif kind == "park_url_discovery":
-        # extract_for_orphans handles URL discovery internally when no
-        # existing source URL is in the DB. Same command.
-        cmd = ["python", str(ROOT / "scripts" / "extract_for_orphans.py"),
-               "--fid", str(fid), "--discover-urls", "--apply"]
-    elif kind == "full_refresh":
-        cmd = ["python", str(ROOT / "scripts" / "extract_for_orphans.py"),
-               "--fid", str(fid), "--apply"]
-    else:
+    if kind not in ("dogs_extraction", "park_url_discovery", "full_refresh"):
         print(f"  unknown kind: {kind}")
         return False
+    cmd = ["python", str(ROOT / "scripts" / "extract_one_fid.py"),
+           "--fid", str(fid), "--kind", kind, "--apply"]
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)

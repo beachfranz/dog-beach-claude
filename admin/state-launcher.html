@@ -77,6 +77,44 @@
   .stat .delta.warn { color: #dc2626; }
   .stat.warn .value { color: #dc2626; }
 
+  /* Progress bars */
+  .prog-list { display: flex; flex-direction: column; gap: 10px; }
+  .prog-row { display: grid; grid-template-columns: 130px 1fr 70px;
+              gap: 10px; align-items: center; }
+  .prog-label {
+    font-size: 11px; font-weight: 600; color: #475569;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .prog-bar {
+    height: 18px; background: #f1f5f9; border-radius: 4px;
+    overflow: hidden; position: relative;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
+  }
+  .prog-fill {
+    height: 100%; transition: width 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+    background: linear-gradient(90deg, #4ade80, #22c55e);
+    position: relative;
+  }
+  .prog-fill.warn { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+  .prog-fill.empty { background: #e2e8f0; }
+  .prog-fill.full { background: linear-gradient(90deg, #15803d, #166534); }
+  .prog-fill::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+  }
+  .prog-fill.running::after {
+    animation: shimmer 1.4s linear infinite;
+    background: linear-gradient(90deg,
+      transparent 20%, rgba(255,255,255,0.5) 50%, transparent 80%);
+    background-size: 200% 100%;
+  }
+  @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  .prog-count {
+    font-family: 'DM Mono', ui-monospace, monospace;
+    font-size: 11px; color: #475569; text-align: right; font-weight: 600;
+  }
+  .prog-count .pct { color: #0f2742; font-weight: 700; }
+
   /* Process buttons */
   .btn-row { display: flex; gap: 8px; }
   .launch-btn {
@@ -227,6 +265,13 @@
   <div class="col-side">
 
     <div class="card">
+      <h2>Pipeline progress <span class="badge" id="prog-state">OR</span></h2>
+      <div class="prog-list" id="prog-list">
+        <!-- bars rendered by JS -->
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Snapshot <span class="badge" id="stats-state">OR</span></h2>
       <div class="stat-grid" id="stats">
         <div class="stat"><span class="label">arena (in state)</span>
@@ -374,10 +419,51 @@ function fmtTime(ts) {
   const d = new Date(ts);
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
+// Pipeline-step bar renderer
+function renderProgress(stats, opts = {}) {
+  document.getElementById('prog-state').textContent = currentState;
+  const arena = stats.arena_in_state || 0;
+  const gold = stats.gold_rows || 0;
+  const goldBep = stats.gold_with_bep || 0;
+  const goldGov = stats.gold_with_governance || 0;
+  const scoreable = stats.gold_scoreable || 0;
+  const queueDone = stats.queue_completed || 0;
+  const queueTotal = stats.queue_total || 0;
+
+  const steps = [
+    { label: 'Promoted',    num: gold,      den: arena,      tip: 'arena → gold' },
+    { label: 'BEP enriched', num: goldBep,  den: gold,       tip: 'gold rows with at least one BEP row' },
+    { label: 'Governance',  num: goldGov,   den: gold,       tip: 'gold rows with PAD-US/operator governance evidence' },
+    { label: 'Scoreable',   num: scoreable, den: gold,       tip: 'gold rows with is_scoreable=true' },
+    { label: 'Extracted',   num: queueDone, den: queueTotal, tip: 'queued LLM extractions completed' },
+  ];
+
+  const list = document.getElementById('prog-list');
+  list.innerHTML = '';
+  steps.forEach((s, i) => {
+    const pct = s.den > 0 ? Math.min(100, Math.round((s.num / s.den) * 100)) : 0;
+    let cls = 'prog-fill';
+    if (s.den === 0) cls += ' empty';
+    else if (pct === 100) cls += ' full';
+    else if (pct < 50)  cls += ' warn';
+    if (opts.running) cls += ' running';
+    const row = document.createElement('div');
+    row.className = 'prog-row';
+    row.title = s.tip;
+    row.innerHTML = `
+      <span class="prog-label">${s.label}</span>
+      <div class="prog-bar"><div class="${cls}" style="width:${pct}%"></div></div>
+      <span class="prog-count"><span class="pct">${pct}%</span> &middot; ${s.num}/${s.den}</span>
+    `;
+    list.appendChild(row);
+  });
+}
+
 async function loadStats(silent = false) {
   try {
     const stats = await rpcGet('state_launcher_stats', { p_state: currentState });
     document.getElementById('stats-state').textContent = currentState;
+    renderProgress(stats);
     const setStat = (id, val, prevKey) => {
       const el = document.getElementById(id);
       el.textContent = fmtNum(val);
@@ -591,6 +677,7 @@ async function launchState(opts = {}) {
   activeBtn.innerHTML = `<span class="spinner"></span>${runningLabel}`;
 
   prevStats = await loadStats(true);
+  if (prevStats) renderProgress(prevStats, { running: true });
   clearPhaseLog();
 
   const loadNoaa = document.getElementById('opt-load-noaa').checked;

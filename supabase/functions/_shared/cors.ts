@@ -16,6 +16,8 @@ const ALLOWED_PATTERNS: RegExp[] = [
   /^https:\/\/([a-z0-9-]+\.)+dogbea\.ch$/,
   /^https:\/\/([a-z0-9-]+\.)+workers\.dev$/,
   /^https:\/\/([a-z0-9-]+\.)+pages\.dev$/,
+  // Local development servers (python -m http.server, vite, etc.)
+  /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,
 ];
 
 function isAllowedOrigin(origin: string): boolean {

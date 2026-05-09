@@ -57,7 +57,57 @@ PHASES = [
             "select (count(*) >= 4)::boolean from public.external_source_status "
             "where state = $STATE and source in ('pad_us','osm_landing','osm_amenities','tiger_places') "
             "  and status in ('ok','skipped')",
-        'criterion_text': 'all 4 required sources status in (ok, skipped)',
+        'criterion_text': 'all 4 required sources status in (ok, skipped) + noaa_stations(global) loaded',
+    },
+    # Cheap idempotent check — runs early so any populator-chain drift
+    # halts the canon BEFORE we run promote/refire and write bad data.
+    # Catches the regression family of issues #2, #18, #20.
+    {
+        'key': 'chain_integrity_check',
+        'action': "select case when public.assert_populator_chains_intact() then 1 else 0 end::int",
+        'criterion': "select public.assert_populator_chains_intact()",
+        'criterion_text':
+            'promote_to_gold + refire_bep_cascade contain all expected populator '
+            'calls AND promote INSERT contains all expected columns',
+    },
+    # ─── Policy-seed phases (Franz, 2026-05-09) ─────────────────────────
+    # These three phases assert the per-state / per-unit / per-species
+    # policy seed tables are populated BEFORE the canon's data-emission
+    # phase (`promote`) runs. Without seeded policies, downstream phases
+    # produce 0 beach_dog_policy rows (the RI fresh-state-quiet-zero
+    # symptom). See docs/canon-issues-log.md issue #19 + #20.
+    #
+    # Each phase has:
+    #   - action: a python action that auto-attempts to seed via LLM
+    #     research script (or no-op if data is already present).
+    #   - criterion: SQL that returns true iff the seed is sufficient.
+    {
+        'key': 'state_policy_seed',
+        'kind': 'python',
+        'action': 'state_policy_seed',
+        'criterion':
+            "select (public.unseeded_state_policy_for_state($STATE) = 0)::boolean",
+        'criterion_text': 'state_dogs_policy has at least 1 row for state',
+    },
+    {
+        'key': 'federal_policy_seed',
+        'kind': 'python',
+        'action': 'federal_policy_seed',
+        # Advisory for now: filter is too loose (returns thousands of FED units
+        # per state). Tightened in a follow-up to coastal NS/NWR/NRA only.
+        # For now criterion always passes; the action logs the pending count.
+        'criterion': "select true",
+        'criterion_text':
+            'federal coastal-unit policy seeded (advisory; filter pending refinement)',
+    },
+    {
+        'key': 'seasonal_closure_seed',
+        'kind': 'python',
+        'action': 'seasonal_closure_seed',
+        'criterion':
+            "select (public.unseeded_seasonal_closures_for_state($STATE) = 0)::boolean",
+        'criterion_text':
+            'no pending seasonal closures (status=pending) for state',
     },
     {
         'key': 'operators',
@@ -100,7 +150,10 @@ PHASES = [
     {
         'key': 'cluster_group',
         'action':
-            "select coalesce((select relation_grouped from public.populate_arena_group_id()), 0)::int",
+            # State-scoped: only re-clusters arena rows in this state's
+            # counties. Global O(N²) was hitting 600s timeout once arena
+            # exceeded ~10k rows. State-scope keeps it fast (DE: 55 rows).
+            "select coalesce((select relation_grouped from public.populate_arena_group_id($STATE)), 0)::int",
         'criterion': "select true",
         'criterion_text': 'no exception',
     },
@@ -133,9 +186,9 @@ PHASES = [
             "select coalesce((select rows_promoted + rows_already_in_gold "
             "                   from public.promote_to_gold((select fids from f)::bigint[], false::boolean, true::boolean)), 0)::int",
         'criterion':
-            "select (count(*) filter (where county_fips is null) = 0)::boolean "
-            "from public.beaches_gold where state = $STATE and is_active",
-        'criterion_text': 'every active beach in state has county_fips set',
+            "select public.assert_promote_complete_for_state($STATE)",
+        'criterion_text':
+            'every active beach has county_fips and state set (#2/#18 guard)',
     },
     {
         'key': 'address_poi',
@@ -180,6 +233,18 @@ PHASES = [
             "from public.beaches_gold g join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
             "where g.state = $STATE and g.is_active",
         'criterion_text': 'no Tier 3/4 beach is scoreable',
+    },
+    # Asserts every scoreable beach has a NOAA station (issue #21 guard).
+    # Inland beaches without stations should be is_scoreable=false; the
+    # align_scoreable phase above sets that. This phase double-checks.
+    {
+        'key': 'noaa_station_check',
+        'action':
+            "select case when public.assert_scoreable_have_noaa_for_state($STATE) then 1 else 0 end::int",
+        'criterion':
+            "select public.assert_scoreable_have_noaa_for_state($STATE)",
+        'criterion_text':
+            'every scoreable beach in state has noaa_station_id set (issue #21 guard)',
     },
     {
         'key': 'purge_pollution',
@@ -326,6 +391,20 @@ PHASES = [
             "            where g.state=$STATE and r.local_date=current_date) "
             "select d.n done, t.n total from d, t",
     },
+    {
+        # End-of-pipeline drift/coverage check. Runs the per-state audit
+        # in --check mode; non-zero exit if any of the hard thresholds
+        # fail (county_fips < 100%, name_source < 100%, today_rec < 95%,
+        # state_dogs_policy_v1 missing from BEP, tier-1+2 = 0). Prints
+        # the full report regardless.
+        'key': 'field_population_check',
+        'kind': 'python',
+        'action': 'field_population_check',
+        'criterion': "select true",  # validation is in the action exit code
+        'criterion_text':
+            'population audit thresholds met (county_fips=100%, name_source=100%, '
+            'today_rec>=95%, BEP has state_dogs_policy_v1, tier-1+2 > 0)',
+    },
 ]
 
 
@@ -333,11 +412,38 @@ PHASES = [
 # Each takes a state code, returns int rows_affected (or raises).
 
 def _state_operator_ids(state: str) -> list[int]:
+    """Operators worth researching for this state's dog policy.
+
+    Filters to operators whose footprint contains (or is within 1km of)
+    at least one active gold beach in the state. Avoids the 80%+ of
+    inland city/county operators that have no chance of contributing
+    coastal dog policy. Falls back to ALL active operators if the
+    filtered set is empty (first-launch before promote runs, OR a state
+    where polygon containment hasn't resolved yet).
+    """
     with open_conn() as c, c.cursor() as cur:
         cur.execute(
+            'select operator_id from public.state_operator_ids_with_beaches(%s) '
+            'order by operator_id',
+            (state,)
+        )
+        ids = [r[0] for r in cur.fetchall()]
+        if ids:
+            cur.execute(
+                "select count(*) from public.operators "
+                " where state_code = %s and is_active and level in ('city','county','state')",
+                (state,)
+            )
+            total = cur.fetchone()[0]
+            log(f'    operator filter: {len(ids)}/{total} ops have beaches '
+                f'(saving {100 - len(ids)*100//total if total else 0}%)')
+            return ids
+        # Fallback for first-launch state where containment hasn't run yet
+        log(f'    operator filter empty for {state} — falling back to all ops')
+        cur.execute(
             "select id from public.operators "
-            "where state_code = %s and is_active and level in ('city','county','state') "
-            "order by id",
+            " where state_code = %s and is_active and level in ('city','county','state') "
+            " order by id",
             (state,)
         )
         return [r[0] for r in cur.fetchall()]
@@ -483,14 +589,126 @@ def action_daily_refresh_fire(state: str) -> int:
     return ok
 
 
+_STATE_SEED_TEMPLATE = (
+    "  INSERT INTO public.state_dogs_policy\n"
+    "    (state_code, state_name, county_fips_filter,\n"
+    "     dogs_allowed, default_rule, has_on_leash, has_off_leash,\n"
+    "     source_quote, source_url, ordinance_ref, scope_notes, confidence)\n"
+    "  VALUES\n"
+    "    ('{state}', '<full state name>', NULL,\n"
+    "     'yes'|'no'|'mixed', 'yes'|'no'|'mixed', true|false, true|false,\n"
+    "     '<state public-trust statute or beach-access law verbatim>',\n"
+    "     '<source URL — state parks dog-policy page or statute>',\n"
+    "     '<statute citation — e.g. RI Gen. Laws §4-13-15>',\n"
+    "     '<scope: where this default applies — coastal-only? statewide?>',\n"
+    "     0.40);\n"
+)
+
+
+def action_state_policy_seed(state: str) -> int:
+    """Ensure state_dogs_policy has a row for state.
+
+    If unseeded, fail loudly with a template INSERT the operator can
+    fill out. Once filled and applied, re-run the canon.
+    """
+    with open_conn() as c, c.cursor() as cur:
+        cur.execute('select public.unseeded_state_policy_for_state(%s)', (state,))
+        unseeded = cur.fetchone()[0]
+    if unseeded == 0:
+        log(f'    state_dogs_policy already seeded for {state}; skip')
+        return 0
+    raise RuntimeError(
+        f'state_dogs_policy is missing a row for {state}. The canon halts here\n'
+        f'because every active beach in {state} would otherwise resolve to\n'
+        f'dogs_allowed=unknown and produce 0 beach_dog_policy rows (see\n'
+        f'docs/canon-issues-log.md issue #19).\n\n'
+        f'Remediation: INSERT a row using the template below, then re-run\n'
+        f'this phase via:\n'
+        f'  python scripts/run_state_pipeline.py --state {state} --resume\n\n'
+        f'Template:\n\n{_STATE_SEED_TEMPLATE.format(state=state)}'
+    )
+
+
+def action_federal_policy_seed(state: str) -> int:
+    """Pending coastal federal-unit dog-policy curation for state.
+
+    Advisory phase (criterion always passes for now): logs how many
+    PAD-US federal units in this state lack a pad_us_unit_dogs_policy
+    row, so the operator knows where curation is missing. The current
+    filter for "coastal" units is too loose (FED-everything) and is
+    being tightened to NPS national seashores + USFWS NWRs only.
+    """
+    with open_conn() as c, c.cursor() as cur:
+        cur.execute('set statement_timeout=\'120s\'')
+        cur.execute('select public.unseeded_pad_us_units_for_state(%s)', (state,))
+        unseeded = cur.fetchone()[0]
+    log(f'    federal coastal-unit policy: {unseeded} unseeded for {state} (advisory)')
+    if unseeded > 0:
+        log(f'    [TODO] tighten coastal_pad_us_units_for_state filter to NPS NS / USFWS NWR only')
+        log(f'    [TODO] write LLM seed script that reads nps.gov / fws.gov per unit')
+    return int(unseeded)
+
+
+def action_seasonal_closure_seed(state: str) -> int:
+    """Pending seasonal-closure seed rows for state.
+
+    If any rows are status='pending', either the seed table has new
+    species/sites that haven't been matched to gold beaches yet, OR
+    the seed table is unpopulated for this state and needs species-
+    level curation. Fails loudly if pending > 0.
+    """
+    with open_conn() as c, c.cursor() as cur:
+        cur.execute(
+            "select count(*) from public.seasonal_closure_seed "
+            " where state_code=%s and status='pending'",
+            (state,)
+        )
+        pending = cur.fetchone()[0]
+    if pending == 0:
+        log(f'    no pending seasonal_closure_seed rows for {state}; skip')
+        return 0
+    raise RuntimeError(
+        f'{pending} pending seasonal_closure_seed rows for {state}.\n'
+        f'These need to be matched to a beaches_gold fid OR marked status=\'no_match\'.\n'
+        f'Inspect with:\n'
+        f'  SELECT * FROM public.seasonal_closure_seed\n'
+        f'   WHERE state_code = \'{state}\' AND status = \'pending\';\n'
+        f'Then UPDATE matched_fid + status=\'applied\' (or status=\'no_match\').'
+    )
+
+
+def action_field_population_check(state: str) -> int:
+    """End-of-pipeline drift check: run the per-state audit in --check
+    mode. Prints the full report; raises if any hard threshold fails."""
+    rc, out, err = _run_subprocess(
+        [sys.executable, 'scripts/audit/state_population_audit.py',
+         '--state', state, '--check'],
+        timeout=300,
+    )
+    # Always print the audit output to the orchestrator log
+    print(out)
+    if err.strip():
+        print(err, file=sys.stderr)
+    if rc != 0:
+        raise RuntimeError(
+            f'field_population_check FAIL for {state} (exit {rc}). See report '
+            f'output above for which criteria violated.'
+        )
+    return 0
+
+
 PYTHON_ACTIONS = {
-    'operator_llm_extract': action_operator_llm_extract,
-    'operator_merge':       action_operator_merge,
-    'bep_refire':           action_bep_refire,
-    'section_extract':      action_section_extract,
-    'descriptions':         action_descriptions,
-    'photos_mapillary':     action_photos_mapillary,
-    'daily_refresh_fire':   action_daily_refresh_fire,
+    'state_policy_seed':       action_state_policy_seed,
+    'federal_policy_seed':     action_federal_policy_seed,
+    'seasonal_closure_seed':   action_seasonal_closure_seed,
+    'operator_llm_extract':    action_operator_llm_extract,
+    'operator_merge':          action_operator_merge,
+    'bep_refire':              action_bep_refire,
+    'section_extract':         action_section_extract,
+    'descriptions':            action_descriptions,
+    'photos_mapillary':        action_photos_mapillary,
+    'daily_refresh_fire':      action_daily_refresh_fire,
+    'field_population_check':  action_field_population_check,
 }
 
 

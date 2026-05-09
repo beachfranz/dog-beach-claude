@@ -37,10 +37,13 @@ Deno.serve(async (req: Request) => {
     const lngParam = url.searchParams.get("lng");
     const lat   = latParam ? parseFloat(latParam) : null;
     const lng   = lngParam ? parseFloat(lngParam) : null;
-    // scored=true (default) — only beaches with day_recommendations rows.
-    // scored=false → full catalog (763), unscored render as no_data cards.
+    // scored=true → only beaches with day_recommendations rows.
+    // scored=false (NEW DEFAULT) → full catalog visible; client renders
+    // tier-aware icons (1+2 normal, 3 muted, 4 grey-no-dog). The cost
+    // gate (is_scoreable) is enforced upstream by daily-beach-refresh,
+    // not by this read query — display gates are tier-based.
     const scoredParam = url.searchParams.get("scored");
-    const scoredOnly  = scoredParam === "false" ? false : true;
+    const scoredOnly  = scoredParam === "true" ? true : false;
 
     // Bounded result set via spatial KNN. Only applied when lat/lng present;
     // without coords the server still returns the full active set (ghost-user
@@ -190,6 +193,9 @@ Deno.serve(async (req: Request) => {
         access_rule:        b.access_rule,
         has_on_leash:       b.has_on_leash  ?? null,
         has_off_leash:      b.has_off_leash ?? null,
+        dogs_allowed:       b.dogs_allowed  ?? null,
+        dogs_prohibited_start: b.dogs_prohibited_start ?? null,
+        location_tier:      b.location_tier ?? null,
         distance_m:         b.distance_m ?? null,
         day_status:         b.day_status  ?? "no_data",
         best_window_label:  bestWindowLabel  ?? null,
@@ -234,6 +240,9 @@ interface BeachRow {
   access_rule:        string | null;
   has_on_leash:       boolean | null;
   has_off_leash:      boolean | null;
+  dogs_allowed:       string | null;
+  dogs_prohibited_start: string | null;
+  location_tier:      string | null;
   distance_m:         number | null;
   day_status:         string | null;
   best_window_label:  string | null;

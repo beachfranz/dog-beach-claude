@@ -270,6 +270,23 @@
     .day-card.status-caution  { border-left: 3px solid var(--amber); }
     .day-card.status-no_go    { border-left: 3px solid var(--red); opacity: 0.7; }
 
+    /* Tier-based display gates: 1+2 normal, 3 muted, 4 grey-no-dog.
+       is_scoreable is the cost gate (LLM/refresh); tier is the display gate. */
+    .day-card.tier-3_limited_access {
+      opacity: 0.62;
+      filter: grayscale(0.45);
+    }
+    .day-card.tier-4_no_dogs {
+      opacity: 0.50;
+      filter: grayscale(0.75);
+      border-left-color: var(--text-dim) !important;
+    }
+    .day-card.tier-4_no_dogs .day-score-value::before { content: '🚫 '; }
+    .day-card.tier-unknown {
+      opacity: 0.55;
+      filter: grayscale(0.55);
+    }
+
     .day-left {
       display: flex;
       align-items: center;
@@ -630,7 +647,7 @@
       // client-side haversine path.
       const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
       const beachList = (await loadBeachesForDate(todayISO))
-        .map(b => ({ location_id: b.location_id, arena_group_id: b.arena_group_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule, distance_m: b.distance_m, day_status: b.day_status, composite_score: b.composite_score }));
+        .map(b => ({ location_id: b.location_id, arena_group_id: b.arena_group_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule, has_on_leash: b.has_on_leash, has_off_leash: b.has_off_leash, dogs_allowed: b.dogs_allowed, location_tier: b.location_tier, distance_m: b.distance_m, day_status: b.day_status, composite_score: b.composite_score }));
 
       const filteredBeachList = beachList.filter(b => matchesLeashFilter(b));
 
@@ -729,7 +746,9 @@
       params.set('lng',   String(userLng));
       params.set('limit', String(NEAREST_LIMIT));
     }
-    if (catalogMode === 'all') params.set('scored', 'false');
+    // Explicit param both ways — Edge Function default is now scored=false
+    // (full catalog), so 'scored' mode must opt in.
+    params.set('scored', catalogMode === 'all' ? 'false' : 'true');
     const res  = await fetch(
       `${SUPABASE_URL}/functions/v1/get-beaches-find?${params}`,
       { headers: { 'Authorization': `Bearer ${ANON_KEY}` } }
@@ -932,8 +951,14 @@
 
     const chips = buildChips(day, distance);
 
+    // Tier class: display gate. T1+T2 render normally, T3 muted, T4
+    // grey-no-dog. Falls back to 'tier-unknown' if the field isn't
+    // populated (older client, edge cache, etc.).
+    const tier = beach.location_tier ?? 'unknown';
+    const tierClass = `tier-${tier}`;
+
     return `
-      <div class="day-card status-${status}" data-location-id="${beach.location_id}" onclick="window.location.href='detail.html?${beach.arena_group_id ? 'fid=' + beach.arena_group_id : 'location=' + beach.location_id}&date=${selectedDate}'">
+      <div class="day-card status-${status} ${tierClass}" data-location-id="${beach.location_id}" onclick="window.location.href='detail.html?${beach.arena_group_id ? 'fid=' + beach.arena_group_id : 'location=' + beach.location_id}&date=${selectedDate}'">
         <div class="day-left">
           <div class="rank-label">#${rank}</div>
           ${scoreHtml}

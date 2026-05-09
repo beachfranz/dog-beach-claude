@@ -101,6 +101,50 @@ Old set: `1_marquee`, `1b_offleash_caveat`, `1c_onleash`, `3_no_dogs`, `4_limite
 
 New set: `1_off-leash` (collapsed old marquee + 1b), `2_on-leash`, `3_limited_access` (was tier 4), `4_no_dogs` (was tier 3). **Note the tier 3 ↔ 4 number swap.** Lower number = better-for-dogs, ordering is preserved.
 
+### Location Tier semantic criteria (Franz, 2026-05-09 02:30)
+
+The richer semantic definition driving the next iteration of `beach_location_tier()`. **Today's classifier does not yet implement these — see TODO below.**
+
+| Tier | Criterion |
+|---|---|
+| **1** | Dogs allowed **on the sand** in any zone, **off-leash** |
+| **2** | Same as Tier 1 but **on-leash** required |
+| **3** | Dogs **NOT** allowed on the sand, **but** the location offers ample non-sand zones (trails, bluffs, picnic areas, etc.) that still make it attractive to bring a dog |
+| **4** | Either **no dogs anywhere**, or dogs allowed in some technical sense but the location has little to offer (no sand, no meaningful amenities, just a parking lot or restricted zone) |
+
+The "on-sand" qualifier in Tiers 1 & 2 is the key gap vs. today's classifier. Today's `beach_location_tier()` keys off `dogs_allowed` (yes/no/mixed) and `has_off_leash`/`has_on_leash` booleans without distinguishing "dogs welcome on the sand" from "dogs welcome in the parking lot." Tier 3's definition has also tightened: it's not just "mixed access," it's specifically **no sand access but meaningful surrounding amenity**.
+
+**Schema fields that already exist** (on `operator_dogs_policy`) to support this — `area_sand`, `area_water`, `area_picnic_area`, `area_parking_lot`, `area_trails`, `area_campground`, `designated_dog_zones`, `prohibited_areas`. They aren't yet propagated to `beach_dog_policy` and the classifier doesn't read them.
+
+**TODO** — implement richer classifier:
+1. Propagate area-specific fields from `operator_dogs_policy` → `beach_dog_policy` via `promote_canonical_to_consumer_tables`.
+2. Update `beach_location_tier()` to read those fields with the criteria above:
+   - Tier 1: `area_sand ∈ {off_leash, designated_off_leash_zone}`
+   - Tier 2: `area_sand ∈ {on_leash, leashed}`
+   - Tier 3: `area_sand ∈ {no_dogs, prohibited}` AND (`area_trails IN {allowed,...}` OR `area_picnic_area IN {allowed,...}` OR `area_parking_lot IN {allowed,...}`) — at least one non-sand amenity dog-friendly
+   - Tier 4: `area_sand ∈ {no_dogs}` AND no meaningful non-sand amenity dog-friendly
+3. After deploying, re-run classification across all states (it's a pure function of `beach_dog_policy` columns; just re-fire `align_scoreable` per state).
+
+**Re-run plan when ready:** apply the migration that updates the classifier + `align_scoreable_to_tier(state)` will flip `is_scoreable` correctly for every state in one pass; no per-state re-canon needed. Cost is just `align_scoreable` SQL across ~50 states ≈ <1 minute total. The harder lift is curating the area-specific fields for non-CA operators (existing `operator_dogs_policy` has those columns; they're populated for CA but sparse for OR/WA/RI).
+
+### poi_landing.state derived from county FIPS (issue #22 fix, 2026-05-09)
+
+**Spec rule:** every row in `poi_landing` must have `state` set, derived from `county_geoid` via `state_from_fips()` (the structural FIPS code, not Google's text `address_state`). A trigger (`poi_landing_state_sync` in `20260509_poi_landing_state_from_fips.sql`) keeps the column in sync on every INSERT/UPDATE. The 2026-05-09 backfill flipped 7,484 rows from NULL → state-tagged, unlocking ~49 DE POIs, 685 MA, 269 NJ, 538 HI, etc., for promote-into-arena.
+
+Why FIPS, not address_state: Google's `address_state` is text inference (can disagree on cross-border addresses, P.O. boxes, etc.). `county_geoid` is structural — every promoted record carries it.
+
+### Operator-with-beaches filter for LLM extraction (issue #22 follow-up)
+
+**Spec rule:** `operator_llm_extract` phase (Phase 20) only researches operators that govern at least one active gold beach in the state. Filter is `public.state_operator_ids_with_beaches(state)`:
+
+- **County-level operators**: included if `op.county_geoid` is in the set of counties that contain any active beach in this state.
+- **City-level operators**: PIP via `jurisdictions.geom` — included if the city's polygon intersects any beach.
+- **State-level operators**: always included (statewide jurisdiction).
+- **Spatial fallback**: where operator has its own geom (CA CSP-loaded operators), use 1km buffer intersect.
+- **BEP fallback**: operators referenced in `polygon_containment` BEP evidence are always included.
+
+Savings: DE 90% (51→5), RI 55% (11→5), OR 84% (269→42), WA 78% (295→64). Cuts operator extraction cost+time by ~10× on average.
+
 ### State-aware operator extraction
 
 `extract_operator_dogs_policy.py` was originally CA-hardcoded. Auditing OR/WA's first run found ~50% of "policy_found=true" extractions were cross-state pollution: Tavily returned similarly-named jurisdictions from CA (e.g. WA's "City of Carbonado" got Coronado, CA's dog-policy URL accepted by a CA-prompt-bound picker). The patch:

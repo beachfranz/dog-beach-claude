@@ -333,27 +333,38 @@ async function processBeach(
   // Weekly cron passes forceTideRefresh + tideWindowDays=14 to refill the
   // buffer; daily cron uses defaults (no force, 7-day window) which means
   // we skip NOAA whenever stored rows cover the next 7 days at <=7d age.
-  let tideMap: Map<string, number>;
+  //
+  // Inland/lake beaches without a NOAA station: skip tide fetch entirely
+  // and proceed with empty tideMap. Scoring math defaults tideHeight=null
+  // → tideScore=0.5 (neutral), same pattern as null crowd/busyness data.
+  // Don't fail the whole beach for missing tide data.
+  let tideMap: Map<string, number> = new Map();
   let tideFromCache = false;
-  try {
-    if (!opts.forceTideRefresh) {
-      const cached = await tryReadTideCache(supabase, beach, runAt);
-      if (cached) {
-        tideMap = cached;
-        tideFromCache = true;
-        phases.noaa = "skipped";
-        console.log(`[${beach.location_id}] Tides cached — ${tideMap.size} hours (skipping NOAA)`);
+  if (!beach.noaa_station_id) {
+    phases.noaa = "skipped";
+    console.log(`[${beach.location_id}] No NOAA station (inland) — scoring without tide`);
+  } else {
+    try {
+      if (!opts.forceTideRefresh) {
+        const cached = await tryReadTideCache(supabase, beach, runAt);
+        if (cached) {
+          tideMap = cached;
+          tideFromCache = true;
+          phases.noaa = "skipped";
+          console.log(`[${beach.location_id}] Tides cached — ${tideMap.size} hours (skipping NOAA)`);
+        }
       }
+      if (!tideFromCache) {
+        tideMap = await fetchTides(beach, runAt, opts.tideWindowDays);
+        phases.noaa = "ok";
+        console.log(`[${beach.location_id}] Tides fetched — ${tideMap.size} hours (${opts.tideWindowDays}d window)`);
+      }
+    } catch (err) {
+      await logError(supabase, beach.location_id, "noaa", err);
+      phases.noaa = "error";
+      tideMap = new Map();
+      console.warn(`[${beach.location_id}] NOAA failed — proceeding without tide data`);
     }
-    if (!tideFromCache) {
-      tideMap = await fetchTides(beach, runAt, opts.tideWindowDays);
-      phases.noaa = "ok";
-      console.log(`[${beach.location_id}] Tides fetched — ${tideMap.size} hours (${opts.tideWindowDays}d window)`);
-    }
-  } catch (err) {
-    await logError(supabase, beach.location_id, "noaa", err);
-    phases.noaa = "error";
-    return { locationId: beach.location_id, ok: false, error: String(err), phases };
   }
 
   // c. Crowds (non-fatal)

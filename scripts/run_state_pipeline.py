@@ -352,11 +352,18 @@ PHASES = [
             "select d.n done, t.n total from d, t",
     },
     {
-        'key': 'photos_mapillary',
+        # Phase 24 swapped from Mapillary → Wikimedia Commons (2026-05-09).
+        # Wikimedia produces ~3× higher-quality photos (CC-licensed real
+        # photos vs Mapillary's street-view shots) and the loader has
+        # keyword bias + photographer auto-blocklist. Mapillary loader
+        # still exists at scripts/load_mapillary_photos.py for ad-hoc
+        # use but is no longer in the canon.
+        'key': 'photos_wikimedia',
         'kind': 'python',
-        'action': 'photos_mapillary',
-        'criterion': "select true",  # rate-limited; 0 acceptable
-        'criterion_text': 'mapillary loader ran (Mapillary rate limits may cap coverage)',
+        'action': 'photos_wikimedia',
+        'criterion': "select true",  # coverage varies by region; 0 acceptable
+        'criterion_text':
+            'wikimedia loader ran (Commons coverage varies; rural beaches may have 0)',
         'progress_sql':
             "with t as (select count(*)::int n from public.beaches_gold g "
             "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
@@ -366,7 +373,7 @@ PHASES = [
             "     d as (select count(distinct bp.arena_group_id)::int n "
             "             from public.beach_photos bp "
             "             join public.beaches_gold g on g.fid=bp.arena_group_id "
-            "            where g.state=$STATE and g.is_active and bp.source='mapillary') "
+            "            where g.state=$STATE and g.is_active and bp.source='wikimedia') "
             "select d.n done, t.n total from d, t",
     },
     {
@@ -538,19 +545,21 @@ def action_descriptions(state: str) -> int:
     return int(m.group(1)) if m else 0
 
 
-def action_photos_mapillary(state: str) -> int:
-    """Mapillary photos for state's tier-1+2 fids."""
-    fids = _state_tier12_fids(state)
-    if not fids:
-        return 0
+def action_photos_wikimedia(state: str) -> int:
+    """Wikimedia Commons photos for state's tier-1+2 fids.
+    Replaced Mapillary (2026-05-09) — Commons photos are CC-licensed,
+    higher quality (real photos vs street-view), keyword-biased, and
+    photographer-auto-blocklisted. The Mapillary loader still exists
+    at scripts/load_mapillary_photos.py for ad-hoc use."""
     rc, out, err = _run_subprocess(
-        [sys.executable, 'scripts/load_mapillary_photos.py',
-         '--fids', ','.join(map(str, fids))],
+        [sys.executable, 'scripts/load_wikimedia_commons_photos.py',
+         '--states', state],
         timeout=7200,
     )
     if rc != 0:
-        raise RuntimeError(f"photos exit {rc}: {err[-500:]}")
-    m = re.search(r'photos saved:\s+(\d+)', out)
+        raise RuntimeError(f"wikimedia photos exit {rc}: {err[-500:]}")
+    # Loader output: "Done. N beaches, M photos saved, K no-coverage"
+    m = re.search(r'(\d+)\s+photos saved', out)
     return int(m.group(1)) if m else 0
 
 
@@ -685,7 +694,7 @@ PYTHON_ACTIONS = {
     'bep_refire':              action_bep_refire,
     'section_extract':         action_section_extract,
     'descriptions':            action_descriptions,
-    'photos_mapillary':        action_photos_mapillary,
+    'photos_wikimedia':        action_photos_wikimedia,
     'daily_refresh_fire':      action_daily_refresh_fire,
     'field_population_check':  action_field_population_check,
 }

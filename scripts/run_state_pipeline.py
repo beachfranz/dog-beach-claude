@@ -26,11 +26,13 @@ Usage:
    python scripts/run_state_pipeline.py --state OR --dry-run    (print plan only)
 """
 from __future__ import annotations
-import argparse, ast, json, os, re, subprocess, sys, time, urllib.parse
+import argparse, ast, json, os, re, subprocess, sys, threading, time, urllib.parse
 from pathlib import Path
 import httpx
 import psycopg2, psycopg2.extras
 from dotenv import load_dotenv
+
+HEARTBEAT_INTERVAL_S = 15
 
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
@@ -210,6 +212,16 @@ PHASES = [
             "join public.operators op on op.id = ope.operator_id "
             "where op.state_code = $STATE and ope.extracted_at > now() - interval '7 days'",
         'criterion_text': 'fresh extractions exist for state',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.operators "
+            "             where state_code = $STATE and is_active "
+            "               and level in ('city','county','state')), "
+            "     d as (select count(distinct ope.operator_id)::int n "
+            "             from public.operator_policy_extractions ope "
+            "             join public.operators op on op.id = ope.operator_id "
+            "            where op.state_code = $STATE "
+            "              and ope.extracted_at > now() - interval '4 hours') "
+            "select d.n done, t.n total from d, t",
     },
     {
         'key': 'operator_merge',
@@ -236,6 +248,17 @@ PHASES = [
         'criterion':
             "select true",  # match coverage capped by operator policy_found set; 0 acceptable
         'criterion_text': 'section extractor ran (coverage capped by upstream)',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beaches_gold g "
+            "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
+            "             where g.state=$STATE and g.is_active "
+            "               and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "                   in ('1_off-leash','2_on-leash')), "
+            "     d as (select count(distinct gold_fid)::int n "
+            "             from public.beach_enrichment_provenance "
+            "            where source = 'section_research_v1' "
+            "              and gold_fid in (select g.fid from public.beaches_gold g where g.state=$STATE)) "
+            "select d.n done, t.n total from d, t",
     },
     {
         'key': 'descriptions',
@@ -251,6 +274,17 @@ PHASES = [
             "  and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
             "      in ('1_off-leash','2_on-leash')",
         'criterion_text': 'at least 50% of tier-1+2 beaches have descriptions',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beaches_gold g "
+            "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
+            "             where g.state=$STATE and g.is_active "
+            "               and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "                   in ('1_off-leash','2_on-leash')), "
+            "     d as (select count(distinct bd.arena_group_id)::int n "
+            "             from public.beach_descriptions bd "
+            "             join public.beaches_gold g on g.fid=bd.arena_group_id "
+            "            where g.state=$STATE and g.is_active) "
+            "select d.n done, t.n total from d, t",
     },
     {
         'key': 'photos_mapillary',
@@ -258,6 +292,17 @@ PHASES = [
         'action': 'photos_mapillary',
         'criterion': "select true",  # rate-limited; 0 acceptable
         'criterion_text': 'mapillary loader ran (Mapillary rate limits may cap coverage)',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beaches_gold g "
+            "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
+            "             where g.state=$STATE and g.is_active "
+            "               and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "                   in ('1_off-leash','2_on-leash')), "
+            "     d as (select count(distinct bp.arena_group_id)::int n "
+            "             from public.beach_photos bp "
+            "             join public.beaches_gold g on g.fid=bp.arena_group_id "
+            "            where g.state=$STATE and g.is_active and bp.source='mapillary') "
+            "select d.n done, t.n total from d, t",
     },
     {
         'key': 'daily_refresh_fire',
@@ -272,6 +317,14 @@ PHASES = [
             "              where g.state = $STATE and r.local_date = current_date) "
             "select (rec.c::float >= sc.c::float * 0.95)::boolean from sc, rec",
         'criterion_text': 'today rec exists for >= 95% of scoreable beaches',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beaches_gold "
+            "             where state=$STATE and is_active and is_scoreable), "
+            "     d as (select count(distinct r.location_id)::int n "
+            "             from public.beach_day_recommendations r "
+            "             join public.beaches_gold g on g.location_id=r.location_id "
+            "            where g.state=$STATE and r.local_date=current_date) "
+            "select d.n done, t.n total from d, t",
     },
 ]
 
@@ -505,8 +558,34 @@ def main():
 
         criterion = ph['criterion'].replace('$STATE', f"'{state}'")
         kind = ph.get('kind', 'sql')
-        log(f'  RUN  {ph["key"]:<22} ...')
+        progress_sql = ph.get('progress_sql')
+        if progress_sql:
+            progress_sql = progress_sql.replace('$STATE', f"'{state}'")
+        phase_num = PHASES.index(ph) + 1
+        log(f'  RUN  [{phase_num}/{len(PHASES)}] {ph["key"]:<22} ...')
         t0 = time.time()
+
+        # Heartbeat thread: every HEARTBEAT_INTERVAL_S seconds, print phase
+        # number/name + elapsed + (if progress_sql is set) done/total counts.
+        stop_heartbeat = threading.Event()
+        def _heartbeat():
+            while not stop_heartbeat.wait(HEARTBEAT_INTERVAL_S):
+                elapsed = int(time.time() - t0)
+                msg = f'  ··   [{phase_num}/{len(PHASES)}] {ph["key"]:<22} elapsed={elapsed}s'
+                if progress_sql:
+                    try:
+                        with open_conn() as c, c.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                            cur.execute(progress_sql)
+                            r = cur.fetchone() or {}
+                            done = r.get('done', 0) or 0
+                            total = r.get('total', 0) or 0
+                            pct = (done / total * 100) if total else 0
+                            msg += f'  rows={done}/{total} ({pct:.0f}%)'
+                    except Exception as e:
+                        msg += f'  (progress query err: {str(e)[:50]})'
+                print(msg, flush=True)
+        hb = threading.Thread(target=_heartbeat, daemon=True)
+        hb.start()
 
         try:
             if kind == 'sql':
@@ -556,24 +635,28 @@ def main():
                         """, (rows, ph['criterion_text'], err, run_id, state, ph['key']))
                     raise RuntimeError(err)
 
+            stop_heartbeat.set()
             elapsed = time.time() - t0
-            log(f'    OK   {ph["key"]:<22} rows={rows:<6} ({elapsed:.0f}s)')
+            log(f'    OK   [{phase_num}/{len(PHASES)}] {ph["key"]:<22} rows={rows:<6} ({elapsed:.0f}s)')
 
         except psycopg2.errors.RaiseException as e:
+            stop_heartbeat.set()
             elapsed = time.time() - t0
-            log(f'    FAIL {ph["key"]:<22} ({elapsed:.0f}s)')
+            log(f'    FAIL [{phase_num}/{len(PHASES)}] {ph["key"]:<22} ({elapsed:.0f}s)')
             log(f'    {str(e).splitlines()[0]}')
             log(f'\nHALTED at phase={ph["key"]} run_id={run_id}. Inspect:')
             log(f"  select * from public.pipeline_phase_status where run_id={run_id} order by phase;")
             sys.exit(1)
         except RuntimeError as e:
+            stop_heartbeat.set()
             elapsed = time.time() - t0
-            log(f'    FAIL {ph["key"]:<22} ({elapsed:.0f}s) — {e}')
+            log(f'    FAIL [{phase_num}/{len(PHASES)}] {ph["key"]:<22} ({elapsed:.0f}s) — {e}')
             log(f'\nHALTED at phase={ph["key"]} run_id={run_id}.')
             sys.exit(1)
         except Exception as e:
+            stop_heartbeat.set()
             elapsed = time.time() - t0
-            log(f'    ERR  {ph["key"]:<22} ({elapsed:.0f}s) — unexpected: {e}')
+            log(f'    ERR  [{phase_num}/{len(PHASES)}] {ph["key"]:<22} ({elapsed:.0f}s) — unexpected: {e}')
             # Record error
             try:
                 with open_conn() as c, c.cursor() as cur:

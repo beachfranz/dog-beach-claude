@@ -195,6 +195,16 @@ public.run_pipeline_for_state(p_state text DEFAULT 'CA', p_fids bigint[] DEFAULT
 ```
 `scripts/promote_to_gold.py` updated to call the 3-arg form explicitly.
 
+### `tee`-buffered log files look "hung" but the process is fine
+
+When you start a long-running script with `python ... 2>&1 | tee tmp/foo.log` in a Bash-on-Windows shell, the tee output gets buffered and the log file can stay 0 bytes for hours even though the underlying process is actively working. **Don't conclude a job is hung from log-file mtime alone.** Cross-check with:
+
+1. Process CPU time — `Get-Process python | Select-Object Id, StartTime, CPU` (a CPU-seconds value much greater than 0 means active work)
+2. DB activity — query the relevant table for `max(<timestamp_col>) > now() - interval '5 minutes'`
+3. Background task status (if launched via the harness) — task status reports `completed` only when the underlying process exits
+
+Real example tonight: thought `bjday8emj` was hung at 80 minutes of empty log; actually 246 of 373 operators had been written to `operator_policy_extractions` with the latest row 30 seconds before the check.
+
 ### psycopg2 cursor in failed-transaction state
 
 After `RAISE EXCEPTION` from a SQL function, the psycopg2 cursor remains in `InFailedSqlTransaction` state until a `ROLLBACK` is issued or a new connection opens. If you're orchestrating phases in Python, **open a fresh connection per phase**. The `run_state_pipeline.py` script does this correctly (`open_conn()` returns a fresh connection per phase) — copy that pattern in any new orchestrator.

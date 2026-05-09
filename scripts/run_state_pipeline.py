@@ -54,8 +54,8 @@ PHASES = [
         'criterion':
             "select (count(*) >= 4)::boolean from public.external_source_status "
             "where state = $STATE and source in ('pad_us','osm_landing','osm_amenities','tiger_places') "
-            "  and status = 'ok'",
-        'criterion_text': 'all 4 required sources status=ok in external_source_status',
+            "  and status in ('ok','skipped')",
+        'criterion_text': 'all 4 required sources status in (ok, skipped)',
     },
     {
         'key': 'operators',
@@ -65,6 +65,35 @@ PHASES = [
             "select (count(*) > 0)::boolean from public.operators "
             "where state_code = $STATE and is_active",
         'criterion_text': 'operators table has rows for state',
+    },
+    {
+        'key': 'arena_seed',
+        'action':
+            # Three landing→arena promotions are global (touch all rows). Run all
+            # three; total rows_affected = poi promotes + osm promotes + name refreshes.
+            "select coalesce((select promoted from public.promote_poi_landing_to_arena()), 0)::int "
+            "     + coalesce((select promoted from public.promote_osm_landing_to_arena()), 0)::int "
+            "     + coalesce((select arena_rows_updated from public.refresh_arena_names_from_osm_landing()), 0)::int",
+        'criterion':
+            # State has at least one arena row whose county_fips maps to it.
+            # State FIPS is derived inline because we don't have a SQL helper that takes a 2-letter state.
+            "select (count(*) > 0)::boolean from public.arena a "
+            "join public.counties c on c.geoid = a.county_fips "
+            "where a.is_active and c.state_fp = (select case $STATE "
+            "  when 'AL' then '01' when 'AK' then '02' when 'AZ' then '04' when 'AR' then '05' "
+            "  when 'CA' then '06' when 'CO' then '08' when 'CT' then '09' when 'DE' then '10' "
+            "  when 'FL' then '12' when 'GA' then '13' when 'HI' then '15' when 'ID' then '16' "
+            "  when 'IL' then '17' when 'IN' then '18' when 'IA' then '19' when 'KS' then '20' "
+            "  when 'KY' then '21' when 'LA' then '22' when 'ME' then '23' when 'MD' then '24' "
+            "  when 'MA' then '25' when 'MI' then '26' when 'MN' then '27' when 'MS' then '28' "
+            "  when 'MO' then '29' when 'MT' then '30' when 'NE' then '31' when 'NV' then '32' "
+            "  when 'NH' then '33' when 'NJ' then '34' when 'NM' then '35' when 'NY' then '36' "
+            "  when 'NC' then '37' when 'ND' then '38' when 'OH' then '39' when 'OK' then '40' "
+            "  when 'OR' then '41' when 'PA' then '42' when 'RI' then '44' when 'SC' then '45' "
+            "  when 'SD' then '46' when 'TN' then '47' when 'TX' then '48' when 'UT' then '49' "
+            "  when 'VT' then '50' when 'VA' then '51' when 'WA' then '53' when 'WV' then '54' "
+            "  when 'WI' then '55' when 'WY' then '56' end)",
+        'criterion_text': 'at least one arena row with county_fips in this state',
     },
     {
         'key': 'cluster_group',

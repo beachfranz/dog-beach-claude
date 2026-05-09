@@ -89,17 +89,12 @@ PHASES = [
             "select (public.unseeded_state_policy_for_state($STATE) = 0)::boolean",
         'criterion_text': 'state_dogs_policy has at least 1 row for state',
     },
-    {
-        'key': 'federal_policy_seed',
-        'kind': 'python',
-        'action': 'federal_policy_seed',
-        # Advisory for now: filter is too loose (returns thousands of FED units
-        # per state). Tightened in a follow-up to coastal NS/NWR/NRA only.
-        # For now criterion always passes; the action logs the pending count.
-        'criterion': "select true",
-        'criterion_text':
-            'federal coastal-unit policy seeded (advisory; filter pending refinement)',
-    },
+    # federal_policy_seed phase REMOVED 2026-05-09: collapsed into the
+    # operator-extraction pipeline. populate_operators_for_state now seeds
+    # federal coastal units (NPS NS / USFWS NWR / etc.) as level='federal'
+    # operators. extract_operator_dogs_policy.py researches them like any
+    # other operator. populate_from_operators_gold emits BEP via PAD-US
+    # polygon containment. See 20260509_federal_operators_per_state.sql.
     {
         'key': 'seasonal_closure_seed',
         'kind': 'python',
@@ -112,7 +107,12 @@ PHASES = [
     {
         'key': 'operators',
         'action':
-            "select cities_added + counties_added from public.populate_operators_for_state($STATE)",
+            # Now seeds cities + counties + federal coastal units (per
+            # 20260509_federal_operators_per_state.sql). Federal collapses
+            # the old federal_policy_seed phase into the standard operator
+            # pipeline.
+            "select cities_added + counties_added + federal_added "
+            "  from public.populate_operators_for_state($STATE)",
         'criterion':
             "select (count(*) > 0)::boolean from public.operators "
             "where state_code = $STATE and is_active",
@@ -629,26 +629,6 @@ def action_state_policy_seed(state: str) -> int:
     )
 
 
-def action_federal_policy_seed(state: str) -> int:
-    """Pending coastal federal-unit dog-policy curation for state.
-
-    Advisory phase (criterion always passes for now): logs how many
-    PAD-US federal units in this state lack a pad_us_unit_dogs_policy
-    row, so the operator knows where curation is missing. The current
-    filter for "coastal" units is too loose (FED-everything) and is
-    being tightened to NPS national seashores + USFWS NWRs only.
-    """
-    with open_conn() as c, c.cursor() as cur:
-        cur.execute('set statement_timeout=\'120s\'')
-        cur.execute('select public.unseeded_pad_us_units_for_state(%s)', (state,))
-        unseeded = cur.fetchone()[0]
-    log(f'    federal coastal-unit policy: {unseeded} unseeded for {state} (advisory)')
-    if unseeded > 0:
-        log(f'    [TODO] tighten coastal_pad_us_units_for_state filter to NPS NS / USFWS NWR only')
-        log(f'    [TODO] write LLM seed script that reads nps.gov / fws.gov per unit')
-    return int(unseeded)
-
-
 def action_seasonal_closure_seed(state: str) -> int:
     """Pending seasonal-closure seed rows for state.
 
@@ -699,7 +679,6 @@ def action_field_population_check(state: str) -> int:
 
 PYTHON_ACTIONS = {
     'state_policy_seed':       action_state_policy_seed,
-    'federal_policy_seed':     action_federal_policy_seed,
     'seasonal_closure_seed':   action_seasonal_closure_seed,
     'operator_llm_extract':    action_operator_llm_extract,
     'operator_merge':          action_operator_merge,

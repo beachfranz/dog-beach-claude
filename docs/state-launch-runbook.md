@@ -1,6 +1,6 @@
 # State Launch Runbook
 
-**For:** the engineer (human or AI) launching a new state in dog-beach-scout. **Last verified:** 2026-05-09 against OR + WA tier-1+2 launches. **Companion to** `docs/pipeline-overview.md` (architectural map). This doc is procedural — it captures the *operational truth* including every gotcha we hit tonight.
+**For:** the engineer (human or AI) launching a new state in dog-beach-scout. **Last verified:** 2026-05-09 against OR + WA + RI + DE launches. **Companion to** `docs/pipeline-overview.md` (architectural map). This doc is procedural — it captures the *operational truth* including every gotcha we hit.
 
 ---
 
@@ -10,9 +10,9 @@
 python scripts/run_state_pipeline.py --state RI
 ```
 
-That's it. The Python orchestrator at `scripts/run_state_pipeline.py` runs **20 gated phases**, each with a success criterion. First failure halts; resumable by `run_id`. After it completes, the state's beaches are scored, populated, photographed, described, and live in the find feed.
+That's it. The Python orchestrator at `scripts/run_state_pipeline.py` runs **26 gated phases**, each with a success criterion. First failure halts; resumable by `run_id`. After it completes, the state's beaches are scored, populated, photographed, described, and live in the find feed.
 
-Wall clock: **~45-90 min for structural phases, +1-3 hr for LLM phases**. Cost: **~$25-55 per state** (LLM phases). DB growth: ~50-200 MB depending on state size.
+Wall clock: **~30-60 min for structural phases, +1-2 hr for LLM phases** (smart operator filter cuts LLM cost+time by ~80%). Cost: **~$5-15 per state** (LLM phases). DB growth: ~50-200 MB depending on state size.
 
 ---
 
@@ -47,30 +47,36 @@ Before kicking off `run_state_pipeline.py --state XX`:
 
 ---
 
-## The 20 phases
+## The 26 phases
 
 | # | Phase | Kind | Action | Success criterion | Typical wall clock |
 |---|---|---|---|---|---|
-| 1 | `precheck` | SQL | `assert_state_upstream_loaded(state)` | All 4 required sources ok in `external_source_status` | <1s |
-| 2 | `operators` | SQL | `populate_operators_for_state(state)` | `operators` has rows for state | 1-3s |
-| 3 | `cluster_group` | SQL | `populate_arena_group_id()` | non-error | 30-180s (global) |
-| 4 | `cluster_extras` | SQL | `populate_arena_extras()` | non-error | 1-10s |
-| 5 | `promote` | SQL | `promote_to_gold(<state's fids>, false, true)` | every active gold row has `county_fips` | 10-60s |
-| 6 | `address_poi` | SQL | `_enrich_address_from_poi_for_state(state)` | non-error | <2s |
-| 7 | `address_city` | SQL | `_enrich_address_city_for_state(state)` | non-error | <5s |
-| 8 | `name_source` | SQL | `_enrich_name_source_for_state(state)` | every active gold row has `name_source` | <2s |
-| 9 | `strip_plus_codes` | SQL | `strip_plus_codes_from_addresses(state)` | no plus-code-prefixed `address` remains | <2s |
-| 10 | `align_scoreable` | SQL | `align_is_scoreable_to_tier(state)` | no Tier-3/4 beach is scoreable | <2s |
-| 11 | `purge_pollution` | SQL | `purge_cross_state_extractions(state)` | non-error (idempotent) | <2s |
-| 12 | `dedup` | SQL | `run_late_stage_dedup()` | non-error | 5-30s |
-| 13 | `geom_queue` | SQL | `process_geom_change_queue(100)` | non-error | <5s |
-| 14 | `operator_llm_extract` | Python | `extract_operator_dogs_policy.py --ids <state ops>` | fresh extractions exist (last 7d) | 20-50 min, $5-25 |
-| 15 | `operator_merge` | Python | `merge_operator_dogs_policy.py` | merged operator policies for state | 1-3 min |
-| 16 | `bep_refire` | Python | `refire_bep_cascade(<tier-1+2 fids>)` | non-error | 1-5 min |
-| 17 | `section_extract` | Python | `extract_beach_section_rules.py --states X` | non-error (capped by upstream) | 1-5 min, ~$0.25 |
-| 18 | `descriptions` | Python | `generate_beach_descriptions.py --fids <tier-1+2>` | ≥50% of tier-1+2 have description | 15-45 min, $0.50-3 |
-| 19 | `photos_mapillary` | Python | `load_mapillary_photos.py --fids <tier-1+2>` | non-error (rate-limited) | 10-30 min, $0 |
-| 20 | `daily_refresh_fire` | Python | HTTP fire to `daily-beach-refresh` per scoreable | today's rec ≥95% of scoreable | 5-20 min |
+| 1 | `precheck` | SQL | `assert_state_upstream_loaded(state)` | 4 sources ok + global `noaa_stations` ≥3000 | <1s |
+| 2 | `chain_integrity_check` | SQL | `assert_populator_chains_intact()` | `promote_to_gold` + `refire_bep_cascade` contain all expected populator calls AND promote INSERT contains all required columns | <1s |
+| 3 | `state_policy_seed` | Python | check `state_dogs_policy` has row for state | row exists; halts with template if not | <3s |
+| 4 | `seasonal_closure_seed` | Python | check `seasonal_closure_seed` has no pending rows | no `status='pending'` rows for state | <3s |
+| 5 | `operators` | SQL | `populate_operators_for_state(state)` | rows for state exist (cities + counties + federal) | 2-5s |
+| 6 | `arena_seed` | SQL | promote POI/OSM landings → arena | ≥1 arena row whose county is in this state | 3-15s |
+| 7 | `cluster_group` | SQL | `populate_arena_group_id(state)` (state-scoped) | non-error | 5-30s (was 30-600s global) |
+| 8 | `cluster_extras` | SQL | `populate_arena_extras()` | non-error | 1-10s |
+| 9 | `promote` | SQL | `promote_to_gold(<state's fids>, false, true)` | `assert_promote_complete_for_state` (county_fips + state populated on every active beach) | 10-60s |
+| 10 | `address_poi` | SQL | `_enrich_address_from_poi_for_state(state)` | non-error | <2s |
+| 11 | `address_city` | SQL | `_enrich_address_city_for_state(state)` | non-error | <5s |
+| 12 | `name_source` | SQL | `_enrich_name_source_for_state(state)` | every active gold row has `name_source` | <2s |
+| 13 | `strip_plus_codes` | SQL | `strip_plus_codes_from_addresses(state)` | no plus-code-prefixed `address` remains | <2s |
+| 14 | `align_scoreable` | SQL | `align_is_scoreable_to_tier(state)` | no Tier-3/4 beach is scoreable | <2s |
+| 15 | `noaa_station_check` | SQL | `assert_scoreable_have_noaa_for_state(state)` | advisory: warns if scoreable beaches lack station (inland is OK; tide-axis becomes neutral 0.5 in scoring) | <1s |
+| 16 | `purge_pollution` | SQL | `purge_cross_state_extractions(state)` | non-error (idempotent) | <2s |
+| 17 | `dedup` | SQL | `run_late_stage_dedup()` | non-error | 5-30s |
+| 18 | `geom_queue` | SQL | `process_geom_change_queue(100)` | non-error | <5s |
+| 19 | `operator_llm_extract` | Python | `extract_operator_dogs_policy.py --ids <smart-filtered ops>` | fresh extractions exist (last 7d) | 1-15 min, $0.30-3 *(smart filter cuts ~80% of inland ops)* |
+| 20 | `operator_merge` | Python | `merge_operator_dogs_policy.py` | merged operator policies for state | 15-60s |
+| 21 | `bep_refire` | Python | `refire_bep_cascade(<tier-1+2 fids>)` | non-error | 30-180s |
+| 22 | `section_extract` | Python | `extract_beach_section_rules.py --states X` | non-error (capped by upstream) | 1-5 min, ~$0.25 |
+| 23 | `descriptions` | Python | `generate_beach_descriptions.py --fids <tier-1+2>` | ≥50% of tier-1+2 have description | 5-30 min, $0.20-2 |
+| 24 | `photos_mapillary` | Python | `load_mapillary_photos.py --fids <tier-1+2>` | non-error (rate-limited) | 5-20 min, $0 |
+| 25 | `daily_refresh_fire` | Python | HTTP fire to `daily-beach-refresh` per scoreable | today's rec ≥95% of scoreable | 5-15 min |
+| 26 | `field_population_check` | Python | `state_population_audit.py --state X --check` | hard thresholds: county_fips=100%, name_source=100%, today_rec≥95%, BEP has `state_dogs_policy_v1`, tier-1+2 > 0 | <30s |
 
 **Resumability:** every phase records `(run_id, state, phase, status)` in `public.pipeline_phase_status`. Re-run with `--run-id <id> --resume` skips already-`ok` phases. Use `--phase-from <key>` to start at a specific phase. Use `--force` to re-run all phases regardless.
 
@@ -144,6 +150,74 @@ Why FIPS, not address_state: Google's `address_state` is text inference (can dis
 - **BEP fallback**: operators referenced in `polygon_containment` BEP evidence are always included.
 
 Savings: DE 90% (51→5), RI 55% (11→5), OR 84% (269→42), WA 78% (295→64). Cuts operator extraction cost+time by ~10× on average.
+
+### Display vs. cost gates (Franz, 2026-05-09 PM)
+
+Two distinct gates control beach visibility, and they were conflated in the original design:
+
+- **Display gate (catalog presence):** `beaches_gold.is_active=true`. Now tier-based — every active beach is visible to find/map. Tier 1+2 render normally; Tier 3 muted (opacity 0.62, grayscale 0.45); Tier 4 grey + 🚫 prefix; unknown muted.
+- **Cost gate (downstream LLM/refresh spend):** `beaches_gold.is_scoreable=true`. Strictly Tier 1+2 only; controls daily-beach-refresh fan-out, descriptions, photos.
+
+The dropped trigger `tg_inactivate_on_no_dogs` (issue #27) used to flip Tier 4 to `is_active=false` — that was wrong because it removed them from the catalog entirely. New rule: Tier 4 stays in catalog, just doesn't get scored.
+
+Rendering is wired via `find_beaches` RPC returning `location_tier` and find.html applying CSS class `tier-${tier}`. The default `scored=` toggle is now `false` (full catalog); `true` opt-in shows only beaches with day_recommendations rows.
+
+### Inland-scoreable (NOAA optional, issue #28)
+
+Inland beaches without a NOAA tide station (Lake Chelan WA, Yakima River, Spokane area) are now scoreable. The Edge Function `daily-beach-refresh/index.ts` skips `fetchTides` on null station and proceeds with empty `tideMap`. Scoring uses `tideHeight=null → 0.5 neutral` — same fallback pattern as null `busynessScore`. Requires `supabase functions deploy daily-beach-refresh` to take effect at runtime.
+
+### Federal collapsed into operators (issue #31)
+
+NPS National Seashores, USFWS NWRs, National Lakeshores, NRAs, Parks, Monuments are now **first-class operators** at `level='federal'`. `populate_operators_for_state(state)` Pass 3 seeds them per-state from `coastal_pad_us_units_for_state(state)`. The geom is the union of all the unit's polygons in the state. Multi-state units (Assateague spans MD+VA) get a per-state row each.
+
+Result for the 6 launched/test states: MA=12, RI=6, DE=3, OR=43, WA=46, CA=89 federal operators.
+
+Why this matters: existing `extract_operator_dogs_policy.py` researches them like any other operator (NPS units have findable websites — e.g. nps.gov/caco/planyourvisit/pets.htm). `populate_from_operators_gold` emits BEP via PAD-US polygon containment. **Eliminates the need for a separate `pad_us_unit_dogs_policy` curation pipeline.** That table is retained as a manual-override layer for high-confidence curated rules (e.g. plover-zone seasonal closures within Cape Cod NS) but is no longer the primary federal-policy path.
+
+The previous `federal_policy_seed` phase has been **dropped from the canon** (was Phase 4, now removed).
+
+### Canonical agency dictionary (issue #32)
+
+`agency_aliases` table is the single source of truth for matching free-text agency references (PAD-US Loc_Mang, OSM operator tag, raw scrapes) to canonical operators.
+
+Schema:
+- `alias` text (the free-text reference)
+- `alias_normalized` text (lowercase + punctuation collapse + whitespace; trigger-maintained)
+- `operator_id` bigint
+- `match_method` enum: `self`, `exact`, `normalized_exact`, `normalized_stripped`, `fuzzy`, `manual`, `legacy_aliases`, `auto_pipeline`
+- `confidence` numeric
+
+Resolver `public.resolve_agency(alias, source, state_code, min_confidence)` runs a 4-step strategy in order:
+1. Exact alias match (conf 1.00)
+2. Normalized-exact (conf 0.90)
+3. Stripped-variant exact — drops "City of"/"County of"/etc. in fallback only (conf 0.80)
+4. Trigram fuzzy via `pg_trgm` GIN-indexed `%` operator (conf = similarity score)
+
+**Normalization decision (Franz, 2026-05-09):** the indexed `alias_normalized` does NOT strip "City of"/"State of" boilerplate, to avoid cross-state collisions ("City of Washington" vs "State of Washington" both → "washington"). Strip happens only in the resolver's fallback step to handle novel free-text references.
+
+Auto-self-alias trigger keeps the dictionary in sync — every operator INSERT/UPDATE writes a self-alias automatically.
+
+Bulk backfill: `python scripts/one_off/backfill_agency_aliases.py` (out-of-band; chunks 26k+ PAD-US Loc_Mang values + OSM operator tags + Loc_Own). Runs ~1 hour. Idempotent via `ON CONFLICT DO NOTHING`.
+
+`populate_from_operators_gold` PAD-US arm now uses `resolve_agency_id()` instead of textual `op.canonical_name = pu.raw_attrs->>'Loc_Mang'`. Catches case/whitespace variations + fuzzy matches.
+
+### Smart operator filter (issue #30)
+
+Phase 19 (`operator_llm_extract`) now uses `state_operator_ids_with_beaches(state)` — filters to operators that actually govern at least one beach in the state.
+
+Filter logic:
+- County-level: `op.county_geoid` ∈ counties with active beaches
+- City-level: PIP via `jurisdictions.geom` intersecting any beach
+- State-level: always included (statewide jurisdiction)
+- Federal-level: spatial intersect via operator's PAD-US polygon
+- BEP-resolved containment: any operator referenced in `polygon_containment` BEP evidence
+
+Savings on operator extraction:
+- DE: 51 → 5 (90%)
+- RI: 11 → 5 (55%)
+- OR: 269 → 42 (84%)
+- WA: 295 → 64 (78%)
+- CA: 611 → 165 (73%)
 
 ### State-aware operator extraction
 

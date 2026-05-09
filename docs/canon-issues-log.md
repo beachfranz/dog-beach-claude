@@ -63,7 +63,66 @@ The first end-to-end run of the canonical orchestrator (`run_state_pipeline.py -
 
 **Side-effect from durability hardening:** the new `align_is_scoreable_to_tier` strict-tier-1+2-only-with-station rule corrected pre-existing CA scope drift: 373 CA Tier-3/4/unknown beaches that had `is_scoreable=true` (they predate the canonical Tier 1+2 scoring scope) were demoted to `is_scoreable=false`. CA scoreable count: 577 → 204. This is canonical-correct per `project_scoring_scope.md` ("only Tier 1 + Tier 2 get scored"); the prior 577 included 373 out-of-scope beaches that should never have been scored.
 
-**Pipeline now 27 phases** (was 25). Two new SQL phases added: `chain_integrity_check` (after precheck) and `noaa_station_check` (after align_scoreable). Plus the `precheck` and `promote` phase criteria are tighter. Migration file: `20260509_canon_durability_fixes.sql` + `20260509_canon_durability_v2.sql`.
+**Pipeline now 26 phases** (was 25). Two new SQL phases added: `chain_integrity_check` (after precheck) and `noaa_station_check` (after align_scoreable). Plus the `precheck` and `promote` phase criteria are tighter. Migration file: `20260509_canon_durability_fixes.sql` + `20260509_canon_durability_v2.sql`.
+
+---
+
+---
+
+## 2026-05-09 (afternoon) — DE launch + architectural cleanups
+
+The DE launch surfaced six more durability gaps and three architectural shortcomings (CA-hardcoded data, federal-as-separate-pipeline, free-text agency matching). Each is now codified.
+
+| # | Phase / area | Symptom | Root cause | Fix |
+|---|---|---|---|---|
+| 22 | poi_landing → arena | DE launch promoted only 6 OSM beaches; 49 POI candidates (Bethany, Rehoboth, Cape Henlopen, etc.) sat in `poi_landing` invisible to `promote_poi_landing_to_arena()`. Same pattern affected 24 priority-1 states (FL=708, MA=685, MI=662, etc.) | `poi_landing.state` was only populated for CA/OR/WA. The promote function filters by state; rows with `state=NULL` were skipped silently | `20260509_poi_landing_state_from_fips.sql` — backfilled `state` from `state_from_fips(county_geoid)` (7,484 rows). Added trigger `poi_landing_state_sync` to keep state synced from county_geoid on every INSERT/UPDATE. **Spec:** `poi_landing.state` is derived from FIPS, not from Google's text `address_state` |
+| 23 | poi_landing | Despite #22 fix, 0 DE POIs promoted. Investigation: all 49 had `is_active=false, inactive_reason='not_ca_county'` | A one-time CA-scope filter soft-deleted every poi_landing row outside CA counties. Stale CA-hardcoded artifact from before priority-1 expansion | `20260509_poi_landing_activate_non_ca.sql` — re-activated 5,327 rows across 24 priority-1 states (FL=708, MA=685, MI=662, HI=538, NY=469, NJ=269, ME=192, etc.) |
+| 24 | promote_poi_landing_to_arena | Despite #22+#23, still 0 DE POIs promoted | `promote_poi_landing_to_arena()` requires BOTH `is_active=true` AND `is_dog_beach_signal=true`. The signal flag was false for all non-Pacific POIs | Inline UPDATE flipped `is_dog_beach_signal=true` for 6,169 priority-1 active POIs. *No migration file (data fix only); should add to a future schema-curation migration if we re-load these tables* |
+| 25 | promote_poi_landing_to_arena | DE arena_seed phase failed: `duplicate key value violates unique constraint "arena_pkey"` | Function's `WHERE NOT EXISTS` collision check filtered to `source_code='poi'` only, but `arena.fid` is the PK regardless of source. POI fids that collided with existing OSM fids broke the INSERT | `20260509_promote_poi_arena_conflict_nothing.sql` — `ON CONFLICT (fid) DO NOTHING`. Silent skip is correct: the OSM row already represents the same beach |
+| 26 | cluster_group | DE v5/v5b hit 600s timeout / connection drop | `populate_arena_group_id()` ran globally on the entire arena (~12k rows after activation pass). For DE's 55 candidates, we were O(N²)-clustering 12k rows | `20260509_cluster_group_state_scoped.sql` — added `p_state` parameter; all CTE filters scope to state's counties. DE clustering went 600s+ → 8s |
+| 27 | tg_inactivate_on_no_dogs trigger | Tier 4 beaches (`dogs_allowed='no'`) were entirely removed from catalog | Trigger flipped `is_active=false` whenever `beach_dog_policy.dogs_allowed='no'` was written. Wrong gate: display should be tier-based; cost gate is `is_scoreable` | `20260509_tier4_visible_not_scoreable.sql` — dropped trigger; re-activated 130 clean trigger casualties (CA=87, WA=29, OR=14). Dedup victims (86 with `inactive_reason='dupe_of_*'`) correctly stayed inactive |
+| 28 | scoring scope | NOAA-station-required gate kept inland beaches (Lake Chelan WA, Yakima River, etc.) out of scoreable. 19 WA beaches affected | `align_is_scoreable_to_tier` required `noaa_station_id IS NOT NULL`; daily-beach-refresh threw on null station | `20260509_inland_beaches_scoreable.sql` — dropped NOAA gate from align; relaxed `noaa_station_check` to advisory. `daily-beach-refresh/index.ts` skips fetchTides on null station and proceeds with empty tideMap (mirror of the crowd-failure pattern). Scoring uses `tideHeight=null → score=0.5` neutral fallback — same pattern as null `busynessScore` |
+| 29 | find page display | "Scored" toggle conflated cost gate (LLM/refresh) with display gate (catalog visibility). Tier 4 beaches were invisible | Display should be tier-based, not based on whether scoring data exists | `20260509_find_beaches_returns_tier.sql` — RPC returns `location_tier`. `find.html` adds CSS `tier-${tier}` class; T1+T2 normal, T3 muted, T4 grey + 🚫 prefix. Edge Function default flipped to `scored=false` (full catalog) |
+| 30 | operator_llm_extract | Phase 20 ran extraction for ALL 51 DE city operators (~13min, $3) — most are inland with no beach in their footprint | Smart filter missing | `20260509_operators_with_beaches_filter.sql` — `state_operator_ids_with_beaches(state)` filters to operators whose footprint contains a beach. Savings: DE 90% (51→5), RI 55%, OR 84% (269→42), WA 78% (295→64), CA 73% (611→165) |
+| 31 | federal-policy curation | Original design had a separate `federal_policy_seed` phase + `pad_us_unit_dogs_policy` table. Cape Cod NS, Monomoy NWR, etc. needed manual curation | We already have `level='federal'` in operators (CA had 19) and an extraction pipeline that works for any operator with a website (NPS / FWS unit pages are findable). Separate path was redundant | `20260509_federal_operators_per_state.sql` — `populate_operators_for_state` now seeds federal coastal-rec units (NPS NS / Lakeshore / NRA / Park / Monument + USFWS NWR) as level='federal' operators with PAD-US polygon as geom. Dropped `federal_policy_seed` phase from canon. Filter tightened from "any FED" to canonical name patterns. Result: MA=12, RI=6, DE=3, OR=43, WA=46, CA=89 federal operators |
+| 32 | populate_from_operators_gold PAD-US join | Text-match `op.canonical_name = pu.raw_attrs->>'Loc_Mang'` was case/whitespace-sensitive. Missing 30-50% of legitimate matches across PAD-US name variations ("DELAWARE STATE PARKS" vs "Delaware State Parks") | No canonical agency-name dictionary | `20260509_agency_aliases_schema.sql` + `20260509_agency_resolver_and_integration.sql` + `20260509_agency_dictionary_complete.sql` — new `agency_aliases` table (alias + alias_normalized + operator_id), `_normalize_agency_text()` (lowercase + punctuation collapse + whitespace; **does NOT strip** "City of"/"County of" to avoid cross-state collisions per Franz's review), `resolve_agency()` with 4-step strategy (exact / normalized_exact / stripped fallback / fuzzy via pg_trgm GIN). `populate_from_operators_gold` PAD-US arm now uses `resolve_agency_id` instead of textual match. Auto-self-alias trigger keeps dictionary in sync with operators table. Backfill: 6,234 self+legacy aliases. Bulk PAD-US/OSM backfill runs out-of-band via `scripts/one_off/backfill_agency_aliases.py` |
+
+**Architectural decisions captured this round:**
+
+- **Display vs. cost gates separated** (issues #27, #29): `is_active` controls catalog presence (all tiers visible); `is_scoreable` controls downstream LLM/refresh spend (Tier 1+2 only). Tier 4 beaches stay in catalog with muted UI.
+- **NOAA-station optional for scoreability** (issue #28): inland beaches scored without tide data; tide axis becomes neutral 0.5 (same as null crowd). Allows Lake Chelan, Yakima River, etc. to be scored.
+- **Federal collapsed into operators** (issue #31): instead of two parallel curation pipelines, NPS/USFWS units are first-class operators. Existing `extract_operator_dogs_policy.py` researches them like any other operator. `pad_us_unit_dogs_policy` retained as a manual-override layer for high-confidence curated rules but no longer the primary federal path.
+- **Canonical agency dictionary** (issue #32): `agency_aliases` table is the single source of truth for agency-name reconciliation across PAD-US, OSM, operator inputs, and free text. Normalization preserves boilerplate ("City of") to avoid collisions; resolver fallback strips it for novel references.
+
+**Pipeline now 26 phases** (was 24 before this session). Phase order with new additions in **bold**:
+
+1. precheck (now also requires global `noaa_stations` ≥ 3000)
+2. **chain_integrity_check** (NEW; catches populator regression family #2/#18/#20)
+3. state_policy_seed
+4. ~~federal_policy_seed~~ REMOVED — collapsed into Pass 3 of `populate_operators_for_state`
+5. seasonal_closure_seed
+6. operators (now seeds cities + counties + **federal**)
+7. arena_seed
+8. cluster_group (now **state-scoped** — was global O(N²))
+9. cluster_extras
+10. promote (criterion now uses `assert_promote_complete_for_state`)
+11. address_poi
+12. address_city
+13. name_source
+14. strip_plus_codes
+15. align_scoreable (no NOAA gate; Tier 1+2 only)
+16. **noaa_station_check** (NEW; advisory)
+17. purge_pollution
+18. dedup
+19. geom_queue
+20. operator_llm_extract (uses **smart filter**)
+21. operator_merge
+22. bep_refire
+23. section_extract
+24. descriptions
+25. photos_mapillary
+26. daily_refresh_fire
+27. **field_population_check** (NEW; per-state audit at end)
 
 ---
 

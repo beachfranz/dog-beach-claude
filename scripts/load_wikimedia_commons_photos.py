@@ -174,6 +174,19 @@ def _commons_call(params: dict) -> dict:
     return {}
 
 
+# ─── Photographer blocklist ───────────────────────────────────────────────
+# Auto-blocklist photographers whose past contributions average a negative
+# relevance score (specimen photos, vehicles, etc.). Threshold: ≥3 photos
+# AND mean relevance ≤ 0.0. Computed from prior wikimedia rows in
+# beach_photos at loader start.
+
+def fetch_blocked_photographers() -> set[str]:
+    """Returns set of artist strings to skip on this run."""
+    rows = supa("/rest/v1/rpc/wikimedia_blocked_photographers", method="POST", body={})
+    if not rows: return set()
+    return {r["artist"].lower() for r in rows if r.get("artist")}
+
+
 # ─── Filter / rank ────────────────────────────────────────────────────────
 
 def _ext_of(title_or_url: str) -> str:
@@ -201,9 +214,95 @@ def haversine_m(la1, lo1, la2, lo2):
     return 2 * 6_371_000 * asin(sqrt(a))
 
 
+# Keyword bias for ranking. Positive terms boost; negative terms penalize.
+# Match is substring-insensitive against (title + description) lowercased.
+# Narrowed pass per Franz 2026-05-09: just dog/sand/shore positive,
+# train added to negatives (Del Mar got "Coaster Train" photos).
+# Two-tier positive bias: dog-specific terms get 2× weight over generic
+# beach terms. A dog-on-the-beach photo should outrank a generic sand
+# photo every time. Franz iteration 4.
+POSITIVE_TERMS_DOG = [
+    "dog", "dogs", "doggie", "doggy",
+    "puppy", "pup", "pups", "puppies",
+    "canine", "pooch", "hound",
+]
+POSITIVE_TERMS_GENERIC = [
+    "sand", "shore",
+    "leash", "leashed", "off-leash", "off leash",
+    "rules", "regulations", "regulation",
+    "permitted", "allowed", "prohibited",
+    "ordinance",
+]
+POSITIVE_TERMS = POSITIVE_TERMS_DOG + POSITIVE_TERMS_GENERIC  # back-compat
+NEGATIVE_TERMS = [
+    # Vehicles / infrastructure
+    "train", "railway", "railroad", "locomotive",
+    "car", "truck", "vehicle", "automobile", "pontiac", "chevrolet",
+    "ford", "toyota", "honda", "parking lot",
+    # Wildlife / sea creatures (specimen photos clutter the gallery)
+    "fish", "crab", "lobster", "shrimp",
+    "whale", "dolphin", "porpoise",
+    "octopus", "squid", "cuttlefish",
+    "jellyfish", "sea nettle", "sea jelly",
+    "starfish", "sea star",
+    "urchin", "anemone", "barnacle",
+    "scallop", "mussel", "clam", "oyster", "abalone",
+    "sea cucumber", "sea spider", "sea slug", "sea worm",
+    "nudibranch", "mollusk", "crustacean", "specimen",
+    "coral", "plankton",
+    # Birds (specimen photos)
+    "bird", "birds", "gull", "seagull", "larus",
+    "pelican", "cormorant", "heron", "egret",
+    "tern", "plover", "sandpiper", "shorebird",
+    "duck", "goose", "swan", "raptor", "hawk", "osprey",
+    "curlew", "willet", "godwit", "sanderling", "phalarope",
+    "inaturalist",  # wildlife photo-sharing app — anything from there is specimen
+    # Common Latin genus names for specimen photos
+    "apostichopus", "pycnogonum", "ophioderma", "crassadoma",
+    "platynereis", "numenius", "phalacrocorax", "pelecanus",
+    "haliaeetus", "calidris", "limosa", "americanus",
+    "panamense", "californicus", "bicanaliculata",
+    "astropecten", "amphistichus", "verrilli", "armatus", "koelzi",
+    "surfperch", "sand star", "spiny sand", "calico surf",
+    # Pure-graphic / non-photo
+    "map", "diagram", "chart", "logo", "plaque",
+    "satellite", "aerial",
+    "construction", "interior",
+    "screenshot", "infographic",
+]
+
+
+def _relevance_score(title: str, description: str) -> float:
+    """Weighted scoring:
+       Dog-specific positive: +3.0 title / +2.0 desc (overweighted)
+       Generic positive:      +1.5 title / +1.0 desc
+       Negative:              -1.2 title / -0.8 desc
+    Title hits weighted higher than description (titles are more curated)."""
+    txt_title = (title or "").lower()
+    txt_desc  = (description or "").lower()
+    score = 0.0
+    for t in POSITIVE_TERMS_DOG:
+        if t in txt_title: score += 3.0
+        elif t in txt_desc: score += 2.0
+    for t in POSITIVE_TERMS_GENERIC:
+        if t in txt_title: score += 1.5
+        elif t in txt_desc: score += 1.0
+    for t in NEGATIVE_TERMS:
+        if t in txt_title: score -= 1.2
+        elif t in txt_desc: score -= 0.8
+    return score
+
+
 def rank_and_pick(geo_results: list[dict], info_map: dict[int, dict],
                   beach_lat: float, beach_lng: float,
-                  max_radius_m: int, top_n: int) -> list[dict]:
+                  max_radius_m: int, top_n: int,
+                  blocked_artists: set[str] | None = None) -> list[dict]:
+    """Rank by combined relevance + distance score.
+       composite = relevance + (1.0 - distance / max_radius_m) * 2.0
+    Distance is normalized so closeness contributes ~0..2 to the score;
+    relevance can be much higher. Positive-term-rich photos at moderate
+    distance beat unrelated photos at the centroid.
+    """
     scored = []
     for g in geo_results:
         pid = g.get("pageid")
@@ -211,18 +310,34 @@ def rank_and_pick(geo_results: list[dict], info_map: dict[int, dict],
         if not info: continue
         title = info.get("_title") or g.get("title", "")
         ext = _ext_of(title)
-        # Skip non-photo formats
         if ext in SKIP_EXTS: continue
         if PHOTO_EXTS and ext and ext not in PHOTO_EXTS: continue
-        # Skip undersized images
         if (info.get("width") or 0) < MIN_WIDTH: continue
-        # Skip non-image MIME
         mime = info.get("mime") or ""
         if mime and not mime.startswith("image/"): continue
         d = haversine_m(beach_lat, beach_lng, g.get("lat") or 0, g.get("lon") or 0)
         if d > max_radius_m: continue
-        scored.append({**g, "_info": info, "_distance_m": d, "_title": title})
-    scored.sort(key=lambda x: x["_distance_m"])
+
+        extmd = info.get("extmetadata") or {}
+        desc = (extmd.get("ImageDescription", {}) or {}).get("value") or ""
+        # strip HTML tags from description
+        import re as _re
+        desc = _re.sub(r"<[^>]+>", "", desc)
+
+        # Skip blocklisted photographers (set by past low-relevance pattern)
+        if blocked_artists:
+            artist_raw = _meta(extmd, "Artist") or ""
+            if artist_raw and artist_raw.lower() in blocked_artists:
+                continue
+
+        rel = _relevance_score(title, desc)
+        proximity = 1.0 - d / max(max_radius_m, 1)
+        composite = rel + proximity * 2.0
+
+        scored.append({**g, "_info": info, "_distance_m": d, "_title": title,
+                       "_relevance": rel, "_composite": composite})
+    # Higher composite first; distance tiebreak
+    scored.sort(key=lambda x: (-x["_composite"], x["_distance_m"]))
     return scored[:top_n]
 
 
@@ -261,30 +376,36 @@ def replace_commons(fid: int, photos: list[dict]):
             "page_url":       page_url,
             "source_meta":    {"description": (description or "")[:500],
                                "title": p["_title"],
+                               "artist": artist[:200],   # for blocklist grouping
                                "credit": _meta(extmd, "Credit"),
-                               "usage_terms": _meta(extmd, "UsageTerms")},
+                               "usage_terms": _meta(extmd, "UsageTerms"),
+                               "relevance_score": round(p.get("_relevance", 0.0), 2),
+                               "composite_score": round(p.get("_composite", 0.0), 2)},
         })
     supa("/rest/v1/beach_photos", method="POST", body=rows,
          prefer="return=minimal,resolution=ignore-duplicates")
 
 
 def _thumb_url(full_url: str, target_width: int) -> str | None:
-    """Convert Commons File URL to a thumb URL of the given width.
-    Commons URL pattern:
-      https://upload.wikimedia.org/wikipedia/commons/<a>/<ab>/<filename>
-    Thumb pattern:
-      https://upload.wikimedia.org/wikipedia/commons/thumb/<a>/<ab>/<filename>/<width>px-<filename>
+    """Return a Special:FilePath redirect URL — Commons resolves it to the
+    nearest standard thumbnail size. Stable across filenames with special
+    chars (parens, ampersands, comma) where the direct /commons/thumb/...
+    URL pattern fails with HTTP 400.
+
+    Pattern:
+      https://commons.wikimedia.org/wiki/Special:FilePath/<filename>?width=N
     """
     if not full_url or "/commons/" not in full_url: return None
-    if "/commons/thumb/" in full_url: return full_url
-    parts = full_url.split("/commons/", 1)
-    if len(parts) != 2: return None
-    head, tail = parts
-    # tail is "a/ab/filename.ext"
-    segs = tail.split("/")
-    if len(segs) < 3: return None
-    filename = segs[-1]
-    return f"{head}/commons/thumb/{tail}/{target_width}px-{filename}"
+    # Get filename from the last path segment, strip query string
+    clean = full_url.split("?", 1)[0]
+    filename_encoded = clean.rstrip("/").rsplit("/", 1)[-1]
+    if not filename_encoded: return None
+    # Decode %28 → (, %29 → ), %2C → ,, etc. — Special:FilePath accepts
+    # both forms but unencoded is the canonical input.
+    filename = urllib.parse.unquote(filename_encoded)
+    # Re-encode as URL path segment (safe chars include parens for Commons)
+    filename_for_url = urllib.parse.quote(filename, safe="()',- _.")
+    return f"https://commons.wikimedia.org/wiki/Special:FilePath/{filename_for_url}?width={target_width}"
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────
@@ -303,6 +424,11 @@ def main():
     targets = select_targets(args)
     print(f"Targets: {len(targets)} beaches")
 
+    blocked = fetch_blocked_photographers()
+    if blocked:
+        print(f"Photographer blocklist: {len(blocked)} artists "
+              f"(>=3 prior photos, mean rel <= 0)")
+
     saved_total = 0
     no_photos = 0
     for i, b in enumerate(targets):
@@ -318,7 +444,7 @@ def main():
             time.sleep(THROTTLE_S)
             info_map = commons_imageinfo([g["pageid"] for g in geo])
             picked = rank_and_pick(geo, info_map, b["lat"], b["lng"],
-                                   args.radius, args.per_beach)
+                                   args.radius, args.per_beach, blocked)
             if not picked:
                 no_photos += 1
                 replace_commons(b["fid"], [])

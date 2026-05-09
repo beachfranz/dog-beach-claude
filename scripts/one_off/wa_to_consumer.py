@@ -68,14 +68,8 @@ def run(state):
     print(f"   {results}")
 
     print(f"\n6. Final {state} tier breakdown")
-    for r in q(f"""select case
-        when bdp.dogs_allowed='yes' and bdp.has_off_leash and bdp.dogs_prohibited_start is null then '1_marquee'
-        when bdp.dogs_allowed='yes' and bdp.has_off_leash then '1b_offleash_caveat'
-        when bdp.dogs_allowed='yes' then '1c_onleash'
-        when bdp.dogs_allowed='mixed' and (bdp.has_off_leash is null or not bdp.has_off_leash) and bdp.has_on_leash then '4_limited_access'
-        when bdp.dogs_allowed='no' then '3_no_dogs'
-        else 'unknown'
-      end tier, g.is_active, g.is_scoreable, count(*)
+    for r in q(f"""select public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) tier,
+      g.is_active, g.is_scoreable, count(*)
       from public.beaches_gold g
       left join public.beach_dog_policy bdp on bdp.arena_group_id = g.fid
      where g.state=%s group by 1,2,3 order by 1,2,3 desc""", (state,)):

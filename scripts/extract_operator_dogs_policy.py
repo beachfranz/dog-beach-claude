@@ -67,7 +67,7 @@ def fetch_top_operators(limit: int, counties: list[str] | None = None) -> list[d
         """
     else:
         sql = f"""
-          select op.id, op.slug, op.canonical_name, op.website, op.level, op.subtype,
+          select op.id, op.slug, op.canonical_name, op.website, op.level, op.subtype, op.state_code,
                  (select count(*) from public.beach_locations bl where bl.operator_id = op.id) as beach_count
           from public.operators op
           where exists (select 1 from public.beach_locations bl where bl.operator_id = op.id)
@@ -93,10 +93,48 @@ def fetch_top_operators(limit: int, counties: list[str] | None = None) -> list[d
     return json.loads(m.group(1))
 
 
+STATE_NAME = {
+    'AL':'Alabama','AK':'Alaska','AZ':'Arizona','AR':'Arkansas','CA':'California',
+    'CO':'Colorado','CT':'Connecticut','DE':'Delaware','DC':'District of Columbia',
+    'FL':'Florida','GA':'Georgia','HI':'Hawaii','ID':'Idaho','IL':'Illinois',
+    'IN':'Indiana','IA':'Iowa','KS':'Kansas','KY':'Kentucky','LA':'Louisiana',
+    'ME':'Maine','MD':'Maryland','MA':'Massachusetts','MI':'Michigan','MN':'Minnesota',
+    'MS':'Mississippi','MO':'Missouri','MT':'Montana','NE':'Nebraska','NV':'Nevada',
+    'NH':'New Hampshire','NJ':'New Jersey','NM':'New Mexico','NY':'New York',
+    'NC':'North Carolina','ND':'North Dakota','OH':'Ohio','OK':'Oklahoma','OR':'Oregon',
+    'PA':'Pennsylvania','RI':'Rhode Island','SC':'South Carolina','SD':'South Dakota',
+    'TN':'Tennessee','TX':'Texas','UT':'Utah','VT':'Vermont','VA':'Virginia',
+    'WA':'Washington','WV':'West Virginia','WI':'Wisconsin','WY':'Wyoming',
+}
+
+# Domains that obviously belong to a specific state. If an operator is in state X
+# but the candidate URL is in this map for state Y (Y!=X), that's cross-state pollution.
+_DOMAIN_STATE_HINTS = [
+    ('.ca.gov', 'CA'), ('.ca.us', 'CA'), ('parks.ca.gov', 'CA'),
+    ('cityofpacifica', 'CA'), ('coronado.ca', 'CA'), ('lakeforestca', 'CA'),
+    ('carpinteriaca', 'CA'), ('smcgov', 'CA'), ('countyofkingsca', 'CA'),
+    ('cityofmyrtlebeach', 'SC'), ('blainemn', 'MN'), ('dsm.city', 'IA'),
+    ('raymond.ca', 'XX'),  # raymond.ca is Canada; XX = non-US, treat as wrong-state
+    ('.fl.us', 'FL'), ('.fl.gov', 'FL'),
+    ('.ny.gov', 'NY'), ('.ny.us', 'NY'),
+    ('.tx.us', 'TX'),
+]
+
+
+def domain_state_hint(url: str) -> str | None:
+    """If the URL's domain strongly implies a specific state, return that state code."""
+    if not url: return None
+    u = url.lower()
+    for needle, state in _DOMAIN_STATE_HINTS:
+        if needle in u:
+            return state
+    return None
+
+
 def fetch_operators_by_ids(ids: list[int]) -> list[dict]:
     id_list = ",".join(str(i) for i in ids)
     sql = f"""
-      select op.id, op.slug, op.canonical_name, op.website, op.level, op.subtype,
+      select op.id, op.slug, op.canonical_name, op.website, op.level, op.subtype, op.state_code,
              (select count(*) from public.beach_locations bl where bl.operator_id = op.id) as beach_count
         from public.operators op
        where op.id in ({id_list})
@@ -338,31 +376,46 @@ def pick_url(operator: dict, hits: list[dict], context: str) -> tuple[str | None
     if not hits:
         return (None, "no_hits")
 
+    state_code = (operator.get('state_code') or 'CA').upper()
+    state_name = STATE_NAME.get(state_code, state_code)
+
+    # Defense in depth: drop any candidate whose domain hints at a different state
+    filtered = []
+    for h in hits[:5]:
+        hint = domain_state_hint(h.get('url') or '')
+        if hint and hint != state_code:
+            continue  # cross-state — drop pre-picker
+        filtered.append(h)
+    if not filtered:
+        return (None, f"all_candidates_cross_state (operator state={state_code})")
+
     candidates = "\n".join(
         f"{i+1}. {h.get('url')}\n   title: {h.get('title','')[:120]}\n   snippet: {(h.get('content','') or '')[:200]}"
-        for i, h in enumerate(hits[:5])
+        for i, h in enumerate(filtered[:5])
     )
 
-    system = """You are picking the single most authoritative URL for extracting a California beach operator's dog policy. Reject:
-- Pages about NPS or state-park units OUTSIDE California (e.g., Padre Island NS in Texas)
+    system = f"""You are picking the single most authoritative URL for extracting a {state_name} beach operator's dog policy. Reject:
+- Pages whose URL or content is about a DIFFERENT state's jurisdiction (e.g., a {state_name} city operator's candidates may not be from any other state)
 - Third-party SEO content ("Top 10 dog-friendly beaches", travel blogs, news aggregators)
 - Generic operator homepages that don't mention dogs/pets in title or snippet
 - 404/error pages
 
 Prefer:
-- Operator's own .gov / .ca.us / .ca.gov / .org domain
-- Page title or snippet explicitly addresses dogs, pets, or beach rules
+- Operator's own .gov / .{state_code.lower()}.us / .{state_code.lower()}.gov / .org domain
+- Page title or snippet explicitly mentions {state_name} or the operator's name AND addresses dogs, pets, or beach rules
 - Specific dog-policy/pet-policy pages over generic park/beach landing pages
 
-Return ONLY a single JSON object: {"chosen_index": <1..5 | null>, "reason": <short text>}"""
+CRITICAL: This operator is in {state_name} ({state_code}). If a candidate URL or its content is clearly for a different state's similarly-named jurisdiction, reject it. When in doubt about state, reject.
 
-    user = f"""Operator: {operator['canonical_name']} ({operator.get('level','unknown')}, manages CA beaches)
+Return ONLY a single JSON object: {{"chosen_index": <1..{len(filtered)} | null>, "reason": <short text>}}"""
+
+    user = f"""Operator: {operator['canonical_name']} ({operator.get('level','unknown')}, manages {state_name} beaches)
 Context: {context}
 
-Tavily candidates:
+Tavily candidates (already filtered to drop obvious wrong-state domains):
 {candidates}
 
-Pick the most authoritative URL for extracting this operator's dog policy on their California beaches. If none look right, set chosen_index=null."""
+Pick the most authoritative URL for extracting this {state_name} operator's dog policy. If none look right (including any that smell like a different state's jurisdiction), set chosen_index=null."""
 
     result = call_llm(HAIKU, system, user, max_tokens=200)
     if "error" in result:
@@ -371,19 +424,22 @@ Pick the most authoritative URL for extracting this operator's dog policy on the
     obj = result["json"]
     idx = obj.get("chosen_index")
     reason = obj.get("reason", "")
-    if not isinstance(idx, int) or idx < 1 or idx > len(hits):
+    if not isinstance(idx, int) or idx < 1 or idx > len(filtered):
         return (None, f"picker_rejected_all: {reason[:80]}")
-    return (hits[idx - 1]["url"], reason)
+    return (filtered[idx - 1]["url"], reason)
 
 
 def common_system(t: dict) -> str:
-    return f"""You are extracting beach dog policy from a single source page for the California operator "{t['canonical_name']}" ({t['level']}).
+    state_code = (t.get('state_code') or 'CA').upper()
+    state_name = STATE_NAME.get(state_code, state_code)
+    return f"""You are extracting beach dog policy from a single source page for the {state_name} operator "{t['canonical_name']}" ({t['level']}).
 
 ABSOLUTE RULES:
 - Only assert facts directly supported by the <page> content provided.
 - Quote 1-2 short verbatim spans (≤120 chars each) for every populated field. NO parenthetical commentary inside quotes.
 - If the page is silent on a field, return null or empty array. Empty is correct.
-- Do NOT use prior knowledge about California beaches or this operator. If you don't see it on the page, you don't know it.
+- Do NOT use prior knowledge about {state_name} beaches or this operator. If you don't see it on the page, you don't know it.
+- If the page is clearly about a DIFFERENT state's jurisdiction (not {state_name}), set policy_found=false and explain in your quotes — do not extract policy fields.
 - Return ONLY a single JSON object. No prose. No markdown fences. No commentary."""
 
 
@@ -608,20 +664,39 @@ def process_operator(t: dict, dry_run: bool = False, force_url: str | None = Non
             except Exception as e:
                 print(f"   [A] tavily/picker error: {e}")
 
-    # Source B: broad Tavily search → Haiku-picked URL
-    b_query = f'"{t["canonical_name"]}" California dogs allowed beach official rules ordinance'
+    # Source B: broad Tavily search → Haiku-picked URL (state-aware)
+    state_code = (t.get('state_code') or 'CA').upper()
+    state_name = STATE_NAME.get(state_code, state_code)
+    b_query = f'"{t["canonical_name"]}" {state_name} dogs allowed beach official rules ordinance'
     try:
         hits = tavily_search(b_query, max_results=5)
         # de-dupe against A
         hits = [h for h in hits if h.get("url") != a_url]
         b_url, b_reason = pick_url(t, hits,
-            "broad search; prefer operator's authoritative source")
+            f"broad search ({state_name}); prefer operator's authoritative source")
         if b_url:
             print(f"   [B] picked: {b_reason[:80]}")
         else:
             print(f"   [B] picker rejected: {b_reason[:80]}")
     except Exception as e:
         print(f"   [B] tavily/picker error: {e}")
+        b_url = None
+
+    # Source B2: iterative re-query — if B rejected, try with city/county phrasing
+    # explicitly tied to state. Catches the "operator name is too generic" case.
+    if not b_url:
+        b2_query = f'{t["canonical_name"]} {state_code} municipal code dogs leash beach park'
+        try:
+            hits = tavily_search(b2_query, max_results=5)
+            hits = [h for h in hits if h.get("url") not in (a_url,)]
+            b_url, b_reason = pick_url(t, hits,
+                f"alt-query ({state_code}); municipal code / ordinance text")
+            if b_url:
+                print(f"   [B2] picked (alt query): {b_reason[:80]}")
+            else:
+                print(f"   [B2] picker rejected: {b_reason[:80]}")
+        except Exception as e:
+            print(f"   [B2] tavily/picker error: {e}")
 
     print(f"   A: {a_url or '—'}\n   B: {b_url or '—'}")
     if dry_run:

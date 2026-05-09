@@ -32,6 +32,10 @@ PG = dict(host=_p.hostname, port=_p.port or 5432, user=_p.username,
 sys.path.insert(0, str(ROOT / 'scripts'))
 from load_state import fetch_overpass_beaches, STATE_BBOX
 
+# Sibling helper for external_source_status writes
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _external_source_status import record_status  # noqa: E402
+
 # Add bbox catalog for the states we'll need (load_state.py only has CA/OR/WA).
 # Source: USGS state bounding boxes, padded slightly.
 EXTRA_BBOX = {
@@ -122,11 +126,27 @@ def main():
             log(f'  {st}: {n:>6} osm_landing rows in bbox  {tag}')
         return
 
+    def safe_status(*a, **kw):
+        """Status writes are best-effort — a DNS/connection blip during a
+        failed state must not poison the rest of the run."""
+        try:
+            record_status(*a, **kw)
+        except Exception as se:
+            log(f'    (status write failed: {se})')
+
     loaded, skipped, failed = 0, 0, 0
     for st in states:
-        n = osm_landing_count(st)
+        try:
+            n = osm_landing_count(st)
+        except Exception as e:
+            log(f'{st}: count check failed ({e}); skipping this state')
+            time.sleep(args.rest_seconds)
+            continue
+
         if n > 50:
             log(f'{st}: {n} osm_landing rows already; skipping')
+            safe_status(PG, 'osm_landing', st, 'skipped', n,
+                        'already had rows in bbox')
             skipped += 1
             continue
 
@@ -136,9 +156,12 @@ def main():
             inserted = fetch_overpass_beaches(st, args.max_records_per_state)
             elapsed = time.time() - t0
             log(f'  {st}: inserted {inserted} osm_landing rows in {elapsed:.0f}s')
+            safe_status(PG, 'osm_landing', st, 'ok', inserted,
+                        f'fetched in {elapsed:.0f}s')
             loaded += 1
         except Exception as e:
             log(f'  {st}: FAILED — {e}')
+            safe_status(PG, 'osm_landing', st, 'failed', None, str(e)[:500])
             failed += 1
 
         time.sleep(args.rest_seconds)

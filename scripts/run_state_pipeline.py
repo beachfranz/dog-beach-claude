@@ -500,6 +500,12 @@ def log(m): print(f"[{time.strftime('%H:%M:%S')}] {m}", flush=True)
 def open_conn():
     c = psycopg2.connect(**PG)
     c.autocommit = True  # critical: each phase commits independently for status persistence
+    # Some phases run global clustering / dedup over the whole arena table
+    # (populate_arena_group_id, run_late_stage_dedup) and exceed the default
+    # 60s statement_timeout once arena grows past a few thousand rows.
+    # Bump to 10 minutes for the orchestrator's connections.
+    with c.cursor() as cur:
+        cur.execute("set statement_timeout = '600s'")
     return c
 
 

@@ -131,16 +131,32 @@ def fetch_mapillary(lat: float, lng: float, radius_m: int = RADIUS_M, limit: int
            f"&bbox={bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"
            f"&limit={limit}")
     req = urllib.request.Request(url, headers={"User-Agent": "DogBeachScout/1.0"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return (json.loads(r.read()) or {}).get("data") or []
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", "ignore")[:200]
-        print(f"  Mapillary HTTP {e.code}: {body}", file=sys.stderr)
-        return []
-    except Exception as e:
-        print(f"  Mapillary error: {e}", file=sys.stderr)
-        return []
+    # Adaptive backoff on rate-limit / 5xx. Retry up to 4 times with
+    # exponentially-growing waits (5s, 15s, 45s, 120s). 4xx (other than 429)
+    # gets returned as empty so the run continues without retry — these are
+    # legitimately "no data here" rather than transient.
+    delays = [5, 15, 45, 120]
+    for attempt, delay in enumerate([0, *delays]):
+        if delay > 0:
+            print(f"  Mapillary backoff {delay}s (attempt {attempt}/{len(delays)})", file=sys.stderr)
+            time.sleep(delay)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return (json.loads(r.read()) or {}).get("data") or []
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", "ignore")[:200]
+            if e.code in (429, 500, 502, 503, 504) and attempt < len(delays):
+                print(f"  Mapillary HTTP {e.code} (will retry): {body}", file=sys.stderr)
+                continue
+            print(f"  Mapillary HTTP {e.code}: {body}", file=sys.stderr)
+            return []
+        except Exception as e:
+            if attempt < len(delays):
+                print(f"  Mapillary error (will retry): {e}", file=sys.stderr)
+                continue
+            print(f"  Mapillary error: {e}", file=sys.stderr)
+            return []
+    return []
 
 
 def haversine_m(la1, lo1, la2, lo2):

@@ -164,7 +164,7 @@ Anything still ad-hoc and not in this list is a bug in the runbook. Open an issu
 
 ### Mapillary rate limits
 
-`load_mapillary_photos.py` hits `HTTP 500: Please reduce the amount of data you're asking for` after a few hundred consecutive queries. Coverage caps at whatever state was processing when the limit hit. **Workaround:** run with `--fids` for state-scoped batches; spread runs across hours; expect 30-70% coverage rather than 100%. **Real fix:** add per-request rate-limit backoff to the loader (TODO).
+`load_mapillary_photos.py` can hit `HTTP 500: Please reduce the amount of data you're asking for` after a few hundred consecutive queries. The loader now has **adaptive backoff** (5s → 15s → 45s → 120s on 429 / 5xx) and **skip-existing by default** (a beach with photos already is skipped unless `--refresh` is passed), so a rate-limited run is resumable: re-run the same command and it picks up where it stopped without re-fetching. Realistic coverage: 30-70% (limited by Mapillary's actual streetview density near beaches, not by our retry logic).
 
 ### Daily-refresh per-fid trigger has rotated secret
 
@@ -186,13 +186,14 @@ python scripts/external_sources.py load pad_us --state AK
 ```
 and watch stderr.
 
-### `promote_to_gold` has 2 overloads
+### `promote_to_gold` and `run_pipeline_for_state` overloads
 
-Postgres has both `promote_to_gold(bigint[], boolean)` and `promote_to_gold(bigint[], boolean, boolean)` as the function evolved. Calling with 2 args is ambiguous. **Always call with 3 args** (the third is `p_publish boolean default true`):
-```sql
-select * from public.promote_to_gold(array[1,2,3]::bigint[], false::boolean, true::boolean);
+Both functions had stale 2-arg signatures alongside the canonical 3-arg ones. **Resolved 2026-05-09**: `20260509_drop_legacy_overloads.sql` dropped both stale overloads. Only the canonical signatures remain:
 ```
-Drop the 2-arg overload at next opportunity (low risk — no callers should still use it).
+public.promote_to_gold(p_fids bigint[], p_score boolean DEFAULT false, p_publish boolean DEFAULT true)
+public.run_pipeline_for_state(p_state text DEFAULT 'CA', p_fids bigint[] DEFAULT NULL, p_skip_precheck boolean DEFAULT false)
+```
+`scripts/promote_to_gold.py` updated to call the 3-arg form explicitly.
 
 ### psycopg2 cursor in failed-transaction state
 
@@ -306,10 +307,10 @@ These are real gaps documented but not yet shipped. Each is a known surface for 
 5. **USFWS plover polygons** — pinned, manual shapefile download required.
 6. **Multi-region zone_rules** — current section extractor produces single-region. To support "north end is off-leash, south end is on-leash" for a single beach, need richer LLM prompt + schema. ~4-8 hr engineering.
 7. **Daily-refresh trigger secret rotation** — move secret to config table, update trigger.
-8. **Photo loaders not idempotent on rate-limit retry** — Mapillary rate limit kills the run; restarting re-fetches everything. Add `--skip-existing`.
+8. ~~**Photo loaders not idempotent on rate-limit retry**~~ — fixed 2026-05-09. Loader now has adaptive backoff (5s/15s/45s/120s) on 429/5xx and skip-existing by default; re-runs pick up where they stopped.
 9. **`v2-run-pipeline` deprecation** — kill the staging path or fully merge into the canon. Architectural debt.
 10. **Dagster integration** — every phase as an asset, lineage in UI. The strategic destination per `docs/pipeline-overview.md` Phase 10 discussion.
-11. **Drop legacy 2-arg `promote_to_gold` overload** — once no callers remain.
+11. ~~**Drop legacy 2-arg `promote_to_gold` overload**~~ — fixed 2026-05-09. `20260509_drop_legacy_overloads.sql` dropped both 2-arg `promote_to_gold` and 2-arg `run_pipeline_for_state`. Only canonical 3-arg signatures remain.
 12. **Photos source coverage** — Pexels filter rejects all; Pixabay/Unsplash/Flickr keys not loaded; only Mapillary works. Investigate Wikipedia Commons or NPS public photos.
 
 ---

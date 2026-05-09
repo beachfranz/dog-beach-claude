@@ -145,6 +145,13 @@ compute_beach_field_consensus(fid)   -- Layer-2 cross-source voting
 
 **Source registry:** `bep_source_catalog` (`20260508_bep_source_catalog.sql`) — declarative table listing each source, its kind (`raw_spatial`, `derived`, `extraction`, `manual`), allowed field_groups, and emitter function name.
 
+**Full emitter inventory** (29 functions, used directly by `promote_to_gold`/`refire_bep_cascade` or invoked indirectly by resolvers via `bep_source_catalog` lookup):
+- *Wired into orchestrators* (Phase 3 per-fid loop): `populate_polygon_containment_gold`, `populate_from_cpad_gold`, `populate_from_pad_us_gold`, `populate_from_park_operators_gold`, `populate_from_operators_gold`, `populate_from_research_gold`, `populate_from_park_url_gold`, `populate_from_park_url_governance_gold`, `populate_from_unified_v1_gold`, `populate_from_city_dog_policy_gold`, `populate_from_county_dog_policy_gold`, `_emit_evidence_from_osm_amenities`.
+- *Resolver-driven via `bep_source_catalog`*: `_emit_evidence_from_cpad_unit_dogs_policy`, `_emit_evidence_from_pad_us_dogs_policy`, `_emit_evidence_from_operator_dogs_policy`, `_emit_evidence_from_operator_amenities`, `_emit_evidence_from_operator_policy_exceptions`, `_emit_evidence_from_state_dogs_policy`, `_emit_evidence_from_zone_rules_practical`, `_emit_evidence_from_zone_rules_derived`, `_emit_evidence_from_park_url`, `_emit_evidence_from_park_url_raw_amenities`.
+- *Fallback*: `populate_from_state_default_gold` (state-level default rules when no per-beach evidence).
+- *zone_rules injectors* (called by `_promote_zone_rules_for_fid`): `_zr_inject_perimeter`, `_zr_inject_sand_from_policy`, `_zr_inject_sections_from_bep`.
+- *Resolvers*: `_resolve_polygon_containment`, `_resolve_governance_gold`, `_resolve_dogs_gold`, `_resolve_practical_gold`, `_resolve_field_group_gold`.
+
 **Consensus mechanics:** Wilson 90% lower bound (`_wilson_lower_bound(accuracy, n, z=1.645)`) to penalize small samples. Source calibration weights (per-field, per-source) seeded from a 2026-05-03 ground-truth audit:
 
 | Field | Top sources (calibration weight) |

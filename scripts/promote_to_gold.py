@@ -139,7 +139,7 @@ def main() -> int:
     # Layer 2 consensus + auto-promoter), which takes longer than the default
     # 60s connection timeout when the catalog has hundreds of beaches.
     cur.execute("set local statement_timeout = '600s'")
-    cur.execute("select * from public.promote_to_gold(%s::bigint[], %s)",
+    cur.execute("select * from public.promote_to_gold(%s::bigint[], %s::boolean, true::boolean)",
                 (fids, args.score))
     result = cur.fetchone()
     conn.commit()
@@ -195,7 +195,7 @@ def main() -> int:
         # populate_from_*_gold (incl unified_v1), resolvers,
         # compute_beach_field_consensus, promote_canonical_to_consumer_tables.
         cur.execute("set local statement_timeout = '600s'")
-        cur.execute("select * from public.promote_to_gold(%s::bigint[], false)", (fids,))
+        cur.execute("select * from public.promote_to_gold(%s::bigint[], false::boolean, true::boolean)", (fids,))
         result2 = cur.fetchone()
         conn.commit()
         for k, v in result2.items():

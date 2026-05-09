@@ -18,6 +18,7 @@ Usage:
 
 from __future__ import annotations
 import argparse, json, os, re, sys, time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 import httpx
@@ -336,15 +337,49 @@ def fetch_and_clean(url: str) -> tuple[str, str, int]:
 
 # ── LLM ──────────────────────────────────────────────────────────────
 def call_llm(model: str, system: str, user: str, max_tokens: int = 2048) -> dict:
-    """Call Anthropic with up to 3 retries on transient failures (timeout, 5xx)."""
+    """Plain call. No caching. See call_llm_cached for the multi-pass case."""
+    return _call_anthropic(model, system, [{"type": "text", "text": user}], max_tokens)
+
+
+def call_llm_cached(model: str, system: str, cached_user_prefix: str,
+                    user_specific: str, max_tokens: int = 2048) -> dict:
+    """Anthropic call with prompt-cache markers on system + cached_user_prefix.
+    Subsequent calls within ~5 min that use the same system + prefix hit the
+    cache — input tokens for those blocks billed at ~10% of normal rate.
+
+    Use case: 3 passes (A/B/C) per source URL share the same system block
+    AND the same '<page>{page_text}</page>' wrapper; only the schema-
+    specific instructions vary. Cache covers ~95% of the input volume.
+    """
+    return _call_anthropic(
+        model, system,
+        [
+            {"type": "text", "text": cached_user_prefix,
+             "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": user_specific},
+        ],
+        max_tokens,
+        cached_system=True,
+    )
+
+
+def _call_anthropic(model: str, system: str, user_blocks: list,
+                    max_tokens: int = 2048, cached_system: bool = False) -> dict:
+    """Shared Anthropic POST with up to 3 retries on transient failures.
+    cached_system=True wraps the system block with cache_control markers."""
+    if cached_system:
+        sys_payload = [{"type": "text", "text": system,
+                        "cache_control": {"type": "ephemeral"}}]
+    else:
+        sys_payload = system
     last_err = None
     for attempt in range(3):
         try:
             r = httpx.post("https://api.anthropic.com/v1/messages",
                 headers={"x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01",
                          "content-type": "application/json"},
-                json={"model": model, "max_tokens": max_tokens, "system": system,
-                      "messages": [{"role":"user","content":user}]},
+                json={"model": model, "max_tokens": max_tokens, "system": sys_payload,
+                      "messages": [{"role":"user","content":user_blocks}]},
                 timeout=120)
             if r.status_code >= 500 or r.status_code == 429:
                 last_err = f"http_{r.status_code}"
@@ -443,14 +478,19 @@ ABSOLUTE RULES:
 - Return ONLY a single JSON object. No prose. No markdown fences. No commentary."""
 
 
+def _cached_user_prefix(page_text: str, source_url: str) -> str:
+    """The portion of the user message that's identical across passes A/B/C
+    for one source URL — cached by Anthropic prompt-cache."""
+    return f"Source URL: {source_url}\n\n<page>\n{page_text}\n</page>\n"
+
+
 def pass_a_user(t: dict, page_text: str, source_url: str) -> str:
-    return f"""Source URL: {source_url}
+    """Back-compat: full prompt. Used when not caching."""
+    return _cached_user_prefix(page_text, source_url) + "\n" + pass_a_instruction(t)
 
-<page>
-{page_text}
-</page>
 
-Extract ONLY four fields about this operator's beach dog policy.
+def pass_a_instruction(t: dict) -> str:
+    return """Extract ONLY four fields about this operator's beach dog policy.
 
 1. policy_found (bool): does the page meaningfully address whether dogs are allowed on this operator's beaches OR public spaces (parks, recreation areas, public property)?
    Set true even if the policy is implicit — e.g., a general leash ordinance for all public spaces with no beach-specific exception is itself a policy.
@@ -486,13 +526,11 @@ Return ONLY:
 
 
 def pass_b_user(t: dict, page_text: str, source_url: str) -> str:
-    return f"""Source URL: {source_url}
+    return _cached_user_prefix(page_text, source_url) + "\n" + pass_b_instruction(t)
 
-<page>
-{page_text}
-</page>
 
-Extract operator-LEVEL restriction structure ONLY. If the page is a per-beach catalog (table of beach name → rule), return all fields empty/null — that detail belongs in Pass C.
+def pass_b_instruction(t: dict) -> str:
+    return """Extract operator-LEVEL restriction structure ONLY. If the page is a per-beach catalog (table of beach name → rule), return all fields empty/null — that detail belongs in Pass C.
 
 1. time_windows: array of allowed time windows that apply at OPERATOR level.
    Each: {{"before": "HH:MM"|null, "after": "HH:MM"|null, "season": "summer"|"winter"|"year_round"|null, "leashed": <bool|null>}}
@@ -517,13 +555,11 @@ Return ONLY:
 
 
 def pass_c_user(t: dict, page_text: str, source_url: str) -> str:
-    return f"""Source URL: {source_url}
+    return _cached_user_prefix(page_text, source_url) + "\n" + pass_c_instruction(t)
 
-<page>
-{page_text}
-</page>
 
-Extract per-beach exceptions and document references:
+def pass_c_instruction(t: dict) -> str:
+    return """Extract per-beach exceptions and document references:
 
 1. exceptions: per-beach overrides — specific named beaches with rules that differ from the operator's default. Each:
    {{"beach_name": <text>, "rule": "off_leash"|"prohibited"|"allowed", "source_quote": <verbatim text>}}
@@ -544,26 +580,71 @@ Return ONLY:
 
 
 def run_three_passes(t: dict, page_text: str, source_url: str) -> dict:
-    """Runs A/B/C against one page, returns dict with each pass output."""
-    sys_block = common_system(t)
-    out = {"total_input_tokens": 0, "total_output_tokens": 0}
+    """Runs A/B/C against one page, returns dict with each pass output.
 
-    for label, model, ufn, max_tokens in [
-        ("a", HAIKU,  pass_a_user, 2048),
-        ("b", SONNET, pass_b_user, 1500),
-        ("c", SONNET, pass_c_user, 2048),
-    ]:
-        result = call_llm(model, sys_block, ufn(t, page_text, source_url), max_tokens)
+    Two optimizations:
+      1. Prompt caching — system block + URL/page wrapper are marked
+         cacheable. Pass A primes the cache; Pass B and C reuse it.
+         ~80% input-token savings on B+C (they're the Sonnet calls).
+      2. Short-circuit — if Pass A returns policy_found=false, skip
+         B and C. They'd extract nothing useful from a page that
+         doesn't address dogs at all.
+    """
+    sys_block = common_system(t)
+    cached_prefix = _cached_user_prefix(page_text, source_url)
+    out = {"total_input_tokens": 0, "total_output_tokens": 0,
+           "cache_creation_tokens": 0, "cache_read_tokens": 0}
+
+    passes = [
+        ("a", HAIKU,  pass_a_instruction, 2048),
+        ("b", SONNET, pass_b_instruction, 1500),
+        ("c", SONNET, pass_c_instruction, 2048),
+    ]
+
+    for label, model, instr_fn, max_tokens in passes:
+        result = call_llm_cached(model, sys_block, cached_prefix,
+                                 instr_fn(t), max_tokens)
         usage = result.get("usage", {})
         out["total_input_tokens"]  += usage.get("input_tokens", 0)
         out["total_output_tokens"] += usage.get("output_tokens", 0)
+        out["cache_creation_tokens"] += usage.get("cache_creation_input_tokens", 0)
+        out["cache_read_tokens"]     += usage.get("cache_read_input_tokens", 0)
         if "error" in result:
             out[f"pass_{label}_status"] = "parse_error"
             out[f"pass_{label}_raw"]    = result["raw"][:1000]
         else:
             out[f"pass_{label}_status"] = "ok"
             out[f"pass_{label}_json"]   = result["json"]
+
+        # Short-circuit: if Pass A says the page doesn't address dogs,
+        # skip B and C — they'd return empty arrays.
+        if label == "a":
+            pa = out.get("pass_a_json") or {}
+            if pa.get("policy_found") is False:
+                out["short_circuit"] = "pass_a_no_policy_found"
+                out["pass_b_status"] = "skipped"
+                out["pass_c_status"] = "skipped"
+                break
+
     return out
+
+
+# ── Recently-extracted skip check ────────────────────────────────────
+def recently_extracted(operator_id: int, days: int = 7) -> bool:
+    """True if operator already has a fresh extraction within the last
+    `days`. Used to skip re-research on subsequent state launches.
+    Saves ~50% on CA re-runs; ~0% on first-state launches."""
+    headers = {"apikey": SERVICE_KEY, "Authorization": f"Bearer {SERVICE_KEY}"}
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    r = httpx.get(f"{SUPABASE_URL}/rest/v1/operator_policy_extractions",
+                  headers=headers,
+                  params={"operator_id": f"eq.{operator_id}",
+                          "extracted_at": f"gte.{cutoff}",
+                          "select": "id", "limit": "1"},
+                  timeout=15)
+    if not r.is_success:
+        return False
+    return len(r.json() or []) > 0
 
 
 # ── Persistence ──────────────────────────────────────────────────────
@@ -731,6 +812,9 @@ def main():
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--skip-existing", action="store_true",
                    help="skip operators that already have any extraction row")
+    p.add_argument("--skip-recent", type=int, default=7,
+                   help="skip operators with extractions in the last N days "
+                        "(default 7; pass 0 to disable). Saves cost on re-runs.")
     p.add_argument("--counties", type=str, default=None,
                    help="comma-separated list, e.g. 'Los Angeles,Orange,San Diego'")
     p.add_argument("--ids", type=str, default=None,
@@ -759,11 +843,15 @@ def main():
         print(f"Skip set: {len(skip_ids)} operators already have rows")
 
     t0 = time.time()
-    totals = {"src_a": 0, "src_b": 0, "errors": 0, "skipped": 0}
+    totals = {"src_a": 0, "src_b": 0, "errors": 0, "skipped": 0, "skipped_recent": 0}
     for i, op in enumerate(operators, 1):
         op["level"] = op.get("level") or "unknown"
         if op["id"] in skip_ids:
             totals["skipped"] += 1
+            continue
+        if args.skip_recent > 0 and recently_extracted(op["id"], args.skip_recent):
+            totals["skipped_recent"] += 1
+            print(f"\n[{i}/{len(operators)}] #{op['id']} {op['canonical_name']} — skipped (recent extraction within {args.skip_recent}d)")
             continue
         print(f"\n[{i}/{len(operators)}] #{op['id']} {op['canonical_name']} ({op.get('beach_count')} beaches)")
         try:

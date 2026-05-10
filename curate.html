@@ -90,10 +90,26 @@
     text-align: center; padding: 6px; color: var(--red);
     font-size: 11px; font-weight: 700;
   }
+  .photo-card { position: relative; }
   .photo-card img {
     width: 100%; height: 180px; object-fit: cover; display: block;
     background: #1e293b;
     pointer-events: none; /* let drag pass through */
+  }
+  /* Number badge top-left of card image (matches the on-map dot label) */
+  .photo-num {
+    position: absolute; top: 8px; left: 8px;
+    width: 26px; height: 26px; border-radius: 50%;
+    background: rgba(15,39,66,0.92); color: #fff;
+    font-family: 'DM Mono', monospace; font-weight: 700;
+    font-size: 13px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 0 2px #fff, 0 2px 4px rgba(0,0,0,0.3);
+    z-index: 2;
+  }
+  .photo-card.flash-on-map .photo-num {
+    background: var(--accent);
+    transition: background 0.15s;
   }
   .photo-meta { padding: 10px 12px; }
   .photo-source {
@@ -566,6 +582,7 @@ const MQ_COLOR = {
 };
 let _map = null;
 let _mapLayers = [];
+let _markersById = new Map();   // photo.id → leaflet marker
 function ensureMap() {
   if (_map) return _map;
   _map = L.map('curate-map', { zoomControl: true });
@@ -579,6 +596,7 @@ function renderMap() {
   const map = ensureMap();
   _mapLayers.forEach(l => map.removeLayer(l));
   _mapLayers = [];
+  _markersById = new Map();
   const bounds = [];
 
   const bLat = beachData?.beach?.lat;
@@ -624,6 +642,7 @@ function renderMap() {
       }
     });
     _mapLayers.push(m);
+    _markersById.set(p.id, m);
     bounds.push([p.lat, p.lng]);
   });
 
@@ -632,6 +651,18 @@ function renderMap() {
   // Map sometimes mis-sizes when its container becomes visible after
   // layout; force a recalc on the next tick.
   setTimeout(() => map.invalidateSize(), 50);
+}
+
+// Highlight a marker on the map (called from the photo card click).
+function flashMarker(photoId) {
+  const m = _markersById.get(photoId);
+  if (!m || !_map) return;
+  // Pan to marker, open popup, briefly puff up the radius for emphasis.
+  _map.panTo(m.getLatLng(), { animate: true });
+  m.openPopup();
+  const orig = m.getRadius ? m.getRadius() : 7;
+  m.setRadius(13);
+  setTimeout(() => m.setRadius(orig), 900);
 }
 
 function renderBeach() {
@@ -647,7 +678,7 @@ function renderBeach() {
     return;
   }
 
-  grid.innerHTML = beachData.photos.map(p => renderPhotoCard(p)).join('');
+  grid.innerHTML = beachData.photos.map((p, i) => renderPhotoCard(p, i)).join('');
   wireCardEvents();
   updateSummary();
 }
@@ -660,7 +691,7 @@ function fmtDistance(m) {
   return mi < 10 ? `${mi.toFixed(2)} mi` : `${mi.toFixed(1)} mi`;
 }
 
-function renderPhotoCard(p) {
+function renderPhotoCard(p, idx) {
   const matchOptionsHtml = MATCH_OPTIONS.map(o =>
     `<option value="${o.v}">${o.label}</option>`).join('');
   const access = p.access_point_name || '(no source name)';
@@ -669,7 +700,9 @@ function renderPhotoCard(p) {
   const distHtml = distLabel
     ? `<span class="photo-distance" title="distance from beach point">📍 ${escHtml(distLabel)}</span>`
     : '';
-  return `<div class="photo-card" data-id="${p.id}" draggable="true">
+  const num = (idx ?? 0) + 1;
+  return `<div class="photo-card" data-id="${p.id}" data-num="${num}" draggable="true">
+    <div class="photo-num" title="click to highlight on map">${num}</div>
     <img src="${p.thumb_url || p.image_url}" alt="" loading="lazy">
     <div class="photo-meta">
       <span class="photo-source">${escHtml(p.source)}</span>
@@ -694,6 +727,16 @@ function renderPhotoCard(p) {
 }
 
 function wireCardEvents() {
+  // Number-badge click → highlight matching marker on map.
+  document.querySelectorAll('.photo-num').forEach(badge => {
+    badge.onclick = (e) => {
+      e.stopPropagation();
+      const card = badge.closest('.photo-card');
+      const id = parseInt(card?.dataset?.id || '0', 10);
+      if (id) flashMarker(id);
+    };
+  });
+
   // Set initial match-quality dropdowns from beachData
   for (const p of beachData.photos) {
     const sel = document.querySelector(`.match-select[data-id="${p.id}"]`);

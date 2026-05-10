@@ -67,7 +67,15 @@
     display: flex; justify-content: space-between; align-items: baseline;
     margin-bottom: 16px;
   }
-  .beach-name { font-size: 22px; font-weight: 700; margin: 0; }
+  .beach-name {
+    font-size: 22px; font-weight: 700; margin: 0;
+    cursor: pointer; transition: color 0.15s;
+  }
+  .beach-name:hover { color: var(--accent); text-decoration: underline; }
+  .beach-name::after {
+    content: ' ↗'; font-size: 14px; color: var(--muted);
+    font-weight: 400;
+  }
   .beach-sub { font-size: 13px; color: var(--muted); }
 
   .photo-grid {
@@ -667,7 +675,17 @@ function flashMarker(photoId) {
 
 function renderBeach() {
   if (!beachData) return;
-  document.getElementById('beach-name').textContent = beachData.beach.display_name;
+  const nameEl = document.getElementById('beach-name');
+  nameEl.textContent = beachData.beach.display_name;
+  nameEl.title = `Open in beach-editor-gold (fid ${beachData.beach.fid})`;
+  // Click the beach name → open beach-editor-gold in a named tab so
+  // repeated clicks reuse the same tab instead of stacking new ones.
+  nameEl.onclick = () => {
+    const fid = beachData.beach.fid;
+    const w = window.open(`admin/beach-editor-gold.html?fid=${fid}`,
+                          'beach-editor-gold');
+    if (w) w.focus();
+  };
   document.getElementById('beach-sub').textContent =
     `fid ${beachData.beach.fid} · ${beachData.beach.county_name}, ${beachData.beach.state}`;
   renderMap();

@@ -38,7 +38,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: beach } = await supabase
       .from("beaches_gold")
-      .select("fid, name, display_name_override, county_name, state")
+      .select("fid, name, display_name_override, county_name, state, lat, lon")
       .eq("fid", fid).maybeSingle();
     if (!beach) {
       return new Response(JSON.stringify({ error: "Beach not found" }),
@@ -48,7 +48,8 @@ Deno.serve(async (req: Request) => {
     const { data: photos } = await supabase
       .from("beach_photos")
       .select("id, source, image_url, thumb_url, attribution, license, " +
-              "page_url, distance_m, sort_order, source_meta, match_quality")
+              "page_url, distance_m, sort_order, source_meta, match_quality, " +
+              "lat, lng")
       .eq("arena_group_id", fid)
       .order("sort_order", { ascending: true });
 
@@ -81,6 +82,8 @@ Deno.serve(async (req: Request) => {
         display_name: beach.display_name_override ?? beach.name,
         county_name: beach.county_name,
         state: beach.state,
+        lat: beach.lat,
+        lng: beach.lon,
       },
       photos: enriched,
       curation_status: status,

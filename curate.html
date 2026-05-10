@@ -551,26 +551,29 @@ async function loadBeach(fid) {
   beachData = await res.json();
   // Sort policy:
   // - If beach has been curated (curation_status.curated_at exists) → drag
-  //   is king: sort by sort_order. Curator's manual arrangement wins.
-  // - Otherwise (fresh beach) → sort L→R by name-match quality so the
-  //   most-likely-relevant photos surface first for review.
+  //   is king: sort_order wins.
+  // - Otherwise (fresh beach) → composite score combining name-match
+  //   quality + distance from beach point. Exact-name matches still
+  //   sort first, but within the same match-quality bucket the closer
+  //   photos come first.
   const MATCH_RANK = { exact: 0, very_likely: 1, somewhat_likely: 2, unlikely: 3, wtf: 4 };
   const wasCurated = !!(beachData.curation_status && beachData.curation_status.curated_at);
   (beachData.photos || []).sort((a, b) => {
     if (wasCurated) {
-      // sort_order primary; match_quality as tiebreaker
       const so = (a.sort_order ?? 0) - (b.sort_order ?? 0);
       if (so !== 0) return so;
       const ra = MATCH_RANK[a.match_quality ?? a.default_match_quality] ?? 5;
       const rb = MATCH_RANK[b.match_quality ?? b.default_match_quality] ?? 5;
       return ra - rb;
-    } else {
-      // match_quality primary; sort_order as tiebreaker
-      const ra = MATCH_RANK[a.match_quality ?? a.default_match_quality] ?? 5;
-      const rb = MATCH_RANK[b.match_quality ?? b.default_match_quality] ?? 5;
-      if (ra !== rb) return ra - rb;
-      return (a.sort_order ?? 0) - (b.sort_order ?? 0);
     }
+    // Fresh beach: lexicographic by (match_quality, distance, sort_order).
+    const ra = MATCH_RANK[a.match_quality ?? a.default_match_quality] ?? 5;
+    const rb = MATCH_RANK[b.match_quality ?? b.default_match_quality] ?? 5;
+    if (ra !== rb) return ra - rb;
+    const da = a.distance_m ?? Number.POSITIVE_INFINITY;
+    const db = b.distance_m ?? Number.POSITIVE_INFINITY;
+    if (da !== db) return da - db;
+    return (a.sort_order ?? 0) - (b.sort_order ?? 0);
   });
   dirtyMap = new Map();
   renderBeach();

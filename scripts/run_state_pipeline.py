@@ -4,19 +4,32 @@ Each phase: action SQL + success criterion. Status recorded in
 public.pipeline_phase_status. First failure halts. Resumable by run_id.
 
 Phases (in order):
-   precheck            — assert_state_upstream_loaded
-   operators           — populate_operators_for_state
-   cluster             — populate_arena_group_id + populate_arena_extras
-   promote             — promote_to_gold for the state's fids
-   address_poi         — _enrich_address_from_poi_for_state
-   address_city        — _enrich_address_city_for_state
-   name_source         — _enrich_name_source_for_state
-   strip_plus_codes    — strip_plus_codes_from_addresses
-   align_scoreable     — align_is_scoreable_to_tier
-   dedup               — run_late_stage_dedup
-   geom_queue          — process_geom_change_queue
-   purge_pollution     — purge_cross_state_extractions (post-LLM, idempotent)
-   <LLM/external phases — run separately or in their own scripts>
+   chain_integrity_check  — assert_populator_chains_intact
+   state_policy_seed      — research + seed state_dogs_policy
+   seasonal_closure_seed  — research + seed seasonal_closures
+   ensure_tiger_places    — bulk_load_tiger_places (per-state, idempotent)
+   ensure_pad_us          — bulk_load_pad_us       (per-state, idempotent)
+   ensure_overpass        — bulk_load_overpass     (osm_landing, per-state)
+   ensure_amenities       — bulk_load_amenities    (osm_amenities, per-state)
+   ensure_dog_features    — bulk_load_dog_features (osm_dog_features, per-state)
+   precheck               — assert_state_upstream_loaded (sanity-check)
+   operators              — populate_operators_for_state
+   arena_seed             — promote_*_landing_to_arena
+   cluster_group          — populate_arena_group_id (state-scoped)
+   cluster_extras         — populate_arena_extras
+   promote                — promote_to_gold for the state's fids
+   address_poi            — _enrich_address_from_poi_for_state
+   address_city           — _enrich_address_city_for_state
+   name_source            — _enrich_name_source_for_state
+   strip_plus_codes       — strip_plus_codes_from_addresses
+   align_scoreable        — align_is_scoreable_to_tier
+   noaa_station_check     — assert_scoreable_have_noaa_for_state
+   purge_pollution        — purge_cross_state_extractions
+   dedup                  — run_late_stage_dedup
+   geom_queue             — process_geom_change_queue
+   <LLM/external phases — operator_llm_extract, operator_merge, bep_refire,
+                          section_extract, descriptions, photos_wikimedia,
+                          daily_refresh_fire, field_population_check>
 
 Usage:
    python scripts/run_state_pipeline.py --state OR
@@ -50,18 +63,10 @@ PG = dict(host=_p.hostname, port=_p.port or 5432, user=_p.username,
 #                    Use $STATE as a placeholder; substituted at runtime.
 #   criterion_text — human-readable description of the criterion
 PHASES = [
-    {
-        'key': 'precheck',
-        'action': "select count(*)::int from public.assert_state_upstream_loaded($STATE)",
-        'criterion':
-            "select (count(*) >= 4)::boolean from public.external_source_status "
-            "where state = $STATE and source in ('pad_us','osm_landing','osm_amenities','tiger_places') "
-            "  and status in ('ok','skipped')",
-        'criterion_text': 'all 4 required sources status in (ok, skipped) + noaa_stations(global) loaded',
-    },
     # Cheap idempotent check — runs early so any populator-chain drift
     # halts the canon BEFORE we run promote/refire and write bad data.
-    # Catches the regression family of issues #2, #18, #20.
+    # Catches the regression family of issues #2, #18, #20. Has no upstream
+    # data dependency, so it goes first.
     {
         'key': 'chain_integrity_check',
         'action': "select case when public.assert_populator_chains_intact() then 1 else 0 end::int",
@@ -103,6 +108,80 @@ PHASES = [
             "select (public.unseeded_seasonal_closures_for_state($STATE) = 0)::boolean",
         'criterion_text':
             'no pending seasonal closures (status=pending) for state',
+    },
+    # ─── Upstream bulk-loader phases (Franz, 2026-05-09) ────────────────
+    # These wrap the per-state bulk loaders that USED to live in the
+    # state-launch runbook as manual commands. With these in canon, a
+    # state launch is truly single-command. Each ensure_X phase:
+    #   - Reads public.external_source_status for (source, $STATE).
+    #   - If status in ('ok','skipped') AND last_loaded_at is recent, skip.
+    #   - Otherwise invoke the loader subprocess; loader updates the status
+    #     row on success/failure.
+    # Order: tiger_places before operators (operators depends on
+    # jurisdictions); the rest before arena_seed (which depends on OSM
+    # landings + PAD-US/amenities for downstream populators).
+    {
+        'key': 'ensure_tiger_places',
+        'kind': 'python',
+        'action': 'ensure_tiger_places',
+        'criterion':
+            "select coalesce((select status in ('ok','skipped') "
+            "                 from public.external_source_status "
+            "                 where source='tiger_places' and state=$STATE), false)",
+        'criterion_text': "external_source_status['tiger_places', state] in (ok, skipped)",
+    },
+    {
+        'key': 'ensure_pad_us',
+        'kind': 'python',
+        'action': 'ensure_pad_us',
+        'criterion':
+            "select coalesce((select status in ('ok','skipped') "
+            "                 from public.external_source_status "
+            "                 where source='pad_us' and state=$STATE), false)",
+        'criterion_text': "external_source_status['pad_us', state] in (ok, skipped)",
+    },
+    {
+        'key': 'ensure_overpass',
+        'kind': 'python',
+        'action': 'ensure_overpass',
+        'criterion':
+            "select coalesce((select status in ('ok','skipped') "
+            "                 from public.external_source_status "
+            "                 where source='osm_landing' and state=$STATE), false)",
+        'criterion_text': "external_source_status['osm_landing', state] in (ok, skipped)",
+    },
+    {
+        'key': 'ensure_amenities',
+        'kind': 'python',
+        'action': 'ensure_amenities',
+        'criterion':
+            "select coalesce((select status in ('ok','skipped') "
+            "                 from public.external_source_status "
+            "                 where source='osm_amenities' and state=$STATE), false)",
+        'criterion_text': "external_source_status['osm_amenities', state] in (ok, skipped)",
+    },
+    {
+        'key': 'ensure_dog_features',
+        'kind': 'python',
+        'action': 'ensure_dog_features',
+        'criterion':
+            "select coalesce((select status in ('ok','skipped') "
+            "                 from public.external_source_status "
+            "                 where source='osm_dog_features' and state=$STATE), false)",
+        'criterion_text': "external_source_status['osm_dog_features', state] in (ok, skipped)",
+    },
+    # precheck moved here from phase #1: now serves as the final sanity
+    # check that all loaders above succeeded. With the ensure_* phases
+    # auto-running missing loaders, precheck is now belt-and-suspenders
+    # rather than a hard gate at the start.
+    {
+        'key': 'precheck',
+        'action': "select count(*)::int from public.assert_state_upstream_loaded($STATE)",
+        'criterion':
+            "select (count(*) >= 4)::boolean from public.external_source_status "
+            "where state = $STATE and source in ('pad_us','osm_landing','osm_amenities','tiger_places') "
+            "  and status in ('ok','skipped')",
+        'criterion_text': 'all 4 required sources status in (ok, skipped) + noaa_stations(global) loaded',
     },
     {
         'key': 'operators',
@@ -476,6 +555,58 @@ def _run_subprocess(cmd: list[str], timeout: int = 14400) -> tuple[int, str, str
     return rc.returncode, rc.stdout, rc.stderr
 
 
+def _ensure_loader(state: str, source: str, script_name: str,
+                    max_age_days: int = 30, timeout: int = 2400) -> int:
+    """Generic upstream-loader gate: skip if external_source_status for
+    (source, state) is 'ok' or 'skipped' and recently loaded; otherwise
+    invoke the bulk loader subprocess. Used by phases ensure_pad_us,
+    ensure_overpass, ensure_amenities, ensure_tiger_places,
+    ensure_dog_features.
+
+    Pre-flight bulk loaders that USED to live in the runbook as manual
+    commands. Now per-state launch is truly single-command.
+    """
+    from datetime import datetime, timezone, timedelta
+    with open_conn() as c, c.cursor() as cur:
+        cur.execute(
+            "select status, last_loaded_at from public.external_source_status "
+            " where source=%s and state=%s",
+            (source, state),
+        )
+        r = cur.fetchone()
+    if r:
+        status, last = r
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+        if status in ('ok', 'skipped') and last and last > cutoff:
+            log(f'    {source} already loaded for {state} ({status}, '
+                f'age <{max_age_days}d); skip')
+            return 0
+    log(f'    invoking scripts/one_off/{script_name} --states {state}')
+    rc, out, err = _run_subprocess(
+        [sys.executable, f'scripts/one_off/{script_name}', '--states', state],
+        timeout=timeout,
+    )
+    if rc != 0:
+        raise RuntimeError(f'{script_name} exit {rc}: {err[-500:]}')
+    return 1
+
+
+def action_ensure_pad_us(state: str) -> int:
+    return _ensure_loader(state, 'pad_us', 'bulk_load_pad_us.py', timeout=2400)
+
+def action_ensure_overpass(state: str) -> int:
+    return _ensure_loader(state, 'osm_landing', 'bulk_load_overpass.py', timeout=1200)
+
+def action_ensure_amenities(state: str) -> int:
+    return _ensure_loader(state, 'osm_amenities', 'bulk_load_amenities.py', timeout=1200)
+
+def action_ensure_tiger_places(state: str) -> int:
+    return _ensure_loader(state, 'tiger_places', 'bulk_load_tiger_places.py', timeout=600)
+
+def action_ensure_dog_features(state: str) -> int:
+    return _ensure_loader(state, 'osm_dog_features', 'bulk_load_dog_features.py', timeout=600)
+
+
 def _chunked_subprocess(script_path: str, items: list, *,
                         flag_name: str = '--fids',
                         chunk_size: int = 30,
@@ -782,6 +913,11 @@ def action_field_population_check(state: str) -> int:
 PYTHON_ACTIONS = {
     'state_policy_seed':       action_state_policy_seed,
     'seasonal_closure_seed':   action_seasonal_closure_seed,
+    'ensure_tiger_places':     action_ensure_tiger_places,
+    'ensure_pad_us':           action_ensure_pad_us,
+    'ensure_overpass':         action_ensure_overpass,
+    'ensure_amenities':        action_ensure_amenities,
+    'ensure_dog_features':     action_ensure_dog_features,
     'operator_llm_extract':    action_operator_llm_extract,
     'operator_merge':          action_operator_merge,
     'bep_refire':              action_bep_refire,

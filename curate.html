@@ -219,6 +219,7 @@
 <!-- App (hidden until logged in) -->
 <header class="bar" style="display:none" id="app-bar">
   <div class="bar-title">Photo curator</div>
+  <select id="sel-state" style="min-width:140px"></select>
   <select id="sel-county"></select>
   <select id="sel-beach"></select>
   <button id="btn-logout" type="button" class="danger" style="margin-left:auto">Logout</button>
@@ -265,9 +266,11 @@ const MATCH_OPTIONS = [
 
 const SS_TOKEN = 'curator_token';
 const SS_USER  = 'curator_username';
+const SS_STATE = 'curator_state';
 let token = sessionStorage.getItem(SS_TOKEN);
 let curatorUser = sessionStorage.getItem(SS_USER) || 'curator';
-let progress = null;        // get_curation_progress() result
+let currentState = sessionStorage.getItem(SS_STATE) || 'CA';
+let progress = null;        // get_curation_progress(state) result
 let currentCounty = null;
 let currentBeach = null;
 let beachData = null;       // { beach, photos, curation_status }
@@ -325,16 +328,48 @@ async function showApp() {
   document.getElementById('app-bar').style.display = '';
   document.getElementById('county-bar').style.display = '';
   document.getElementById('app').style.display = '';
+  await loadStates();
   await loadProgress();
 }
 
-// ─── Load curation progress ─────────────────────────────────────────
+// ─── Load list of states with curate-able photos ────────────────────
+async function loadStates() {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_curation_states`, {
+    method: 'POST',
+    headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
+               'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  const states = (await res.json()) || [];
+  const sel = document.getElementById('sel-state');
+  sel.innerHTML = '';
+  for (const s of states) {
+    const opt = document.createElement('option');
+    opt.value = s.state;
+    opt.textContent = `${s.state} — ${s.beaches_with_photos} beaches · ${s.photos} photos`;
+    sel.appendChild(opt);
+  }
+  // If saved state isn't available, fall back to first
+  if (!states.find(s => s.state === currentState) && states.length) {
+    currentState = states[0].state;
+  }
+  sel.value = currentState;
+  sel.onchange = async () => {
+    currentState = sel.value;
+    sessionStorage.setItem(SS_STATE, currentState);
+    currentCounty = null;
+    currentBeach = null;
+    await loadProgress();
+  };
+}
+
+// ─── Load curation progress for the selected state ─────────────────
 async function loadProgress(opts = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_curation_progress`, {
     method: 'POST',
     headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
                'Content-Type': 'application/json' },
-    body: '{}',
+    body: JSON.stringify({ p_state: currentState }),
   });
   progress = (await res.json()) || [];
   renderCountyDropdown();
@@ -343,6 +378,16 @@ async function loadProgress(opts = {}) {
     // Auto-pick first county that has beaches with photos and isn't done
     const next = progress.find(c => c.with_photos > 0 && !c.is_done) || progress[0];
     if (next) selectCounty(next.county);
+  } else if (!progress.length) {
+    // No counties for this state — clear the UI
+    document.getElementById('sel-county').innerHTML = '';
+    document.getElementById('sel-beach').innerHTML = '';
+    document.getElementById('photo-grid').innerHTML =
+      '<div class="empty">No beaches with photos in this state.</div>';
+    document.getElementById('beach-name').textContent = '—';
+    document.getElementById('beach-sub').textContent = '';
+    document.getElementById('county-name').textContent = '—';
+    document.getElementById('county-count').textContent = '';
   }
 }
 

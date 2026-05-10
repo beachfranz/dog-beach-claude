@@ -45,6 +45,15 @@ import httpx
 import psycopg2, psycopg2.extras
 from dotenv import load_dotenv
 
+# Windows: stdout defaults to cp1252 when piped (e.g. through tee), which
+# can't encode unicode chars like → ≤ used in our log lines. Reconfigure
+# to utf-8 with replace fallback so logging never crashes a phase.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, OSError):
+        pass
+
 HEARTBEAT_INTERVAL_S = 15
 
 ROOT = Path(__file__).resolve().parent.parent

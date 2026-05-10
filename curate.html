@@ -5,8 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Beach photo curator</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   :root {
     --bg: #f8fafc; --card: #fff; --text: #0f2742; --muted: #64748b;
@@ -209,36 +207,6 @@
   .empty {
     text-align: center; padding: 60px 20px; color: var(--muted);
   }
-
-  /* Map (above photo grid) */
-  #curate-map {
-    height: 320px; width: 100%;
-    border-radius: 10px; overflow: hidden;
-    border: 1px solid var(--border); margin-bottom: 16px;
-    background: #1e293b;
-  }
-  /* Custom photo marker — small circle colored by match quality */
-  .pm-dot {
-    width: 18px; height: 18px; border-radius: 50%;
-    border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 10px; font-weight: 700; color: #fff;
-    font-family: monospace; line-height: 1;
-  }
-  .pm-exact          { background: #15803d; }
-  .pm-very_likely    { background: #4ade80; color: #064e2c; }
-  .pm-somewhat_likely{ background: #f59e0b; }
-  .pm-unlikely       { background: #d97706; }
-  .pm-wtf            { background: #b91c1c; }
-  .pm-unknown        { background: #64748b; }
-  /* Beach centroid — bigger star-ish marker */
-  .pm-beach {
-    width: 28px; height: 28px; border-radius: 50%;
-    background: #1d4ed8; border: 3px solid #fff;
-    box-shadow: 0 0 0 2px rgba(29,78,216,0.5);
-    display: flex; align-items: center; justify-content: center;
-    color: #fff; font-size: 14px; font-weight: 700;
-  }
 </style>
 </head>
 <body>
@@ -283,7 +251,6 @@
     <button id="btn-next-pending" type="button">Next pending ›</button>
     <button id="btn-next-beach" type="button">Next beach ›</button>
   </div>
-  <div id="curate-map"></div>
   <div class="photo-grid" id="photo-grid"></div>
   <div class="save-summary" id="save-summary"></div>
   <div style="display:flex; justify-content:center; margin: 18px 0 32px;">
@@ -562,86 +529,11 @@ async function loadBeach(fid) {
   renderBeach();
 }
 
-// ─── Map ─────────────────────────────────────────────────────────────
-let _map = null;
-let _mapLayers = [];
-function ensureMap() {
-  if (_map) return _map;
-  _map = L.map('curate-map', { zoomControl: true, attributionControl: true });
-  // Esri World Imagery — raster aerial/satellite base, free, no key.
-  L.tileLayer(
-    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    { maxZoom: 19, attribution: 'Imagery © Esri, Maxar, Earthstar Geographics' }
-  ).addTo(_map);
-  _map.setView([37.5, -120], 6);
-  return _map;
-}
-
-function renderMap() {
-  const map = ensureMap();
-  // Clear prior markers
-  _mapLayers.forEach(l => map.removeLayer(l));
-  _mapLayers = [];
-
-  const bLat = beachData?.beach?.lat;
-  const bLng = beachData?.beach?.lng;
-  const bounds = [];
-
-  if (bLat != null && bLng != null) {
-    const beachIcon = L.divIcon({
-      className: '', html: '<div class="pm-beach">★</div>',
-      iconSize: [28, 28], iconAnchor: [14, 14],
-    });
-    const m = L.marker([bLat, bLng], { icon: beachIcon, zIndexOffset: 1000 })
-      .bindPopup(`<b>${escHtml(beachData.beach.display_name)}</b><br>fid ${beachData.beach.fid}`)
-      .addTo(map);
-    _mapLayers.push(m);
-    bounds.push([bLat, bLng]);
-  }
-
-  (beachData?.photos || []).forEach((p, i) => {
-    if (p.lat == null || p.lng == null) return;
-    const mq = p.match_quality || p.default_match_quality || 'unknown';
-    const dotIcon = L.divIcon({
-      className: '',
-      html: `<div class="pm-dot pm-${mq}">${i + 1}</div>`,
-      iconSize: [18, 18], iconAnchor: [9, 9],
-    });
-    const m = L.marker([p.lat, p.lng], { icon: dotIcon })
-      .bindPopup(
-        `<b>#${i + 1} (${escHtml(p.source)})</b><br>` +
-        `${escHtml(p.access_point_name || '(no source name)')}<br>` +
-        `match: ${escHtml(mq)} · ${p.distance_m != null ? p.distance_m + 'm' : '?'}<br>` +
-        `<img src="${escHtml(p.thumb_url || p.image_url)}" style="max-width:160px;max-height:120px;margin-top:4px">`
-      )
-      .addTo(map);
-    m.on('click', () => {
-      // Scroll to the corresponding photo card and flash it
-      const card = document.querySelector(`.photo-card[data-id="${p.id}"]`);
-      if (card) {
-        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        card.style.transition = 'box-shadow 0.3s';
-        card.style.boxShadow = '0 0 0 3px var(--accent)';
-        setTimeout(() => { card.style.boxShadow = ''; }, 1200);
-      }
-    });
-    _mapLayers.push(m);
-    bounds.push([p.lat, p.lng]);
-  });
-
-  if (bounds.length > 1) {
-    map.fitBounds(bounds, { padding: [30, 30], maxZoom: 17 });
-  } else if (bounds.length === 1) {
-    map.setView(bounds[0], 16);
-  }
-}
-
 function renderBeach() {
   if (!beachData) return;
   document.getElementById('beach-name').textContent = beachData.beach.display_name;
   document.getElementById('beach-sub').textContent =
     `fid ${beachData.beach.fid} · ${beachData.beach.county_name}, ${beachData.beach.state}`;
-  renderMap();
 
   const grid = document.getElementById('photo-grid');
   if (!beachData.photos.length) {

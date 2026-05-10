@@ -476,23 +476,116 @@ def _run_subprocess(cmd: list[str], timeout: int = 14400) -> tuple[int, str, str
     return rc.returncode, rc.stdout, rc.stderr
 
 
-def action_operator_llm_extract(state: str) -> int:
-    """Invoke extract_operator_dogs_policy.py for state's operator IDs."""
-    ids = _state_operator_ids(state)
-    if not ids:
-        log(f'    no operators for {state}; skip')
+def _chunked_subprocess(script_path: str, items: list, *,
+                        flag_name: str = '--fids',
+                        chunk_size: int = 30,
+                        per_chunk_timeout: int = 600,
+                        extra_args: list | None = None,
+                        parse_fn=None,
+                        retry: int = 1) -> int:
+    """Run a Python script in chunks; one subprocess per chunk.
+
+    Each chunk's subprocess timeout is bounded (default 10 min) instead
+    of hours. Failures retry once with backoff; if still fail, log and
+    continue (don't halt the whole run). Underlying script must be
+    idempotent (e.g. --skip-recent N) so failed chunks self-recover on
+    the next phase run.
+
+    See feedback_chunked_subprocess.md.
+
+    Args:
+      script_path: Python script under repo root
+      items: list of strings/ints to chunk
+      flag_name: CLI flag the script accepts for the chunk's csv list
+      chunk_size: items per subprocess invocation
+      per_chunk_timeout: seconds per subprocess
+      extra_args: list of additional CLI args (e.g. ['--states', 'MA'])
+      parse_fn: callable(stdout) -> int rows; default returns 0
+      retry: how many additional attempts on rc!=0 (default 1)
+
+    Returns total rows summed from parse_fn across successful chunks.
+    """
+    extra_args = list(extra_args or [])
+    if not items:
+        log('    no items; skip')
         return 0
-    log(f'    extracting for {len(ids)} operators (cost ~${len(ids)*0.05:.0f})')
-    rc, out, err = _run_subprocess(
-        [sys.executable, 'scripts/extract_operator_dogs_policy.py', '--ids', ','.join(map(str, ids))]
-    )
-    if rc != 0:
-        raise RuntimeError(f"extractor exit {rc}: {err[-500:]}")
+    total_chunks = (len(items) + chunk_size - 1) // chunk_size
+    log(f'    chunking {len(items)} items → {total_chunks} chunks of ≤{chunk_size} '
+        f'(per-chunk timeout {per_chunk_timeout}s)')
+    total_rows = 0
+    failed_chunks = 0
+    for i in range(0, len(items), chunk_size):
+        chunk = items[i:i + chunk_size]
+        chunk_idx = i // chunk_size + 1
+        chunk_args = extra_args + [flag_name, ','.join(map(str, chunk))]
+        cmd = [sys.executable, script_path] + chunk_args
+        t0 = time.time()
+        attempts = retry + 1
+        rc, out, err = -1, '', ''
+        for attempt in range(1, attempts + 1):
+            try:
+                rc, out, err = _run_subprocess(cmd, timeout=per_chunk_timeout)
+            except subprocess.TimeoutExpired:
+                rc, out, err = -2, '', f'subprocess timeout after {per_chunk_timeout}s'
+            if rc == 0:
+                break
+            if attempt < attempts:
+                log(f'      chunk {chunk_idx} attempt {attempt}/{attempts} '
+                    f'rc={rc}; retry in 30s')
+                time.sleep(30)
+        elapsed = time.time() - t0
+        if rc != 0:
+            failed_chunks += 1
+            log(f'    chunk {chunk_idx}/{total_chunks} FAILED rc={rc} '
+                f'({elapsed:.0f}s): {err[-200:]}')
+            continue
+        rows = parse_fn(out) if parse_fn else 0
+        total_rows += rows
+        log(f'    chunk {chunk_idx}/{total_chunks} ok ({elapsed:.0f}s; '
+            f'rows={rows}; cumulative={total_rows})')
+    if failed_chunks:
+        log(f'    {failed_chunks}/{total_chunks} chunk(s) failed; '
+            f'they will retry on next phase run via --skip-recent self-resume')
+    return total_rows
+
+
+def _parse_op_extract(out: str) -> int:
     m = re.search(r"\{'src_a':[^\}]+\}", out)
     if m:
         d = ast.literal_eval(m.group(0))
         return int(d.get('src_a', 0)) + int(d.get('src_b', 0))
     return 0
+
+
+def _parse_section_ok(out: str) -> int:
+    m = re.search(r'Done\.\s+ok=(\d+)', out)
+    return int(m.group(1)) if m else 0
+
+
+def _parse_descriptions_generated(out: str) -> int:
+    m = re.search(r'generated:\s+(\d+)', out)
+    return int(m.group(1)) if m else 0
+
+
+def _parse_photos_saved(out: str) -> int:
+    m = re.search(r'(\d+)\s+photos saved', out)
+    return int(m.group(1)) if m else 0
+
+
+def action_operator_llm_extract(state: str) -> int:
+    """Invoke extract_operator_dogs_policy.py for state's operator IDs.
+    Chunked into groups of 5 ops (~3min/chunk) to bound subprocess timeout
+    and enable graceful recovery on transient failures."""
+    ids = _state_operator_ids(state)
+    if not ids:
+        log(f'    no operators for {state}; skip')
+        return 0
+    log(f'    extracting for {len(ids)} operators (smart filter; estimated cost ~${len(ids)*0.05:.0f})')
+    return _chunked_subprocess(
+        'scripts/extract_operator_dogs_policy.py', ids,
+        flag_name='--ids', chunk_size=5, per_chunk_timeout=600,
+        parse_fn=_parse_op_extract,
+    )
 
 
 def action_operator_merge(state: str) -> int:
@@ -519,48 +612,48 @@ def action_bep_refire(state: str) -> int:
 
 
 def action_section_extract(state: str) -> int:
-    rc, out, err = _run_subprocess(
-        [sys.executable, 'scripts/extract_beach_section_rules.py', '--states', state],
-        timeout=3600,
-    )
-    if rc != 0:
-        raise RuntimeError(f"section_extract exit {rc}: {err[-500:]}")
-    m = re.search(r'Done\.\s+ok=(\d+)', out)
-    return int(m.group(1)) if m else 0
-
-
-def action_descriptions(state: str) -> int:
-    """Generate descriptions for state's tier-1+2 fids (passes --fids)."""
+    """Per-beach section rules. Chunked into groups of 40 fids (~2-3min
+    each, batched 8 beaches/Haiku call inside the script)."""
     fids = _state_tier12_fids(state)
     if not fids:
         return 0
-    rc, out, err = _run_subprocess(
-        [sys.executable, 'scripts/generate_beach_descriptions.py',
-         '--fids', ','.join(map(str, fids))],
-        timeout=7200,
+    return _chunked_subprocess(
+        'scripts/extract_beach_section_rules.py', fids,
+        flag_name='--fids', chunk_size=40, per_chunk_timeout=600,
+        parse_fn=_parse_section_ok,
     )
-    if rc != 0:
-        raise RuntimeError(f"descriptions exit {rc}: {err[-500:]}")
-    m = re.search(r'generated:\s+(\d+)', out)
-    return int(m.group(1)) if m else 0
+
+
+def action_descriptions(state: str) -> int:
+    """Generate descriptions for state's tier-1+2 fids. Chunked into
+    groups of 30 fids (~5min each)."""
+    fids = _state_tier12_fids(state)
+    if not fids:
+        return 0
+    return _chunked_subprocess(
+        'scripts/generate_beach_descriptions.py', fids,
+        flag_name='--fids', chunk_size=30, per_chunk_timeout=900,
+        parse_fn=_parse_descriptions_generated,
+    )
 
 
 def action_photos_wikimedia(state: str) -> int:
-    """Wikimedia Commons photos for state's tier-1+2 fids.
+    """Wikimedia Commons photos for state's tier-1+2 fids. Chunked into
+    groups of 100 fids (~3min each — Commons API is fast, throttle is
+    politeness rather than rate limiting).
+
     Replaced Mapillary (2026-05-09) — Commons photos are CC-licensed,
     higher quality (real photos vs street-view), keyword-biased, and
     photographer-auto-blocklisted. The Mapillary loader still exists
     at scripts/load_mapillary_photos.py for ad-hoc use."""
-    rc, out, err = _run_subprocess(
-        [sys.executable, 'scripts/load_wikimedia_commons_photos.py',
-         '--states', state],
-        timeout=7200,
+    fids = _state_tier12_fids(state)
+    if not fids:
+        return 0
+    return _chunked_subprocess(
+        'scripts/load_wikimedia_commons_photos.py', fids,
+        flag_name='--fids', chunk_size=100, per_chunk_timeout=600,
+        parse_fn=_parse_photos_saved,
     )
-    if rc != 0:
-        raise RuntimeError(f"wikimedia photos exit {rc}: {err[-500:]}")
-    # Loader output: "Done. N beaches, M photos saved, K no-coverage"
-    m = re.search(r'(\d+)\s+photos saved', out)
-    return int(m.group(1)) if m else 0
 
 
 def action_daily_refresh_fire(state: str) -> int:

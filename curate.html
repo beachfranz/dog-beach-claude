@@ -246,8 +246,10 @@
     </div>
   </div>
   <div class="pending-row">
+    <button id="btn-prev-beach" type="button">‹ Previous beach</button>
     <button id="btn-prev-pending" type="button">‹ Previous pending</button>
     <button id="btn-next-pending" type="button">Next pending ›</button>
+    <button id="btn-next-beach" type="button">Next beach ›</button>
   </div>
   <div class="photo-grid" id="photo-grid"></div>
   <div class="save-summary" id="save-summary"></div>
@@ -460,6 +462,19 @@ function updateProgressLabel() {
 
 document.getElementById('btn-next-pending').onclick = () => jumpPending(+1);
 document.getElementById('btn-prev-pending').onclick = () => jumpPending(-1);
+document.getElementById('btn-next-beach').onclick = () => stepBeach(+1);
+document.getElementById('btn-prev-beach').onclick = () => stepBeach(-1);
+
+function stepBeach(dir) {
+  if (!currentCounty || !currentBeach) return;
+  // Only step among beaches that have photos (zero-photo beaches still
+  // appear in the dropdown but there's nothing to curate there).
+  const beaches = (currentCounty.beaches || []).filter(b => b.photo_count > 0);
+  const idx = beaches.findIndex(b => b.fid === currentBeach);
+  const next = idx + dir;
+  if (next < 0 || next >= beaches.length) return;  // edge of county
+  loadBeach(beaches[next].fid);
+}
 
 function jumpPending(dir) {
   if (!currentCounty || !currentBeach) return;
@@ -487,6 +502,29 @@ async function loadBeach(fid) {
     return;
   }
   beachData = await res.json();
+  // Sort policy:
+  // - If beach has been curated (curation_status.curated_at exists) → drag
+  //   is king: sort by sort_order. Curator's manual arrangement wins.
+  // - Otherwise (fresh beach) → sort L→R by name-match quality so the
+  //   most-likely-relevant photos surface first for review.
+  const MATCH_RANK = { exact: 0, very_likely: 1, somewhat_likely: 2, unlikely: 3, wtf: 4 };
+  const wasCurated = !!(beachData.curation_status && beachData.curation_status.curated_at);
+  (beachData.photos || []).sort((a, b) => {
+    if (wasCurated) {
+      // sort_order primary; match_quality as tiebreaker
+      const so = (a.sort_order ?? 0) - (b.sort_order ?? 0);
+      if (so !== 0) return so;
+      const ra = MATCH_RANK[a.match_quality ?? a.default_match_quality] ?? 5;
+      const rb = MATCH_RANK[b.match_quality ?? b.default_match_quality] ?? 5;
+      return ra - rb;
+    } else {
+      // match_quality primary; sort_order as tiebreaker
+      const ra = MATCH_RANK[a.match_quality ?? a.default_match_quality] ?? 5;
+      const rb = MATCH_RANK[b.match_quality ?? b.default_match_quality] ?? 5;
+      if (ra !== rb) return ra - rb;
+      return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+    }
+  });
   dirtyMap = new Map();
   renderBeach();
 }

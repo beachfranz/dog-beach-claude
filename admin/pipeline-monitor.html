@@ -144,6 +144,33 @@
   .filter-bar button:hover { background: #f1f5f9; }
   .filter-bar button.active { background: #1e40af; color: #fff;
                               border-color: #1e40af; }
+
+  /* Canon orchestrator run grid */
+  .canon-state-row { display: grid;
+                     grid-template-columns: 60px 110px 1fr;
+                     gap: 12px; align-items: center;
+                     padding: 8px 4px; border-bottom: 1px solid #f1f5f9; }
+  .canon-state-row:last-child { border-bottom: none; }
+  .canon-state-code { font-family: 'DM Mono', monospace; font-weight: 700;
+                      font-size: 16px; color: #0f2742; }
+  .canon-state-meta { font-size: 11px; color: #64748b;
+                      font-family: monospace; line-height: 1.4; }
+  .canon-phases { display: flex; flex-wrap: wrap; gap: 3px; }
+  .canon-chip { width: 22px; height: 22px; border-radius: 3px;
+                background: #e2e8f0; cursor: help; position: relative;
+                display: flex; align-items: center; justify-content: center;
+                font-size: 9px; font-weight: 700; color: #fff;
+                font-family: 'DM Mono', monospace; line-height: 1; }
+  .canon-chip.ok          { background: #15803d; }
+  .canon-chip.failed      { background: #ef4444; }
+  .canon-chip.in_progress { background: #38bdf8; animation: pulse 1.5s ease-in-out infinite; }
+  .canon-chip.skipped     { background: #cbd5e1; }
+  .canon-chip.pending     { background: #e2e8f0; color: #94a3b8; }
+  .canon-legend { font-size: 11px; color: #64748b; margin-top: 8px;
+                  display: flex; gap: 14px; align-items: center; }
+  .canon-legend .swatch { display: inline-block; width: 12px; height: 12px;
+                          border-radius: 2px; vertical-align: middle;
+                          margin-right: 4px; }
 </style>
 </head>
 <body>
@@ -156,6 +183,19 @@
 
 <div class="container">
   <div class="col-main">
+    <div class="card">
+      <h2>🚀 Canon orchestrator runs <span id="canon-stamp" style="font-weight:400; color:#64748b; font-size:11px;"></span></h2>
+      <div id="canon-runs"></div>
+      <div class="canon-legend">
+        <span><span class="swatch" style="background:#15803d;"></span>ok</span>
+        <span><span class="swatch" style="background:#38bdf8;"></span>in_progress</span>
+        <span><span class="swatch" style="background:#ef4444;"></span>failed</span>
+        <span><span class="swatch" style="background:#cbd5e1;"></span>skipped</span>
+        <span><span class="swatch" style="background:#e2e8f0;"></span>not run</span>
+        <span style="margin-left:auto;">latest run per state · run_state_pipeline.py</span>
+      </div>
+    </div>
+
     <div class="card">
       <h2>Pipeline overview <span id="overview-stamp" style="font-weight:400; color:#64748b; font-size:11px;"></span></h2>
       <div class="pipeline-bar" id="pipeline-bar"></div>
@@ -226,6 +266,21 @@ const PHASE_LABELS = {
   '06_complete':                 'Complete (consumer-ready)',
 };
 
+// Canonical 31-phase order for run_state_pipeline.py (2026-05-09 canon).
+// Mirror of PHASES list in scripts/run_state_pipeline.py — keep in sync.
+const CANON_PHASE_ORDER = [
+  'chain_integrity_check', 'state_policy_seed', 'seasonal_closure_seed',
+  'ensure_tiger_places', 'ensure_pad_us', 'ensure_overpass',
+  'ensure_amenities', 'ensure_dog_features', 'precheck',
+  'operators', 'arena_seed', 'cluster_group', 'cluster_extras',
+  'promote', 'address_poi', 'address_city', 'name_source',
+  'strip_plus_codes', 'align_scoreable', 'noaa_station_check',
+  'purge_pollution', 'dedup', 'geom_queue',
+  'operator_llm_extract', 'operator_merge', 'bep_refire',
+  'section_extract', 'descriptions', 'photos_wikimedia',
+  'daily_refresh_fire', 'field_population_check',
+];
+
 let allBeaches = [];
 let activeFilter = null;
 
@@ -250,18 +305,89 @@ async function fetchJson(url) {
 }
 
 async function refresh() {
-  const [counts, beaches, activity] = await Promise.all([
+  const [counts, beaches, activity, canonRows] = await Promise.all([
     fetchJson(`${SUPABASE_URL}/rest/v1/beach_pipeline_phase_counts?select=*&order=phase`),
     fetchJson(`${SUPABASE_URL}/rest/v1/beach_pipeline_status?select=*&order=fid`),
     fetchJson(`${SUPABASE_URL}/rest/v1/beach_pipeline_activity_recent?select=*`),
+    fetchJson(`${SUPABASE_URL}/rest/v1/canon_run_status?select=*&order=state_code,started_at.asc`),
   ]);
   allBeaches = beaches;
+  renderCanonRuns(canonRows);
   renderPipelineBar(counts);
   renderPhases(counts);
   renderActivity(activity);
   renderBeaches();
   document.getElementById('stamp').textContent =
     `last refresh ${new Date().toLocaleTimeString()}`;
+}
+
+function renderCanonRuns(rows) {
+  const wrap = document.getElementById('canon-runs');
+  if (!rows.length) {
+    wrap.innerHTML = '<div class="empty" style="color:#94a3b8; font-size:12px; padding:12px;">No canon runs recorded yet.</div>';
+    return;
+  }
+  // Group by state_code
+  const byState = new Map();
+  for (const r of rows) {
+    if (!byState.has(r.state_code)) byState.set(r.state_code, []);
+    byState.get(r.state_code).push(r);
+  }
+  // Sort states: ones with in_progress first, then by most-recent activity
+  const states = [...byState.entries()].sort((a, b) => {
+    const aLive = a[1].some(r => r.status === 'in_progress') ? 1 : 0;
+    const bLive = b[1].some(r => r.status === 'in_progress') ? 1 : 0;
+    if (aLive !== bLive) return bLive - aLive;
+    const aLast = Math.max(...a[1].map(r => new Date(r.started_at || 0).getTime()));
+    const bLast = Math.max(...b[1].map(r => new Date(r.started_at || 0).getTime()));
+    return bLast - aLast;
+  });
+
+  wrap.innerHTML = states.map(([state, phases]) => {
+    const byPhase = new Map(phases.map(p => [p.phase, p]));
+    const ok       = phases.filter(p => p.status === 'ok').length;
+    const failed   = phases.filter(p => p.status === 'failed').length;
+    const running  = phases.filter(p => p.status === 'in_progress').length;
+    const skipped  = phases.filter(p => p.status === 'skipped').length;
+    const runId    = phases[0]?.run_id;
+    const liveDot  = running ? '<span class="live-dot" style="margin-right:4px;"></span>' : '';
+
+    const chips = CANON_PHASE_ORDER.map((phase, idx) => {
+      const p = byPhase.get(phase);
+      const status = p?.status || 'pending';
+      const dur = p?.duration_s ? formatDuration(p.duration_s) : '';
+      const rows = (p?.rows_affected != null) ? `, ${p.rows_affected} rows` : '';
+      const errMsg = p?.error_message ? `\nERR: ${p.error_message.slice(0, 200)}` : '';
+      const tooltip = `${idx + 1}. ${phase}\nstatus: ${status}${dur ? '\ndur: ' + dur : ''}${rows}${errMsg}`;
+      return `<div class="canon-chip ${status}" title="${escAttr(tooltip)}">${idx + 1}</div>`;
+    }).join('');
+
+    return `<div class="canon-state-row">
+      <div class="canon-state-code">${liveDot}${state}</div>
+      <div class="canon-state-meta">
+        run #${runId}<br>
+        ${ok} ok${failed ? ` · <span style="color:#ef4444;">${failed} fail</span>` : ''}${running ? ` · <span style="color:#38bdf8;">${running} live</span>` : ''}${skipped ? ` · ${skipped} skip` : ''}
+      </div>
+      <div class="canon-phases">${chips}</div>
+    </div>`;
+  }).join('');
+
+  // Stamp: total runs + any live
+  const liveStates = states.filter(([_, ph]) => ph.some(p => p.status === 'in_progress')).map(s => s[0]);
+  document.getElementById('canon-stamp').textContent =
+    `· ${states.length} state${states.length === 1 ? '' : 's'}` +
+    (liveStates.length ? ` · live: ${liveStates.join(', ')}` : '');
+}
+
+function formatDuration(s) {
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s/60)}m${s%60 ? ` ${s%60}s` : ''}`;
+  return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`;
+}
+
+function escAttr(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 // Track previous counts so we can show delta chips

@@ -395,13 +395,14 @@ function renderCountyDropdown() {
   const sel = document.getElementById('sel-county');
   sel.innerHTML = '';
   for (const c of progress) {
-    if (!c.with_photos) continue;  // skip counties with no photos
     const opt = document.createElement('option');
     let mark = '';
     if (c.is_done) mark = ' ✓';
     else if (c.curated > 0) mark = ' •';   // in-progress
+    if (!c.with_photos) mark = ' (no photos)';
     opt.value = c.county;
-    opt.textContent = `${c.county} (${c.curated}/${c.with_photos})${mark}`;
+    opt.textContent = `${c.county} (${c.curated}/${c.with_photos} of ${c.total})${mark}`;
+    if (!c.with_photos) opt.style.color = '#94a3b8';
     sel.appendChild(opt);
   }
   sel.onchange = () => selectCounty(sel.value);
@@ -422,12 +423,15 @@ function selectCounty(name) {
 function renderBeachDropdown() {
   const sel = document.getElementById('sel-beach');
   sel.innerHTML = '';
-  const beaches = (currentCounty?.beaches || []).filter(b => b.photo_count > 0);
-  for (const b of beaches) {
+  // Show ALL beaches in the county (not just photo>0). Zero-photo beaches
+  // are greyed; the curator can still navigate to them and see the
+  // empty-state. Franz, 2026-05-09: "i ONLY SEE A FEW BEACHES IN CURATE".
+  for (const b of (currentCounty?.beaches || [])) {
     const opt = document.createElement('option');
     const done = b.is_curated ? ' ✓' : '';
     opt.value = String(b.fid);
     opt.textContent = `${b.name} (${b.photo_count})${done}`;
+    if (!b.photo_count) opt.style.color = '#94a3b8';
     sel.appendChild(opt);
   }
   sel.onchange = () => loadBeach(parseInt(sel.value, 10));

@@ -758,6 +758,24 @@ async function loadQueue(name, preferFid) {
     url = 'beaches_gold?select=fid,name,display_name_override,county_name'
         + '&state=eq.CA&is_active=eq.true&is_scoreable=eq.true'
         + '&order=county_name.asc,name.asc&limit=2000';
+  } else if (name === 'review_military') {
+    // scoreability_review_queue: beaches flagged by the military-base
+    // detector (etc) that need a curator decision. Pull fids, then
+    // join to beaches_gold for the standard queue shape.
+    try {
+      const flags = await restGet('scoreability_review_queue?select=fid&order=flagged_at.desc.nullslast&limit=500');
+      const fids = flags.map(f => f.fid);
+      if (fids.length === 0) {
+        showToast('Review queue is empty', false);
+        return;
+      }
+      url = 'beaches_gold?select=fid,name,display_name_override,county_name'
+          + `&fid=in.(${fids.join(',')})`
+          + '&order=county_name.asc,name.asc';
+    } catch (err) {
+      showToast(`Queue load failed: ${err.message}`, true);
+      return;
+    }
   } else {
     showToast(`Unknown queue: ${name}`, true);
     return;

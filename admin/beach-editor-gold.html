@@ -198,6 +198,13 @@
     <span id="beach-meta" class="meta"></span>
   </div>
 
+  <div id="queue-bar" class="top" style="display:none; border-top: 1px solid var(--border);">
+    <button id="q-prev" type="button" title="Previous in queue">‹ Prev</button>
+    <select id="q-select" style="min-width:380px;"></select>
+    <button id="q-next" type="button" title="Next in queue">Next ›</button>
+    <span id="q-meta" class="meta"></span>
+  </div>
+
   <div id="form-container" style="display:none;">
     <div id="gold-map"></div>
     <div id="gold-map-hint">
@@ -712,7 +719,7 @@ function renderConsensus(rows) {
 }
 
 // Wire input listeners after DOM ready
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   for (const el of document.querySelectorAll('[data-table]')) {
     el.addEventListener('input', markDirtyClasses);
     el.addEventListener('change', markDirtyClasses);
@@ -720,11 +727,83 @@ document.addEventListener('DOMContentLoaded', () => {
   // Allow ?fid= URL param to auto-load
   const params = new URLSearchParams(location.search);
   const fid = params.get('fid');
-  if (fid) {
+  const queue = params.get('queue');
+  if (queue) {
+    await loadQueue(queue, fid ? parseInt(fid, 10) : null);
+  } else if (fid) {
     document.getElementById('fid-input').value = fid;
     loadBeach();
   }
 });
+
+// ─── Queue: step through a defined set of beaches ────────────────────
+// Supports ?queue=<name>. Currently defined:
+//   ca_t1t2  → CA, is_active, is_scoreable (= Tier 1 + Tier 2). Ordered
+//              by county_name, then name.
+let _queue = [];     // [{fid, name, county_name}]
+let _queueIdx = -1;
+let _queueName = null;
+
+async function loadQueue(name, preferFid) {
+  _queueName = name;
+  let url = null;
+  if (name === 'ca_t1t2') {
+    url = 'beaches_gold?select=fid,name,display_name_override,county_name'
+        + '&state=eq.CA&is_active=eq.true&is_scoreable=eq.true'
+        + '&order=county_name.asc,name.asc&limit=2000';
+  } else {
+    showToast(`Unknown queue: ${name}`, true);
+    return;
+  }
+  try {
+    const rows = await restGet(url);
+    _queue = rows;
+  } catch (err) {
+    showToast(`Queue load failed: ${err.message}`, true);
+    return;
+  }
+
+  // Build dropdown
+  const sel = document.getElementById('q-select');
+  sel.innerHTML = '';
+  _queue.forEach((r, i) => {
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    const dn = r.display_name_override || r.name || '(unnamed)';
+    opt.textContent = `${i + 1}. ${dn} — ${r.county_name || '?'} (fid ${r.fid})`;
+    sel.appendChild(opt);
+  });
+  sel.onchange = () => jumpQueue(parseInt(sel.value, 10));
+
+  document.getElementById('q-prev').onclick = () => jumpQueue(_queueIdx - 1);
+  document.getElementById('q-next').onclick = () => jumpQueue(_queueIdx + 1);
+  document.getElementById('queue-bar').style.display = 'flex';
+
+  // Land on preferFid if it's in the queue, else first entry
+  let startIdx = 0;
+  if (preferFid) {
+    const i = _queue.findIndex(r => r.fid === preferFid);
+    if (i >= 0) startIdx = i;
+  }
+  jumpQueue(startIdx);
+}
+
+function jumpQueue(idx) {
+  if (idx < 0 || idx >= _queue.length) return;
+  _queueIdx = idx;
+  const row = _queue[idx];
+  document.getElementById('q-select').value = String(idx);
+  document.getElementById('q-meta').textContent =
+    `${idx + 1}/${_queue.length} · queue=${_queueName}`;
+  document.getElementById('q-prev').disabled = idx === 0;
+  document.getElementById('q-next').disabled = idx === _queue.length - 1;
+  // Push fid into URL so a refresh stays on this beach (and keeps the queue)
+  const params = new URLSearchParams(location.search);
+  params.set('fid', String(row.fid));
+  history.replaceState(null, '', `?${params.toString()}`);
+  document.getElementById('fid-input').value = String(row.fid);
+  loadBeach();
+}
 </script>
 </body>
 </html>

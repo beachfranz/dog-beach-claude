@@ -519,15 +519,16 @@ function render(data, beachFid) {
       <button class="copy-btn" type="button" data-copy="${escHtml(coordStr)}">Copy</button>`;
   }
 
-  // Main column: description, hero carousel (where map used to be),
-  // hours, amenities, zone rules, details, links
+  // Main column: hero carousel, hours, amenities, zone rules,
+  // details (now sourced from beach_descriptions.description), links.
+  // The description used to appear at top via buildDescriptionSection;
+  // moved into the Details slot 2026-05-10 per Franz.
   const sections = [];
-  sections.push(buildDescriptionSection(data.description));
   sections.push(buildHeroCarousel(data.photos));
   sections.push(buildHoursSection(beach, amenities));
   sections.push(buildAmenitiesSection(amenities));
   sections.push(buildZoneRulesSection(dog_policy, beach.display_name, _currentLocalHour(beach.timezone)));
-  sections.push(buildDetailsSection(dog_policy));
+  sections.push(buildDetailsSection(data.description));
   sections.push(buildLinksSection(beach, beachFid));
   document.getElementById('main-content').innerHTML = sections.filter(Boolean).join('');
 
@@ -782,8 +783,12 @@ function buildZoneRulesSection(dogPolicy, beachName, currentLocalHour) {
   </section>`;
 }
 
-function buildDetailsSection(dogPolicy) {
-  const text = dogPolicy?.zone_rules?.global_notes;
+function buildDetailsSection(description) {
+  // Bottom-of-page Details card. Source swapped from
+  // dog_policy.zone_rules.global_notes → beach_descriptions.description
+  // (LLM-generated, dog-owner-focused, grounded in beach_amenities +
+  // park_url source pages) on 2026-05-10.
+  const text = description?.text;
   if (!text) return '';
   return `<section class="card">
     <h2>Details</h2>

@@ -597,13 +597,20 @@ function buildSidebarMap(beach) {
 function buildHoursSection(beach, amenities) {
   const hoursText = amenities?.hours_text;
   const open = beach.open_time, close = beach.close_time;
-  if (!hoursText && !open && !close) return '';
+  // beaches_gold.open_time/close_time is 05:00–22:00 for 1,868 of 1,873
+  // scoreable beaches — a universal default seed, not real beach hours.
+  // Treat that exact pair as "no data" and rely on Posted hours_text
+  // instead. Any non-default pair (or pair where one side is set
+  // distinctively) renders as before.
+  const isDefault = open === '05:00' && close === '22:00';
+  const showStructured = (open || close) && !isDefault && !hoursText;
+  if (!hoursText && !showStructured) return '';
   const rows = [];
   if (hoursText) rows.push(`<dt>Posted</dt><dd>${escHtml(hoursText)}</dd>`);
-  if (open || close) {
+  if (showStructured) {
     const range = (open && close) ? `${escHtml(open)} – ${escHtml(close)}`
                 : (open ? `Opens ${escHtml(open)}` : `Closes ${escHtml(close)}`);
-    rows.push(`<dt>Today</dt><dd>${range}</dd>`);
+    rows.push(`<dt>Gate hours</dt><dd>${range}</dd>`);
   }
   return `<section class="card">
     <h2>Hours</h2>

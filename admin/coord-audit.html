@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coord audit — Dog Beach Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --bg: #f8fafc; --card: #fff; --text: #0f2742; --muted: #64748b;
+    --border: #e2e8f0; --accent: #1d4ed8; --green: #15803d; --red: #b91c1c;
+    --amber: #b45309; --theirs: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'DM Sans', system-ui, sans-serif;
+         background: var(--bg); color: var(--text); }
+  header.bar {
+    padding: 12px 16px; background: #0f2742; color: #fff;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    position: sticky; top: 0; z-index: 100;
+  }
+  .bar-title { font-weight: 700; font-size: 15px; }
+  .bar select, .bar input {
+    font-family: inherit; font-size: 13px; padding: 6px 10px;
+    border-radius: 6px; border: 1px solid #1e3a5f;
+    background: #1e293b; color: #fff;
+  }
+  .bar select { min-width: 380px; }
+  .bar .progress { font-size: 12px; opacity: 0.8; }
+  .bar button {
+    font-family: inherit; font-size: 13px; padding: 6px 12px;
+    border-radius: 6px; border: 0; background: var(--accent); color: #fff;
+    cursor: pointer; font-weight: 600;
+  }
+  .bar button[disabled] { opacity: 0.4; cursor: not-allowed; }
+  .bar button.danger { background: var(--red); }
+  .bar button.ghost { background: transparent; border: 1px solid #475569; }
+
+  #login {
+    max-width: 360px; margin: 80px auto; padding: 24px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  #login h1 { margin: 0 0 16px; font-size: 18px; }
+  #login label { display: block; font-size: 12px; font-weight: 600;
+                 color: var(--muted); margin: 12px 0 4px; }
+  #login input { width: 100%; padding: 8px 10px; border: 1px solid var(--border);
+                 border-radius: 6px; font-family: inherit; font-size: 14px; }
+  #login button { margin-top: 16px; width: 100%; padding: 10px;
+                  background: var(--accent); color: white; border: 0;
+                  border-radius: 6px; font-weight: 600; cursor: pointer; }
+  #login .err { color: var(--red); font-size: 13px; margin-top: 12px; min-height: 18px; }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  .header-row { margin-bottom: 12px; }
+  .beach-name {
+    font-size: 22px; font-weight: 700; margin: 0;
+    cursor: pointer; transition: color 0.15s;
+  }
+  .beach-name:hover { color: var(--accent); text-decoration: underline; }
+  .beach-name::after {
+    content: ' ↗'; font-size: 14px; color: var(--muted); font-weight: 400;
+  }
+  .beach-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+
+  .meta-row {
+    display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0 10px;
+    font-size: 12px;
+  }
+  .chip {
+    display: inline-block; padding: 4px 10px; border-radius: 999px;
+    background: var(--card); border: 1px solid var(--border);
+    font-family: 'DM Mono', monospace;
+  }
+  .chip.div { background: #fef3c7; border-color: #f59e0b; font-weight: 700; }
+  .chip.tier-1_off-leash { background: #1a3a2a; color: #7fd99c; border-color: #15803d; }
+  .chip.tier-2_on-leash { background: #1f2d4a; color: #7fb0d9; border-color: #1d4ed8; }
+  .chip.tier-3_limited_access { background: #fef3c7; }
+  .chip.tier-4_no_dogs { background: #fee2e2; color: var(--red); }
+  .chip.bad { background: #fee; border-color: var(--red); color: var(--red); }
+  .chip.good { background: #ecfdf5; border-color: var(--green); color: var(--green); }
+
+  #audit-map {
+    height: 480px; width: 100%; border-radius: 10px; overflow: hidden;
+    border: 1px solid var(--border); background: #1e293b;
+  }
+  .legend {
+    margin-top: 8px; font-size: 12px; color: var(--muted);
+    display: flex; gap: 18px; flex-wrap: wrap;
+  }
+  .legend .swatch { display: inline-block; width: 14px; height: 14px;
+                    border-radius: 50%; vertical-align: middle;
+                    margin-right: 6px; border: 2px solid #fff;
+                    box-shadow: 0 0 0 1px #475569; }
+  .leaflet-tooltip.coord-label {
+    background: rgba(15,39,66,0.92); color: #fff;
+    border: none; border-radius: 4px; box-shadow: none;
+    font-family: 'DM Mono', monospace; font-weight: 700;
+    font-size: 11px; padding: 1px 6px; line-height: 1.1;
+  }
+  .leaflet-tooltip.coord-label:before { display: none; }
+
+  .actions {
+    display: flex; gap: 10px; align-items: center;
+    margin: 18px 0 32px; justify-content: center;
+  }
+  .actions button {
+    font-family: inherit; font-size: 14px; padding: 10px 18px;
+    border-radius: 6px; border: 1px solid var(--border);
+    background: var(--card); cursor: pointer;
+  }
+  .actions button.save {
+    background: var(--green); color: white; border: 0; font-weight: 700;
+    padding: 12px 24px; font-size: 15px;
+  }
+  .actions button.adopt {
+    background: var(--theirs); color: white; border: 0; font-weight: 700;
+  }
+  .actions button.skip { background: #f1f5f9; }
+  .actions button[disabled] { opacity: 0.4; cursor: not-allowed; }
+  .summary {
+    font-size: 13px; color: var(--muted); text-align: center;
+    margin-top: 6px; min-height: 18px;
+  }
+  .summary.dirty { color: var(--amber); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <h1>Coord audit</h1>
+  <label for="u">Username</label><input id="u" autocomplete="username">
+  <label for="p">Password</label><input id="p" type="password" autocomplete="current-password">
+  <button id="login-btn" type="button">Sign in</button>
+  <div class="err" id="login-err"></div>
+</div>
+
+<header class="bar" style="display:none" id="app-bar">
+  <div class="bar-title">Coord audit (DogTrekker)</div>
+  <button id="btn-prev" type="button" class="ghost">‹ Prev</button>
+  <select id="sel-fid"></select>
+  <button id="btn-next" type="button" class="ghost">Next ›</button>
+  <span class="progress" id="progress">—</span>
+  <button id="btn-logout" type="button" class="danger" style="margin-left:auto">Logout</button>
+</header>
+
+<main id="app" style="display:none">
+  <div class="header-row">
+    <h2 class="beach-name" id="beach-name">—</h2>
+    <div class="beach-sub" id="beach-sub"></div>
+  </div>
+  <div class="meta-row" id="meta-row"></div>
+  <div id="audit-map"></div>
+  <div class="legend">
+    <span><span class="swatch" style="background:var(--accent)"></span>Ours (draggable)</span>
+    <span><span class="swatch" style="background:var(--theirs)"></span>Theirs (DogTrekker, reference)</span>
+    <span>Drag the blue marker to set the new coord. Save writes lat/lon to beaches_gold.</span>
+  </div>
+  <div class="actions">
+    <button id="btn-skip" type="button" class="skip" title="Leave our coord unchanged, advance to next">Skip</button>
+    <button id="btn-adopt" type="button" class="adopt" title="Move our marker to theirs">Adopt theirs</button>
+    <button id="btn-save" type="button" class="save" disabled>Save and Next →</button>
+  </div>
+  <div class="summary" id="summary"></div>
+</main>
+
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVobHpid3Ryc3hhYXVrdXJla2F1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU2OTc0MDYsImV4cCI6MjA5MTI3MzQwNn0.BKGWJWwX99a39vzvpzFXduBn0vwHykKYliGlB2Ov0UU';
+
+const SS_TOKEN = 'curator_token';
+let token = sessionStorage.getItem(SS_TOKEN);
+let queue = [];     // rows from coord_audit_pairs
+let idx = -1;
+let working = null; // { fid, our_lat_orig, our_lon_orig, our_lat, our_lon, their_lat, their_lng, ...row }
+
+const $ = id => document.getElementById(id);
+
+function escHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ─── Login ─────────────────────────────────────────────────────────────
+$('login-btn').onclick = login;
+$('p').addEventListener('keydown', e => { if (e.key==='Enter') login(); });
+async function login() {
+  $('login-err').textContent = '';
+  const u = $('u').value.trim(); const p = $('p').value;
+  if (!u || !p) { $('login-err').textContent = 'Both fields required.'; return; }
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/verify-curator-login`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY,
+                 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: u, password: p }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(()=>({error:'login failed'}));
+      $('login-err').textContent = j.error || `HTTP ${res.status}`; return;
+    }
+    const { token: t } = await res.json();
+    token = t;
+    sessionStorage.setItem(SS_TOKEN, t);
+    showApp();
+  } catch (e) { $('login-err').textContent = String(e); }
+}
+$('btn-logout').onclick = () => {
+  sessionStorage.removeItem(SS_TOKEN); token = null;
+  $('login').style.display = ''; $('app').style.display = 'none'; $('app-bar').style.display = 'none';
+};
+if (token) showApp();
+
+async function showApp() {
+  $('login').style.display = 'none';
+  $('app-bar').style.display = '';
+  $('app').style.display = '';
+  await loadQueue();
+}
+
+// ─── Queue ─────────────────────────────────────────────────────────────
+async function loadQueue() {
+  const url = `${SUPABASE_URL}/rest/v1/coord_audit_pairs?select=*&order=divergence_m.desc&limit=500`;
+  const res = await fetch(url, {
+    headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
+  });
+  if (!res.ok) { alert('Queue load failed: ' + res.status); return; }
+  queue = await res.json();
+  const sel = $('sel-fid'); sel.innerHTML = '';
+  queue.forEach((r, i) => {
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    const flags = [];
+    if (!r.is_active) flags.push('inactive');
+    if (r.tier) flags.push(r.tier);
+    opt.textContent = `${i+1}. ${r.beach_name} — ${r.county_name} · ${r.divergence_m}m · ${flags.join(', ')}`;
+    sel.appendChild(opt);
+  });
+  sel.onchange = () => jump(parseInt(sel.value, 10));
+  $('btn-prev').onclick = () => jump(idx - 1);
+  $('btn-next').onclick = () => jump(idx + 1);
+  // Land on URL-hash fid if present
+  const hash = (location.hash || '').match(/#fid=(\d+)/);
+  let start = 0;
+  if (hash) {
+    const wantFid = parseInt(hash[1], 10);
+    const i = queue.findIndex(r => r.fid === wantFid);
+    if (i >= 0) start = i;
+  }
+  jump(start);
+}
+
+function jump(i) {
+  if (i < 0 || i >= queue.length) return;
+  idx = i;
+  working = JSON.parse(JSON.stringify(queue[i]));
+  working.our_lat_orig = working.our_lat;
+  working.our_lon_orig = working.our_lon;
+  $('sel-fid').value = String(i);
+  $('progress').textContent = `${i+1}/${queue.length}`;
+  $('btn-prev').disabled = (i === 0);
+  $('btn-next').disabled = (i === queue.length - 1);
+  history.replaceState(null, '', `#fid=${working.fid}`);
+  render();
+}
+
+// ─── Map ───────────────────────────────────────────────────────────────
+let _map = null, _ourMarker = null, _theirMarker = null, _line = null;
+function ensureMap() {
+  if (_map) return _map;
+  _map = L.map('audit-map');
+  L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+    maxZoom: 20,
+    attribution: '&copy; OSM France contributors',
+    subdomains: 'abc',
+  }).addTo(_map);
+  return _map;
+}
+
+function render() {
+  if (!working) return;
+  const w = working;
+  const nameEl = $('beach-name');
+  nameEl.textContent = w.beach_name;
+  nameEl.title = `Open in beach-editor-gold (fid ${w.fid})`;
+  nameEl.onclick = () => {
+    const win = window.open(`beach-editor-gold.html?fid=${w.fid}`, 'beach-editor-gold');
+    if (win) win.focus();
+  };
+  $('beach-sub').textContent = `fid ${w.fid} · ${w.county_name}, ${w.state}`;
+
+  // Meta chips
+  const chips = [];
+  chips.push(`<span class="chip div">${w.divergence_m} m apart</span>`);
+  if (w.tier) chips.push(`<span class="chip tier-${w.tier}">${w.tier}</span>`);
+  chips.push(`<span class="chip ${w.is_active ? 'good' : 'bad'}">${w.is_active ? 'active' : 'INACTIVE'}</span>`);
+  chips.push(`<span class="chip ${w.is_scoreable ? 'good' : ''}">${w.is_scoreable ? 'scoreable' : 'not-scoreable'}</span>`);
+  if (w.their_url) chips.push(`<a class="chip" href="${escHtml(w.their_url)}" target="_blank" rel="noopener">DogTrekker page ↗</a>`);
+  $('meta-row').innerHTML = chips.join('');
+
+  // Map markers
+  const map = ensureMap();
+  if (_ourMarker) { map.removeLayer(_ourMarker); _ourMarker = null; }
+  if (_theirMarker) { map.removeLayer(_theirMarker); _theirMarker = null; }
+  if (_line) { map.removeLayer(_line); _line = null; }
+
+  const ourLL = [w.our_lat, w.our_lon];
+  const theirLL = [w.their_lat, w.their_lng];
+
+  _theirMarker = L.circleMarker(theirLL, {
+    radius: 9, fillColor: 'var(--theirs)', color: '#b91c1c',
+    fillOpacity: 0.95, weight: 3,
+    interactive: true,
+  }).addTo(map);
+  _theirMarker.bindTooltip('Theirs', {
+    permanent: true, direction: 'top', offset: [0, -10],
+    className: 'coord-label',
+  });
+
+  _ourMarker = L.marker(ourLL, { draggable: true }).addTo(map);
+  _ourMarker.bindTooltip('Ours', {
+    permanent: true, direction: 'top', offset: [0, -32],
+    className: 'coord-label',
+  });
+  _ourMarker.on('drag dragend', (e) => {
+    const p = e.target.getLatLng();
+    working.our_lat = p.lat; working.our_lon = p.lng;
+    updateLine();
+    updateSaveState();
+  });
+
+  updateLine();
+  updateSaveState();
+  map.fitBounds([ourLL, theirLL], { padding: [40, 40], maxZoom: 18 });
+  setTimeout(() => map.invalidateSize(), 50);
+}
+
+function updateLine() {
+  const map = ensureMap();
+  if (_line) { map.removeLayer(_line); _line = null; }
+  if (!working) return;
+  _line = L.polyline(
+    [[working.our_lat, working.our_lon], [working.their_lat, working.their_lng]],
+    { color: '#94a3b8', weight: 1, dashArray: '4 4', interactive: false }
+  ).addTo(map);
+}
+
+function updateSaveState() {
+  const dirty = working && (working.our_lat !== working.our_lat_orig ||
+                            working.our_lon !== working.our_lon_orig);
+  $('btn-save').disabled = !dirty;
+  const sum = $('summary');
+  if (dirty) {
+    const dlat = (working.our_lat - working.our_lat_orig).toFixed(6);
+    const dlng = (working.our_lon - working.our_lon_orig).toFixed(6);
+    sum.textContent = `Ours moved: Δlat ${dlat}, Δlng ${dlng}. New coord (${working.our_lat.toFixed(6)}, ${working.our_lon.toFixed(6)}).`;
+    sum.classList.add('dirty');
+  } else {
+    sum.textContent = 'Drag the blue marker to set a new coord, or click "Adopt theirs" to copy DogTrekker\'s.';
+    sum.classList.remove('dirty');
+  }
+}
+
+// ─── Actions ───────────────────────────────────────────────────────────
+$('btn-adopt').onclick = () => {
+  if (!working) return;
+  working.our_lat = working.their_lat;
+  working.our_lon = working.their_lng;
+  _ourMarker.setLatLng([working.our_lat, working.our_lon]);
+  updateLine();
+  updateSaveState();
+};
+
+$('btn-skip').onclick = () => jump(idx + 1);
+
+$('btn-save').onclick = async () => {
+  if (!working) return;
+  const dirty = working.our_lat !== working.our_lat_orig ||
+                working.our_lon !== working.our_lon_orig;
+  if (!dirty) return;
+  $('btn-save').disabled = true;
+  $('summary').textContent = 'Saving…';
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-update-beaches-gold`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY,
+        'Content-Type': 'application/json', 'x-admin-secret': token,
+      },
+      body: JSON.stringify({
+        fid: working.fid,
+        fields: { lat: working.our_lat, lon: working.our_lon },
+      }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      $('summary').textContent = `Save failed: ${j.error || 'HTTP ' + res.status}`;
+      $('btn-save').disabled = false;
+      return;
+    }
+    // Update local cache so re-loading the same fid shows the new coord
+    queue[idx].our_lat = working.our_lat;
+    queue[idx].our_lon = working.our_lon;
+    jump(idx + 1);
+  } catch (e) {
+    $('summary').textContent = `Save error: ${e.message}`;
+    $('btn-save').disabled = false;
+  }
+};
+</script>
+</body>
+</html>

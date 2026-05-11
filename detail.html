@@ -699,6 +699,25 @@
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+
+      // Parallel fetch: beach_descriptions.description (LLM-generated
+      // dog-focused prose). When present, replaces the Details card
+      // content (which used to read zone_rules.global_notes).
+      const fidForDesc = data?.beach?.fid ?? arenaGroupId;
+      if (fidForDesc) {
+        try {
+          const dr = await fetch(
+            `${SUPABASE_URL}/rest/v1/beach_descriptions`
+            + `?select=description&arena_group_id=eq.${fidForDesc}&limit=1`,
+            { headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } }
+          );
+          if (dr.ok) {
+            const rows = await dr.json();
+            data.description = rows[0]?.description ?? null;
+          }
+        } catch (_) { /* non-fatal: details card just won't render */ }
+      }
+
       render(data);
     } catch (err) {
       showError(err.message);
@@ -706,7 +725,7 @@
   }
 
   // ── Render ────────────────────────────────────────────────────────
-  function render({ beach, day, hours, metadata, zone_rules, dog_policy, alternatives }) {
+  function render({ beach, day, hours, metadata, zone_rules, dog_policy, alternatives, description }) {
     // Header
     const dateObj  = new Date(date + 'T12:00:00');
     const dayName  = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
@@ -984,8 +1003,9 @@
       ${narrativeHtml}
     `);
 
-    // 5. Details card — global_notes narrative (only when set)
-    appendHtml(buildDetailsCardHtml(zone_rules));
+    // 5. Details card — LLM-generated beach description (only when set).
+    // Replaces the prior zone_rules.global_notes content.
+    appendHtml(buildDetailsCardHtml(description));
 
     // Now that #scout-blurb is in the DOM, kick off the async loader.
     loadScoutBlurb(beach.location_id, date, day, hours, dog_policy);
@@ -1548,12 +1568,13 @@
     return cards.join('');
   }
 
-  // Bottom-of-page narrative card. Carries the LLM-generated
-  // zone_rules.global_notes prose (operator + ordinance + sibling
-  // context). Hidden when the field is empty.
-  function buildDetailsCardHtml(zoneRules) {
-    if (!zoneRules || typeof zoneRules !== 'object') return '';
-    const text = (zoneRules.global_notes || '').trim();
+  // Bottom-of-page narrative card. Carries the LLM-generated beach
+  // description from beach_descriptions.description (warm,
+  // activity-led, dog-owner-focused; written by
+  // scripts/generate_beach_descriptions.py). Hidden when the field is
+  // empty. Replaced zone_rules.global_notes 2026-05-10.
+  function buildDetailsCardHtml(description) {
+    const text = (description || '').trim();
     if (!text) return '';
     return `<div class="details-card">
               <div class="details-header">Details</div>

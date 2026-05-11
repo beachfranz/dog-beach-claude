@@ -63,7 +63,7 @@ REQUIRED:
    **CRITICAL scope guard:** the source page may describe a CONTAINING area (a park, preserve, regional area) rather than THIS specific beach. Check whether the page is about THIS beach by name (`name` in inputs). If the page's content is clearly about a containing area, use it ONLY for brief geographic context ("inside [Park Name]" / "down in the [Park Name] area"). DO NOT attribute size, length, mile counts, acreage, or named features of the larger area to this specific beach.
    If source content contradicts `zones` (the structured dog policy), TRUST `zones` for dog rules — the source page may be outdated.
 4. Time-windows / seasonal restrictions: be concrete and direct. "Dogs gotta be off the sand 9-6 in summer" beats "Dogs are prohibited between 9 a.m. and 6 p.m. during peak season".
-5. Mention amenities only if they actually matter for the visit. Group naturally ("restrooms and showers, lifeguard's usually around"). Don't read off the full inventory.
+5. Amenities. **HARD RULE:** mention ONLY items in `amenities.present`. NEVER mention items in `amenities.absent` (those are confirmed-not-there). NEVER add amenities not in either list (those are unknown — Scout doesn't guess). Group naturally ("restrooms and a lifeguard"). Don't read off the full inventory.
 6. Mention parking ONCE in passing when `parking.type` is set ("free lot", "metered street parking, plan ahead", etc). Skip if null.
 7. First-person sometimes ("I bring my pup early", "we like dawn patrol here"), second-person sometimes ("you'll want to plan around the leash hours") — whichever feels natural. Avoid stiff imperative-mood marching ("Walk your dog. Share a picnic. Find parking.").
 
@@ -256,19 +256,17 @@ def build_inputs(fid: int) -> dict | None:
             "type": p_type,
             "cost": "paid" if p_type == "metered" else None,
         }
-    # Compact amenity flags dict (only the trues — keeps prompt lean and
-    # forces the LLM to mention only what's there).
-    amenities = {k: v for k, v in {
-        "has_restrooms":       amen.get("has_restrooms"),
-        "has_showers":         amen.get("has_showers"),
-        "has_lifeguards":      amen.get("has_lifeguards"),
-        "has_drinking_water":  amen.get("has_drinking_water"),
-        "has_disabled_access": amen.get("has_disabled_access"),
-        "has_food":            amen.get("has_food"),
-        "has_fire_pits":       amen.get("has_fire_pits"),
-        "has_picnic_area":     amen.get("has_picnic_area"),
-        "hours_text":          amen.get("hours_text"),
-    }.items() if v}
+    # Amenity flags — split into present / absent / unknown so the LLM
+    # CAN'T hallucinate amenities that the data says are absent. If a
+    # flag is null/unknown, it's omitted from both lists.
+    flag_keys = ['has_restrooms','has_showers','has_lifeguards',
+                 'has_drinking_water','has_disabled_access','has_food',
+                 'has_fire_pits','has_picnic_area']
+    amenities = {
+        'present':  [k.replace('has_','') for k in flag_keys if amen.get(k) is True],
+        'absent':   [k.replace('has_','') for k in flag_keys if amen.get(k) is False],
+        'hours_text': amen.get('hours_text'),
+    }
 
     cpad_unit = None
     if g.get("cpad_unit_id"):

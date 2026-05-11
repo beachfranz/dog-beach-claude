@@ -241,12 +241,11 @@
   }
   .state-icon { font-size: 36px; }
 
-  /* Details narrative (LLM-generated beach description in Scout's voice).
-     Prominence matches the old .beach-description styling so the
-     description carries weight on the page instead of reading as
-     legal-style dim policy notes. */
+  /* Details narrative — structured / curated facts (zone_rules.global_notes).
+     Dimmer than .beach-description so the LLM-generated description at
+     top carries the page; details supplement, don't compete. */
   .details-prose {
-    font-size: 15px; color: var(--text); line-height: 1.6;
+    font-size: 13px; color: var(--text-muted); line-height: 1.55;
     white-space: pre-wrap;
   }
 
@@ -522,16 +521,19 @@ function render(data, beachFid) {
       <button class="copy-btn" type="button" data-copy="${escHtml(coordStr)}">Copy</button>`;
   }
 
-  // Main column: hero carousel, hours, amenities, zone rules,
-  // details (now sourced from beach_descriptions.description), links.
-  // The description used to appear at top via buildDescriptionSection;
-  // moved into the Details slot 2026-05-10 per Franz.
+  // Main column: description (top, prominent), hero carousel, hours,
+  // amenities, zone rules, details, links.
+  // Description = LLM-generated Scout-voice prose.
+  // Details = structured / curated facts (still TBD — currently sourced
+  // from dog_policy.zone_rules.global_notes; hidden when empty).
+  // These are TWO distinct things — Franz, 2026-05-10.
   const sections = [];
+  sections.push(buildDescriptionSection(data.description));
   sections.push(buildHeroCarousel(data.photos));
   sections.push(buildHoursSection(beach, amenities));
   sections.push(buildAmenitiesSection(amenities));
   sections.push(buildZoneRulesSection(dog_policy, beach.display_name, _currentLocalHour(beach.timezone)));
-  sections.push(buildDetailsSection(data.description));
+  sections.push(buildDetailsSection(dog_policy));
   sections.push(buildLinksSection(beach, beachFid));
   document.getElementById('main-content').innerHTML = sections.filter(Boolean).join('');
 
@@ -793,12 +795,13 @@ function buildZoneRulesSection(dogPolicy, beachName, currentLocalHour) {
   </section>`;
 }
 
-function buildDetailsSection(description) {
-  // Bottom-of-page Details card. Source swapped from
-  // dog_policy.zone_rules.global_notes → beach_descriptions.description
-  // (LLM-generated, dog-owner-focused, grounded in beach_amenities +
-  // park_url source pages) on 2026-05-10.
-  const text = description?.text;
+function buildDetailsSection(dogPolicy) {
+  // Bottom-of-page Details card. Structured / curated facts about the
+  // beach. Currently sourced from dog_policy.zone_rules.global_notes
+  // (operator + ordinance + sibling context). Distinct from
+  // .beach-description which carries the LLM-generated Scout-voice
+  // prose at the top of the page.
+  const text = dogPolicy?.zone_rules?.global_notes;
   if (!text) return '';
   return `<section class="card">
     <h2>Details</h2>

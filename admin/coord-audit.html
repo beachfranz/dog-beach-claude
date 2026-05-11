@@ -1,4 +1,15 @@
 <!DOCTYPE html>
+<!--
+  admin/coord-audit.html — Coord divergence curator.
+
+  Queues divergent (our coord vs external source coord) pairs from the
+  coord_audit_pairs view. Curator sees ours (blue, draggable) and theirs
+  (red, reference) on a map; saves write back to beaches_gold.lat/lon
+  via admin-update-beaches-gold.
+
+  Patterns reused from curate.html: JWT anon key, admin-secret in
+  localStorage, Leaflet map, URL-hash persistence, Prev/Save/Skip/Next.
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -11,7 +22,7 @@
   :root {
     --bg: #f8fafc; --card: #fff; --text: #0f2742; --muted: #64748b;
     --border: #e2e8f0; --accent: #1d4ed8; --green: #15803d; --red: #b91c1c;
-    --amber: #b45309; --theirs: #b91c1c;
+    --amber: #b45309;
   }
   * { box-sizing: border-box; }
   body { margin: 0; font-family: 'DM Sans', system-ui, sans-serif;
@@ -22,13 +33,12 @@
     position: sticky; top: 0; z-index: 100;
   }
   .bar-title { font-weight: 700; font-size: 15px; }
-  .bar select, .bar input {
+  .bar select {
     font-family: inherit; font-size: 13px; padding: 6px 10px;
     border-radius: 6px; border: 1px solid #1e3a5f;
-    background: #1e293b; color: #fff;
+    background: #1e293b; color: #fff; min-width: 380px;
   }
-  .bar select { min-width: 380px; }
-  .bar .progress { font-size: 12px; opacity: 0.8; }
+  .bar .progress { font-size: 12px; opacity: 0.7; }
   .bar button {
     font-family: inherit; font-size: 13px; padding: 6px 12px;
     border-radius: 6px; border: 0; background: var(--accent); color: #fff;
@@ -36,22 +46,32 @@
   }
   .bar button[disabled] { opacity: 0.4; cursor: not-allowed; }
   .bar button.danger { background: var(--red); }
-  .bar button.ghost { background: transparent; border: 1px solid #475569; }
+  .bar button.success { background: var(--green); }
+  .bar button.warn { background: var(--amber); }
 
+  /* Login screen */
   #login {
     max-width: 360px; margin: 80px auto; padding: 24px;
     background: var(--card); border: 1px solid var(--border);
     border-radius: 12px;
   }
   #login h1 { margin: 0 0 16px; font-size: 18px; }
-  #login label { display: block; font-size: 12px; font-weight: 600;
-                 color: var(--muted); margin: 12px 0 4px; }
-  #login input { width: 100%; padding: 8px 10px; border: 1px solid var(--border);
-                 border-radius: 6px; font-family: inherit; font-size: 14px; }
-  #login button { margin-top: 16px; width: 100%; padding: 10px;
-                  background: var(--accent); color: white; border: 0;
-                  border-radius: 6px; font-weight: 600; cursor: pointer; }
-  #login .err { color: var(--red); font-size: 13px; margin-top: 12px; min-height: 18px; }
+  #login label {
+    display: block; font-size: 12px; font-weight: 600;
+    color: var(--muted); margin: 12px 0 4px;
+  }
+  #login input {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: 6px; font-family: inherit; font-size: 14px;
+  }
+  #login button {
+    margin-top: 16px; width: 100%; padding: 10px;
+    background: var(--accent); color: white; border: 0;
+    border-radius: 6px; font-weight: 600; cursor: pointer;
+  }
+  #login .err {
+    color: var(--red); font-size: 13px; margin-top: 12px; min-height: 18px;
+  }
 
   main { max-width: 1100px; margin: 0 auto; padding: 16px; }
   .header-row { margin-bottom: 12px; }
@@ -64,85 +84,80 @@
     content: ' ↗'; font-size: 14px; color: var(--muted); font-weight: 400;
   }
   .beach-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .beach-sub .pill {
+    display: inline-block; padding: 1px 8px; border-radius: 999px;
+    font-size: 11px; font-weight: 700; margin-left: 6px;
+    background: rgba(29,78,216,0.1); color: var(--accent);
+  }
+  .beach-sub .pill.warn { background: rgba(180,83,9,0.1); color: var(--amber); }
+  .beach-sub .pill.muted { background: rgba(100,116,139,0.15); color: var(--muted); }
 
-  .meta-row {
-    display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0 10px;
-    font-size: 12px;
-  }
-  .chip {
-    display: inline-block; padding: 4px 10px; border-radius: 999px;
-    background: var(--card); border: 1px solid var(--border);
-    font-family: 'DM Mono', monospace;
-  }
-  .chip.div { background: #fef3c7; border-color: #f59e0b; font-weight: 700; }
-  .chip.tier-1_off-leash { background: #1a3a2a; color: #7fd99c; border-color: #15803d; }
-  .chip.tier-2_on-leash { background: #1f2d4a; color: #7fb0d9; border-color: #1d4ed8; }
-  .chip.tier-3_limited_access { background: #fef3c7; }
-  .chip.tier-4_no_dogs { background: #fee2e2; color: var(--red); }
-  .chip.bad { background: #fee; border-color: var(--red); color: var(--red); }
-  .chip.good { background: #ecfdf5; border-color: var(--green); color: var(--green); }
-
-  #audit-map {
-    height: 480px; width: 100%; border-radius: 10px; overflow: hidden;
-    border: 1px solid var(--border); background: #1e293b;
-  }
+  #coord-map { height: 540px; width: 100%;
+               border-radius: 10px; overflow: hidden;
+               border: 1px solid var(--border); margin: 14px 0;
+               background: #1e293b; }
   .legend {
-    margin-top: 8px; font-size: 12px; color: var(--muted);
-    display: flex; gap: 18px; flex-wrap: wrap;
+    display: flex; gap: 20px; font-size: 13px; align-items: center;
+    margin: 6px 0; color: var(--muted);
   }
-  .legend .swatch { display: inline-block; width: 14px; height: 14px;
-                    border-radius: 50%; vertical-align: middle;
-                    margin-right: 6px; border: 2px solid #fff;
-                    box-shadow: 0 0 0 1px #475569; }
-  .leaflet-tooltip.coord-label {
-    background: rgba(15,39,66,0.92); color: #fff;
-    border: none; border-radius: 4px; box-shadow: none;
-    font-family: 'DM Mono', monospace; font-weight: 700;
-    font-size: 11px; padding: 1px 6px; line-height: 1.1;
+  .legend .swatch {
+    display: inline-block; width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
+    margin-right: 6px; vertical-align: middle;
   }
-  .leaflet-tooltip.coord-label:before { display: none; }
+  .legend .swatch.ours { background: var(--accent); }
+  .legend .swatch.theirs { background: var(--red); }
+  .legend .delta { color: var(--text); font-weight: 600; }
 
-  .actions {
-    display: flex; gap: 10px; align-items: center;
-    margin: 18px 0 32px; justify-content: center;
+  .coord-display { font-family: 'DM Mono', monospace; font-size: 12px;
+                   color: var(--muted); margin: 4px 0; }
+  .coord-display .diff { color: var(--amber); margin-left: 8px; }
+  .coord-display .moved { color: var(--accent); margin-left: 8px; font-weight: 600; }
+
+  .action-row {
+    display: flex; gap: 10px; margin: 14px 0;
   }
-  .actions button {
-    font-family: inherit; font-size: 14px; padding: 10px 18px;
-    border-radius: 6px; border: 1px solid var(--border);
-    background: var(--card); cursor: pointer;
+  .action-row button {
+    font-family: inherit; font-size: 14px; font-weight: 600;
+    padding: 10px 16px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--card); color: var(--text); cursor: pointer;
   }
-  .actions button.save {
-    background: var(--green); color: white; border: 0; font-weight: 700;
-    padding: 12px 24px; font-size: 15px;
+  .action-row button.primary { background: var(--green); color: #fff; border: 0; }
+  .action-row button.primary[disabled] { opacity: 0.4; }
+  .action-row button.danger { background: var(--red); color: #fff; border: 0; }
+
+  .external-link {
+    display: inline-block; font-size: 12px; color: var(--accent);
+    margin-left: 10px;
   }
-  .actions button.adopt {
-    background: var(--theirs); color: white; border: 0; font-weight: 700;
+  .toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--text); color: #fff; padding: 10px 18px;
+    border-radius: 8px; font-size: 14px;
+    opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 1000;
   }
-  .actions button.skip { background: #f1f5f9; }
-  .actions button[disabled] { opacity: 0.4; cursor: not-allowed; }
-  .summary {
-    font-size: 13px; color: var(--muted); text-align: center;
-    margin-top: 6px; min-height: 18px;
-  }
-  .summary.dirty { color: var(--amber); font-weight: 600; }
+  .toast.show { opacity: 1; }
+  .toast.error { background: var(--red); }
 </style>
 </head>
 <body>
 
+<!-- Login -->
 <div id="login">
   <h1>Coord audit</h1>
-  <label for="u">Username</label><input id="u" autocomplete="username">
-  <label for="p">Password</label><input id="p" type="password" autocomplete="current-password">
+  <label for="u">Username</label>
+  <input id="u" autocomplete="username">
+  <label for="p">Password</label>
+  <input id="p" type="password" autocomplete="current-password">
   <button id="login-btn" type="button">Sign in</button>
   <div class="err" id="login-err"></div>
 </div>
 
+<!-- App -->
 <header class="bar" style="display:none" id="app-bar">
-  <div class="bar-title">Coord audit (DogTrekker)</div>
-  <button id="btn-prev" type="button" class="ghost">‹ Prev</button>
-  <select id="sel-fid"></select>
-  <button id="btn-next" type="button" class="ghost">Next ›</button>
-  <span class="progress" id="progress">—</span>
+  <div class="bar-title">Coord audit</div>
+  <select id="sel-pair"></select>
+  <span class="progress" id="progress"></span>
   <button id="btn-logout" type="button" class="danger" style="margin-left:auto">Logout</button>
 </header>
 
@@ -151,20 +166,24 @@
     <h2 class="beach-name" id="beach-name">—</h2>
     <div class="beach-sub" id="beach-sub"></div>
   </div>
-  <div class="meta-row" id="meta-row"></div>
-  <div id="audit-map"></div>
+
   <div class="legend">
-    <span><span class="swatch" style="background:var(--accent)"></span>Ours (draggable)</span>
-    <span><span class="swatch" style="background:var(--theirs)"></span>Theirs (DogTrekker, reference)</span>
-    <span>Drag the blue marker to set the new coord. Save writes lat/lon to beaches_gold.</span>
+    <span><span class="swatch ours"></span>Ours (draggable) <span id="badge-source"></span></span>
+    <span><span class="swatch theirs"></span>Theirs (reference)</span>
+    <span class="delta" id="delta-label"></span>
   </div>
-  <div class="actions">
-    <button id="btn-skip" type="button" class="skip" title="Leave our coord unchanged, advance to next">Skip</button>
-    <button id="btn-adopt" type="button" class="adopt" title="Move our marker to theirs">Adopt theirs</button>
-    <button id="btn-save" type="button" class="save" disabled>Save and Next →</button>
+  <div id="coord-map"></div>
+  <div class="coord-display" id="coord-display"></div>
+
+  <div class="action-row">
+    <button id="btn-prev" type="button">‹ Prev</button>
+    <button id="btn-skip" type="button">Skip →</button>
+    <button id="btn-revert" type="button">Revert drag</button>
+    <button id="btn-save" class="primary" type="button" disabled>Save & Next →</button>
   </div>
-  <div class="summary" id="summary"></div>
 </main>
+
+<div class="toast" id="toast"></div>
 
 <script>
 const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
@@ -172,24 +191,20 @@ const ANON_KEY     = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 
 const SS_TOKEN = 'curator_token';
 let token = sessionStorage.getItem(SS_TOKEN);
-let queue = [];     // rows from coord_audit_pairs
-let idx = -1;
-let working = null; // { fid, our_lat_orig, our_lon_orig, our_lat, our_lon, their_lat, their_lng, ...row }
+let queue = [];        // [{fid, beach_name, county, is_active, is_scoreable, tier, our_lat, our_lon, source, their_lat, their_lng, their_name, their_url, divergence_m}]
+let qIdx = -1;
+let movedLat = null, movedLng = null;  // pending drag changes
 
-const $ = id => document.getElementById(id);
+const loginBox = document.getElementById('login');
+const errEl = document.getElementById('login-err');
+document.getElementById('login-btn').addEventListener('click', login);
+document.getElementById('p').addEventListener('keydown', e => { if (e.key==='Enter') login(); });
 
-function escHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c =>
-    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-// ─── Login ─────────────────────────────────────────────────────────────
-$('login-btn').onclick = login;
-$('p').addEventListener('keydown', e => { if (e.key==='Enter') login(); });
 async function login() {
-  $('login-err').textContent = '';
-  const u = $('u').value.trim(); const p = $('p').value;
-  if (!u || !p) { $('login-err').textContent = 'Both fields required.'; return; }
+  errEl.textContent = '';
+  const u = document.getElementById('u').value.trim();
+  const p = document.getElementById('p').value;
+  if (!u || !p) { errEl.textContent = 'Both fields required.'; return; }
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/verify-curator-login`, {
       method: 'POST',
@@ -199,216 +214,253 @@ async function login() {
     });
     if (!res.ok) {
       const j = await res.json().catch(()=>({error:'login failed'}));
-      $('login-err').textContent = j.error || `HTTP ${res.status}`; return;
+      errEl.textContent = j.error || `HTTP ${res.status}`;
+      return;
     }
     const { token: t } = await res.json();
     token = t;
     sessionStorage.setItem(SS_TOKEN, t);
     showApp();
-  } catch (e) { $('login-err').textContent = String(e); }
+  } catch (e) { errEl.textContent = String(e); }
 }
-$('btn-logout').onclick = () => {
-  sessionStorage.removeItem(SS_TOKEN); token = null;
-  $('login').style.display = ''; $('app').style.display = 'none'; $('app-bar').style.display = 'none';
-};
+
+document.getElementById('btn-logout').addEventListener('click', () => {
+  sessionStorage.removeItem(SS_TOKEN);
+  token = null;
+  loginBox.style.display = '';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('app-bar').style.display = 'none';
+});
 if (token) showApp();
 
 async function showApp() {
-  $('login').style.display = 'none';
-  $('app-bar').style.display = '';
-  $('app').style.display = '';
+  loginBox.style.display = 'none';
+  document.getElementById('app-bar').style.display = '';
+  document.getElementById('app').style.display = '';
   await loadQueue();
 }
 
-// ─── Queue ─────────────────────────────────────────────────────────────
+// ─── Queue ────────────────────────────────────────────────────────
 async function loadQueue() {
-  const url = `${SUPABASE_URL}/rest/v1/coord_audit_pairs?select=*&order=divergence_m.desc&limit=500`;
-  const res = await fetch(url, {
-    headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },
-  });
-  if (!res.ok) { alert('Queue load failed: ' + res.status); return; }
-  queue = await res.json();
-  const sel = $('sel-fid'); sel.innerHTML = '';
-  queue.forEach((r, i) => {
+  const url = `${SUPABASE_URL}/rest/v1/coord_audit_pairs`
+            + `?select=*&is_active=eq.true&is_scoreable=eq.true`
+            + `&order=divergence_m.desc&limit=500`;
+  const res = await fetch(url, { headers: {
+    apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } });
+  queue = res.ok ? await res.json() : [];
+
+  // Populate dropdown
+  const sel = document.getElementById('sel-pair');
+  sel.innerHTML = '';
+  queue.forEach((p, i) => {
     const opt = document.createElement('option');
     opt.value = String(i);
-    const flags = [];
-    if (!r.is_active) flags.push('inactive');
-    if (r.tier) flags.push(r.tier);
-    opt.textContent = `${i+1}. ${r.beach_name} — ${r.county_name} · ${r.divergence_m}m · ${flags.join(', ')}`;
+    opt.textContent = `${i+1}. ${p.beach_name} — ${p.county_name} (${p.divergence_m}m off · ${p.tier})`;
     sel.appendChild(opt);
   });
-  sel.onchange = () => jump(parseInt(sel.value, 10));
-  $('btn-prev').onclick = () => jump(idx - 1);
-  $('btn-next').onclick = () => jump(idx + 1);
-  // Land on URL-hash fid if present
-  const hash = (location.hash || '').match(/#fid=(\d+)/);
-  let start = 0;
-  if (hash) {
-    const wantFid = parseInt(hash[1], 10);
-    const i = queue.findIndex(r => r.fid === wantFid);
-    if (i >= 0) start = i;
+  sel.onchange = () => goto(parseInt(sel.value, 10));
+
+  // Land on URL-hash fid or first row
+  const hashFid = parseHashFid();
+  let startIdx = 0;
+  if (hashFid) {
+    const i = queue.findIndex(p => p.fid === hashFid);
+    if (i >= 0) startIdx = i;
   }
-  jump(start);
+  goto(startIdx);
 }
 
-function jump(i) {
-  if (i < 0 || i >= queue.length) return;
-  idx = i;
-  working = JSON.parse(JSON.stringify(queue[i]));
-  working.our_lat_orig = working.our_lat;
-  working.our_lon_orig = working.our_lon;
-  $('sel-fid').value = String(i);
-  $('progress').textContent = `${i+1}/${queue.length}`;
-  $('btn-prev').disabled = (i === 0);
-  $('btn-next').disabled = (i === queue.length - 1);
-  history.replaceState(null, '', `#fid=${working.fid}`);
-  render();
+function parseHashFid() {
+  const m = (location.hash || '').match(/#fid=(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+function writeHashFid(fid) {
+  history.replaceState(null, '', `#fid=${fid}`);
 }
 
-// ─── Map ───────────────────────────────────────────────────────────────
-let _map = null, _ourMarker = null, _theirMarker = null, _line = null;
+function goto(idx) {
+  if (idx < 0 || idx >= queue.length) return;
+  qIdx = idx;
+  movedLat = null; movedLng = null;
+  document.getElementById('btn-save').disabled = true;
+  document.getElementById('sel-pair').value = String(idx);
+  document.getElementById('progress').textContent =
+    `${idx+1}/${queue.length}`;
+  document.getElementById('btn-prev').disabled = idx === 0;
+  const p = queue[idx];
+  writeHashFid(p.fid);
+  renderBeach(p);
+}
+
+document.getElementById('btn-prev').onclick = () => goto(qIdx - 1);
+document.getElementById('btn-skip').onclick = () => goto(qIdx + 1);
+document.getElementById('btn-save').onclick = () => savePair();
+document.getElementById('btn-revert').onclick = () => {
+  if (qIdx >= 0) {
+    movedLat = null; movedLng = null;
+    document.getElementById('btn-save').disabled = true;
+    renderBeach(queue[qIdx]);
+  }
+};
+
+function escHtml(s) {
+  return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderBeach(p) {
+  const nameEl = document.getElementById('beach-name');
+  nameEl.textContent = p.beach_name;
+  nameEl.title = `Open in beach-editor-gold (fid ${p.fid})`;
+  nameEl.onclick = () => {
+    const w = window.open(`beach-editor-gold.html?fid=${p.fid}`, 'beach-editor-gold');
+    if (w) w.focus();
+  };
+
+  const sub = document.getElementById('beach-sub');
+  sub.innerHTML =
+    `fid ${p.fid} · ${escHtml(p.county_name || '')}, ${escHtml(p.state || 'CA')}` +
+    ` <span class="pill">${escHtml(p.tier || '-')}</span>` +
+    (p.is_scoreable ? ' <span class="pill">scoreable</span>' :
+                      ' <span class="pill muted">not scoreable</span>') +
+    ` <span class="pill warn">${p.divergence_m}m divergence</span>`;
+
+  // Source link
+  const srcLabel = document.getElementById('badge-source');
+  if (p.their_url) {
+    srcLabel.innerHTML = ` (<a href="${escHtml(p.their_url)}" target="_blank" rel="noopener">${escHtml(p.source)}: ${escHtml(p.their_name || '')}</a>)`;
+  } else {
+    srcLabel.textContent = ` (${p.source}: ${p.their_name || ''})`;
+  }
+
+  document.getElementById('delta-label').textContent = `Δ ${p.divergence_m} m`;
+
+  updateCoordDisplay(p, null, null);
+  renderMap(p);
+}
+
+function updateCoordDisplay(p, mLat, mLng) {
+  const lines = [
+    `ours:   ${p.our_lat.toFixed(6)}, ${p.our_lon.toFixed(6)}`,
+    `theirs: ${p.their_lat.toFixed(6)}, ${p.their_lng.toFixed(6)}`,
+  ];
+  if (mLat != null && mLng != null) {
+    lines.push(`<span class="moved">moved: ${mLat.toFixed(6)}, ${mLng.toFixed(6)}</span>`);
+  }
+  document.getElementById('coord-display').innerHTML = lines.join('<br>');
+}
+
+// ─── Map ─────────────────────────────────────────────────────────
+let _map = null, _ours = null, _theirs = null, _line = null;
 function ensureMap() {
   if (_map) return _map;
-  _map = L.map('audit-map');
+  _map = L.map('coord-map', { zoomControl: true });
   L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
     maxZoom: 20,
-    attribution: '&copy; OSM France contributors',
+    attribution: '&copy; OpenStreetMap France | &copy; OpenStreetMap contributors',
     subdomains: 'abc',
   }).addTo(_map);
+  _map.setView([37.5, -120], 6);
   return _map;
 }
 
-function render() {
-  if (!working) return;
-  const w = working;
-  const nameEl = $('beach-name');
-  nameEl.textContent = w.beach_name;
-  nameEl.title = `Open in beach-editor-gold (fid ${w.fid})`;
-  nameEl.onclick = () => {
-    const win = window.open(`beach-editor-gold.html?fid=${w.fid}`, 'beach-editor-gold');
-    if (win) win.focus();
-  };
-  $('beach-sub').textContent = `fid ${w.fid} · ${w.county_name}, ${w.state}`;
-
-  // Meta chips
-  const chips = [];
-  chips.push(`<span class="chip div">${w.divergence_m} m apart</span>`);
-  if (w.tier) chips.push(`<span class="chip tier-${w.tier}">${w.tier}</span>`);
-  chips.push(`<span class="chip ${w.is_active ? 'good' : 'bad'}">${w.is_active ? 'active' : 'INACTIVE'}</span>`);
-  chips.push(`<span class="chip ${w.is_scoreable ? 'good' : ''}">${w.is_scoreable ? 'scoreable' : 'not-scoreable'}</span>`);
-  if (w.their_url) chips.push(`<a class="chip" href="${escHtml(w.their_url)}" target="_blank" rel="noopener">DogTrekker page ↗</a>`);
-  $('meta-row').innerHTML = chips.join('');
-
-  // Map markers
+function renderMap(p) {
   const map = ensureMap();
-  if (_ourMarker) { map.removeLayer(_ourMarker); _ourMarker = null; }
-  if (_theirMarker) { map.removeLayer(_theirMarker); _theirMarker = null; }
+  if (_ours) { map.removeLayer(_ours); _ours = null; }
+  if (_theirs) { map.removeLayer(_theirs); _theirs = null; }
   if (_line) { map.removeLayer(_line); _line = null; }
 
-  const ourLL = [w.our_lat, w.our_lon];
-  const theirLL = [w.their_lat, w.their_lng];
-
-  _theirMarker = L.circleMarker(theirLL, {
-    radius: 9, fillColor: 'var(--theirs)', color: '#b91c1c',
-    fillOpacity: 0.95, weight: 3,
-    interactive: true,
+  // Ours — blue, draggable
+  _ours = L.circleMarker([p.our_lat, p.our_lon], {
+    radius: 9, fillColor: '#1d4ed8', color: '#fff',
+    weight: 3, fillOpacity: 1, opacity: 1,
   }).addTo(map);
-  _theirMarker.bindTooltip('Theirs', {
+  _ours.bindTooltip('Ours (draggable)', {
     permanent: true, direction: 'top', offset: [0, -10],
-    className: 'coord-label',
+  });
+  // Build draggable marker on top of the dot for grip
+  const dragMarker = L.marker([p.our_lat, p.our_lon],
+    { draggable: true, opacity: 0 }).addTo(map);
+  _ours._dragMarker = dragMarker;
+  dragMarker.on('drag dragend', (e) => {
+    const ll = e.target.getLatLng();
+    _ours.setLatLng(ll);
+    movedLat = ll.lat; movedLng = ll.lng;
+    document.getElementById('btn-save').disabled = false;
+    updateCoordDisplay(p, movedLat, movedLng);
+    if (_line) {
+      _line.setLatLngs([[movedLat, movedLng], [p.their_lat, p.their_lng]]);
+    }
   });
 
-  _ourMarker = L.marker(ourLL, { draggable: true }).addTo(map);
-  _ourMarker.bindTooltip('Ours', {
-    permanent: true, direction: 'top', offset: [0, -32],
-    className: 'coord-label',
-  });
-  _ourMarker.on('drag dragend', (e) => {
-    const p = e.target.getLatLng();
-    working.our_lat = p.lat; working.our_lon = p.lng;
-    updateLine();
-    updateSaveState();
+  // Theirs — red, reference
+  _theirs = L.circleMarker([p.their_lat, p.their_lng], {
+    radius: 9, fillColor: '#b91c1c', color: '#fff',
+    weight: 3, fillOpacity: 1, opacity: 1,
+  }).addTo(map);
+  _theirs.bindTooltip(`Theirs (${p.source})`, {
+    permanent: true, direction: 'top', offset: [0, -10],
   });
 
-  updateLine();
-  updateSaveState();
-  map.fitBounds([ourLL, theirLL], { padding: [40, 40], maxZoom: 18 });
+  // Line connecting them
+  _line = L.polyline([[p.our_lat, p.our_lon], [p.their_lat, p.their_lng]], {
+    color: '#b45309', weight: 2, dashArray: '6 6', opacity: 0.7,
+  }).addTo(map);
+
+  // Fit both
+  map.fitBounds([[p.our_lat, p.our_lon], [p.their_lat, p.their_lng]],
+                { padding: [60, 60], maxZoom: 18 });
   setTimeout(() => map.invalidateSize(), 50);
 }
 
-function updateLine() {
-  const map = ensureMap();
-  if (_line) { map.removeLayer(_line); _line = null; }
-  if (!working) return;
-  _line = L.polyline(
-    [[working.our_lat, working.our_lon], [working.their_lat, working.their_lng]],
-    { color: '#94a3b8', weight: 1, dashArray: '4 4', interactive: false }
-  ).addTo(map);
-}
-
-function updateSaveState() {
-  const dirty = working && (working.our_lat !== working.our_lat_orig ||
-                            working.our_lon !== working.our_lon_orig);
-  $('btn-save').disabled = !dirty;
-  const sum = $('summary');
-  if (dirty) {
-    const dlat = (working.our_lat - working.our_lat_orig).toFixed(6);
-    const dlng = (working.our_lon - working.our_lon_orig).toFixed(6);
-    sum.textContent = `Ours moved: Δlat ${dlat}, Δlng ${dlng}. New coord (${working.our_lat.toFixed(6)}, ${working.our_lon.toFixed(6)}).`;
-    sum.classList.add('dirty');
-  } else {
-    sum.textContent = 'Drag the blue marker to set a new coord, or click "Adopt theirs" to copy DogTrekker\'s.';
-    sum.classList.remove('dirty');
-  }
-}
-
-// ─── Actions ───────────────────────────────────────────────────────────
-$('btn-adopt').onclick = () => {
-  if (!working) return;
-  working.our_lat = working.their_lat;
-  working.our_lon = working.their_lng;
-  _ourMarker.setLatLng([working.our_lat, working.our_lon]);
-  updateLine();
-  updateSaveState();
-};
-
-$('btn-skip').onclick = () => jump(idx + 1);
-
-$('btn-save').onclick = async () => {
-  if (!working) return;
-  const dirty = working.our_lat !== working.our_lat_orig ||
-                working.our_lon !== working.our_lon_orig;
-  if (!dirty) return;
-  $('btn-save').disabled = true;
-  $('summary').textContent = 'Saving…';
+// ─── Save ────────────────────────────────────────────────────────
+async function savePair() {
+  if (qIdx < 0 || movedLat == null || movedLng == null) return;
+  const p = queue[qIdx];
+  document.getElementById('btn-save').disabled = true;
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-update-beaches-gold`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY,
-        'Content-Type': 'application/json', 'x-admin-secret': token,
-      },
+      headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY,
+                 'Content-Type': 'application/json', 'x-admin-secret': token },
       body: JSON.stringify({
-        fid: working.fid,
-        fields: { lat: working.our_lat, lon: working.our_lon },
+        fid: p.fid,
+        fields: { lat: movedLat, lon: movedLng },
       }),
     });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      $('summary').textContent = `Save failed: ${j.error || 'HTTP ' + res.status}`;
-      $('btn-save').disabled = false;
+      showToast(`Save failed: ${j.error || res.status}`, true);
+      document.getElementById('btn-save').disabled = false;
       return;
     }
-    // Update local cache so re-loading the same fid shows the new coord
-    queue[idx].our_lat = working.our_lat;
-    queue[idx].our_lon = working.our_lon;
-    jump(idx + 1);
+    showToast(`Saved fid ${p.fid}`);
+    // Optimistic: update in-memory queue so re-visits show new ours
+    p.our_lat = movedLat; p.our_lon = movedLng;
+    p.divergence_m = Math.round(haversineKm(movedLat, movedLng, p.their_lat, p.their_lng) * 1000);
+    goto(qIdx + 1);
   } catch (e) {
-    $('summary').textContent = `Save error: ${e.message}`;
-    $('btn-save').disabled = false;
+    showToast(`Save error: ${e}`, true);
+    document.getElementById('btn-save').disabled = false;
   }
-};
+}
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI/180;
+  const dLon = (lon2 - lon1) * Math.PI/180;
+  const a = Math.sin(dLat/2)**2 +
+            Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) *
+            Math.sin(dLon/2)**2;
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function showToast(msg, isError = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.toggle('error', !!isError);
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
 </script>
 </body>
 </html>

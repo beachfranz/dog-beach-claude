@@ -747,7 +747,14 @@ let _queueName = null;
 async function loadQueue(name, preferFid) {
   _queueName = name;
   let url = null;
-  if (name === 'ca_t1t2') {
+  if (name === 'ca_t1') {
+    // T1 (off-leash) only — joined-inner on beach_dog_policy.has_off_leash.
+    url = 'beaches_gold?select=fid,name,display_name_override,county_name,'
+        + 'beach_dog_policy!inner(has_off_leash)'
+        + '&state=eq.CA&is_active=eq.true&is_scoreable=eq.true'
+        + '&beach_dog_policy.has_off_leash=eq.true'
+        + '&order=county_name.asc,name.asc&limit=2000';
+  } else if (name === 'ca_t1t2') {
     url = 'beaches_gold?select=fid,name,display_name_override,county_name'
         + '&state=eq.CA&is_active=eq.true&is_scoreable=eq.true'
         + '&order=county_name.asc,name.asc&limit=2000';

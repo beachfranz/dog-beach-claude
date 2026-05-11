@@ -46,9 +46,9 @@ OVERPASS_URL    = "https://overpass-api.de/api/interpreter"
 OVERPASS_DELAY  = 3.0     # seconds between Overpass requests (be polite)
 OVERPASS_RADIUS = 300     # meters around beach centroid
 
-PROMPT = """You write 2-3 sentence beach descriptions for a dog-owner-focused app.
+PROMPT = """You write 3-4 sentence beach descriptions for a dog-owner-focused app.
 
-The reader is planning a visit with their dog. They want: what can my dog and I do here, and what's the place like?
+The reader is planning a visit with their dog. They want: what can my dog and I do here, what amenities are present, and what's the place actually like?
 
 REQUIRED:
 1. Lead with the activities derived from `zones` -> `sections`. Map sections to actions:
@@ -59,8 +59,10 @@ REQUIRED:
    - picnic_area on_leash -> "share a picnic with your pooch"
    - sections marked NOT ALLOWED -> "stay clear of [section]"
 2. If `verified_physical_features` is non-empty, weave the facts in naturally — open or close with a short clause (e.g. "at the mouth of Aliso Creek", "backed by coastal bluffs"). Don't make it its own sentence unless natural.
-3. Mention time-windows / seasonal restrictions concretely when present.
-4. Mention parking ONCE somewhere natural in the prose, using `parking.type` and `parking.cost` when set:
+3. If `source_pages` has content (an `extracted_description` or `raw_text_excerpt`), USE it as authoritative grounding for named features, locations, and specific facts (named dunes / piers / lagoons / coves the beach is near, specific named restrictions, geographic framing like "Central Coast" or "Big Sur coast"). Paraphrase — do NOT copy verbatim. Cite specific named features only if present in source content. If source content contradicts `zones` (the structured dog policy), TRUST `zones` for dog rules — the source page may be outdated on policy.
+4. Mention time-windows / seasonal restrictions concretely when present in `zones` or surfacing from `source_pages`.
+5. Use `amenities` to add a concrete "what's here" sentence — only mention flags that are present. Group naturally: "with restrooms, showers, and a lifeguard" rather than a list inventory. Skip if amenities is empty.
+6. Mention parking ONCE somewhere natural in the prose, using `parking.type` and `parking.cost` when set:
    - type=lot, cost=free  -> "with free parking"
    - type=lot, cost=paid  -> "with paid parking" / "for a small fee at the lot"
    - type=street, cost=free -> "with free street parking"
@@ -69,7 +71,7 @@ REQUIRED:
    - type=mixed, cost=paid -> "with paid lot and street parking"
    - type set, cost=null -> just describe type ("with a parking lot", "with street parking")
    - parking.type=null -> skip parking entirely
-5. Use 2nd-person imperative voice ("Let your dog...", "Enjoy a walk...", "Pack a lunch").
+7. Use 2nd-person imperative voice ("Let your dog...", "Enjoy a walk...", "Pack a lunch").
 
 VERIFIED PHYSICAL FEATURE -> CLAUSE:
 - natural=cliff (any count) -> "backed by coastal bluffs"
@@ -81,12 +83,12 @@ VERIFIED PHYSICAL FEATURE -> CLAUSE:
 
 FORBIDDEN:
 - Generic beach imagery not specific to THIS beach ("rolling waves", "salty breeze").
-- Inventing physical features not in `verified_physical_features`. If empty, don't describe terrain at all — just lead with activities.
+- Inventing features not in `verified_physical_features` or `source_pages`. If both are empty, don't describe terrain at all — just lead with activities + amenities.
 - Superlatives ("best", "famous", "treasured", "beloved", "gem", "pristine").
 - Crowd / popularity claims.
-- Restating amenity flags as a list inventory.
+- Copying phrases verbatim from source_pages.
 
-VOICE: warm, second-person imperative, activity-led. 2-3 sentences. Output ONLY the description.
+VOICE: warm, second-person imperative, activity-led. 3-4 sentences. Output ONLY the description.
 
 INPUTS
 %s
@@ -127,14 +129,24 @@ def select_targets(args) -> list[int]:
                             "order": "fid.asc",
                             "limit": str(int(args.pilot))})
         return [r["fid"] for r in rows]
+    if args.county:
+        rows = supa("/rest/v1/beaches_gold",
+                    params={"select": "fid",
+                            "is_active": "eq.true",
+                            "is_scoreable": "eq.true",
+                            "state": f"eq.{args.state}",
+                            "county_name": f"eq.{args.county}",
+                            "order": "fid.asc"})
+        return [r["fid"] for r in rows]
     if args.full:
         rows = supa("/rest/v1/beaches_gold",
                     params={"select": "fid",
                             "is_active": "eq.true",
                             "is_scoreable": "eq.true",
+                            "state": f"eq.{args.state}",
                             "order": "fid.asc"})
         return [r["fid"] for r in rows]
-    print("ERROR: provide --fids, --pilot N, or --full", file=sys.stderr)
+    print("ERROR: provide --fids, --pilot N, --county, or --full", file=sys.stderr)
     sys.exit(1)
 
 
@@ -216,11 +228,13 @@ def build_inputs(fid: int) -> dict | None:
     })
     bdp = bdp_rows[0] if bdp_rows else {}
 
-    # Parking signal from beach_amenities. parking_cost is not yet in
-    # the schema (queued as a future extraction pass) so we only have
-    # parking_type. cost stays null until we add it.
+    # Full beach_amenities row — has restrooms / showers / lifeguards /
+    # drinking water / picnic / food / fire pits / disabled access /
+    # parking flags. Used to add a concrete "what's here" sentence.
     amen_rows = supa("/rest/v1/beach_amenities", params={
-        "select": "parking_type,parking_notes",
+        "select": ("parking_type,parking_notes,has_restrooms,has_showers,"
+                   "has_lifeguards,has_drinking_water,has_disabled_access,"
+                   "has_food,has_fire_pits,has_picnic_area,hours_text"),
         "arena_group_id": f"eq.{g['group_id']}", "limit": "1",
     })
     amen = amen_rows[0] if amen_rows else {}
@@ -232,6 +246,19 @@ def build_inputs(fid: int) -> dict | None:
             "type": p_type,
             "cost": "paid" if p_type == "metered" else None,
         }
+    # Compact amenity flags dict (only the trues — keeps prompt lean and
+    # forces the LLM to mention only what's there).
+    amenities = {k: v for k, v in {
+        "has_restrooms":       amen.get("has_restrooms"),
+        "has_showers":         amen.get("has_showers"),
+        "has_lifeguards":      amen.get("has_lifeguards"),
+        "has_drinking_water":  amen.get("has_drinking_water"),
+        "has_disabled_access": amen.get("has_disabled_access"),
+        "has_food":            amen.get("has_food"),
+        "has_fire_pits":       amen.get("has_fire_pits"),
+        "has_picnic_area":     amen.get("has_picnic_area"),
+        "hours_text":          amen.get("hours_text"),
+    }.items() if v}
 
     cpad_unit = None
     if g.get("cpad_unit_id"):
@@ -257,12 +284,30 @@ def build_inputs(fid: int) -> dict | None:
     # Beach's polygon but is City-managed, not CDPR-managed). Re-introduce
     # once we have an operator-reconciled "parent unit" attribution.
     _ = cpad_unit  # kept for audit, not sent
+
+    # Source-page content already cached during dog-policy extraction.
+    # Reused here as authoritative grounding for the description (same
+    # pages, same trust hierarchy). park_url_extractions has a
+    # dog-focused description column AND raw_text; we pass both.
+    pue = supa("/rest/v1/park_url_extractions", params={
+        "select": "source_url,description,raw_text",
+        "arena_group_id": f"eq.{fid}",
+        "order": "scraped_at.desc", "limit": "3",
+    }) or []
+    source_pages = [{
+        "url": p.get("source_url"),
+        "extracted_description": p.get("description"),
+        "raw_text_excerpt": (p.get("raw_text") or "")[:3000],
+    } for p in pue if (p.get("description") or p.get("raw_text"))]
+
     return {
         "name": g.get("display_name_override") or g["name"],
         "location": ", ".join(filter(None, [g.get("county_name"), g.get("state")])),
         "zones": fetch_zones_summary(bdp.get("zone_rules") or {}),
         "parking": parking,
+        "amenities": amenities,
         "verified_physical_features": physical,
+        "source_pages": source_pages,
     }
 
 
@@ -330,6 +375,8 @@ def main():
     grp.add_argument("--fids",  help="comma-separated list of fids")
     grp.add_argument("--pilot", type=int, help="run on first N beaches")
     grp.add_argument("--full",  action="store_true", help="run on all active scoreable beaches")
+    grp.add_argument("--county", help="run on all active+scoreable beaches in this county (e.g. 'Orange')")
+    ap.add_argument("--state", default="CA", help="state filter for --county / --full (default CA)")
     ap.add_argument("--refresh", action="store_true",
                     help="regenerate even when input_hash matches cache")
     ap.add_argument("--dry-run", action="store_true",

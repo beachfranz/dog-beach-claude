@@ -429,6 +429,21 @@ async function loadProgress(opts = {}) {
   progress = (await res.json()) || [];
   renderCountyDropdown();
   if (opts.skipAutoSelect) return;
+
+  // Survives tab-discard: if the URL has #fid=N, find that beach in
+  // the loaded progress and resume on it instead of auto-picking.
+  const hashFid = parseHashFid();
+  if (hashFid) {
+    for (const c of progress) {
+      const hit = (c.beaches || []).find(b => b.fid === hashFid);
+      if (hit) {
+        selectCounty(c.county);
+        loadBeach(hashFid);
+        return;
+      }
+    }
+  }
+
   if (progress.length && !currentCounty) {
     // Auto-pick first county that has beaches with photos and isn't done
     const next = progress.find(c => c.with_photos > 0 && !c.is_done) || progress[0];
@@ -536,8 +551,19 @@ function jumpPending(dir) {
 }
 
 // ─── Load and render a beach ────────────────────────────────────────
+function parseHashFid() {
+  const m = (location.hash || '').match(/#fid=(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+function writeHashFid(fid) {
+  // Use replaceState so the back button doesn't have to step through every
+  // beach the curator opens.
+  history.replaceState(null, '', `#fid=${fid}`);
+}
+
 async function loadBeach(fid) {
   currentBeach = fid;
+  writeHashFid(fid);
   document.getElementById('sel-beach').value = String(fid);
   const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-curate-beach?fid=${fid}`, {
     headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY,

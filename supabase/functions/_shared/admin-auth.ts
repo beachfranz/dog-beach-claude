@@ -25,8 +25,9 @@ const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ADMIN_SECRET         = Deno.env.get("ADMIN_SECRET") ?? "";
 
-const RATE_LIMIT_PER_HOUR = 300;  // per IP. Plenty for real admin work,
-                                  // blocks scraping / brute force.
+const RATE_LIMIT_PER_HOUR = 1500; // per IP. Curation-pace headroom (~25
+                                  // reqs/min sustained); still bounds
+                                  // scrapers / brute-force runs.
 
 function constantTimeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;

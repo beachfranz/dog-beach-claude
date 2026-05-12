@@ -30,9 +30,11 @@ import base64
 import json
 import os
 import sys
+import threading
 import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -50,6 +52,11 @@ PG = dict(host=_p.hostname, port=_p.port or 5432, user=_p.username,
 
 # Haiku 4.5 vision — cheapest capable vision model per env description.
 MODEL = "claude-haiku-4-5-20251001"
+# Schema version — bump when the prompt/output shape changes so old rows
+# get re-tagged automatically without manual clearing.
+#   v1: initial schema
+#   v2: added has_surfing + has_active_people, dropped "people" from subjects
+SCHEMA_VERSION = "v2"
 
 # Anthropic per-1M-tokens (Haiku 4.5): input $1, output $5, image ~1500 tok.
 # Two-pass per photo ≈ 3000 in + 350 out ≈ $0.005. Budget guard below.
@@ -65,7 +72,8 @@ SCENES = [
     "interior", "urban", "screenshot_or_map", "food", "other",
 ]
 SUBJECTS = [
-    "dog", "people", "water", "sand", "sunset", "pier", "boats", "structure",
+    "dog", "water", "sand", "sunset", "pier", "boats", "structure",
+    # "people" intentionally dropped — has_active_people / has_human_face_closeup cover it.
 ]
 QUALITY_ISSUES = ["none", "blurry", "low_light", "distressing", "screenshot"]
 ATMOSPHERES = ["sunny", "cloudy", "fog", "stormy", "night", "sunset", "unclear"]
@@ -75,6 +83,9 @@ ATMOSPHERES = ["sunny", "cloudy", "fog", "stormy", "night", "sunset", "unclear"]
 
 import anthropic
 _client = anthropic.Anthropic()
+
+# Cap concurrent base64 fetches to Wikimedia — they 429 above ~2 in flight.
+_wm_sem = threading.Semaphore(2)
 
 
 def _strip_utm(url: str) -> str:
@@ -93,21 +104,22 @@ def _image_source(image_url: str, force_b64: bool = False) -> dict:
     Strip only utm_* params so width=N hints survive."""
     url = _strip_utm(image_url)
     if force_b64 or "wikimedia.org" in url or "wikipedia.org" in url:
-        req = urllib.request.Request(url, headers={"User-Agent": "DogBeachScout/1.0"})
-        with urllib.request.urlopen(req, timeout=30) as r:
-            data = r.read()
-            ct = r.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
-        if len(data) > 5 * 1024 * 1024:
-            # >5 MB → Anthropic rejects. Fetch a smaller thumbnail variant
-            # via Special:FilePath?width=1024.
-            if "Special:FilePath" in url:
-                small = url + ("&" if "?" in url else "?") + "width=1024"
-                req = urllib.request.Request(small, headers={"User-Agent": "DogBeachScout/1.0"})
-                with urllib.request.urlopen(req, timeout=30) as r:
-                    data = r.read()
-                    ct = r.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
-            else:
-                raise RuntimeError(f"image too large ({len(data)} bytes) and no Special:FilePath fallback")
+        with _wm_sem:                          # cap concurrent wikimedia fetches
+            req = urllib.request.Request(url, headers={"User-Agent": "DogBeachScout/1.0"})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                data = r.read()
+                ct = r.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+            if len(data) > 5 * 1024 * 1024:
+                # >5 MB → Anthropic rejects. Fetch a smaller thumbnail variant
+                # via Special:FilePath?width=1024.
+                if "Special:FilePath" in url:
+                    small = url + ("&" if "?" in url else "?") + "width=1024"
+                    req = urllib.request.Request(small, headers={"User-Agent": "DogBeachScout/1.0"})
+                    with urllib.request.urlopen(req, timeout=30) as r:
+                        data = r.read()
+                        ct = r.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+                else:
+                    raise RuntimeError(f"image too large ({len(data)} bytes) and no Special:FilePath fallback")
         return {"type": "base64", "media_type": ct,
                 "data": base64.b64encode(data).decode()}
     return {"type": "url", "url": url}
@@ -142,7 +154,9 @@ Given the photo and an initial description, return a JSON object with these fiel
 
   has_dog: true|false  (dogs, puppies — any breed)
   has_birds: true|false  (shorebirds, gulls, raptors, any bird — but not when they are a tiny dot in the distance)
-  has_human_face_closeup: true|false  (a person's face dominates the frame — selfie or portrait)
+  has_surfing: true|false  (visible surfers riding waves, OR surfboards/paddleboards/wetsuits being carried or in use. Just calm flat water with no surf activity = false.)
+  has_active_people: true|false  (people doing things on the beach — playing, walking, swimming, picnicking, kids, families. Not just one tiny figure in the distance, but a recognizable beachgoer present and engaged. A close-up portrait counts as active_people=false; use has_human_face_closeup for that.)
+  has_human_face_closeup: true|false  (a person's face dominates the frame — selfie or portrait shot)
   scene: one of {SCENES}
   subjects: subset of {SUBJECTS}  (multi-label; pick any that are clearly and prominently present)
   landscape_features: subset of {LANDSCAPE_FEATURES}  (multi-label; ONLY include a feature if it is a PROMINENT, IDENTIFIABLE element of the photo — not background detail.
@@ -189,9 +203,10 @@ def _extract(image_url: str, beach_name: str, description: str
 
 # ─── Per-photo driver ─────────────────────────────────────────────────────
 
-def tag_photo(image_url: str, beach_name: str, retries: int = 2
+def tag_photo(image_url: str, beach_name: str, retries: int = 3
               ) -> tuple[dict, dict]:
-    """Run two passes; return (tags, usage). Retries on transient errors."""
+    """Run two passes; return (tags, usage). Retries on transient errors
+    including Wikimedia 429s during the base64 fetch."""
     last_err = None
     for attempt in range(retries + 1):
         try:
@@ -199,14 +214,17 @@ def tag_photo(image_url: str, beach_name: str, retries: int = 2
             tags, in2, out2 = _extract(image_url, beach_name, desc)
             tags["description"] = desc
             tags["model"] = MODEL
+            tags["schema_version"] = SCHEMA_VERSION
             tags["tagged_at"] = datetime.now(timezone.utc).isoformat()
             usage = {"input_tokens": in1 + in2, "output_tokens": out1 + out2}
             return tags, usage
-        except (anthropic.APIError, RuntimeError) as e:
+        except Exception as e:
             last_err = e
+            # 429s (wikimedia or anthropic) need longer backoff
+            is_429 = "429" in str(e) or "rate" in str(e).lower()
             if attempt < retries:
-                wait = 2 ** attempt * 3   # 3s, 6s, 12s
-                print(f"    retry {attempt+1}/{retries} after {wait}s: {e}",
+                wait = (15 if is_429 else 3) * (2 ** attempt)  # 15/30/60 or 3/6/12
+                print(f"    retry {attempt+1}/{retries} after {wait}s: {str(e)[:120]}",
                       flush=True)
                 time.sleep(wait)
     raise RuntimeError(f"giving up after {retries} retries: {last_err}")
@@ -223,6 +241,8 @@ def main():
                     help="Reprocess photos that already have vision tags")
     ap.add_argument("--budget-usd", type=float, default=DEFAULT_BUDGET_USD,
                     help=f"Hard stop if est cost exceeds (default ${DEFAULT_BUDGET_USD})")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="Concurrent vision-tag workers (default 1; backfill should use 5-10)")
     args = ap.parse_args()
 
     conn = psycopg2.connect(**PG)
@@ -241,9 +261,8 @@ def main():
              order by bp.arena_group_id, bp.sort_order
         """, (fids,))
     else:
-        skip_clause = ""
-        if not args.no_skip_existing:
-            skip_clause = f"""and not (source_meta -> 'vision' ->> 'model' = '{MODEL}')"""
+        # Idempotency: skip rows already tagged with the current model+schema.
+        # Bumping SCHEMA_VERSION auto-invalidates v1 rows without manual ops.
         cur.execute(f"""
             select bp.id, bp.image_url, bp.thumb_url, bp.source_meta,
                    coalesce(g.display_name_override, g.name) as beach_name
@@ -251,7 +270,8 @@ def main():
               join public.beaches_gold g on g.fid = bp.arena_group_id
              where bp.image_url is not null
                and (source_meta -> 'vision' ->> 'model' is null
-                    or source_meta -> 'vision' ->> 'model' != '{MODEL}')
+                    or source_meta -> 'vision' ->> 'model' != '{MODEL}'
+                    or coalesce(source_meta -> 'vision' ->> 'schema_version', 'v1') != '{SCHEMA_VERSION}')
              order by bp.id
              limit %s
         """, (args.chunk_size,))
@@ -265,53 +285,91 @@ def main():
         sys.exit(1)
 
     upd_cur = conn.cursor()
-    ok = err = 0
-    in_tok = out_tok = 0
+    state = {"ok": 0, "err": 0, "in": 0, "out": 0, "done": 0}
+    lock = threading.Lock()
     t0 = time.time()
-    for i, p in enumerate(targets, 1):
-        url = p["thumb_url"] or p["image_url"]   # thumb is plenty for vision
+
+    def process(p):
+        url = p["thumb_url"] or p["image_url"]
         try:
             tags, usage = tag_photo(url, p["beach_name"] or "a beach")
-            in_tok += usage["input_tokens"]
-            out_tok += usage["output_tokens"]
-            ok += 1
         except Exception as e:
-            err += 1
-            print(f"  [{i}/{len(targets)}] id={p['id']} ERR: {e}", flush=True)
-            time.sleep(1.0)
-            continue
-
+            with lock:
+                state["err"] += 1
+                state["done"] += 1
+                pid = p["id"]
+                d = state["done"]
+            print(f"  [{d}/{len(targets)}] id={pid} ERR: {e}", flush=True)
+            return None
+        with lock:
+            state["ok"] += 1
+            state["in"] += usage["input_tokens"]
+            state["out"] += usage["output_tokens"]
+            state["done"] += 1
+            d = state["done"]
         if args.audit:
-            print(f"  [{i}/{len(targets)}] id={p['id']}  "
+            print(f"  [{d}/{len(targets)}] id={p['id']}  "
                   f"dog={tags.get('has_dog')}  birds={tags.get('has_birds')}  "
+                  f"surf={tags.get('has_surfing')}  "
+                  f"active={tags.get('has_active_people')}  "
+                  f"face={tags.get('has_human_face_closeup')}  "
                   f"scene={tags.get('scene')}  q={tags.get('quality_issue')}  "
-                  f"features={tags.get('landscape_features')}",
-                  flush=True)
+                  f"feat={tags.get('landscape_features')}", flush=True)
             print(f"      desc: {tags.get('description', '')[:160]}", flush=True)
-        else:
+            return None
+        return (p["id"], tags, d)
+
+    if args.workers <= 1:
+        # Sequential path
+        for p in targets:
+            r = process(p)
+            if r is None: continue
+            pid, tags, d = r
             upd_cur.execute("""
                 update public.beach_photos
                    set source_meta = source_meta || jsonb_build_object('vision', %s::jsonb)
                  where id = %s
-            """, (json.dumps(tags), p["id"]))
-
-        if i % 20 == 0:
-            conn.commit()
-            elapsed = time.time() - t0
-            rate = i / elapsed
-            eta = (len(targets) - i) / rate if rate > 0 else 0
-            print(f"  [{i}/{len(targets)}]  ok={ok}  err={err}  "
-                  f"{rate:.1f}/s  eta={eta:.0f}s  "
-                  f"tok in={in_tok:,} out={out_tok:,}", flush=True)
-
-        time.sleep(0.15)   # gentle pacing — Haiku has plenty of headroom
+            """, (json.dumps(tags), pid))
+            if d % 20 == 0:
+                conn.commit()
+                _progress(state, len(targets), t0)
+            time.sleep(0.15)
+    else:
+        # Parallel: workers pool, single DB writer in main thread.
+        # Tag → result queue (via Future); main commits as they land.
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            futures = {pool.submit(process, p): p for p in targets}
+            for fut in as_completed(futures):
+                r = fut.result()
+                if r is None: continue
+                pid, tags, d = r
+                upd_cur.execute("""
+                    update public.beach_photos
+                       set source_meta = source_meta || jsonb_build_object('vision', %s::jsonb)
+                     where id = %s
+                """, (json.dumps(tags), pid))
+                if d % 20 == 0:
+                    conn.commit()
+                    _progress(state, len(targets), t0)
 
     if not args.audit:
         conn.commit()
 
-    actual = in_tok * 1e-6 + out_tok * 5e-6   # Haiku 4.5 pricing
-    print(f"\nDone in {time.time()-t0:.0f}s. ok={ok} err={err}", flush=True)
-    print(f"Tokens: in={in_tok:,} out={out_tok:,}  est cost=${actual:.2f}", flush=True)
+    actual = state["in"] * 1e-6 + state["out"] * 5e-6   # Haiku 4.5 pricing
+    print(f"\nDone in {time.time()-t0:.0f}s. ok={state['ok']} err={state['err']}",
+          flush=True)
+    print(f"Tokens: in={state['in']:,} out={state['out']:,}  est cost=${actual:.2f}",
+          flush=True)
+
+
+def _progress(state, total, t0):
+    elapsed = time.time() - t0
+    d = state["done"]
+    rate = d / elapsed if elapsed > 0 else 0
+    eta = (total - d) / rate if rate > 0 else 0
+    print(f"  [{d}/{total}]  ok={state['ok']}  err={state['err']}  "
+          f"{rate:.1f}/s  eta={eta:.0f}s  "
+          f"tok in={state['in']:,} out={state['out']:,}", flush=True)
 
 
 if __name__ == "__main__":

@@ -817,19 +817,23 @@ function renderBeach() {
   renderMap();
 
   const grid = document.getElementById('photo-grid');
-  // When 🐶 Dog only is on, restrict the photo grid to dog-titled photos.
-  // This keeps the curation pass tight — only the high-signal photos appear.
+  // When 🐶 Dog only is on, restrict the photo grid to dog photos.
+  // Checks vision.has_dog first (strong pixel signal); falls back to
+  // title/description regex for photos not yet vision-tagged.
   const DOG_RE = /\b(dog|dogs|puppy|pup|pups|puppies|pooch|canine|hound|doggie|doggy)\b/i;
   let display = beachData.photos || [];
   if (dogOnly) {
     display = display.filter(p => {
       const m = p.source_meta || {};
-      return DOG_RE.test(m.title || '') || DOG_RE.test(m.description || '');
+      const v = m.vision || {};
+      return v.has_dog === true
+          || DOG_RE.test(m.title || '')
+          || DOG_RE.test(m.description || '');
     });
   }
   if (!display.length) {
     grid.innerHTML = dogOnly
-      ? `<div class="empty">No dog-titled photos here. (Beach is in the dog-filter cohort because uncurated dog photos exist; if you see this, they may have just been curated.)</div>`
+      ? `<div class="empty">No dog photos here. (Beach is in the dog-filter cohort because uncurated dog photos exist; they may have just been curated.)</div>`
       : `<div class="empty">No photos for this beach.</div>`;
     return;
   }

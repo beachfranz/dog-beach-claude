@@ -34,6 +34,9 @@ share/
 # Throwaway scratch — exploratory artifacts, tile caches, one-off CSVs
 tmp/
 
+# Trained model binaries — re-derivable from training data
+scripts/output/
+
 # Per-curator QGIS project files (user-specific paths)
 QGIS/
 

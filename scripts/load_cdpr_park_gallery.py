@@ -80,6 +80,9 @@ def fetch_gallery_imgs(page_id: str) -> list[str]:
 
 def park_pages_from_db(conn) -> dict[str, list[int]]:
     """{page_id: [beach_fid, ...]} for CDPR beaches with parks.ca.gov URLs."""
+    # Filter to gold_fids that still exist in beaches_gold — governance
+    # data can outlive dedup'd beaches (e.g. today's beaches_gold dedup
+    # left a few orphan gov rows).
     sql = """
     select bep.source_url, c.gold_fid
       from beach_enrichment_provenance bep
@@ -88,6 +91,7 @@ def park_pages_from_db(conn) -> dict[str, list[int]]:
          where field_group='governance' and is_canonical=true
            and claimed_values->>'name' = 'California Department of Parks and Recreation'
       ) c on c.gold_fid = bep.gold_fid
+      join beaches_gold g on g.fid = c.gold_fid and g.is_active
      where bep.source_url ilike '%parks.ca.gov%'
     """
     PAGE_RE = re.compile(r"page_id=(\d+)")

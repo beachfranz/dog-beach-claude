@@ -673,13 +673,25 @@ async function loadBeach(fid) {
     return;
   }
   beachData = await res.json();
-  // Sort: always distance ascending, with name_match as tiebreak.
-  // Same rule regardless of prior curation state — consistent UX (Franz 2026-05-12).
+  // Hybrid sort: ML keep-probability with a distance penalty.
+  //   base = predicted_keep_prob (0-1) when present, else composite_score/10, else 0
+  //   final = base - (distance_m / 1000) * 0.15   ← ~0.15 cost per km
+  // So a great photo at 1km (pred 0.95) beats a mediocre one at 0m
+  // (pred 0.50): 0.80 vs 0.50. name_match is a final tiebreak.
+  // Replaces the prior pure-distance-ascending rule once we had ML.
   const nameMatch = (p) => parseFloat((p.source_meta || {}).name_match_score ?? 0) || 0;
+  const sortScore = (p) => {
+    const m = p.source_meta || {};
+    const pred = parseFloat(m.predicted_keep_prob);
+    const base = !isNaN(pred) ? pred
+               : (parseFloat(m.composite_score) || 0) / 10;
+    const dist = parseFloat(p.distance_m);
+    const penalty = !isNaN(dist) ? (dist / 1000) * 0.15 : 0;
+    return base - penalty;
+  };
   (beachData.photos || []).sort((a, b) => {
-    const da = a.distance_m ?? Number.POSITIVE_INFINITY;
-    const db = b.distance_m ?? Number.POSITIVE_INFINITY;
-    if (da !== db) return da - db;
+    const sa = sortScore(a), sb = sortScore(b);
+    if (sa !== sb) return sb - sa;                  // higher first
     return nameMatch(b) - nameMatch(a);
   });
   dirtyMap = new Map();

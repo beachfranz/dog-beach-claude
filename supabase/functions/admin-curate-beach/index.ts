@@ -115,6 +115,28 @@ Deno.serve(async (req: Request) => {
 
     let deleted = 0;
     if (toDelete.length) {
+      // BEFORE deleting, write tombstones so loaders don't re-fetch these
+      // photos next run. Failure to tombstone is non-fatal — log and proceed
+      // so the user's intent (delete from grid) still takes effect.
+      const { data: doomed } = await supabase
+        .from("beach_photos")
+        .select("arena_group_id, source, external_id")
+        .in("id", toDelete);
+      const tombstones = (doomed ?? [])
+        .filter(d => d.external_id != null)
+        .map(d => ({
+          arena_group_id: d.arena_group_id,
+          source:         d.source,
+          external_id:    d.external_id,
+          rejected_by:    body.curated_by ?? null,
+        }));
+      if (tombstones.length) {
+        const { error: tombErr } = await supabase
+          .from("beach_photo_rejected")
+          .upsert(tombstones, { onConflict: "arena_group_id,source,external_id" });
+        if (tombErr) console.error("tombstone write failed:", tombErr.message);
+      }
+
       const { error: delErr, count } = await supabase
         .from("beach_photos")
         .delete({ count: "exact" })

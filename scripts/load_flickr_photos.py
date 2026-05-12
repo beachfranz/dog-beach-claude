@@ -58,8 +58,18 @@ if not FLICKR_KEY:
     sys.exit(1)
 
 PER_BEACH    = 5
-RADIUS_KM    = 5
-THROTTLE_S   = 1.0
+RADIUS_KM    = 0.5          # Match the HARD_CUTOFF_M (450m) closely. Wider
+                            # radii (5km) let Flickr's interestingness sort
+                            # crowd out our actually-near photos with famous
+                            # landmarks at the edge of the radius — fid 9944
+                            # (Lake Union Park) returned 0 within 450m at 5km
+                            # but 6 within 450m at 0.5km. Tightening to 500m
+                            # is the right precision tradeoff.
+HARD_CUTOFF_M = 450         # Franz's wikicommons-curation finding: photos >450m
+                            # from beach point are rarely actually of the right beach.
+THROTTLE_S   = 2.5         # bumped from 1.5 after the 1st key got soft-flagged
+                            # on a 250-burst. Per-key reputation matters more
+                            # than documented limits — start conservative.
 # All CC license codes; 0 (ARR) excluded
 CC_LICENSES  = "1,2,3,4,5,6,7,8,9,10"
 
@@ -69,6 +79,135 @@ LICENSE_LABEL = {
     "7": "no-known-restrictions", "8": "US-government-public-domain",
     "9": "CC0", "10": "public-domain",
 }
+
+# Keyword bias for ranking — mirror of load_wikimedia_commons_photos.py.
+# Same term lists; same scoring weights. Plus a small set of Flickr-specific
+# negatives for event/race photos that Flickr surfaces more than Commons does.
+POSITIVE_TERMS_DOG = [
+    "dog", "dogs", "doggie", "doggy",
+    "puppy", "pup", "pups", "puppies",
+    "canine", "pooch", "hound",
+]
+POSITIVE_TERMS_GENERIC = [
+    "sand", "shore",
+    "leash", "leashed", "off-leash", "off leash",
+    "rules", "regulations", "regulation",
+    "permitted", "allowed", "prohibited",
+    "ordinance",
+]
+POSITIVE_TERMS = POSITIVE_TERMS_DOG + POSITIVE_TERMS_GENERIC
+NEGATIVE_TERMS = [
+    # Vehicles / infrastructure
+    "train", "railway", "railroad", "locomotive",
+    "car", "truck", "vehicle", "automobile", "pontiac", "chevrolet",
+    "ford", "toyota", "honda", "parking lot",
+    # Wildlife / sea creatures (specimen photos clutter the gallery)
+    "fish", "crab", "lobster", "shrimp",
+    "whale", "dolphin", "porpoise",
+    "octopus", "squid", "cuttlefish",
+    "jellyfish", "sea nettle", "sea jelly",
+    "starfish", "sea star",
+    "urchin", "anemone", "barnacle",
+    "scallop", "mussel", "clam", "oyster", "abalone",
+    "sea cucumber", "sea spider", "sea slug", "sea worm",
+    "nudibranch", "mollusk", "crustacean", "specimen",
+    "coral", "plankton",
+    # Birds (specimen photos)
+    "bird", "birds", "gull", "seagull", "larus",
+    "pelican", "cormorant", "heron", "egret",
+    "tern", "plover", "sandpiper", "shorebird",
+    "duck", "goose", "swan", "raptor", "hawk", "osprey",
+    "curlew", "willet", "godwit", "sanderling", "phalarope",
+    "inaturalist",
+    # Common Latin genus names for specimen photos
+    "apostichopus", "pycnogonum", "ophioderma", "crassadoma",
+    "platynereis", "numenius", "phalacrocorax", "pelecanus",
+    "haliaeetus", "calidris", "limosa", "americanus",
+    "panamense", "californicus", "bicanaliculata",
+    "astropecten", "amphistichus", "verrilli", "armatus", "koelzi",
+    "surfperch", "sand star", "spiny sand", "calico surf",
+    "dolichovespula", "meliscaeva", "megapenthes",   # insect specimens — added 2026-05-12
+    "eristalis", "evacanthus",                       # more insect genera, same photographer cohort
+    # Pure-graphic / non-photo
+    "map", "diagram", "chart", "logo", "plaque",
+    "satellite", "aerial",
+    "construction", "interior",
+    "screenshot", "infographic",
+    # Flickr-specific: event/race photos that show up at beach locations
+    # (Pacific Islander Festival, Escape from Alcatraz triathlon, Over-the-Line
+    # tournament, weddings, etc. were the noise in the 2026-05-11 pilot)
+    "festival", "tournament", "competition", "triathlon",
+    "race", "marathon", "concert", "wedding",
+    "parade", "fundraiser",
+]
+
+
+# Tokens that are too generic to count as name-match signal. Most beach names
+# contain "Beach"; "the" / "of" / "and" are connectors; "Park" / "State" /
+# "Point" / "Cove" / "Bay" / "Cape" / "Island" appear in many beach names and
+# can't disambiguate them.
+NAME_STOPWORDS = {
+    "beach", "the", "a", "an", "of", "and", "or",
+    "state", "park", "county", "city",
+    "point", "cove", "bay", "cape", "island",
+    "public", "access", "parking", "lot",
+    "north", "south", "east", "west",   # directional alone is weak signal
+}
+
+import re as _re
+def _name_tokens(s: str) -> set[str]:
+    if not s: return set()
+    return {t for t in _re.findall(r"[a-z]+", s.lower())
+            if len(t) > 2 and t not in NAME_STOPWORDS}
+
+
+def _name_match_score(beach_name: str, title: str) -> float:
+    """Reward photos whose title contains the beach's distinctive name tokens.
+       Tokenize beach name + title (lowercase, strip non-alpha, drop generic
+       stopwords like 'beach'/'state'/'park'/'cove'), then:
+         - 0 distinctive matches   ->  0
+         - partial match           ->  3.0 * (matched / total)  [linear]
+         - full match (all tokens) -> +4.0 (caps the linear value at +4)
+       Examples:
+         beach='Mile Rock Beach'     title='Mile Rock Beach'     -> 2/2 = +4.0
+         beach='Rosie's Dog Beach'   title='Rosie's Dog Beach'   -> 2/2 = +4.0
+         beach='Black Sands Beach'   title='Black sand beach...' -> 1/2 = +1.5
+                                              (sand/sands plural miss)
+         beach='Main Beach'          title='Laguna Beach'        -> 0/1 = 0
+                                              ('Main' is the only distinctive token)
+    """
+    beach_t = _name_tokens(beach_name)
+    title_t = _name_tokens(title)
+    if not beach_t or not title_t: return 0.0
+    matched = len(beach_t & title_t)
+    if matched == 0: return 0.0
+    if matched >= len(beach_t): return 4.0
+    return round(3.0 * matched / len(beach_t), 2)
+
+
+def _relevance_score(title: str, description: str = "") -> float:
+    """Term-list scoring — copy of the WC loader's function.
+       Dog-specific positive: +3.0 title / +2.0 desc
+       Generic positive:      +1.5 title / +1.0 desc
+       Negative:              -1.2 title / -0.8 desc
+    Flickr photos rarely carry descriptions in the search response, so
+    description is usually empty and only title-scoring fires.
+    NOTE: this is one of TWO scoring components — name-match is computed
+    separately by _name_match_score(). Composite combines both with proximity.
+    """
+    txt_title = (title or "").lower()
+    txt_desc  = (description or "").lower()
+    score = 0.0
+    for t in POSITIVE_TERMS_DOG:
+        if t in txt_title: score += 3.0
+        elif t in txt_desc: score += 2.0
+    for t in POSITIVE_TERMS_GENERIC:
+        if t in txt_title: score += 1.5
+        elif t in txt_desc: score += 1.0
+    for t in NEGATIVE_TERMS:
+        if t in txt_title: score -= 1.2
+        elif t in txt_desc: score -= 0.8
+    return score
 
 
 # ─── Supabase REST helpers ────────────────────────────────────────────────
@@ -103,6 +242,11 @@ def select_targets(args):
                     params={"select": "fid,name,display_name_override,county_name,state",
                             "fid": f"in.({','.join(map(str, ids))})",
                             "is_active": "eq.true"})
+        # Preserve caller's order — Supabase REST `in.(...)` returns rows in
+        # Postgres' arbitrary order otherwise, which kills our "hourly first /
+        # catchment desc" intent.
+        by_fid = {r["fid"]: r for r in (rows or [])}
+        rows = [by_fid[i] for i in ids if i in by_fid]
     elif args.pilot:
         rows = supa("/rest/v1/beaches_gold",
                     params={"select": "fid,name,display_name_override,county_name,state",
@@ -136,10 +280,17 @@ def select_targets(args):
 # ─── Flickr search ────────────────────────────────────────────────────────
 
 def flickr_search(text, lat, lng, radius_km=RADIUS_KM, per_page=20):
+    """Geo-only search. The text+geo AND filter is too restrictive in practice
+    (e.g. Boston-area Carson Beach returns 0 with 'Carson Beach Suffolk' but 10
+    with no text) — text-matching photos are often ungeo'd and the geo filter
+    drops them. Rely on geo + post-score: HARD_CUTOFF_M for proximity, the
+    name-match and term-relevance signals for what to surface in the top N.
+    The `text` arg is retained for callers but ignored.
+    """
+    _ = text  # intentionally unused — see docstring
     params = {
         "method":   "flickr.photos.search",
         "api_key":  FLICKR_KEY,
-        "text":     text,
         "license":  CC_LICENSES,
         "lat":      f"{lat}",
         "lon":      f"{lng}",
@@ -154,16 +305,30 @@ def flickr_search(text, lat, lng, radius_km=RADIUS_KM, per_page=20):
     }
     url = "https://api.flickr.com/services/rest/?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, headers={"User-Agent": "DogBeachScout/1.0"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            d = json.loads(r.read())
-        if d.get("stat") != "ok":
-            print(f"  flickr error: {d.get('message')}", file=sys.stderr)
+    # Backoff retry on stat=fail (code 201 = service rate-limit/outage). Same
+    # pattern as the WC loader's _commons_call.
+    delays = [3, 10, 30]
+    for attempt, delay in enumerate([0, *delays]):
+        if delay > 0:
+            time.sleep(delay)
+            print(f"  flickr backoff {delay}s (attempt {attempt}/{len(delays)})",
+                  file=sys.stderr)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                d = json.loads(r.read())
+            if d.get("stat") == "ok":
+                return (d.get("photos") or {}).get("photo") or []
+            # Retryable: code 201 (service not currently available) or 105 (rate limit)
+            code = d.get("code")
+            if code in (105, 201) and attempt < len(delays):
+                continue
+            print(f"  flickr error code={code}: {d.get('message')}", file=sys.stderr)
             return []
-        return (d.get("photos") or {}).get("photo") or []
-    except Exception as e:
-        print(f"  flickr error: {e}", file=sys.stderr)
-        return []
+        except Exception as e:
+            if attempt < len(delays): continue
+            print(f"  flickr exception: {e}", file=sys.stderr)
+            return []
+    return []
 
 
 def haversine_m(la1, lo1, la2, lo2):
@@ -173,33 +338,64 @@ def haversine_m(la1, lo1, la2, lo2):
     return 2 * 6_371_000 * asin(sqrt(a))
 
 
-def pick_best(photos, beach_lat, beach_lng, top_n=PER_BEACH):
+def pick_best(photos, beach_lat, beach_lng, beach_name="", top_n=PER_BEACH):
+    """Composite scoring — three signals + a hard geo cutoff.
+
+       composite = relevance + name_match + proximity * 2.0
+
+    Components:
+      - relevance:   keyword bias from POSITIVE_TERMS / NEGATIVE_TERMS lists
+                     (range ~-5 .. +6 in practice)
+      - name_match:  does the photo title contain the beach's distinctive name
+                     tokens? (range 0 .. +4)
+      - proximity:   1.0 - distance/HARD_CUTOFF_M, weighted x2.0 (range 0 .. +2)
+
+    Drops anything past HARD_CUTOFF_M and ungeo'd photos. Sort desc by
+    composite with distance tiebreak.
+    """
     scored = []
     for p in photos:
-        # Flickr returns latitude/longitude as strings; "0" means no geo
         try:
             plat = float(p.get("latitude") or 0)
             plng = float(p.get("longitude") or 0)
         except (TypeError, ValueError):
             plat = plng = 0
         if plat == 0 and plng == 0:
-            # No geo data — keep but mark as unknown
-            d = -1
-        else:
-            d = int(haversine_m(beach_lat, beach_lng, plat, plng))
-        scored.append({**p, "_distance_m": d})
-    # Prioritize geo-tagged photos (sorted by distance asc), then ungeo (preserve order)
-    geo  = sorted([s for s in scored if s["_distance_m"] >= 0], key=lambda x: x["_distance_m"])
-    ungeo = [s for s in scored if s["_distance_m"] < 0]
-    return (geo + ungeo)[:top_n]
+            continue
+        d = int(haversine_m(beach_lat, beach_lng, plat, plng))
+        if d > HARD_CUTOFF_M:
+            continue
+        title = p.get("title") or ""
+        rel       = _relevance_score(title)
+        name_m    = _name_match_score(beach_name, title)
+        proximity = 1.0 - d / max(HARD_CUTOFF_M, 1)
+        composite = rel + name_m + proximity * 2.0
+        scored.append({**p, "_distance_m": d,
+                       "_relevance":  rel,
+                       "_name_match": name_m,
+                       "_composite":  composite})
+    # Two-stage sort:
+    #   1. SELECTION — pick top N by composite (best photos win).
+    scored.sort(key=lambda x: (-x["_composite"], x["_distance_m"]))
+    kept = scored[:top_n]
+    #   2. DISPLAY — re-sort the kept set by distance asc, name-match as
+    #      tiebreak. Curator UX wants closest-first (Franz, 2026-05-11).
+    kept.sort(key=lambda x: (x["_distance_m"], -x.get("_name_match", 0)))
+    return kept
 
 
 # ─── Persistence ──────────────────────────────────────────────────────────
 
 def replace_flickr(fid, photos):
+    # Delete ONLY uncurated rows. Curated photos (sort_order set by the curator
+    # via the admin-curate-beach edge function) are preserved across re-runs.
+    # If a candidate from this batch matches a kept photo by external_id, the
+    # unique constraint (arena_group_id, source, external_id) + ignore-duplicates
+    # on the INSERT will silently drop the duplicate.
     supa("/rest/v1/beach_photos", method="DELETE", params={
         "arena_group_id": f"eq.{fid}",
         "source":         "eq.flickr",
+        "curated_at":     "is.null",
     }, prefer="return=minimal")
     if not photos: return
     rows = []
@@ -240,7 +436,14 @@ def replace_flickr(fid, photos):
             "distance_m":     p["_distance_m"] if p["_distance_m"] >= 0 else None,
             "sort_order":     50 + i,  # flickr ranked above mapillary (100+)
             "page_url":       page_url,
-            "source_meta":    {"title": p.get("title"), "license_code": license_code},
+            "source_meta":    {
+                "title":            p.get("title"),
+                "license_code":     license_code,
+                "artist":           owner[:200],
+                "relevance_score":  round(p.get("_relevance", 0.0), 2),
+                "name_match_score": round(p.get("_name_match", 0.0), 2),
+                "composite_score":  round(p.get("_composite", 0.0), 2),
+            },
         })
     if rows:
         supa("/rest/v1/beach_photos", method="POST", body=rows,
@@ -248,6 +451,35 @@ def replace_flickr(fid, photos):
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────
+
+def fetch_blocked_photographers():
+    """Returns set of artist strings to skip on this run (Flickr source)."""
+    try:
+        rows = supa("/rest/v1/rpc/beach_photo_blocked_photographers",
+                    method="POST", body={"p_source": "flickr"})
+    except Exception:
+        return set()
+    if not rows: return set()
+    return {(r["artist"] or "").lower() for r in rows if r.get("artist")}
+
+
+def fetch_rejected_external_ids(fids: list[int]) -> dict[int, set[str]]:
+    """Returns {fid: {external_id, ...}} of photos the curator has rejected
+    for this source. Loaders filter candidates against this before scoring,
+    so trashed photos don't come back next run.
+    """
+    if not fids: return {}
+    try:
+        rows = supa("/rest/v1/rpc/get_rejected_external_ids",
+                    method="POST",
+                    body={"p_fids": fids, "p_source": "flickr"})
+    except Exception:
+        return {}
+    out: dict[int, set[str]] = {}
+    for r in rows or []:
+        out.setdefault(r["arena_group_id"], set()).add(r["external_id"])
+    return out
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -259,19 +491,38 @@ def main():
     args = ap.parse_args()
 
     targets = select_targets(args)
-    print(f"Targets: {len(targets)} beaches  (radius {RADIUS_KM}km, top {PER_BEACH} per beach)")
+    print(f"Targets: {len(targets)} beaches  (radius {RADIUS_KM}km, "
+          f"top {PER_BEACH} per beach, hard cutoff {HARD_CUTOFF_M}m)")
+
+    blocked = fetch_blocked_photographers()
+    if blocked:
+        print(f"Photographer blocklist: {len(blocked)} flickr artists "
+              f"(>=3 prior photos, mean relevance <= 0)")
+
+    rejected_by_fid = fetch_rejected_external_ids([b["fid"] for b in targets])
+    if rejected_by_fid:
+        total_rej = sum(len(s) for s in rejected_by_fid.values())
+        print(f"Curator-rejected tombstones: {total_rej} external_ids "
+              f"across {len(rejected_by_fid)} beaches (will skip)")
 
     saved = errored = 0
     for i, b in enumerate(targets, 1):
         try:
-            # Search query: beach name + "beach" disambiguator + city/state
             query_parts = [b["name"]]
             if "beach" not in b["name"].lower():
                 query_parts.append("beach")
             if b.get("county"): query_parts.append(b["county"])
             text = " ".join(query_parts)
             cands = flickr_search(text, b["lat"], b["lng"])
-            picked = pick_best(cands, b["lat"], b["lng"])
+            # Filter blocked photographers before scoring
+            if blocked:
+                cands = [c for c in cands
+                         if (c.get("ownername") or "").lower() not in blocked]
+            # Filter curator-rejected external_ids — don't surface trashed photos
+            rej = rejected_by_fid.get(b["fid"]) or set()
+            if rej:
+                cands = [c for c in cands if str(c.get("id")) not in rej]
+            picked = pick_best(cands, b["lat"], b["lng"], beach_name=b["name"])
             replace_flickr(b["fid"], picked)
             saved += len(picked)
             tag = f'{len(picked)} photos' if picked else '(none)'
@@ -279,7 +530,8 @@ def main():
             if picked:
                 p = picked[0]
                 print(f'      top: "{p.get("title", "")[:50]}"  {p.get("ownername")}  '
-                      f'{p["_distance_m"] if p["_distance_m"] >= 0 else "?"}m')
+                      f'{p["_distance_m"]}m  rel={p.get("_relevance",0):.1f} '
+                      f'nm={p.get("_name_match",0):.1f}')
         except Exception as e:
             errored += 1
             print(f"  [{i}/{len(targets)}] fid={b['fid']}  ERROR: {e}", file=sys.stderr)

@@ -187,6 +187,24 @@ def fetch_blocked_photographers() -> set[str]:
     return {r["artist"].lower() for r in rows if r.get("artist")}
 
 
+def fetch_rejected_external_ids(fids: list[int]) -> dict[int, set[str]]:
+    """Returns {fid: {external_id, ...}} of WC photos the curator has rejected.
+    Loaders filter candidates against this before scoring so trashed photos
+    don't come back next run.
+    """
+    if not fids: return {}
+    try:
+        rows = supa("/rest/v1/rpc/get_rejected_external_ids",
+                    method="POST",
+                    body={"p_fids": fids, "p_source": "wikimedia"})
+    except Exception:
+        return {}
+    out: dict[int, set[str]] = {}
+    for r in rows or []:
+        out.setdefault(r["arena_group_id"], set()).add(r["external_id"])
+    return out
+
+
 # ─── Filter / rank ────────────────────────────────────────────────────────
 
 def _ext_of(title_or_url: str) -> str:
@@ -264,6 +282,8 @@ NEGATIVE_TERMS = [
     "panamense", "californicus", "bicanaliculata",
     "astropecten", "amphistichus", "verrilli", "armatus", "koelzi",
     "surfperch", "sand star", "spiny sand", "calico surf",
+    "dolichovespula", "meliscaeva", "megapenthes",   # insect specimens — Third Beach (fid 12806371) dump 2026-05-12
+    "eristalis", "evacanthus",                       # more insect genera, same photographer 'xpda' cohort
     # Pure-graphic / non-photo
     "map", "diagram", "chart", "logo", "plaque",
     "satellite", "aerial",
@@ -293,15 +313,48 @@ def _relevance_score(title: str, description: str) -> float:
     return score
 
 
+# Mirror of load_flickr_photos.py — same name-match scoring across sources
+# so the curate UI is consistent regardless of which loader populated the row.
+NAME_STOPWORDS = {
+    "beach", "the", "a", "an", "of", "and", "or",
+    "state", "park", "county", "city",
+    "point", "cove", "bay", "cape", "island",
+    "public", "access", "parking", "lot",
+    "north", "south", "east", "west",
+}
+import re as _re_global
+def _name_tokens(s: str) -> set[str]:
+    if not s: return set()
+    return {t for t in _re_global.findall(r"[a-z]+", s.lower())
+            if len(t) > 2 and t not in NAME_STOPWORDS}
+
+
+def _name_match_score(beach_name: str, title: str) -> float:
+    """Reward photos whose title contains the beach's distinctive name tokens.
+       Tokenize beach name + title (drop generic stopwords, len <= 2).
+       0 matches -> 0, partial -> linear 3.0 * matched/total, full -> 4.0.
+       See project_photo_scoring_spec.md for details."""
+    beach_t = _name_tokens(beach_name)
+    title_t = _name_tokens(title)
+    if not beach_t or not title_t: return 0.0
+    matched = len(beach_t & title_t)
+    if matched == 0: return 0.0
+    if matched >= len(beach_t): return 4.0
+    return round(3.0 * matched / len(beach_t), 2)
+
+
 def rank_and_pick(geo_results: list[dict], info_map: dict[int, dict],
                   beach_lat: float, beach_lng: float,
                   max_radius_m: int, top_n: int,
-                  blocked_artists: set[str] | None = None) -> list[dict]:
-    """Rank by combined relevance + distance score.
-       composite = relevance + (1.0 - distance / max_radius_m) * 2.0
-    Distance is normalized so closeness contributes ~0..2 to the score;
-    relevance can be much higher. Positive-term-rich photos at moderate
-    distance beat unrelated photos at the centroid.
+                  blocked_artists: set[str] | None = None,
+                  beach_name: str = "") -> list[dict]:
+    """Composite = relevance + name_match + proximity * 2.0
+       See project_photo_scoring_spec.md.
+
+    Two-stage sort:
+      1. Selection — top N by composite (best photos win).
+      2. Display   — re-sort kept set by distance asc (name_match desc tiebreak).
+                     Curator UX wants closest-first scan order.
     """
     scored = []
     for g in geo_results:
@@ -320,9 +373,7 @@ def rank_and_pick(geo_results: list[dict], info_map: dict[int, dict],
 
         extmd = info.get("extmetadata") or {}
         desc = (extmd.get("ImageDescription", {}) or {}).get("value") or ""
-        # strip HTML tags from description
-        import re as _re
-        desc = _re.sub(r"<[^>]+>", "", desc)
+        desc = _re_global.sub(r"<[^>]+>", "", desc)
 
         # Skip blocklisted photographers (set by past low-relevance pattern)
         if blocked_artists:
@@ -330,23 +381,33 @@ def rank_and_pick(geo_results: list[dict], info_map: dict[int, dict],
             if artist_raw and artist_raw.lower() in blocked_artists:
                 continue
 
-        rel = _relevance_score(title, desc)
+        rel       = _relevance_score(title, desc)
+        name_m    = _name_match_score(beach_name, title)
         proximity = 1.0 - d / max(max_radius_m, 1)
-        composite = rel + proximity * 2.0
+        composite = rel + name_m + proximity * 2.0
 
         scored.append({**g, "_info": info, "_distance_m": d, "_title": title,
-                       "_relevance": rel, "_composite": composite})
-    # Higher composite first; distance tiebreak
+                       "_relevance":  rel,
+                       "_name_match": name_m,
+                       "_composite":  composite})
+    # Selection: top N by composite (distance tiebreak)
     scored.sort(key=lambda x: (-x["_composite"], x["_distance_m"]))
-    return scored[:top_n]
+    kept = scored[:top_n]
+    # Display: re-sort kept set by distance asc (name_match desc tiebreak)
+    kept.sort(key=lambda x: (x["_distance_m"], -x.get("_name_match", 0)))
+    return kept
 
 
 # ─── Persistence ──────────────────────────────────────────────────────────
 
 def replace_commons(fid: int, photos: list[dict]):
+    # Delete ONLY uncurated rows (curated photos are preserved). Also: the
+    # stored source is 'wikimedia' — historical bug used 'wikimedia_commons'
+    # in the DELETE which never matched, making the loader silently additive.
     supa("/rest/v1/beach_photos", method="DELETE", params={
         "arena_group_id": f"eq.{fid}",
-        "source":         "eq.wikimedia_commons",
+        "source":         "eq.wikimedia",
+        "curated_at":     "is.null",
     }, prefer="return=minimal")
     if not photos: return
     rows = []
@@ -379,8 +440,9 @@ def replace_commons(fid: int, photos: list[dict]):
                                "artist": artist[:200],   # for blocklist grouping
                                "credit": _meta(extmd, "Credit"),
                                "usage_terms": _meta(extmd, "UsageTerms"),
-                               "relevance_score": round(p.get("_relevance", 0.0), 2),
-                               "composite_score": round(p.get("_composite", 0.0), 2)},
+                               "relevance_score":  round(p.get("_relevance", 0.0), 2),
+                               "name_match_score": round(p.get("_name_match", 0.0), 2),
+                               "composite_score":  round(p.get("_composite", 0.0), 2)},
         })
     supa("/rest/v1/beach_photos", method="POST", body=rows,
          prefer="return=minimal,resolution=ignore-duplicates")
@@ -429,6 +491,12 @@ def main():
         print(f"Photographer blocklist: {len(blocked)} artists "
               f"(>=3 prior photos, mean rel <= 0)")
 
+    rejected_by_fid = fetch_rejected_external_ids([b["fid"] for b in targets])
+    if rejected_by_fid:
+        total_rej = sum(len(s) for s in rejected_by_fid.values())
+        print(f"Curator-rejected tombstones: {total_rej} external_ids "
+              f"across {len(rejected_by_fid)} beaches (will skip)")
+
     saved_total = 0
     no_photos = 0
     for i, b in enumerate(targets):
@@ -441,10 +509,19 @@ def main():
                 no_photos += 1
                 replace_commons(b["fid"], [])
                 continue
+            # Filter curator-rejected external_ids — don't surface trashed photos
+            rej = rejected_by_fid.get(b["fid"]) or set()
+            if rej:
+                geo = [g for g in geo if str(g.get("pageid")) not in rej]
+                if not geo:
+                    no_photos += 1
+                    replace_commons(b["fid"], [])
+                    continue
             time.sleep(THROTTLE_S)
             info_map = commons_imageinfo([g["pageid"] for g in geo])
             picked = rank_and_pick(geo, info_map, b["lat"], b["lng"],
-                                   args.radius, args.per_beach, blocked)
+                                   args.radius, args.per_beach, blocked,
+                                   beach_name=b.get("name", ""))
             if not picked:
                 no_photos += 1
                 replace_commons(b["fid"], [])

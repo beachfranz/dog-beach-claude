@@ -96,7 +96,7 @@ def match_anchor(cur, anchor: dict) -> dict:
                  bdp.consensus_confidence, bdp.disagreement_flag,
                  max(similarity(lower(bg.name), lower(c.label))) as sim
           from public.beaches_gold bg
-          left join public.beach_dog_policy bdp on bdp.arena_group_id = bg.group_id
+          left join public.beach_dog_policy bdp on bdp.arena_group_id = bg.fid
           cross join candidates c
           where (%s::text is null or bg.county_name = %s)
             and similarity(lower(bg.name), lower(c.label)) > 0.20

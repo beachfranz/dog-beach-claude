@@ -51,6 +51,9 @@ STATE_BBOX = {
     "CA": (32.50, -124.50, 42.00, -114.10),
     "OR": (41.99, -124.60, 46.30, -116.45),
     "WA": (45.50, -124.80, 49.00, -116.90),
+    "RI": (41.14, -71.91, 42.02, -71.10),
+    "MA": (41.20, -73.50, 42.90, -69.90),
+    "DE": (38.45, -75.80, 39.85, -75.05),
 }
 
 
@@ -196,6 +199,124 @@ out body geom;
                     conn.rollback()
     if skipped_oos:
         print(f"  skipped {skipped_oos} out-of-state elements (bbox bleed)")
+    print(f"  inserted {inserted} new osm_landing rows")
+    return inserted
+
+
+def fetch_overpass_landscape_features(state: str, max_records: int | None = None):
+    """Fetch beach-adjacent landscape features + dog-friendly POIs from
+    Overpass into osm_landing. Replaces live Overpass calls from the
+    description generator (generate_beach_descriptions.py was hitting
+    Overpass 504s mid-run on these exact tags).
+
+    Tag classes (all within state bbox, state-polygon clipped on insert):
+      - natural=cliff|reef|peninsula|cape|bay  (landscape backdrops)
+      - man_made=pier|jetty|breakwater|groyne|lighthouse  (named structures)
+      - waterway=stream|river (named only)  (creek-mouth anchors)
+      - leisure=marina  (harbor-adjacent context)
+      - amenity=cafe|restaurant|pub|fast_food + dog=yes  (make-a-day-of-it extensions)
+      - leisure=dog_park (named)  (catches some not loaded by bulk_load_dog_amenities)
+
+    All written to osm_landing with full geometry per Franz's pipeline
+    principle (out body geom). Idempotent — ON CONFLICT DO NOTHING.
+    """
+    step(f"Phase A.3 — Overpass landscape + dog-friendly POIs for {state}")
+    if state not in STATE_BBOX:
+        print(f"  no bbox catalog for {state}; skipping landscape fetch")
+        return 0
+    s, w, n, e = STATE_BBOX[state]
+    bbox = f"{s},{w},{n},{e}"
+    query = f"""
+[out:json][timeout:180];
+(
+  way["natural"~"^(cliff|reef|peninsula|cape|bay|arch|stack|sand_dunes|dune|cave_entrance|wetland)$"]({bbox});
+  node["natural"~"^(arch|stack|cave_entrance)$"]({bbox});
+  way["man_made"~"^(pier|jetty|breakwater|groyne|lighthouse|bridge)$"]["name"]({bbox});
+  node["man_made"~"^(pier|jetty|lighthouse)$"]({bbox});
+  way["historic"="lighthouse"]({bbox});
+  node["historic"="lighthouse"]({bbox});
+  way["waterway"~"^(stream|river)$"]["name"]({bbox});
+  way["leisure"~"^(marina|swimming_area|fishing)$"]({bbox});
+  node["tourism"="viewpoint"]["name"]({bbox});
+  node["amenity"~"^(cafe|restaurant|pub|fast_food)$"]["dog"="yes"]({bbox});
+  way["amenity"~"^(cafe|restaurant|pub|fast_food)$"]["dog"="yes"]({bbox});
+  way["leisure"="dog_park"]["name"]({bbox});
+  way["highway"="cycleway"]["name"]({bbox});
+);
+out body geom;
+"""
+    print(f"  bbox={bbox}")
+    data = urllib.parse.urlencode({"data": query}).encode()
+    req = urllib.request.Request(
+        OVERPASS_URL, data=data, method="POST",
+        headers={
+            "User-Agent": "dog-beach-scout/1.0 (load_state.py landscape)",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=200) as resp:
+            payload = json.loads(resp.read())
+    except Exception as e:
+        print(f"  Overpass error: {e}")
+        return 0
+
+    elements = payload.get("elements", [])
+    if max_records:
+        elements = elements[:max_records]
+    print(f"  fetched {len(elements)} OSM elements")
+
+    # NOTE: per-row state-polygon containment check removed (Franz, 2026-05-12).
+    # MA bbox alone produced 95k OSM elements; per-row ST_Intersects round-trip
+    # was the bottleneck. Downstream queries via get_physical_features_for_beach
+    # and get_dog_friendly_pois_for_beach filter with ST_DWithin against a
+    # specific beach's geom, so out-of-state bbox-bleed pollution is
+    # functionally invisible. Provenance: fetched_by labels the loader.
+    #
+    # INSERTs are batched via execute_values (page_size=1000) instead of per-row
+    # — drops 95k-row insert from ~80 min to ~1-2 min across the Supabase pooler.
+    rows: list[tuple] = []
+    for el in elements:
+        etype = el.get("type"); eid = el.get("id")
+        if not etype or eid is None: continue
+        tags = el.get("tags") or {}
+        geom_wkt = None; lat_v = lon_v = None
+        if etype == "node":
+            if "lat" in el and "lon" in el:
+                lat_v, lon_v = el["lat"], el["lon"]
+                geom_wkt = f"POINT({lon_v} {lat_v})"
+        else:
+            geom_arr = el.get("geometry", [])
+            if geom_arr:
+                coords = ",".join(f"{p['lon']} {p['lat']}" for p in geom_arr)
+                if etype == "way":
+                    if geom_arr[0] == geom_arr[-1] and len(geom_arr) >= 4:
+                        geom_wkt = f"POLYGON(({coords}))"
+                    else:
+                        geom_wkt = f"LINESTRING({coords})"
+        if not geom_wkt: continue
+        rows.append((etype, eid, lat_v, lon_v, json.dumps(tags), geom_wkt))
+
+    print(f"  prepared {len(rows)} rows for batch insert")
+    inserted = 0
+    with psycopg2.connect(**PG) as conn:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute("set statement_timeout = '600s'")
+            try:
+                psycopg2.extras.execute_values(cur, """
+                    insert into public.osm_landing
+                      (type, id, lat, lon, tags, geom_full, fetched_at, fetched_by, is_active)
+                    values %s
+                    on conflict (type, id, fetched_at) do nothing
+                """, rows,
+                template="(%s, %s, %s, %s, %s::jsonb, "
+                         "ST_SetSRID(ST_GeomFromText(%s), 4326), "
+                         "now(), 'load_state.py:landscape', true)",
+                page_size=1000)
+                inserted = cur.rowcount
+            except Exception as e:
+                print(f"  batch insert failed: {e}")
     print(f"  inserted {inserted} new osm_landing rows")
     return inserted
 

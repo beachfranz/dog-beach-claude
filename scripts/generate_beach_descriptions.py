@@ -58,14 +58,29 @@ REQUIRED:
    - trails -> "trails to walk if your pup wants to stretch"
    - picnic_area on_leash -> "picnic spot for after"
    - sections marked NOT ALLOWED -> "keep your dog off [section]"
-2. If `verified_physical_features` is non-empty, drop the fact in naturally (e.g. "at the mouth of Aliso Creek", "backed by coastal bluffs", "tucked beside a jetty"). Don't make it its own sentence unless natural.
+2. If `verified_physical_features` is non-empty, pick AT MOST TWO features and drop them in naturally (e.g. "at the mouth of Aliso Creek", "backed by coastal bluffs", "tucked beside a jetty"). Two are allowed only when they read as one connected thought (creek-mouth + adjacent pier, bluff backdrop + sea arch). Otherwise pick one. NEVER enumerate three or more. Don't make it its own sentence unless natural.
 3. If `source_pages` has content (an `extracted_description` or `raw_text_excerpt`), USE it as authoritative grounding for named features, locations, and specific facts. Paraphrase in Scout's voice — do NOT copy verbatim or sound like a brochure.
    **CRITICAL scope guard:** the source page may describe a CONTAINING area (a park, preserve, regional area) rather than THIS specific beach. Check whether the page is about THIS beach by name (`name` in inputs). If the page's content is clearly about a containing area, use it ONLY for brief geographic context ("inside [Park Name]" / "down in the [Park Name] area"). DO NOT attribute size, length, mile counts, acreage, or named features of the larger area to this specific beach.
    If source content contradicts `zones` (the structured dog policy), TRUST `zones` for dog rules — the source page may be outdated.
 4. Time-windows / seasonal restrictions: be concrete and direct. "Dogs gotta be off the sand 9-6 in summer" beats "Dogs are prohibited between 9 a.m. and 6 p.m. during peak season".
-5. Amenities. **HARD RULE:** mention ONLY items in `amenities.present`. NEVER mention items in `amenities.absent` (those are confirmed-not-there). NEVER add amenities not in either list (those are unknown — Scout doesn't guess). Group naturally ("restrooms and a lifeguard"). Don't read off the full inventory.
+5. Amenities. **HARD RULE:** mention ONLY items in `amenities.present`. NEVER mention items in `amenities.absent` (those are confirmed-not-there). NEVER add amenities not in either list (those are unknown — Scout doesn't guess). Don't read off the full inventory.
+   - **Lifeguards.** When `has_lifeguards=true`, say "seasonal lifeguards" or just "lifeguards" — NEVER "lifeguards on duty" or "lifeguards on staff" (implies year-round staffing, which is false at almost every US beach). Lifeguards in CA are typically Memorial Day through Labor Day. If a `source_page` gives a specific posted window, paraphrase it ("lifeguards posted Memorial Day to Labor Day"); otherwise default to "seasonal lifeguards".
 6. Mention parking ONCE in passing when `parking.type` is set ("free lot", "metered street parking, plan ahead", etc). Skip if null.
 7. First-person sometimes ("I bring my pup early", "we like dawn patrol here"), second-person sometimes ("you'll want to plan around the leash hours") — whichever feels natural. Avoid stiff imperative-mood marching ("Walk your dog. Share a picnic. Find parking.").
+8. **Spatial anchors.** When `address` is non-null, anchor the beach with a named street/neighborhood pulled from the address ("off Goldenwest", "in Capitola", "by Pacific Coast Highway"). One anchor per description is enough; never read out a full street address.
+9. **Adjacent-beach disambiguation.** When `nearest_neighbors` has an entry within ~2km with `dogs_allowed='no'`, mention it briefly so the reader doesn't wander into the wrong zone with their pup ("just north is Bolsa Chica where dogs aren't allowed"). Skip if neighbors are also dog-friendly or further than ~2km.
+10. **Nearby extensions.** If `nearby_dog_friendly_pois` has named dog-friendly entries (cafes, pubs, dog parks), drop ONE in passing as a make-a-day-of-it extension ("the [name] up the street is dog-friendly"). Skip if empty. Never invent these — they're only what the field actually contains.
+11. **Crowd-voice notes.** If `osm_notes` has entries, the `note` and `description` text comes from community OSM editors describing the place. PARAPHRASE the sentiment in Scout's voice — don't quote verbatim and never name "OSM" or "community editors". Third-person collective phrasing is allowed ("regulars treat this as off-leash", "considered one of the few real off-leash stretches around"). The text is a crowd signal about how the place is actually used; you may carry that into the prose. Skip entirely if the note is short/generic or duplicates `source_pages` content. Treat as one input among many — don't centre the description on it.
+12. **Accessibility.** When `accessibility` is non-null, surface the SPECIFIC accessibility signal concretely. Be precise to what's in the field:
+    - `accessible_parking: true` -> "wheelchair-accessible parking" or "ADA parking lot"
+    - `accessible_restrooms: true` -> "ADA restrooms" or "accessible restrooms"
+    - `path_to_sand: "boardwalk"` -> "boardwalk leads down to the sand"
+    - `path_to_sand: "ramp"` -> "ramp from parking to the beach"
+    - `path_to_sand: "mat"` or `beach_mat: true` -> "beach mat installed for wheelchair access onto the sand"
+    - `wheelchair_rental: {available: true, provider: X}` -> "beach wheelchairs available through {X}"
+    - `accessible_viewing: true` -> "accessible viewing platform" / "ADA overlook"
+    - `notes: "..."` -> paraphrase the specific detail
+    If `amenities.present` includes `disabled_access` but `accessibility` is null, you may say "wheelchair-accessible" without inventing specifics. Skip entirely if `accessibility` is null AND disabled_access is not in `amenities.present`. NEVER invent specific access features.
 
 VERIFIED PHYSICAL FEATURE -> CLAUSE (keep natural, not forced):
 - natural=cliff -> "backed by bluffs"
@@ -96,9 +111,21 @@ FORBIDDEN:
   - "stay alert" / "be careful" / "watch your dog around X"
   Descriptions REPORT what is at this beach. They do NOT advise on what MIGHT be. Real-time safety signals live in the daily-refresh advisory layer, not in the durable description. If a source page explicitly flags a safety condition for this beach (e.g. "no swimming due to dangerous rip currents"), that's data — paraphrase it. Otherwise, stay silent.
 - Copying phrases verbatim from source_pages.
+- Inventing accessibility features. Specifically don't claim beach mats, wheelchair rentals, boardwalk extents, or accessible-restroom existence not in `accessibility`. "Wheelchair-accessible" generally is acceptable when `disabled_access` is in amenities.present and `accessibility` is null — but no fabricated specifics.
+- "Lifeguards on duty" / "lifeguards on staff" / "lifeguards always posted" / any phrasing implying year-round staffing. Lifeguards are seasonal at almost every US beach. See bullet 5 for the correct phrasing.
+- Referring to the data plumbing. **NEVER** mention "source page", "source pages", "the page", "the data", "the structured dog policy", "our data shows", "the bundle has", "the field is", "the website notes", "the listing says", or any variant that betrays an internal data store. The reader has no idea what these are. Either: (a) attribute to the named operator if it's in the source ("Monterey State Beach allows dogs only south of the Tides Hotel"), or (b) just state the fact as Scout's own observation ("Dogs are only allowed south of the Tides Hotel"). When source_pages and zones disagree, prefer `zones` (per bullet 3) and write the conclusion silently. If you can't resolve confidently, write less rather than narrate the uncertainty.
 - Emojis, exclamation points stacked, brochure phrasing.
 
-VOICE: Scout — casual surfer, first-person where it fits, dog-owner-to-dog-owner, warm but never cheesy. 3-4 sentences. Output ONLY the description text, no preamble.
+VOICE: Scout — casual surfer, first-person where it fits, dog-owner-to-dog-owner, warm but never cheesy.
+
+LENGTH: target **7-9 sentences for rich beaches**, **5-6 for thin-data beaches**. A "rich beach" has 2+ of: nearest_neighbors with a 'no'-dog adjacent, osm_notes, accessibility, source_pages content, 3+ physical_features. Thin = the bundle has only zones + minimal amenities.
+
+SENTENCE HYGIENE — IMPORTANT:
+- Give each grounded fact its own sentence. DO NOT chain 3 ideas into one compound sentence using em-dashes (—). One em-dash per description max.
+- Bad (1 sentence, 4 ideas crammed): "Off Goldenwest in Huntington Beach, this is one of the few stretches where your dog can run off-leash on the sand and in the water year-round — the zone runs from Goldenwest to Seapoint, and locals treat it as a true mile of open beach for pups."
+- Good (4 sentences, same content): "Off Goldenwest in Huntington Beach. Your pup can run off-leash on the sand and hit the water year-round. The off-leash zone runs from Goldenwest to Seapoint. Locals treat it as a true mile of open beach for pups."
+
+NEVER pad with generic filler; if the bundle is thin and you can't reach 5 sentences with grounded facts, stay shorter rather than invent. Output ONLY the description text, no preamble.
 
 INPUTS
 %s
@@ -191,41 +218,74 @@ def fetch_zones_summary(zone_rules: dict) -> list[dict]:
     return out
 
 
-def fetch_overpass_features(lat: float, lng: float) -> list[dict]:
-    """Pull verified physical features within 300m of the centroid."""
-    q = (
-        f'[out:json][timeout:30];'
-        f'('
-        f'way(around:{OVERPASS_RADIUS},{lat},{lng})["natural"~"^(cliff|reef|peninsula|cape|bay)$"];'
-        f'way(around:{OVERPASS_RADIUS},{lat},{lng})["man_made"~"^(pier|jetty|breakwater|groyne|lighthouse)$"];'
-        f'node(around:{OVERPASS_RADIUS},{lat},{lng})["man_made"~"^(pier|jetty|lighthouse)$"];'
-        f'way(around:{OVERPASS_RADIUS},{lat},{lng})["waterway"~"^(stream|river)$"];'
-        f'way(around:{OVERPASS_RADIUS},{lat},{lng})["leisure"="marina"];'
-        f');out tags;'
-    )
-    data = urllib.parse.urlencode({"data": q}).encode()
-    req = urllib.request.Request(OVERPASS_URL, method="POST",
-        data=data, headers={"User-Agent": "DogBeachScout/1.0 (franz@franzfunk.com)"})
+def fetch_landscape_features(fid: int) -> dict:
+    """Local-table replacement for the prior Overpass live call. Pulls
+    physical features (within 300m) + dog-friendly POIs (within 3km)
+    from osm_landing via the SQL RPCs. Caps:
+      - physical: top 5 by distance
+      - dog_friendly_pois: top 3 by distance, with self-name exclusion
+        (the beach's own dog_park entry filtered server-side)
+
+    Source data is pre-ingested by scripts/load_state.py
+    `fetch_overpass_landscape_features`. Description gen no longer
+    hits Overpass live (no more 504s mid-run).
+    """
+    physical, pois = [], []
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            resp = json.loads(r.read())
+        rows = supa("/rest/v1/rpc/get_physical_features_for_beach",
+                    method="POST", body={"p_fid": fid, "p_radius_m": 300, "p_limit": 5})
+        for r in (rows or []):
+            physical.append({"kind": r.get("kind"), "name": r.get("name") or None})
     except Exception as e:
-        print(f"  overpass error: {e}", file=sys.stderr)
+        print(f"  physical-features RPC error: {e}", file=sys.stderr)
+    try:
+        rows = supa("/rest/v1/rpc/get_dog_friendly_pois_for_beach",
+                    method="POST", body={"p_fid": fid, "p_radius_m": 3000, "p_limit": 3})
+        for r in (rows or []):
+            pois.append({"kind": r.get("kind"), "name": r.get("name")})
+    except Exception as e:
+        print(f"  dog-friendly-pois RPC error: {e}", file=sys.stderr)
+    return {"physical": physical, "dog_friendly_pois": pois}
+
+
+def fetch_nearest_neighbors(fid: int) -> list[dict]:
+    """Closest 2 other active beaches with name + distance + dogs_allowed.
+    Used by Scout to disambiguate adjacent zones (e.g. "north of here is
+    Bolsa Chica where dogs aren't allowed"). Uses an existing RPC if
+    available; falls back to a PostgREST geom-distance query.
+    """
+    try:
+        rows = supa("/rest/v1/rpc/get_nearest_beaches",
+                    method="POST", body={"p_fid": fid, "p_limit": 2})
+        if rows:
+            return rows
+    except Exception:
+        pass
+    return []
+
+
+def fetch_osm_notes(fid: int) -> list[dict]:
+    """OSM free-text `note` / `description` for beach-relevant features
+    within 500m of the beach point. These carry crowd-voice nuance that
+    structured fields miss (e.g. "An whole glorious mile of Southern
+    California beach where dogs can run off leash" for HDB). Allowed by
+    feedback memory `feedback_crowd_opinions_in_descriptions`: third-
+    person collective references are fine in description prose.
+    """
+    try:
+        rows = supa("/rest/v1/rpc/get_osm_notes_for_beach",
+                    method="POST",
+                    body={"p_fid": fid, "p_radius_m": 500, "p_limit": 3})
+        return rows or []
+    except Exception:
         return []
-    feats = []
-    for e in resp.get("elements", []):
-        t = e.get("tags") or {}
-        kind = (t.get("natural") or t.get("man_made")
-                or t.get("waterway") or t.get("leisure"))
-        if not kind or kind == "coastline": continue
-        feats.append({"kind": kind, "name": t.get("name") or None})
-    return feats
 
 
 def build_inputs(fid: int) -> dict | None:
     """Assemble the full input bundle for one beach."""
     rows = supa("/rest/v1/beaches_gold", params={
-        "select": "fid,location_id,name,display_name_override,county_name,state,group_id,cpad_unit_id,geom",
+        "select": ("fid,location_id,name,display_name_override,county_name,state,"
+                   "group_id,cpad_unit_id,address,geom"),
         "fid": f"eq.{fid}", "is_active": "eq.true", "limit": "1",
     })
     if not rows:
@@ -234,7 +294,7 @@ def build_inputs(fid: int) -> dict | None:
 
     bdp_rows = supa("/rest/v1/beach_dog_policy", params={
         "select": "zone_rules,dogs_allowed",
-        "arena_group_id": f"eq.{g['group_id']}", "limit": "1",
+        "arena_group_id": f"eq.{fid}", "limit": "1",
     })
     bdp = bdp_rows[0] if bdp_rows else {}
 
@@ -244,8 +304,9 @@ def build_inputs(fid: int) -> dict | None:
     amen_rows = supa("/rest/v1/beach_amenities", params={
         "select": ("parking_type,parking_notes,has_restrooms,has_showers,"
                    "has_lifeguards,has_drinking_water,has_disabled_access,"
-                   "has_food,has_fire_pits,has_picnic_area,hours_text"),
-        "arena_group_id": f"eq.{g['group_id']}", "limit": "1",
+                   "has_food,has_fire_pits,has_picnic_area,hours_text,"
+                   "accessibility_features"),
+        "arena_group_id": f"eq.{fid}", "limit": "1",
     })
     amen = amen_rows[0] if amen_rows else {}
     # Treat 'metered' parking_type as paid; otherwise leave cost null
@@ -267,6 +328,12 @@ def build_inputs(fid: int) -> dict | None:
         'absent':   [k.replace('has_','') for k in flag_keys if amen.get(k) is False],
         'hours_text': amen.get('hours_text'),
     }
+    # Multi-dimensional accessibility from beach_amenities.accessibility_features.
+    # Strip internal fields (_source, _updated_at) before passing to Scout.
+    af_raw = amen.get('accessibility_features') or {}
+    accessibility = {k: v for k, v in af_raw.items() if not k.startswith('_')}
+    if not accessibility:
+        accessibility = None
 
     cpad_unit = None
     if g.get("cpad_unit_id"):
@@ -281,10 +348,20 @@ def build_inputs(fid: int) -> dict | None:
     lat = info.get("beach", {}).get("lat") if info else None
     lng = info.get("beach", {}).get("lng") if info else None
 
-    physical = []
-    if lat is not None and lng is not None:
-        physical = fetch_overpass_features(lat, lng)
-        time.sleep(OVERPASS_DELAY)
+    # Landscape features pulled from osm_landing locally (was Overpass live).
+    op = fetch_landscape_features(fid)
+    physical          = op.get("physical", [])
+    dog_friendly_pois = op.get("dog_friendly_pois", [])
+
+    # Spatial neighbors — closest 2 active beaches with dog policy.
+    # Lets Scout disambiguate adjacent zones (e.g. "north of here is
+    # Bolsa Chica where dogs aren't allowed").
+    nearest_neighbors = fetch_nearest_neighbors(fid)
+
+    # OSM crowd-voice notes (tags->note / tags->description) on nearby
+    # beach-relevant features. Sparse (~3% of beaches have any hit) but
+    # high-quality nuance when present.
+    osm_notes = fetch_osm_notes(fid)
 
     # cpad_unit is intentionally NOT in the prompt right now — CPAD links
     # are geographic-overlap based and conflict with operator reality on
@@ -311,10 +388,15 @@ def build_inputs(fid: int) -> dict | None:
     return {
         "name": g.get("display_name_override") or g["name"],
         "location": ", ".join(filter(None, [g.get("county_name"), g.get("state")])),
+        "address": g.get("address"),
         "zones": fetch_zones_summary(bdp.get("zone_rules") or {}),
         "parking": parking,
         "amenities": amenities,
+        "accessibility": accessibility,
         "verified_physical_features": physical,
+        "nearest_neighbors": nearest_neighbors,
+        "nearby_dog_friendly_pois": dog_friendly_pois,
+        "osm_notes": osm_notes,
         "source_pages": source_pages,
     }
 
@@ -327,7 +409,7 @@ def input_hash(inputs: dict) -> str:
 
 def call_sonnet(inputs: dict) -> tuple[str, dict]:
     body = {
-        "model": MODEL, "max_tokens": 350,
+        "model": MODEL, "max_tokens": 600,
         "messages": [{"role": "user",
                       "content": PROMPT % json.dumps(inputs, indent=2)}],
     }

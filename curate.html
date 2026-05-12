@@ -144,6 +144,15 @@
   .match-label.match-unlikely        { color: #d97706; }
   .match-label.match-wtf             { color: var(--red); font-weight: 700; }
   .match-label.match-unknown         { color: var(--muted); }
+  .ml-badge {
+    display: inline-block; font-size: 10px; font-weight: 700;
+    padding: 1px 5px; border-radius: 4px;
+    background: rgba(0,0,0,0.04); cursor: help;
+  }
+  .ml-badge.ml-high { background: rgba(21,128,61,0.12); color: var(--green); }
+  .ml-badge.ml-mid  { background: rgba(180,83,9,0.10);  color: var(--amber); }
+  .ml-badge.ml-low  { background: rgba(185,28,28,0.10); color: var(--red);   }
+  .ml-badge.ml-na   { color: var(--muted); }
   .photo-caption {
     font-size: 11px; color: var(--text); line-height: 1.3;
     margin: 4px 0; max-height: 2.6em; overflow: hidden;
@@ -835,6 +844,16 @@ function renderPhotoCard(p, idx) {
   const mqLabel = (MATCH_OPTIONS.find(o => o.v === mq) || {}).label || mq;
   // Photo title/description — helps Franz spot beach names in the metadata
   const meta = p.source_meta || {};
+  const mlProb = meta.predicted_keep_prob;
+  const mlModel = meta.predicted_keep_model || 'logreg';
+  let mlHtml = '';
+  if (mlProb != null && !isNaN(mlProb)) {
+    const pct = Math.round(mlProb * 100);
+    const cls = mlProb >= 0.85 ? 'ml-high'
+              : mlProb <= 0.15 ? 'ml-low'
+              : 'ml-mid';
+    mlHtml = `<span class="ml-badge ${cls}" title="ML keep probability (${escHtml(mlModel)})">🤖 ${pct}%</span>`;
+  }
   const title = (meta.title || '').replace(/^File:/,'').replace(/\.(jpe?g|png|tif{1,2}|webp)$/i,'').trim();
   const desc = (meta.description || '').trim();
   const captionText = [title, desc].filter(Boolean).join(' — ');
@@ -848,6 +867,7 @@ function renderPhotoCard(p, idx) {
       <div class="meta-row">
         <span class="photo-source">${escHtml(p.source)}</span>
         ${distHtml}
+        ${mlHtml}
         <span class="match-label match-${escHtml(mq)}" title="Match quality (auto)">${escHtml(mqLabel)}</span>
       </div>
       ${captionHtml}

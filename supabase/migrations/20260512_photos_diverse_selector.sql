@@ -6,8 +6,11 @@
 --
 --   1. ALL has_dog=true photos pass through (capped at p_target).
 --      Franz 2026-05-12: "dogs always stay."
---   2. Remaining slots filled by content bucket in priority order:
---        surf > landscape > people > structure > atmosphere > wide > water
+--   2. Remaining slots filled by content bucket in priority order
+--      (data-driven from per-bucket keep rate on 2,153 curator labels):
+--        surf (84.5%) > landscape (79.7%) > people (67.8%) >
+--        water (67.7%) > wide (66.7%) > atmosphere (53.3%) >
+--        structure (48.3%, near coin-flip — last)
 --      One photo per bucket (the highest-scored), avoid stacking duplicates.
 --   3. Any slots still left after the bucket pass get filled with the
 --      best leftovers by score.
@@ -87,7 +90,7 @@ begin
 
   -- ─── Phase 2: one photo per content bucket, in priority order ──────
   for v_bucket in
-    select unnest(array['surf','landscape','people','structure','atmosphere','wide','water'])
+    select unnest(array['surf','landscape','people','water','wide','atmosphere','structure'])
   loop
     exit when v_slots_left <= 0;
 

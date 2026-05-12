@@ -453,9 +453,12 @@ def apply_vision_rules(prob: float, vision: dict | None) -> tuple[float, list[st
         prob = min(prob, 0.10); rules.append(f"ceil:quality={q}")
     if scene in ("interior", "screenshot_or_map", "food"):
         prob = min(prob, 0.10); rules.append(f"ceil:scene={scene}")
-    # SOFT REJECT — close-up portraits aren't beach photos
+    # HARD REJECT — close-up portraits aren't beach photos.
+    # Data-driven: 0 keeps in 19 curator-labeled face_closeup photos
+    # (per 2026-05-12 per-bucket keep-rate analysis). Tightened from
+    # 0.30 to 0.05 to match observed reality.
     if vision.get("has_human_face_closeup"):
-        prob = min(prob, 0.30); rules.append("ceil:face_closeup")
+        prob = min(prob, 0.05); rules.append("ceil:face_closeup")
 
     # KEEP BOOSTS — only if no hard ceil already applied (else prob<=0.30)
     if prob > 0.30:

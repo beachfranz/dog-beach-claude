@@ -116,20 +116,36 @@ Deno.serve(async (req: Request) => {
     let deleted = 0;
     if (toDelete.length) {
       // BEFORE deleting, write tombstones so loaders don't re-fetch these
-      // photos next run. Failure to tombstone is non-fatal — log and proceed
-      // so the user's intent (delete from grid) still takes effect.
+      // photos next run. Capture metadata fields (title/artist/scores) at
+      // trash time so the Tier 2 photo-quality model can train on
+      // feature-parity labels (was: leakage via missingness — Polyzotis
+      // 2018). Failure to tombstone is non-fatal — log and proceed.
       const { data: doomed } = await supabase
         .from("beach_photos")
-        .select("arena_group_id, source, external_id")
+        .select("arena_group_id, source, external_id, distance_m, license, source_meta")
         .in("id", toDelete);
       const tombstones = (doomed ?? [])
         .filter(d => d.external_id != null)
-        .map(d => ({
-          arena_group_id: d.arena_group_id,
-          source:         d.source,
-          external_id:    d.external_id,
-          rejected_by:    body.curated_by ?? null,
-        }));
+        .map(d => {
+          const sm = (d.source_meta ?? {}) as Record<string, unknown>;
+          const num = (k: string) => {
+            const v = sm[k];
+            return v == null ? null : Number(v);
+          };
+          return {
+            arena_group_id:   d.arena_group_id,
+            source:           d.source,
+            external_id:      d.external_id,
+            rejected_by:      body.curated_by ?? null,
+            title:            (sm.title as string) ?? null,
+            artist:           (sm.artist as string) ?? null,
+            distance_m:       d.distance_m ?? null,
+            relevance_score:  num("relevance_score"),
+            name_match_score: num("name_match_score"),
+            composite_score:  num("composite_score"),
+            license:          d.license ?? null,
+          };
+        });
       if (tombstones.length) {
         const { error: tombErr } = await supabase
           .from("beach_photo_rejected")

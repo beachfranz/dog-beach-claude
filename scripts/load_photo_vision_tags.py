@@ -84,8 +84,15 @@ ATMOSPHERES = ["sunny", "cloudy", "fog", "stormy", "night", "sunset", "unclear"]
 import anthropic
 _client = anthropic.Anthropic()
 
-# Cap concurrent base64 fetches to Wikimedia — they 429 above ~2 in flight.
-_wm_sem = threading.Semaphore(2)
+# Wikimedia robot policy (w.wiki/4wJS) requires:
+#  - identifying User-Agent with contact info
+#  - serial, paced access (concurrent fetches trigger "robot policy" 429s
+#    that block IPs, distinct from normal rate-limit throttling)
+# Use a global lock + post-fetch sleep instead of just a 2-slot semaphore.
+WIKIMEDIA_UA = ("DogBeachScout/1.0 (https://dogbeachscout.com; "
+                "franz@franzfunk.com) photo-curation vision-backfill")
+_wm_lock = threading.Lock()
+WM_PACING_S = 1.5
 
 
 def _strip_utm(url: str) -> str:
@@ -101,25 +108,44 @@ def _image_source(image_url: str, force_b64: bool = False) -> dict:
     """Return image-source dict. Wikimedia (any subdomain) → always base64
     because Anthropic's URL fetcher fails on both Special:FilePath
     redirects and upload.wikimedia.org URLs in this corpus.
-    Strip only utm_* params so width=N hints survive."""
+    Strip only utm_* params so width=N hints survive.
+
+    Raises RuntimeError('bad_url') early for malformed URLs (no protocol,
+    HTTP-only, or non-URL strings) so we don't burn 3 Anthropic retries
+    on data-quality issues."""
+    if not image_url or not isinstance(image_url, str):
+        raise RuntimeError("bad_url: empty")
+    if not image_url.startswith("https://"):
+        raise RuntimeError(f"bad_url: not https ({image_url[:60]})")
     url = _strip_utm(image_url)
     if force_b64 or "wikimedia.org" in url or "wikipedia.org" in url:
-        with _wm_sem:                          # cap concurrent wikimedia fetches
-            req = urllib.request.Request(url, headers={"User-Agent": "DogBeachScout/1.0"})
+        with _wm_lock:                         # serial wikimedia access
+            req = urllib.request.Request(url, headers={"User-Agent": WIKIMEDIA_UA})
             with urllib.request.urlopen(req, timeout=30) as r:
                 data = r.read()
                 ct = r.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+            # Width cascade for big images. TIFs at width=1024 can still
+            # exceed 5MB; step down to 800, then 500. Special:FilePath also
+            # serves JPEG-converted output for TIF sources at smaller widths.
+            for cascade_width in (1024, 800, 500):
+                if len(data) <= 5 * 1024 * 1024:
+                    break
+                if "Special:FilePath" not in url:
+                    # upload.wikimedia.org direct URLs don't have a width
+                    # knob — derive Special:FilePath from filename.
+                    fname = url.rsplit("/", 1)[-1].split("?")[0]
+                    url = f"https://commons.wikimedia.org/wiki/Special:FilePath/{fname}"
+                # Re-build URL with explicit width (overwriting prior width=).
+                base = url.split("?")[0]
+                small = f"{base}?width={cascade_width}"
+                req = urllib.request.Request(small, headers={"User-Agent": WIKIMEDIA_UA})
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    data = r.read()
+                    ct = r.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+                time.sleep(WM_PACING_S)        # pace each retry too
             if len(data) > 5 * 1024 * 1024:
-                # >5 MB → Anthropic rejects. Fetch a smaller thumbnail variant
-                # via Special:FilePath?width=1024.
-                if "Special:FilePath" in url:
-                    small = url + ("&" if "?" in url else "?") + "width=1024"
-                    req = urllib.request.Request(small, headers={"User-Agent": "DogBeachScout/1.0"})
-                    with urllib.request.urlopen(req, timeout=30) as r:
-                        data = r.read()
-                        ct = r.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
-                else:
-                    raise RuntimeError(f"image too large ({len(data)} bytes) and no Special:FilePath fallback")
+                raise RuntimeError(f"image too large even at width=500: {len(data)} bytes")
+            time.sleep(WM_PACING_S)            # pace AFTER successful fetch, before releasing lock
         return {"type": "base64", "media_type": ct,
                 "data": base64.b64encode(data).decode()}
     return {"type": "url", "url": url}
@@ -243,6 +269,11 @@ def main():
                     help=f"Hard stop if est cost exceeds (default ${DEFAULT_BUDGET_USD})")
     ap.add_argument("--workers", type=int, default=1,
                     help="Concurrent vision-tag workers (default 1; backfill should use 5-10)")
+    ap.add_argument("--source", default=None,
+                    help="Comma-separated list of bp.source values to limit to "
+                         "(e.g. 'flickr' or 'flickr,ccc'). Lets two processes run "
+                         "concurrently on disjoint sources — one fast (flickr URL-source) "
+                         "and one slow (wikimedia base64 + serial lock).")
     args = ap.parse_args()
 
     conn = psycopg2.connect(**PG)
@@ -263,18 +294,25 @@ def main():
     else:
         # Idempotency: skip rows already tagged with the current model+schema.
         # Bumping SCHEMA_VERSION auto-invalidates v1 rows without manual ops.
+        source_filter = ""
+        source_params: tuple = ()
+        if args.source:
+            sources = [s.strip() for s in args.source.split(",") if s.strip()]
+            source_filter = "and bp.source = any(%s)"
+            source_params = (sources,)
         cur.execute(f"""
             select bp.id, bp.image_url, bp.thumb_url, bp.source_meta,
                    coalesce(g.display_name_override, g.name) as beach_name
               from public.beach_photos bp
               join public.beaches_gold g on g.fid = bp.arena_group_id
              where bp.image_url is not null
+               {source_filter}
                and (source_meta -> 'vision' ->> 'model' is null
                     or source_meta -> 'vision' ->> 'model' != '{MODEL}'
                     or coalesce(source_meta -> 'vision' ->> 'schema_version', 'v1') != '{SCHEMA_VERSION}')
              order by bp.id
              limit %s
-        """, (args.chunk_size,))
+        """, source_params + (args.chunk_size,))
     targets = cur.fetchall()
     print(f"Targets: {len(targets)} photos", flush=True)
 

@@ -144,6 +144,11 @@ Deno.serve(async (req: Request) => {
             name_match_score: num("name_match_score"),
             composite_score:  num("composite_score"),
             license:          d.license ?? null,
+            // Vision tags from load_photo_vision_tags.py — capture at trash
+            // time so the rejected side has feature parity with the kept
+            // side. Lets the photo-quality classifier train on vision
+            // features without the tombstone-missingness leak.
+            vision_tags:      (sm.vision as Record<string, unknown>) ?? null,
           };
         });
       if (tombstones.length) {

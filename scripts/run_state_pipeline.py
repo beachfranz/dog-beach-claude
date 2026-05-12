@@ -23,9 +23,11 @@ Phases (in order):
    name_source            — _enrich_name_source_for_state
    strip_plus_codes       — strip_plus_codes_from_addresses
    align_scoreable        — align_is_scoreable_to_tier
+   catchment_refresh      — refresh_catchment_cascade (catchment_score → state_pct → scoring_tier)
    noaa_station_check     — assert_scoreable_have_noaa_for_state
    purge_pollution        — purge_cross_state_extractions
-   dedup                  — run_late_stage_dedup
+   dedup                  — run_late_stage_dedup (arena-cluster based)
+   dedup_distance_name    — run_distance_name_dedup (same-name + same-county + 1km)
    geom_queue             — process_geom_change_queue
    <LLM/external phases — operator_llm_extract, operator_merge, bep_refire,
                           section_extract, descriptions, photos_wikimedia,
@@ -322,6 +324,21 @@ PHASES = [
             "where g.state = $STATE and g.is_active",
         'criterion_text': 'no Tier 3/4 beach is scoreable',
     },
+    # Refresh catchment → state_pct → scoring_tier. Runs after align_scoreable
+    # so the is_scoreable cohort is settled, before noaa_station_check so
+    # the scoring_tier reflects the final scoreable population. The wrapper
+    # chains: recompute_beach_catchment(state) → refresh_catchment_state_pct(state)
+    # → refresh_scoring_tier(null). Idempotent.
+    {
+        'key': 'catchment_refresh',
+        'action':
+            "select coalesce((select catchment_recomputed "
+            "                   from public.refresh_catchment_cascade($STATE)), 0)::int",
+        'criterion':
+            "select (count(*) filter (where scoring_tier is null) = 0)::boolean "
+            "from public.beaches_gold where state = $STATE and is_active",
+        'criterion_text': 'every active beach in state has scoring_tier set',
+    },
     # Asserts every scoreable beach has a NOAA station (issue #21 guard).
     # Inland beaches without stations should be is_scoreable=false; the
     # align_scoreable phase above sets that. This phase double-checks.
@@ -343,7 +360,22 @@ PHASES = [
     },
     {
         'key': 'dedup',
-        'action': "select coalesce((select kills from public.run_late_stage_dedup()), 0)::int",
+        # Pass the current state so dedup runs per-state. Original function was
+        # hardcoded to CA; refined 2026-05-12 with state param + pair-safety +
+        # name-group sub-clustering. See project_beaches_gold_dedup_backlog.md.
+        'action': "select coalesce((select kills from public.run_late_stage_dedup($STATE)), 0)::int",
+        'criterion': "select true",
+        'criterion_text': 'no exception',
+    },
+    {
+        'key': 'dedup_distance_name',
+        # Complementary pass: catches same-normalized-name + same-county pairs
+        # within 1km that the arena-cluster-based dedup misses (OSM+POI cross-
+        # source-cluster dups). Added 2026-05-12 after spotting Ocean Shores
+        # Bulkhead (1115m) + Picnic Beach OC (290m) outside the auditor reach.
+        # 1000m threshold is the safe sweet spot; >1km may merge legit
+        # opposite-endpoint cases on long beaches.
+        'action': "select coalesce((select kills from public.run_distance_name_dedup($STATE, 1000)), 0)::int",
         'criterion': "select true",
         'criterion_text': 'no exception',
     },

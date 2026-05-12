@@ -100,7 +100,7 @@
   }
   .photo-card { position: relative; }
   .photo-card img {
-    width: 100%; height: 180px; object-fit: cover; display: block;
+    width: 100%; height: 140px; object-fit: cover; display: block;
     background: #1e293b;
     pointer-events: none; /* let drag pass through */
   }
@@ -119,44 +119,43 @@
     background: var(--accent);
     transition: background 0.15s;
   }
-  .photo-meta { padding: 10px 12px; }
+  .photo-meta { padding: 6px 8px; }
+  .meta-row {
+    display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+  }
   .photo-source {
     display: inline-block; font-size: 10px; font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.04em;
-    padding: 2px 6px; border-radius: 4px;
+    padding: 1px 5px; border-radius: 4px;
     background: rgba(0,0,0,0.06); color: var(--muted);
-    margin-bottom: 6px;
   }
   .photo-distance {
     display: inline-block; font-size: 11px; font-weight: 600;
-    padding: 2px 6px; border-radius: 4px;
+    padding: 1px 5px; border-radius: 4px;
     background: rgba(29,78,216,0.1); color: var(--accent);
-    margin-left: 6px; margin-bottom: 6px;
   }
-  .photo-attribution { font-size: 11px; color: var(--muted); line-height: 1.3; margin-bottom: 8px; }
-  .photo-access { font-size: 12px; color: var(--text); margin-bottom: 8px; }
-  .photo-access strong { color: var(--accent); }
-  .match-row {
-    display: flex; align-items: center; gap: 8px;
-    padding: 6px 0;
+  .match-label {
+    flex: 1; min-width: 0; padding: 1px 5px; font-size: 11px;
+    font-weight: 600; border-radius: 4px; text-align: right;
   }
-  .match-row label { font-size: 11px; font-weight: 600; color: var(--muted); }
-  .match-row select {
-    flex: 1; padding: 4px 8px; font-size: 12px;
-    border-radius: 6px; border: 1px solid var(--border);
-    background: var(--card); color: var(--text);
+  .match-label.match-exact           { color: var(--green); font-weight: 700; }
+  .match-label.match-very_likely     { color: #15803d; }
+  .match-label.match-somewhat_likely { color: var(--amber); }
+  .match-label.match-unlikely        { color: #d97706; }
+  .match-label.match-wtf             { color: var(--red); font-weight: 700; }
+  .match-label.match-unknown         { color: var(--muted); }
+  .photo-caption {
+    font-size: 11px; color: var(--text); line-height: 1.3;
+    margin: 4px 0; max-height: 2.6em; overflow: hidden;
+    text-overflow: ellipsis; display: -webkit-box;
+    -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   }
-  .match-row select.exact          { color: var(--green); font-weight: 700; }
-  .match-row select.very_likely    { color: #15803d; }
-  .match-row select.somewhat_likely{ color: var(--amber); }
-  .match-row select.unlikely       { color: #d97706; }
-  .match-row select.wtf            { color: var(--red); font-weight: 700; }
   .photo-actions {
-    display: flex; gap: 6px; margin-top: 6px;
+    display: flex; gap: 4px;
   }
   .photo-actions button {
-    flex: 1; padding: 6px 8px; font-size: 11px;
-    border-radius: 6px; border: 1px solid var(--border);
+    flex: 1; padding: 3px 4px; font-size: 11px;
+    border-radius: 5px; border: 1px solid var(--border);
     background: var(--card); cursor: pointer;
   }
   .photo-actions button.trash:hover { background: #fee; border-color: var(--red); color: var(--red); }
@@ -200,31 +199,30 @@
   }
   .county-bar .save[disabled] { opacity: 0.4; cursor: not-allowed; }
 
-  /* Pending-jump buttons — between beach header and photo grid */
-  .pending-row {
-    display: flex; gap: 10px; margin: 0 0 14px;
-  }
-  .pending-row button {
-    flex: 1;
-    padding: 8px 12px; font-size: 13px; font-weight: 600;
+  /* Nav buttons inline with beach name + save button (header row) */
+  .nav-buttons { display: flex; gap: 4px; }
+  .nav-buttons button {
+    padding: 6px 8px; font-size: 11px; font-weight: 600;
     border: 1px solid var(--border); border-radius: 6px;
     background: var(--card); color: var(--text); cursor: pointer;
+    white-space: nowrap;
   }
-  .pending-row button:hover { background: var(--bg); }
-  .pending-row button[disabled] { opacity: 0.3; cursor: not-allowed; }
+  .nav-buttons button:hover { background: var(--bg); }
+  .nav-buttons button[disabled] { opacity: 0.3; cursor: not-allowed; }
 
   .save-summary {
     font-size: 13px; color: var(--muted); margin: 14px 0 0;
     text-align: center;
   }
 
-  /* Centered Save-and-Next button below the photo grid */
+  /* Save-and-Next button — now sits in the header row */
   button.save-next {
-    font-family: inherit; font-size: 15px; font-weight: 700;
-    padding: 12px 28px; border-radius: 8px; border: 0;
+    font-family: inherit; font-size: 13px; font-weight: 700;
+    padding: 8px 16px; border-radius: 8px; border: 0;
     background: var(--green); color: white; cursor: pointer;
     box-shadow: 0 2px 6px rgba(21,128,61,0.25);
     transition: background 0.15s, transform 0.1s;
+    white-space: nowrap;
   }
   button.save-next:hover { background: #166534; transform: translateY(-1px); }
   button.save-next:active { transform: translateY(0); }
@@ -234,7 +232,7 @@
     text-align: center; padding: 60px 20px; color: var(--muted);
   }
 
-  /* Map (above photo grid) */
+  /* Map sits below the beach-name header, full-width, above the photo grid */
   #curate-map { height: 320px; width: 100%;
                 border-radius: 10px; overflow: hidden;
                 border: 1px solid var(--border); margin-bottom: 16px;
@@ -271,7 +269,17 @@
 <!-- App (hidden until logged in) -->
 <header class="bar" style="display:none" id="app-bar">
   <div class="bar-title">Photo curator</div>
+  <select id="sel-source" style="min-width:120px">
+    <option value="all">All sources</option>
+    <option value="wikimedia">Wikimedia</option>
+    <option value="flickr">Flickr</option>
+    <option value="ccc">CCC</option>
+    <option value="unsplash">Unsplash</option>
+  </select>
   <select id="sel-state" style="min-width:140px"></select>
+  <label style="display:flex;align-items:center;gap:6px;color:#fff;font-size:12px;cursor:pointer;">
+    <input type="checkbox" id="chk-dog-only" style="cursor:pointer;"> 🐶 Dog only
+  </label>
   <select id="sel-county"></select>
   <select id="sel-beach"></select>
   <button id="btn-logout" type="button" class="danger" style="margin-left:auto">Logout</button>
@@ -285,24 +293,20 @@
 </div>
 
 <main id="app" style="display:none">
-  <div class="header-row">
-    <div>
+  <div class="header-row" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+    <div style="min-width:0; flex:1;">
       <h2 class="beach-name" id="beach-name">—</h2>
       <div class="beach-sub" id="beach-sub"></div>
     </div>
-  </div>
-  <div class="pending-row">
-    <button id="btn-prev-beach" type="button">‹ Previous beach</button>
-    <button id="btn-prev-pending" type="button">‹ Previous pending</button>
-    <button id="btn-next-pending" type="button">Next pending ›</button>
-    <button id="btn-next-beach" type="button">Next beach ›</button>
+    <div class="nav-buttons">
+      <button id="btn-prev-beach" type="button" title="Back to previously-visited beach">← Back</button>
+      <button id="btn-next-pending" type="button" title="Skip to next uncurated beach (no save)">Skip →</button>
+    </div>
+    <button id="btn-save-next" class="save-next" type="button">Save and Next →</button>
   </div>
   <div id="curate-map"></div>
   <div class="photo-grid" id="photo-grid"></div>
   <div class="save-summary" id="save-summary"></div>
-  <div style="display:flex; justify-content:center; margin: 18px 0 32px;">
-    <button id="btn-save-next" class="save-next" type="button">Save and Next →</button>
-  </div>
 </main>
 
 <div id="trash-zone">🗑</div>
@@ -319,12 +323,17 @@ const MATCH_OPTIONS = [
   { v:'wtf',             label:'WTF!' },
 ];
 
-const SS_TOKEN = 'curator_token';
-const SS_USER  = 'curator_username';
-const SS_STATE = 'curator_state';
+const SS_TOKEN  = 'curator_token';
+const SS_USER   = 'curator_username';
+const SS_STATE  = 'curator_state';
+const SS_SOURCE = 'curator_source';
+const SS_DOGONLY= 'curator_dog_only';
 let token = sessionStorage.getItem(SS_TOKEN);
 let curatorUser = sessionStorage.getItem(SS_USER) || 'curator';
-let currentState = sessionStorage.getItem(SS_STATE) || 'CA';
+let currentState  = sessionStorage.getItem(SS_STATE)  || 'CA';
+let currentSource = sessionStorage.getItem(SS_SOURCE) || 'all';
+let dogOnly       = sessionStorage.getItem(SS_DOGONLY) === '1';
+let dogFidSet     = null;  // Set of fids with uncurated dog-titled photos, populated when filter is on
 let progress = null;        // get_curation_progress(state) result
 let currentCounty = null;
 let currentBeach = null;
@@ -383,8 +392,57 @@ async function showApp() {
   document.getElementById('app-bar').style.display = '';
   document.getElementById('county-bar').style.display = '';
   document.getElementById('app').style.display = '';
+  // Wire source dropdown
+  const srcSel = document.getElementById('sel-source');
+  srcSel.value = currentSource;
+  srcSel.onchange = async () => {
+    currentSource = srcSel.value;
+    sessionStorage.setItem(SS_SOURCE, currentSource);
+    currentCounty = null;
+    currentBeach = null;
+    await loadStates();
+    await loadProgress();
+  };
+  // Wire 🐶 Dog only checkbox
+  const dogChk = document.getElementById('chk-dog-only');
+  dogChk.checked = dogOnly;
+  dogChk.onchange = async () => {
+    dogOnly = dogChk.checked;
+    sessionStorage.setItem(SS_DOGONLY, dogOnly ? '1' : '0');
+    if (dogOnly) await loadDogFids();
+    else dogFidSet = null;
+    currentCounty = null;
+    currentBeach = null;
+    await loadStates();    // re-filter state dropdown to dog-states only
+    await loadProgress();
+  };
+  if (dogOnly) await loadDogFids();
   await loadStates();
   await loadProgress();
+}
+
+// Fetch fids that currently have at least one uncurated dog-titled photo.
+async function loadDogFids() {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_dog_photo_fids`, {
+    method: 'POST',
+    headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
+               'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  const arr = await res.json().catch(()=>[]);
+  dogFidSet = new Set((arr || []).map(r => r.fid));
+}
+
+// Get set of state codes that contain at least one dog-photo fid.
+async function fetchDogStates() {
+  if (!dogFidSet || dogFidSet.size === 0) return new Set();
+  const fids = [...dogFidSet];
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/beaches_gold?select=state&fid=in.(${fids.join(',')})`,
+    { headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}` } }
+  );
+  const rows = await res.json().catch(()=>[]);
+  return new Set((rows || []).map(r => r.state));
 }
 
 // ─── Load list of states with curate-able photos ────────────────────
@@ -393,9 +451,15 @@ async function loadStates() {
     method: 'POST',
     headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
                'Content-Type': 'application/json' },
-    body: '{}',
+    body: JSON.stringify({ p_source: currentSource }),
   });
-  const states = (await res.json()) || [];
+  let states = (await res.json()) || [];
+  // When dog-only filter is on, restrict to states that actually contain a
+  // dog-photo fid (fetch per-state via a quick query against the cached set).
+  if (dogOnly && dogFidSet && dogFidSet.size > 0) {
+    const dogStates = await fetchDogStates();
+    states = states.filter(s => dogStates.has(s.state));
+  }
   const sel = document.getElementById('sel-state');
   sel.innerHTML = '';
   for (const s of states) {
@@ -404,7 +468,7 @@ async function loadStates() {
     opt.textContent = `${s.state} — ${s.beaches_with_photos} beaches · ${s.photos} photos`;
     sel.appendChild(opt);
   }
-  // If saved state isn't available, fall back to first
+  // If saved state isn't available for this source, fall back to first
   if (!states.find(s => s.state === currentState) && states.length) {
     currentState = states[0].state;
   }
@@ -424,7 +488,7 @@ async function loadProgress(opts = {}) {
     method: 'POST',
     headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
                'Content-Type': 'application/json' },
-    body: JSON.stringify({ p_state: currentState }),
+    body: JSON.stringify({ p_state: currentState, p_source: currentSource }),
   });
   progress = (await res.json()) || [];
   renderCountyDropdown();
@@ -464,14 +528,21 @@ async function loadProgress(opts = {}) {
 function renderCountyDropdown() {
   const sel = document.getElementById('sel-county');
   sel.innerHTML = '';
+  // All counties shown. ✓ for fully done, • for in-progress, (no photos) for
+  // counties with zero photo'd beaches. Reliable + scannable (Franz, 2026-05-11).
+  // When dog-only is on, only counties with at least one dog-photo beach show.
   for (const c of progress) {
+    if (dogOnly && dogFidSet) {
+      const anyDog = (c.beaches || []).some(b => dogFidSet.has(b.fid));
+      if (!anyDog) continue;
+    }
     const opt = document.createElement('option');
     let mark = '';
     if (c.is_done) mark = ' ✓';
-    else if (c.curated > 0) mark = ' •';   // in-progress
+    else if (c.curated > 0) mark = ' •';
     if (!c.with_photos) mark = ' (no photos)';
     opt.value = c.county;
-    opt.textContent = `${c.county} (${c.curated}/${c.with_photos} of ${c.total})${mark}`;
+    opt.textContent = `${c.county} (${c.curated}/${c.with_photos})${mark}`;
     if (!c.with_photos) opt.style.color = '#94a3b8';
     sel.appendChild(opt);
   }
@@ -483,7 +554,8 @@ function selectCounty(name) {
   if (!currentCounty) return;
   document.getElementById('sel-county').value = name;
   renderBeachDropdown();
-  // Auto-pick first pending beach with photos
+  // Auto-pick first pending photo'd beach; fall back to any photo'd beach
+  // so manual county switches still land somewhere visible.
   const next = (currentCounty.beaches || []).find(b => b.photo_count > 0 && !b.is_curated)
             || (currentCounty.beaches || []).find(b => b.photo_count > 0);
   if (next) loadBeach(next.fid);
@@ -493,10 +565,10 @@ function selectCounty(name) {
 function renderBeachDropdown() {
   const sel = document.getElementById('sel-beach');
   sel.innerHTML = '';
-  // Show ALL beaches in the county (not just photo>0). Zero-photo beaches
-  // are greyed; the curator can still navigate to them and see the
-  // empty-state. Franz, 2026-05-09: "i ONLY SEE A FEW BEACHES IN CURATE".
+  // All beaches in the county shown. ✓ for done. Greyed for no-photos.
+  // When dog-only is on, filter to only beaches with uncurated dog-titled photos.
   for (const b of (currentCounty?.beaches || [])) {
+    if (dogOnly && dogFidSet && !dogFidSet.has(b.fid)) continue;
     const opt = document.createElement('option');
     const done = b.is_curated ? ' ✓' : '';
     opt.value = String(b.fid);
@@ -523,14 +595,19 @@ function updateProgressLabel() {
 }
 
 document.getElementById('btn-next-pending').onclick = () => jumpPending(+1);
-document.getElementById('btn-prev-pending').onclick = () => jumpPending(-1);
-document.getElementById('btn-next-beach').onclick = () => stepBeach(+1);
 document.getElementById('btn-prev-beach').onclick = () => stepBeach(-1);
 
 function stepBeach(dir) {
   if (!currentCounty || !currentBeach) return;
-  // Only step among beaches that have photos (zero-photo beaches still
-  // appear in the dropdown but there's nothing to curate there).
+  // For "Previous beach": chronological back via history if anything's there.
+  // Falls through to alphabetical-prev when history is empty (e.g., first
+  // beach in session).
+  if (dir < 0 && beachHistory.length > 0) {
+    _fromHistory = true;
+    loadBeach(beachHistory.pop());
+    return;
+  }
+  // For "Next beach" (or fallback prev): alphabetical step within county.
   const beaches = (currentCounty.beaches || []).filter(b => b.photo_count > 0);
   const idx = beaches.findIndex(b => b.fid === currentBeach);
   const next = idx + dir;
@@ -561,7 +638,19 @@ function writeHashFid(fid) {
   history.replaceState(null, '', `#fid=${fid}`);
 }
 
+// Visit history (chronological). prev-beach uses this so going "back" lands
+// on the beach you were just on (likely the one you just curated), not the
+// alphabetically-previous beach in the county roster.
+const beachHistory = [];
+let _fromHistory = false;
+
 async function loadBeach(fid) {
+  // If currentBeach is set and we're not navigating via history pop, push it.
+  if (currentBeach != null && currentBeach !== fid && !_fromHistory) {
+    beachHistory.push(currentBeach);
+    if (beachHistory.length > 50) beachHistory.shift();
+  }
+  _fromHistory = false;
   currentBeach = fid;
   writeHashFid(fid);
   document.getElementById('sel-beach').value = String(fid);
@@ -575,31 +664,14 @@ async function loadBeach(fid) {
     return;
   }
   beachData = await res.json();
-  // Sort policy:
-  // - If beach has been curated (curation_status.curated_at exists) → drag
-  //   is king: sort_order wins.
-  // - Otherwise (fresh beach) → composite score combining name-match
-  //   quality + distance from beach point. Exact-name matches still
-  //   sort first, but within the same match-quality bucket the closer
-  //   photos come first.
-  const MATCH_RANK = { exact: 0, very_likely: 1, somewhat_likely: 2, unlikely: 3, wtf: 4 };
-  const wasCurated = !!(beachData.curation_status && beachData.curation_status.curated_at);
+  // Sort: always distance ascending, with name_match as tiebreak.
+  // Same rule regardless of prior curation state — consistent UX (Franz 2026-05-12).
+  const nameMatch = (p) => parseFloat((p.source_meta || {}).name_match_score ?? 0) || 0;
   (beachData.photos || []).sort((a, b) => {
-    if (wasCurated) {
-      const so = (a.sort_order ?? 0) - (b.sort_order ?? 0);
-      if (so !== 0) return so;
-      const ra = MATCH_RANK[a.match_quality ?? a.default_match_quality] ?? 5;
-      const rb = MATCH_RANK[b.match_quality ?? b.default_match_quality] ?? 5;
-      return ra - rb;
-    }
-    // Fresh beach: lexicographic by (match_quality, distance, sort_order).
-    const ra = MATCH_RANK[a.match_quality ?? a.default_match_quality] ?? 5;
-    const rb = MATCH_RANK[b.match_quality ?? b.default_match_quality] ?? 5;
-    if (ra !== rb) return ra - rb;
     const da = a.distance_m ?? Number.POSITIVE_INFINITY;
     const db = b.distance_m ?? Number.POSITIVE_INFINITY;
     if (da !== db) return da - db;
-    return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+    return nameMatch(b) - nameMatch(a);
   });
   dirtyMap = new Map();
   renderBeach();
@@ -623,8 +695,12 @@ let _markersById = new Map();   // photo.id → leaflet marker
 function ensureMap() {
   if (_map) return _map;
   _map = L.map('curate-map', { zoomControl: true });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors', maxZoom: 19,
+  // OSM Germany (tile.openstreetmap.de) — same osm-carto rendering as OSM
+  // standard (shows beach sand polygons explicitly), but separate infra
+  // from the throttled .org / .fr servers (Franz 429s 2026-05-12).
+  L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors (DE)',
+    maxZoom: 19,
   }).addTo(_map);
   _map.setView([37.5, -120], 6);
   return _map;
@@ -720,12 +796,23 @@ function renderBeach() {
   renderMap();
 
   const grid = document.getElementById('photo-grid');
-  if (!beachData.photos.length) {
-    grid.innerHTML = `<div class="empty">No photos for this beach.</div>`;
+  // When 🐶 Dog only is on, restrict the photo grid to dog-titled photos.
+  // This keeps the curation pass tight — only the high-signal photos appear.
+  const DOG_RE = /\b(dog|dogs|puppy|pup|pups|puppies|pooch|canine|hound|doggie|doggy)\b/i;
+  let display = beachData.photos || [];
+  if (dogOnly) {
+    display = display.filter(p => {
+      const m = p.source_meta || {};
+      return DOG_RE.test(m.title || '') || DOG_RE.test(m.description || '');
+    });
+  }
+  if (!display.length) {
+    grid.innerHTML = dogOnly
+      ? `<div class="empty">No dog-titled photos here. (Beach is in the dog-filter cohort because uncurated dog photos exist; if you see this, they may have just been curated.)</div>`
+      : `<div class="empty">No photos for this beach.</div>`;
     return;
   }
-
-  grid.innerHTML = beachData.photos.map((p, i) => renderPhotoCard(p, i)).join('');
+  grid.innerHTML = display.map((p, i) => renderPhotoCard(p, i)).join('');
   wireCardEvents();
   updateSummary();
 }
@@ -739,34 +826,37 @@ function fmtDistance(m) {
 }
 
 function renderPhotoCard(p, idx) {
-  const matchOptionsHtml = MATCH_OPTIONS.map(o =>
-    `<option value="${o.v}">${o.label}</option>`).join('');
-  const access = p.access_point_name || '(no source name)';
-  const attribution = p.attribution || '';
   const distLabel = fmtDistance(p.distance_m);
   const distHtml = distLabel
     ? `<span class="photo-distance" title="distance from beach point">📍 ${escHtml(distLabel)}</span>`
     : '';
   const num = (idx ?? 0) + 1;
+  const mq = p.match_quality || p.default_match_quality || 'unknown';
+  const mqLabel = (MATCH_OPTIONS.find(o => o.v === mq) || {}).label || mq;
+  // Photo title/description — helps Franz spot beach names in the metadata
+  const meta = p.source_meta || {};
+  const title = (meta.title || '').replace(/^File:/,'').replace(/\.(jpe?g|png|tif{1,2}|webp)$/i,'').trim();
+  const desc = (meta.description || '').trim();
+  const captionText = [title, desc].filter(Boolean).join(' — ');
+  const captionHtml = captionText
+    ? `<div class="photo-caption" title="${escHtml(captionText)}">${escHtml(captionText)}</div>`
+    : '';
   return `<div class="photo-card" data-id="${p.id}" data-num="${num}" draggable="true">
     <div class="photo-num" title="click to highlight on map">${num}</div>
     <img src="${p.thumb_url || p.image_url}" alt="" loading="lazy">
     <div class="photo-meta">
-      <span class="photo-source">${escHtml(p.source)}</span>
-      ${distHtml}
-      <div class="photo-access"><strong>Source:</strong> ${escHtml(access)}</div>
-      <div class="photo-attribution">${escHtml(attribution)}</div>
-      <div class="match-row">
-        <label>Match:</label>
-        <select class="match-select" data-id="${p.id}">
-          ${matchOptionsHtml}
-        </select>
+      <div class="meta-row">
+        <span class="photo-source">${escHtml(p.source)}</span>
+        ${distHtml}
+        <span class="match-label match-${escHtml(mq)}" title="Match quality (auto)">${escHtml(mqLabel)}</span>
       </div>
+      ${captionHtml}
       <div class="photo-actions">
-        <button class="trash" type="button" data-action="trash" data-id="${p.id}">🗑 Trash</button>
-        <button class="restore" type="button" data-action="restore" data-id="${p.id}" style="display:none">↩ Restore</button>
+        <button class="trash" type="button" data-action="trash" data-id="${p.id}" title="Trash this photo">🗑</button>
+        <button class="trash" type="button" data-action="trash-right" data-id="${p.id}" title="Trash this and everything after">🗑 →</button>
+        <button class="restore" type="button" data-action="restore" data-id="${p.id}" style="display:none">↩</button>
         <a href="${p.image_url}" target="_blank" rel="noopener" style="text-decoration:none">
-          <button type="button" style="width:100%">🔍 Open</button>
+          <button type="button" style="width:100%">🔍</button>
         </a>
       </div>
     </div>
@@ -784,21 +874,20 @@ function wireCardEvents() {
     };
   });
 
-  // Set initial match-quality dropdowns from beachData
-  for (const p of beachData.photos) {
-    const sel = document.querySelector(`.match-select[data-id="${p.id}"]`);
-    if (sel) {
-      sel.value = p.match_quality || p.default_match_quality || '';
-      sel.className = `match-select ${sel.value || ''}`;
-      sel.onchange = (e) => {
-        sel.className = `match-select ${sel.value || ''}`;
-        markDirty(p.id, { match_quality: sel.value });
-      };
-    }
-  }
+  // match-label is read-only — no event wiring. The auto-computed
+  // default_match_quality is shown as a colored text label.
   // Trash / restore
   document.querySelectorAll('[data-action="trash"]').forEach(b => {
     b.onclick = () => trashPhoto(parseInt(b.dataset.id, 10));
+  });
+  document.querySelectorAll('[data-action="trash-right"]').forEach(b => {
+    b.onclick = () => {
+      const startId = parseInt(b.dataset.id, 10);
+      const order = beachData.photos.map(p => p.id);
+      const startIdx = order.indexOf(startId);
+      if (startIdx < 0) return;
+      for (let i = startIdx; i < order.length; i++) trashPhoto(order[i]);
+    };
   });
   document.querySelectorAll('[data-action="restore"]').forEach(b => {
     b.onclick = () => restorePhoto(parseInt(b.dataset.id, 10));
@@ -872,7 +961,7 @@ function reorderPhotos(srcId, targetId) {
   beachData.photos = order.map(id => byId.get(id));
   // Rerender (cheap)
   const grid = document.getElementById('photo-grid');
-  grid.innerHTML = beachData.photos.map(p => renderPhotoCard(p)).join('');
+  grid.innerHTML = beachData.photos.map((p, i) => renderPhotoCard(p, i)).join('');
   wireCardEvents();
   // Mark all reordered as dirty (sort_order changes)
   beachData.photos.forEach((p, i) => {
@@ -909,12 +998,11 @@ async function saveBeach() {
   // sort_order is set by current grid position (left-to-right show order).
   const photos = beachData.photos.map((p, i) => {
     const dirty = dirtyMap.get(p.id) || {};
-    const sel = document.querySelector(`.match-select[data-id="${p.id}"]`);
     return {
       id: p.id,
       sort_order: 100 + i,  // canonical: current grid order = show order
       keep: !dirty.deleted,
-      match_quality: sel?.value || p.match_quality || p.default_match_quality || null,
+      match_quality: p.match_quality || p.default_match_quality || null,
     };
   });
   const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-curate-beach`, {
@@ -955,9 +1043,18 @@ async function saveBeach() {
   for (let i = 0; i < idx; i++) {
     if (!beaches[i].is_curated) { loadBeach(beaches[i].fid); return; }
   }
-  // All done in county
-  await loadBeach(savedFid);
-  alert(`County complete! ${currentCounty.county}: all beaches curated.`);
+  // County complete — jump to the next county with pending work. No alert;
+  // just keep the curator moving (Franz, 2026-05-11).
+  const nextCounty = progress.find(c =>
+    c.county !== currentCounty.county
+    && (c.with_photos || 0) - (c.curated || 0) > 0
+  );
+  if (nextCounty) {
+    selectCounty(nextCounty.county);   // sets currentCounty + auto-loads first pending beach
+  } else {
+    // State complete (no more pending counties). Stay on current beach.
+    await loadBeach(savedFid);
+  }
 }
 
 function escHtml(s) {

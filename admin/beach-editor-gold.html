@@ -510,10 +510,9 @@ let _marker = null;
 function ensureMap() {
   if (_map) return _map;
   _map = L.map('gold-map').setView([36.7783, -119.4179], 6);
-  L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
-    maxZoom: 20,
-    attribution: '&copy; OpenStreetMap France | &copy; OpenStreetMap contributors',
-    subdomains: 'abc',
+  L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors (DE)',
   }).addTo(_map);
   return _map;
 }

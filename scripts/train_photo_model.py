@@ -87,22 +87,38 @@ def fetch_labels(conn) -> pd.DataFrame:
     fine for the cohort because tombstoned photos share the broad source +
     fid + external_id signal even after deletion.
     """
-    # Kept photos: full feature set available
+    # Kept photos: full feature set available.
+    # label is a SOFT float in [0.70, 1.00] derived from curator rank
+    # (left-to-right in curate UI = sort_order ascending). The leftmost
+    # photo at each beach gets 1.00; each subsequent position drops by
+    # 0.04 (1=1.00, 2=0.96, 3=0.92, ...), floored at 0.70 so rank-8+
+    # photos still stay clearly above the trashed=0.00 cluster.
+    # Franz 2026-05-12: "left-most best, right-most still solid."
     kept_sql = """
-    select bp.id::text photo_key, bp.arena_group_id fid, bp.source,
-           bp.distance_m,
-           bp.license,
-           bp.source_meta,
-           bp.captured_at,
-           bp.loaded_at,
-           g.state, g.scoring_tier,
-           g.lat, g.lon,
-           coalesce(g.display_name_override, g.name) beach_name,
-           1 as label
-      from public.beach_photos bp
-      join public.beaches_gold g on g.fid = bp.arena_group_id
-     where bp.curated_at is not null
-       and g.is_active
+    with ranked as (
+      select bp.*, g.state, g.scoring_tier, g.lat, g.lon,
+             coalesce(g.display_name_override, g.name) beach_name,
+             row_number() over (
+               partition by bp.arena_group_id
+               order by bp.sort_order asc, bp.id asc
+             ) as rank_pos
+        from public.beach_photos bp
+        join public.beaches_gold g on g.fid = bp.arena_group_id
+       where bp.curated_at is not null
+         and g.is_active
+    )
+    select id::text photo_key, arena_group_id fid, source,
+           distance_m,
+           license,
+           source_meta,
+           captured_at,
+           loaded_at,
+           state, scoring_tier,
+           lat, lon,
+           beach_name,
+           greatest(0.70, 1.00 - (rank_pos - 1) * 0.04)::float as label,
+           rank_pos
+      from ranked
     """
     # Rejected (tombstoned): features captured at trash time via the
     # 2026-05-12 schema enrichment + backfill. We require title IS NOT NULL
@@ -111,6 +127,10 @@ def fetch_labels(conn) -> pd.DataFrame:
     # tombstones (mostly WC pageids that didn't resolve + ccc/unsplash) are
     # dropped from training; they reappear once the WC pageid format issue
     # is fixed or those rows get re-curated.
+    # Rejected (tombstoned) — label = 0.00. Require title AND vision_tags
+    # for vision-feature parity with the kept side. CCC + Unsplash + 312
+    # unrecoverable WC tombstones drop out of training (acceptable ~12%
+    # loss of negative class; the rule layer still handles them in prod).
     rej_sql = """
     select 'rej_' || r.arena_group_id::text || '_' || r.source || '_' || r.external_id photo_key,
            r.arena_group_id fid, r.source,
@@ -121,15 +141,19 @@ def fetch_labels(conn) -> pd.DataFrame:
              'artist',           r.artist,
              'relevance_score',  r.relevance_score,
              'name_match_score', r.name_match_score,
-             'composite_score',  r.composite_score
+             'composite_score',  r.composite_score,
+             'vision',           r.vision_tags
            ) as source_meta,
            null::timestamptz captured_at, r.rejected_at loaded_at,
            g.state, g.scoring_tier, g.lat, g.lon,
            coalesce(g.display_name_override, g.name) beach_name,
-           0 as label
+           0.0::float as label,
+           null::int as rank_pos
       from public.beach_photo_rejected r
       join public.beaches_gold g on g.fid = r.arena_group_id
-     where g.is_active and r.title is not null
+     where g.is_active
+       and r.title is not null
+       and r.vision_tags is not null
     """
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(kept_sql)
@@ -247,14 +271,12 @@ def build_features(df: pd.DataFrame, photographer_kept_rate: dict[str, tuple[flo
         v = m.get("vision") or {}
         return v.get(key, default) if isinstance(v, dict) else default
 
-    # NOTE: deliberately NOT exposing a `has_vision_tags` flag as a feature.
-    # That flag would perfectly separate kept photos (vision-tagged via the
-    # 2026-05-12 backfill) from rejected tombstones (image URLs gone after
-    # trash, so no vision tags possible). Same missingness-leakage trap as
-    # the Polyzotis-2018 source_meta='{}' issue we hit earlier this session.
-    # The individual vision_has_X booleans default to False on tombstones,
-    # which is a mild signal (most rejected photos don't show dogs) but
-    # NOT a leakage flag.
+    # has_vision_tags is now safe as a feature — tombstone vision parity
+    # (2026-05-12 via Flickr getInfo + WC imageinfo backfills + edge-fn
+    # capture-at-trash) means both classes have vision parity. The
+    # training-side SQL filters rejected rows to `vision_tags IS NOT NULL`.
+    out["has_vision_tags"] = df.apply(
+        lambda r: int(bool(_vision(r, "model"))), axis=1)
     out["vision_has_dog"] = df.apply(
         lambda r: int(bool(_vision(r, "has_dog", False))), axis=1)
     out["vision_has_birds"] = df.apply(
@@ -284,18 +306,18 @@ NUMERIC_FEATS = [
     "title_beach_overlap",
     "photographer_kept_rate", "photographer_n_labels",
     "license_commercial_ok",
-    # Vision (pixel-signal) features. has_vision_tags is intentionally
-    # excluded — see comment in build_features().
+    # Vision (pixel-signal) features — full set after tombstone parity.
+    "has_vision_tags",
     "vision_has_dog", "vision_has_birds", "vision_has_surfing",
     "vision_has_active_people", "vision_has_human_face_closeup",
     "vision_landscape_count", "vision_confidence",
 ]
-CATEGORICAL_FEATS = ["source", "scoring_tier", "beach_state"]
-# vision_scene + vision_quality_issue intentionally excluded from training:
-# their "unknown" level on tombstones would re-create the missingness leak
-# via the OHE "scene_unknown" / "quality_unknown" columns. Both are used
-# in the post-hoc rule layer (see apply_vision_rules) where the same
-# signal is applied deterministically without contaminating training.
+CATEGORICAL_FEATS = ["source", "scoring_tier", "beach_state",
+                     "vision_scene", "vision_quality_issue"]
+# vision_scene + vision_quality_issue safe as training features post-
+# tombstone-parity (2026-05-12). The "unknown" category still exists
+# for the ~4 Flickr-error tombstones but is no longer the leakage canary
+# it was before parity.
 
 
 def make_preprocessor() -> ColumnTransformer:
@@ -307,18 +329,23 @@ def make_preprocessor() -> ColumnTransformer:
 
 # ─── Training + evaluation ────────────────────────────────────────────────
 
-def fit_logreg(X_train, y_train, X_val, y_val) -> tuple[Pipeline, dict]:
+def fit_logreg(X_train, y_train, X_val, y_val, sample_weight=None
+               ) -> tuple[Pipeline, dict]:
     pipe = Pipeline([
         ("pre", make_preprocessor()),
         ("clf", LogisticRegression(max_iter=1000, C=1.0, class_weight="balanced", solver="lbfgs")),
     ])
-    pipe.fit(X_train, y_train)
+    fit_kwargs = {}
+    if sample_weight is not None:
+        fit_kwargs["clf__sample_weight"] = sample_weight
+    pipe.fit(X_train, y_train, **fit_kwargs)
     p_val = pipe.predict_proba(X_val)[:, 1]
     metrics = compute_metrics(y_val, p_val, "logreg")
     return pipe, metrics
 
 
-def fit_lgbm(X_train, y_train, X_val, y_val) -> tuple[Pipeline, dict]:
+def fit_lgbm(X_train, y_train, X_val, y_val, sample_weight=None
+             ) -> tuple[Pipeline, dict]:
     pre = make_preprocessor()
     X_train_t = pre.fit_transform(X_train)
     X_val_t = pre.transform(X_val)
@@ -327,7 +354,9 @@ def fit_lgbm(X_train, y_train, X_val, y_val) -> tuple[Pipeline, dict]:
         num_leaves=15, min_child_samples=10,
         class_weight="balanced", verbose=-1,
     )
-    clf.fit(X_train_t, y_train, eval_set=[(X_val_t, y_val)], callbacks=[lgb.early_stopping(20, verbose=False)])
+    clf.fit(X_train_t, y_train, eval_set=[(X_val_t, y_val)],
+            sample_weight=sample_weight,
+            callbacks=[lgb.early_stopping(20, verbose=False)])
     pipe = Pipeline([("pre", pre), ("clf", clf)])
     p_val = clf.predict_proba(X_val_t)[:, 1]
     metrics = compute_metrics(y_val, p_val, "lgbm")
@@ -378,7 +407,8 @@ def compute_metrics(y_true, y_prob, name: str) -> dict:
     return metrics
 
 
-def cv_by_beach(X: pd.DataFrame, y: pd.Series, beach_ids: pd.Series, n_splits=5):
+def cv_by_beach(X: pd.DataFrame, y: pd.Series, beach_ids: pd.Series,
+                n_splits=5, sample_weights=None):
     """5-fold cross-validation grouped by beach (prevents leakage)."""
     gkf = GroupKFold(n_splits=n_splits)
     fold_metrics = []
@@ -389,7 +419,10 @@ def cv_by_beach(X: pd.DataFrame, y: pd.Series, beach_ids: pd.Series, n_splits=5)
             ("pre", make_preprocessor()),
             ("clf", LogisticRegression(max_iter=1000, class_weight="balanced", solver="lbfgs")),
         ])
-        pipe.fit(X_tr, y_tr)
+        fit_kwargs = {}
+        if sample_weights is not None:
+            fit_kwargs["clf__sample_weight"] = sample_weights[tr_idx]
+        pipe.fit(X_tr, y_tr, **fit_kwargs)
         p = pipe.predict_proba(X_va)[:, 1]
         m = compute_metrics(y_va, p, f"fold{fold}")
         m["fold"] = fold
@@ -484,9 +517,23 @@ def main():
     # 1. Extract labels + scoring population
     print("Fetching labels ...")
     labels_df = fetch_labels(conn)
-    print(f"  labeled rows: {len(labels_df)} ({labels_df['label'].sum()} kept, "
-          f"{(labels_df['label']==0).sum()} rejected)")
+    # Soft labels: kept=0.70-1.00 by rank, rejected=0.00. Convert to
+    # binary y for sklearn logreg + per-sample weights for rank signal.
+    soft_labels = labels_df["label"].astype(float).values
+    y_labels = (soft_labels > 0.5).astype(int)
+    # sample_weight: rank-1 kept = 1.00 (matters most), rank-8+ kept =
+    # 0.70 (still positive, just less load-bearing), rejected = 1.00
+    # (rule layer + rejected class are equally important, don't downweight).
+    sample_weights = np.where(soft_labels > 0.5, soft_labels, 1.0)
+
+    n_kept = int(y_labels.sum())
+    n_rej  = int((y_labels == 0).sum())
+    print(f"  labeled rows: {len(labels_df)} ({n_kept} kept, {n_rej} rejected)")
     print(f"  unique beaches in labels: {labels_df['fid'].nunique()}")
+    if "rank_pos" in labels_df.columns:
+        rank_dist = labels_df.loc[labels_df['label'] > 0.5, 'rank_pos'].value_counts().sort_index()
+        print(f"  kept-rank distribution: " +
+              ", ".join(f"r{k}:{v}" for k, v in rank_dist.head(8).items()))
 
     if len(labels_df) < 100:
         print("ERROR: not enough labels to train. Exiting.")
@@ -495,11 +542,11 @@ def main():
     # 2. Build features
     print("\nEngineering features ...")
     X_labels, photographer_rates = build_features(labels_df)
-    y_labels = labels_df["label"].astype(int).values
 
-    # 3. Cross-validate (by-beach)
-    print("\n5-fold by-beach CV (logreg):")
-    fold_metrics = cv_by_beach(X_labels, pd.Series(y_labels), labels_df["fid"])
+    # 3. Cross-validate (by-beach) — sample_weight carries rank signal
+    print("\n5-fold by-beach CV (logreg, rank-weighted):")
+    fold_metrics = cv_by_beach(X_labels, pd.Series(y_labels), labels_df["fid"],
+                               sample_weights=sample_weights)
     pr_aucs = [m["pr_auc"] for m in fold_metrics]
     print(f"  CV PR-AUC: mean={np.mean(pr_aucs):.3f} std={np.std(pr_aucs):.3f}")
 
@@ -516,10 +563,11 @@ def main():
     print(f"  val:   {va_mask.sum()} rows / {labels_df.loc[va_mask, 'fid'].nunique()} beaches")
 
     # 5. Train final logreg + (optionally) LightGBM
-    print("\nFitting logreg ...")
+    print("\nFitting logreg (rank-weighted) ...")
     logreg_pipe, logreg_metrics = fit_logreg(
         X_labels[tr_mask], y_labels[tr_mask],
         X_labels[va_mask], y_labels[va_mask],
+        sample_weight=sample_weights[tr_mask.values],
     )
     print(f"  PR-AUC={logreg_metrics['pr_auc']:.3f}  Brier={logreg_metrics['brier']:.3f}")
     print(f"  prec@P>=0.85={logreg_metrics['precision_at_p085']}  n_high={logreg_metrics['count_at_p085']}")
@@ -534,6 +582,7 @@ def main():
             lgbm_pipe, lgbm_metrics = fit_lgbm(
                 X_labels[tr_mask], y_labels[tr_mask],
                 X_labels[va_mask], y_labels[va_mask],
+                sample_weight=sample_weights[tr_mask.values],
             )
             print(f"  PR-AUC={lgbm_metrics['pr_auc']:.3f}  Brier={lgbm_metrics['brier']:.3f}")
             if lgbm_metrics["pr_auc"] > logreg_metrics["pr_auc"] + 0.02:

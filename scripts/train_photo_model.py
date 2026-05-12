@@ -236,6 +236,44 @@ def build_features(df: pd.DataFrame, photographer_kept_rate: dict[str, tuple[flo
     out["scoring_tier"] = df["scoring_tier"].fillna("none")
     out["beach_state"] = df["state"].fillna("XX")
 
+    # ─── Vision features (added 2026-05-12) ───────────────────────────────
+    # Pixel signal from Claude Haiku vision tagging. Photos missing
+    # source_meta.vision (rejected tombstones, or pre-backfill rows) get
+    # neutral defaults — has_vision_tags flag lets the model account for
+    # the absence rather than being misled by missingness.
+    def _vision(row, key, default=None):
+        m = row.get("source_meta") or {}
+        if not isinstance(m, dict): return default
+        v = m.get("vision") or {}
+        return v.get(key, default) if isinstance(v, dict) else default
+
+    # NOTE: deliberately NOT exposing a `has_vision_tags` flag as a feature.
+    # That flag would perfectly separate kept photos (vision-tagged via the
+    # 2026-05-12 backfill) from rejected tombstones (image URLs gone after
+    # trash, so no vision tags possible). Same missingness-leakage trap as
+    # the Polyzotis-2018 source_meta='{}' issue we hit earlier this session.
+    # The individual vision_has_X booleans default to False on tombstones,
+    # which is a mild signal (most rejected photos don't show dogs) but
+    # NOT a leakage flag.
+    out["vision_has_dog"] = df.apply(
+        lambda r: int(bool(_vision(r, "has_dog", False))), axis=1)
+    out["vision_has_birds"] = df.apply(
+        lambda r: int(bool(_vision(r, "has_birds", False))), axis=1)
+    out["vision_has_surfing"] = df.apply(
+        lambda r: int(bool(_vision(r, "has_surfing", False))), axis=1)
+    out["vision_has_active_people"] = df.apply(
+        lambda r: int(bool(_vision(r, "has_active_people", False))), axis=1)
+    out["vision_has_human_face_closeup"] = df.apply(
+        lambda r: int(bool(_vision(r, "has_human_face_closeup", False))), axis=1)
+    out["vision_landscape_count"] = df.apply(
+        lambda r: len(_vision(r, "landscape_features", []) or []), axis=1)
+    out["vision_confidence"] = df.apply(
+        lambda r: float(_vision(r, "confidence", 0.5) or 0.5), axis=1)
+    out["vision_scene"] = df.apply(
+        lambda r: _vision(r, "scene", "unknown") or "unknown", axis=1)
+    out["vision_quality_issue"] = df.apply(
+        lambda r: _vision(r, "quality_issue", "unknown") or "unknown", axis=1)
+
     return out, photographer_kept_rate
 
 
@@ -246,8 +284,18 @@ NUMERIC_FEATS = [
     "title_beach_overlap",
     "photographer_kept_rate", "photographer_n_labels",
     "license_commercial_ok",
+    # Vision (pixel-signal) features. has_vision_tags is intentionally
+    # excluded — see comment in build_features().
+    "vision_has_dog", "vision_has_birds", "vision_has_surfing",
+    "vision_has_active_people", "vision_has_human_face_closeup",
+    "vision_landscape_count", "vision_confidence",
 ]
 CATEGORICAL_FEATS = ["source", "scoring_tier", "beach_state"]
+# vision_scene + vision_quality_issue intentionally excluded from training:
+# their "unknown" level on tombstones would re-create the missingness leak
+# via the OHE "scene_unknown" / "quality_unknown" columns. Both are used
+# in the post-hoc rule layer (see apply_vision_rules) where the same
+# signal is applied deterministically without contaminating training.
 
 
 def make_preprocessor() -> ColumnTransformer:
@@ -349,6 +397,42 @@ def cv_by_beach(X: pd.DataFrame, y: pd.Series, beach_ids: pd.Series, n_splits=5)
         print(f"  fold {fold}: PR-AUC={m['pr_auc']:.3f}  Brier={m['brier']:.3f}  "
               f"prec@P>=0.85={m['precision_at_p085']}  n_high={m['count_at_p085']}")
     return fold_metrics
+
+
+# ─── Post-hoc vision rules ────────────────────────────────────────────────
+# Deterministic adjustments on top of the model's probability, based on
+# vision tags. Lets us encode business directives ("dogs are the most
+# important — never down-rank one" — Franz 2026-05-12) without contaminating
+# training via the missingness leak from tombstone-side vision absence.
+#
+# Precedence: hard-reject ceils ALWAYS win over keep floors. So an
+# interior-dog photo gets the interior ceil, not the dog floor.
+
+def apply_vision_rules(prob: float, vision: dict | None) -> tuple[float, list[str]]:
+    """Return (adjusted_prob, list_of_rule_names_applied)."""
+    if not vision or not isinstance(vision, dict): return prob, []
+    rules = []
+    q = vision.get("quality_issue")
+    scene = vision.get("scene")
+
+    # HARD REJECT — ceil at 0.10
+    if q in ("distressing", "screenshot"):
+        prob = min(prob, 0.10); rules.append(f"ceil:quality={q}")
+    if scene in ("interior", "screenshot_or_map", "food"):
+        prob = min(prob, 0.10); rules.append(f"ceil:scene={scene}")
+    # SOFT REJECT — close-up portraits aren't beach photos
+    if vision.get("has_human_face_closeup"):
+        prob = min(prob, 0.30); rules.append("ceil:face_closeup")
+
+    # KEEP BOOSTS — only if no hard ceil already applied (else prob<=0.30)
+    if prob > 0.30:
+        if vision.get("has_dog"):
+            prob = max(prob, 0.85); rules.append("floor:dog")
+        elif vision.get("has_surfing"):
+            prob = max(prob, 0.65); rules.append("floor:surf")
+        elif vision.get("has_active_people"):
+            prob = max(prob, 0.65); rules.append("floor:active_people")
+    return prob, rules
 
 
 # ─── DB write-back ────────────────────────────────────────────────────────
@@ -490,7 +574,24 @@ def main():
 
     X_score, _ = build_features(score_df, photographer_kept_rate=photographer_rates)
     probs = chosen_pipe.predict_proba(X_score)[:, 1]
-    predictions = dict(zip(score_df["photo_id"].astype(int), probs.astype(float)))
+
+    # Apply post-hoc vision rules (Franz 2026-05-12).
+    raw_probs = probs.astype(float).copy()
+    adjusted = []
+    rule_counts: dict[str, int] = {}
+    for i, prob in enumerate(probs):
+        m = score_df.iloc[i].get("source_meta") or {}
+        vision = m.get("vision") if isinstance(m, dict) else None
+        new_p, rules = apply_vision_rules(float(prob), vision)
+        adjusted.append(new_p)
+        for r in rules: rule_counts[r] = rule_counts.get(r, 0) + 1
+    probs = np.array(adjusted)
+    n_changed = int((np.abs(probs - raw_probs) > 1e-9).sum())
+    print(f"  vision rules applied: {n_changed}/{len(probs)} predictions adjusted")
+    for r, c in sorted(rule_counts.items(), key=lambda x: -x[1]):
+        print(f"    {r}: {c}")
+
+    predictions = dict(zip(score_df["photo_id"].astype(int), probs))
 
     if not args.dry_run:
         print(f"\nWriting {len(predictions)} predictions to beach_photos.source_meta ...")

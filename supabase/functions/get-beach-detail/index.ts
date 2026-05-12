@@ -77,8 +77,9 @@ Deno.serve(async (req: Request) => {
     const isToday        = date === today;
     const currentLocalHour = isToday ? parseInt(getPart("hour")) % 24 : 0;
 
-    // Daily recommendation + hourly scores in parallel (keyed on arena_group_id)
-    const [{ data: day, error: dayErr }, { data: hours, error: hoursErr }] = await Promise.all([
+    // Daily recommendation + hourly scores + photos in parallel
+    const [{ data: day, error: dayErr }, { data: hours, error: hoursErr },
+           { data: photos, error: photosErr }] = await Promise.all([
       supabase
         .from("beach_day_recommendations")
         .select("*")
@@ -99,6 +100,8 @@ Deno.serve(async (req: Request) => {
         .eq("local_date", date)
         .eq("is_daylight", true)
         .order("local_hour", { ascending: true }),
+      // Curated-first photos (option B: curated > predicted_keep_prob >= 0.65)
+      supabase.rpc("get_beach_photos_curated", { p_fid: fid }),
     ]);
 
     if (dayErr) return json({ error: dayErr.message }, 500);
@@ -203,7 +206,10 @@ Deno.serve(async (req: Request) => {
       delete (beach as Record<string, unknown>)._dog_policy_extra;
     }
 
-    return json({ beach, day: finalDay, hours: finalHours, metadata, zone_rules: zoneRules, dog_policy: dogPolicy, alternatives });
+    if (photosErr) console.warn("photos fetch failed:", photosErr.message);
+    return json({ beach, day: finalDay, hours: finalHours, metadata,
+                  zone_rules: zoneRules, dog_policy: dogPolicy, alternatives,
+                  photos: photos ?? [] });
 
   } catch (err) {
     return json({ error: String(err) }, 500);

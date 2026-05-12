@@ -285,6 +285,29 @@
     .narrative-text.amber { color: var(--amber); }
     .narrative-text.red   { color: var(--red); }
 
+    /* Photo strip — horizontal scroll thumbnails sourced from
+       get_beach_photos_curated (curated-first, model-fallback). Sits
+       between header and main-content so the day-detail view leads
+       with a glance of the place before the data. */
+    .photo-strip {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding: 8px 16px 4px;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .photo-strip::-webkit-scrollbar { display: none; }
+    .photo-strip-img {
+      flex: 0 0 auto;
+      width: 130px;
+      height: 90px;
+      object-fit: cover;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--surface);
+    }
+
     /* Product chip strip beneath the Scout blurb. Bracket aesthetic
        matches the design mock — terminal-style affordances rather
        than full pill buttons. */
@@ -706,12 +729,30 @@
   }
 
   // ── Render ────────────────────────────────────────────────────────
-  function render({ beach, day, hours, metadata, zone_rules, dog_policy, alternatives }) {
+  function render({ beach, day, hours, metadata, zone_rules, dog_policy, alternatives, photos }) {
     // Header
     const dateObj  = new Date(date + 'T12:00:00');
     const dayName  = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
     document.title = `${dayName} — ${beach.display_name}`;
     document.getElementById('day-title').textContent = `${beach.display_name} — ${dayName}`;
+
+    // Photo strip — sits right under the header. Curated-first, model-fallback
+    // via get_beach_photos_curated (option B). Silently hides if no photos.
+    if (Array.isArray(photos) && photos.length > 0) {
+      const strip = document.createElement('div');
+      strip.className = 'photo-strip';
+      strip.innerHTML = photos.map(p => {
+        const url = p.thumb_url || p.image_url || '';
+        const link = p.page_url || url;
+        const attr = p.attribution || '';
+        return `<a href="${link}" target="_blank" rel="noopener" title="${escHtml(attr)}">
+          <img class="photo-strip-img" src="${escHtml(url)}" alt="" loading="lazy">
+        </a>`;
+      }).join('');
+      // Insert between header and main-content
+      const header = document.querySelector('header.header');
+      header.parentNode.insertBefore(strip, header.nextSibling);
+    }
 
     const winLabel = document.getElementById('window-label');
     if (day.best_window_label) {

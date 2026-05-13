@@ -67,6 +67,16 @@ RADIUS_KM    = 0.5          # Match the HARD_CUTOFF_M (450m) closely. Wider
                             # is the right precision tradeoff.
 HARD_CUTOFF_M = 450         # Franz's wikicommons-curation finding: photos >450m
                             # from beach point are rarely actually of the right beach.
+# Loose-radius escape hatch for dog-titled photos: validated at Del Mar Dog
+# Beach 2026-05-12 (+8 photos including Surf Dog Surf-A-Thon at ~700-1500m).
+# Photos with an explicit dog keyword in the title are high-signal even when
+# they come from event/cluster photography at the parking lot or trail head.
+DOG_LOOSE_CUTOFF_M = 2000
+import re as _re_top
+DOG_KEYWORDS_RE = _re_top.compile(
+    r'\b(dog|dogs|puppy|pup|pups|puppies|pooch|canine|hound|doggie|doggy)\b',
+    _re_top.I,
+)
 THROTTLE_S   = 2.5         # bumped from 1.5 after the 1st key got soft-flagged
                             # on a 250-burst. Per-key reputation matters more
                             # than documented limits — start conservative.
@@ -363,12 +373,17 @@ def pick_best(photos, beach_lat, beach_lng, beach_name="", top_n=PER_BEACH):
         if plat == 0 and plng == 0:
             continue
         d = int(haversine_m(beach_lat, beach_lng, plat, plng))
-        if d > HARD_CUTOFF_M:
-            continue
         title = p.get("title") or ""
+        # Loose cutoff for dog-titled photos (Del Mar Dog Beach pin 2026-05-12).
+        # Generic photos still capped at HARD_CUTOFF_M; dog-titled photos
+        # get the wider DOG_LOOSE_CUTOFF_M.
+        is_dog_titled = bool(DOG_KEYWORDS_RE.search(title))
+        cutoff = DOG_LOOSE_CUTOFF_M if is_dog_titled else HARD_CUTOFF_M
+        if d > cutoff:
+            continue
         rel       = _relevance_score(title)
         name_m    = _name_match_score(beach_name, title)
-        proximity = 1.0 - d / max(HARD_CUTOFF_M, 1)
+        proximity = 1.0 - d / max(cutoff, 1)
         composite = rel + name_m + proximity * 2.0
         scored.append({**p, "_distance_m": d,
                        "_relevance":  rel,
@@ -488,7 +503,15 @@ def main():
     grp.add_argument("--pilot", type=int, help="run on first N beaches")
     grp.add_argument("--full",  action="store_true")
     ap.add_argument("--refresh", action="store_true", help="redo even if rows exist")
+    ap.add_argument("--radius-km", type=float, default=None,
+                    help="Override the default search RADIUS_KM. Use 2 for "
+                         "loose-radius dog sweep (validated at Del Mar Dog "
+                         "Beach 2026-05-12: +8 dog photos at 700-1500m).")
     args = ap.parse_args()
+    if args.radius_km is not None:
+        global RADIUS_KM
+        RADIUS_KM = args.radius_km
+        print(f"[override] RADIUS_KM = {RADIUS_KM}")
 
     targets = select_targets(args)
     print(f"Targets: {len(targets)} beaches  (radius {RADIUS_KM}km, "

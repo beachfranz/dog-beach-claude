@@ -34,10 +34,15 @@ PG = dict(host=_p.hostname, port=_p.port or 5432, user=_p.username,
 CHUNK_SIZE = int(os.environ.get("PAD_US_CHUNK_SIZE", "100"))
 PER_FID_TIMEOUT_S = 60
 
-# A fid is "processed" if it has a pad_us_unit polygon_containment row OR
-# was already attributed via another governance source. We re-process
-# only beaches that have NEITHER pad_us containment evidence yet NOR an
-# existing canonical governance row from any source.
+# A fid is "processed" once it has a canonical governance row from ANY
+# source. Earlier version filtered on "has pad_us polygon_containment row"
+# which infinite-looped on beaches OUTSIDE PAD-US coverage (those never
+# get a containment row written — function exits cleanly with 0 inserts,
+# and the chunk-picker re-selects them next iteration).
+#
+# Switching to "has canonical governance" means each chunk processes 100
+# truly-unattributed beaches per pass: pad_us first (where applicable),
+# city/county fallback otherwise.
 SQL_PICK_CHUNK = """
   select g.fid, g.state
     from public.beaches_gold g
@@ -45,8 +50,9 @@ SQL_PICK_CHUNK = """
      and not exists (
        select 1 from public.beach_enrichment_provenance b
         where b.gold_fid = g.fid
-          and b.field_group = 'polygon_containment'
-          and b.source = 'pad_us'
+          and b.field_group = 'governance'
+          and b.is_canonical = true
+          and b.claimed_values->>'name' is not null
      )
    order by g.state, g.fid
    limit %s

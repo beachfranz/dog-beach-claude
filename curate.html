@@ -291,6 +291,9 @@
   <label style="display:flex;align-items:center;gap:6px;color:#fff;font-size:12px;cursor:pointer;">
     <input type="checkbox" id="chk-dog-only" style="cursor:pointer;"> 🐶 Dog only
   </label>
+  <label style="display:flex;align-items:center;gap:6px;color:#fff;font-size:12px;cursor:pointer;">
+    <input type="checkbox" id="chk-no-photo" style="cursor:pointer;"> 📷 No photos
+  </label>
   <select id="sel-county"></select>
   <select id="sel-beach"></select>
   <button id="btn-logout" type="button" class="danger" style="margin-left:auto">Logout</button>
@@ -339,12 +342,15 @@ const SS_USER   = 'curator_username';
 const SS_STATE  = 'curator_state';
 const SS_SOURCE = 'curator_source';
 const SS_DOGONLY= 'curator_dog_only';
+const SS_NOPHOTO= 'curator_no_photo';
 let token = sessionStorage.getItem(SS_TOKEN);
 let curatorUser = sessionStorage.getItem(SS_USER) || 'curator';
 let currentState  = sessionStorage.getItem(SS_STATE)  || 'CA';
 let currentSource = sessionStorage.getItem(SS_SOURCE) || 'all';
 let dogOnly       = sessionStorage.getItem(SS_DOGONLY) === '1';
+let noPhotoOnly   = sessionStorage.getItem(SS_NOPHOTO) === '1';
 let dogFidSet     = null;  // Set of fids with uncurated dog-titled photos, populated when filter is on
+let noPhotoFidSet = null;  // Set of fids with zero photos in current source, populated when no-photo filter is on
 let progress = null;        // get_curation_progress(state) result
 let currentCounty = null;
 let currentBeach = null;
@@ -411,6 +417,8 @@ async function showApp() {
     sessionStorage.setItem(SS_SOURCE, currentSource);
     currentCounty = null;
     currentBeach = null;
+    // No-photo filter is source-aware — re-fetch when source changes
+    if (noPhotoOnly) await loadNoPhotoFids();
     await loadStates();
     await loadProgress();
   };
@@ -428,8 +436,35 @@ async function showApp() {
     await loadProgress();
   };
   if (dogOnly) await loadDogFids();
+  // Wire 📷 No photos checkbox — mirrors dog-only pattern. Source-aware:
+  // get_no_photo_fids takes the current source so "no NPS photos" works.
+  const noPhotoChk = document.getElementById('chk-no-photo');
+  noPhotoChk.checked = noPhotoOnly;
+  noPhotoChk.onchange = async () => {
+    noPhotoOnly = noPhotoChk.checked;
+    sessionStorage.setItem(SS_NOPHOTO, noPhotoOnly ? '1' : '0');
+    if (noPhotoOnly) await loadNoPhotoFids();
+    else noPhotoFidSet = null;
+    currentCounty = null;
+    currentBeach = null;
+    await loadStates();
+    await loadProgress();
+  };
+  if (noPhotoOnly) await loadNoPhotoFids();
   await loadStates();
   await loadProgress();
+}
+
+// Fetch fids that have zero photos in the current source filter.
+async function loadNoPhotoFids() {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_no_photo_fids`, {
+    method: 'POST',
+    headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
+               'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_source: currentSource === 'all' ? null : currentSource }),
+  });
+  const arr = await res.json().catch(()=>[]);
+  noPhotoFidSet = new Set((arr || []).map(r => r.fid));
 }
 
 // Fetch fids that currently have at least one uncurated dog-titled photo.
@@ -470,6 +505,14 @@ async function loadStates() {
   if (dogOnly && dogFidSet && dogFidSet.size > 0) {
     const dogStates = await fetchDogStates();
     states = states.filter(s => dogStates.has(s.state));
+  }
+  // 📷 No photos filter: restrict states to those with at least one
+  // no-photo beach (the noPhotoFidSet is per-fid but we derive states).
+  if (noPhotoOnly && noPhotoFidSet && noPhotoFidSet.size > 0) {
+    // No dedicated states endpoint for no-photo; query beaches_gold by
+    // fid set client-side via get_beach_states_for_fids RPC if it
+    // exists, else show all states (the beach dropdown still narrows).
+    // For simplicity: just show all states; county/beach filter narrows.
   }
   const sel = document.getElementById('sel-state');
   sel.innerHTML = '';
@@ -520,8 +563,11 @@ async function loadProgress(opts = {}) {
   }
 
   if (progress.length && !currentCounty) {
-    // Auto-pick first county that has beaches with photos and isn't done
-    const next = progress.find(c => c.with_photos > 0 && !c.is_done) || progress[0];
+    // Auto-pick. When no-photo filter on: pick first county that has ≥1
+    // no-photo beach. Else: first county that has photo'd un-done beaches.
+    const next = noPhotoOnly && noPhotoFidSet
+      ? progress.find(c => (c.beaches || []).some(b => noPhotoFidSet.has(b.fid))) || progress[0]
+      : progress.find(c => c.with_photos > 0 && !c.is_done) || progress[0];
     if (next) selectCounty(next.county);
   } else if (!progress.length) {
     // No counties for this state — clear the UI
@@ -547,6 +593,10 @@ function renderCountyDropdown() {
       const anyDog = (c.beaches || []).some(b => dogFidSet.has(b.fid));
       if (!anyDog) continue;
     }
+    if (noPhotoOnly && noPhotoFidSet) {
+      const anyNoPhoto = (c.beaches || []).some(b => noPhotoFidSet.has(b.fid));
+      if (!anyNoPhoto) continue;
+    }
     const opt = document.createElement('option');
     let mark = '';
     if (c.is_done) mark = ' ✓';
@@ -565,10 +615,12 @@ function selectCounty(name) {
   if (!currentCounty) return;
   document.getElementById('sel-county').value = name;
   renderBeachDropdown();
-  // Auto-pick first pending photo'd beach; fall back to any photo'd beach
-  // so manual county switches still land somewhere visible.
-  const next = (currentCounty.beaches || []).find(b => b.photo_count > 0 && !b.is_curated)
-            || (currentCounty.beaches || []).find(b => b.photo_count > 0);
+  // Auto-pick. When no-photo filter on: pick first no-photo beach. Else:
+  // first pending photo'd beach, falling back to any photo'd beach.
+  const next = noPhotoOnly && noPhotoFidSet
+    ? (currentCounty.beaches || []).find(b => noPhotoFidSet.has(b.fid))
+    : ((currentCounty.beaches || []).find(b => b.photo_count > 0 && !b.is_curated)
+       || (currentCounty.beaches || []).find(b => b.photo_count > 0));
   if (next) loadBeach(next.fid);
   updateProgressLabel();
 }
@@ -580,6 +632,7 @@ function renderBeachDropdown() {
   // When dog-only is on, filter to only beaches with uncurated dog-titled photos.
   for (const b of (currentCounty?.beaches || [])) {
     if (dogOnly && dogFidSet && !dogFidSet.has(b.fid)) continue;
+    if (noPhotoOnly && noPhotoFidSet && !noPhotoFidSet.has(b.fid)) continue;
     const opt = document.createElement('option');
     const done = b.is_curated ? ' ✓' : '';
     opt.value = String(b.fid);

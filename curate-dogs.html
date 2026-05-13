@@ -47,7 +47,8 @@
   }
   #login .err { color: var(--red); font-size: 13px; margin-top: 12px; min-height: 18px; }
 
-  main { padding: 16px; max-width: 1300px; margin: 0 auto; }
+  main { padding: 16px 220px 16px 16px; max-width: 1500px; margin: 0 auto; }
+  @media (max-width: 1000px) { main { padding: 16px; } }
 
   .grid {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(364px, 1fr));
@@ -113,6 +114,53 @@
     font-size: 14px; opacity: 0; transition: opacity 200ms; pointer-events: none;
   }
   .toast.show { opacity: 1; }
+
+  /* Sticky right-nav save panel — always reachable while scrolling */
+  #right-nav {
+    position: fixed; right: 16px; top: 50%; transform: translateY(-50%);
+    z-index: 90; display: flex; flex-direction: column; gap: 10px;
+    background: #fff; padding: 16px 14px; border-radius: 14px;
+    border: 1px solid var(--border);
+    box-shadow: 0 8px 24px rgba(15,39,66,0.18);
+    min-width: 180px;
+  }
+  #right-nav .rn-progress {
+    font-size: 11px; color: var(--muted); text-align: center;
+    font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  }
+  #right-nav .rn-count {
+    font-size: 28px; font-weight: 700; color: var(--text);
+    text-align: center; line-height: 1;
+  }
+  #right-nav .rn-count .total { color: var(--muted); font-size: 16px; }
+  #right-nav button {
+    font-family: inherit; font-size: 14px; padding: 12px 16px;
+    border-radius: 8px; border: 0; cursor: pointer; font-weight: 700;
+    transition: transform 80ms, box-shadow 80ms;
+  }
+  #right-nav button:active:not([disabled]) { transform: translateY(1px); }
+  #right-nav .rn-save {
+    background: var(--green); color: #fff;
+  }
+  #right-nav .rn-save[disabled] {
+    background: #cbd5e1; color: #fff; cursor: not-allowed;
+  }
+  #right-nav .rn-skip {
+    background: #f1f5f9; color: var(--muted); font-size: 12px; padding: 8px 12px;
+  }
+  #right-nav .rn-hint {
+    font-size: 11px; color: var(--muted); text-align: center;
+    line-height: 1.4; margin-top: 4px;
+  }
+  #right-nav kbd {
+    font-family: 'DM Mono', monospace; font-size: 10px;
+    background: #f1f5f9; padding: 1px 4px; border-radius: 3px;
+    border: 1px solid var(--border);
+  }
+  @media (max-width: 1000px) {
+    #right-nav { position: static; transform: none; margin: 16px auto;
+                 max-width: 360px; }
+  }
 </style>
 </head>
 <body>
@@ -120,10 +168,18 @@
 <header class="bar" id="bar" style="display:none">
   <div class="bar-title">🐶 Dog batch curator</div>
   <span class="progress" id="progress">—</span>
-  <button id="btn-save" disabled>Save & Next 6</button>
-  <button id="btn-skip" style="background:#475569">Skip batch</button>
-  <a href="curate.html" style="color:#fff;font-size:12px;text-decoration:underline;margin-left:8px">← Back to per-beach mode</a>
+  <a href="curate.html" style="color:#fff;font-size:12px;text-decoration:underline;margin-left:auto">← Back to per-beach mode</a>
 </header>
+
+<div id="right-nav" style="display:none">
+  <div class="rn-progress">Decisions</div>
+  <div class="rn-count"><span id="rn-decided">0</span><span class="total"> / <span id="rn-total">6</span></span></div>
+  <button id="btn-save" class="rn-save" disabled>Save & Next 6</button>
+  <button id="btn-skip" class="rn-skip">Skip batch →</button>
+  <div class="rn-hint">
+    <kbd>1</kbd>-<kbd>6</kbd> trash · <kbd>q</kbd>-<kbd>y</kbd> keep · <kbd>Enter</kbd> save
+  </div>
+</div>
 
 <div id="login">
   <h1>Sign in to curate</h1>
@@ -288,9 +344,11 @@ function updateSaveButton() {
   const btn = document.getElementById('btn-save');
   // Enabled when EVERY photo in the batch has a decision
   btn.disabled = batch.length === 0 || decisions.size < batch.length;
-  btn.textContent = decisions.size >= batch.length ?
-    `Save & Next 6 (${decisions.size}/${batch.length})` :
-    `Decide all 6 first (${decisions.size}/${batch.length})`;
+  btn.textContent = decisions.size >= batch.length
+    ? 'Save & Next 6'
+    : `Decide all ${batch.length}`;
+  document.getElementById('rn-decided').textContent = decisions.size;
+  document.getElementById('rn-total').textContent = batch.length;
 }
 
 async function saveBatch() {
@@ -372,6 +430,7 @@ async function tryLogin() {
   document.getElementById('login').style.display = 'none';
   document.getElementById('bar').style.display = 'flex';
   document.getElementById('app').style.display = 'block';
+  document.getElementById('right-nav').style.display = 'flex';
   await loadBatch();
 }
 document.getElementById('btn-login').onclick = tryLogin;
@@ -382,6 +441,7 @@ if (curatorUser && token) {
   document.getElementById('login').style.display = 'none';
   document.getElementById('bar').style.display = 'flex';
   document.getElementById('app').style.display = 'block';
+  document.getElementById('right-nav').style.display = 'flex';
   loadBatch();
 }
 </script>

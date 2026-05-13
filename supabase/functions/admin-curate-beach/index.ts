@@ -45,13 +45,28 @@ Deno.serve(async (req: Request) => {
         { status: 404, headers: cors });
     }
 
+    // Default ordering minimizes manual drag burden on the curator:
+    //   1. Curator-touched photos (sort_order < 1000, set by prior saves)
+    //      keep their explicit order — never reorder a curator's intent.
+    //   2. Untouched photos (sort_order >= 1000 from loaders) come in by
+    //      model predicted_keep_prob DESC — best-first per the Tier 2
+    //      photo classifier. Curator drags only when the model is wrong.
     const { data: photos } = await supabase
       .from("beach_photos")
       .select("id, source, image_url, thumb_url, attribution, license, " +
               "page_url, distance_m, sort_order, source_meta, match_quality, " +
               "lat, lng")
-      .eq("arena_group_id", fid)
-      .order("sort_order", { ascending: true });
+      .eq("arena_group_id", fid);
+    (photos ?? []).sort((a, b) => {
+      const aTouched = (a.sort_order ?? 9999) < 1000;
+      const bTouched = (b.sort_order ?? 9999) < 1000;
+      if (aTouched !== bTouched) return aTouched ? -1 : 1;
+      if (aTouched) return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+      const aProb = Number((a.source_meta as Record<string, unknown> | null)?.predicted_keep_prob ?? 0);
+      const bProb = Number((b.source_meta as Record<string, unknown> | null)?.predicted_keep_prob ?? 0);
+      if (aProb !== bProb) return bProb - aProb;
+      return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+    });
 
     const { data: status } = await supabase
       .from("beach_curation_status")

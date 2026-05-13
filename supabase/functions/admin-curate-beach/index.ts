@@ -55,8 +55,15 @@ Deno.serve(async (req: Request) => {
       .from("beach_photos")
       .select("id, source, image_url, thumb_url, attribution, license, " +
               "page_url, distance_m, sort_order, source_meta, match_quality, " +
-              "lat, lng")
-      .eq("arena_group_id", fid);
+              "curated_at, lat, lng")
+      .eq("arena_group_id", fid)
+      .is("curated_at", null);   // hide already-decided photos; curator only
+                                  // sees what they still need to decide.
+                                  // Propagated decisions from sibling beaches
+                                  // mark photos curated_at — they then drop
+                                  // out of the grid here, so a Marin beach
+                                  // whose 30 gallery photos were already
+                                  // decided at sister-beach-1 shows empty.
     (photos ?? []).sort((a, b) => {
       const aTouched = (a.sort_order ?? 9999) < 1000;
       const bTouched = (b.sort_order ?? 9999) < 1000;

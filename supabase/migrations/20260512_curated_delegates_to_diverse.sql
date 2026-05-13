@@ -10,5 +10,5 @@ volatile
 security definer
 set search_path to 'public'
 as $$
-  select public.get_beach_photos_diverse(p_fid, 6);
+  select public.get_beach_photos_diverse(p_fid, 8);
 $$;

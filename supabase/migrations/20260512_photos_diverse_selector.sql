@@ -23,7 +23,7 @@
 --   - get-beach-detail edge function (detail.html via RPC call)
 
 create or replace function public.get_beach_photos_diverse(
-  p_fid bigint, p_target int default 6
+  p_fid bigint, p_target int default 8
 )
 returns jsonb
 language plpgsql

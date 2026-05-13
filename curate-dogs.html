@@ -60,6 +60,17 @@
   }
   .card.keep   { border-color: var(--green); box-shadow: 0 0 0 2px rgba(21,128,61,0.15); }
   .card.trash  { border-color: var(--red);   box-shadow: 0 0 0 2px rgba(185,28,28,0.15); opacity: 0.55; }
+  .card.dragging   { opacity: 0.5; }
+  .card.drop-target { box-shadow: 0 0 0 3px var(--accent); }
+  .card[draggable="true"] { cursor: grab; }
+  .card[draggable="true"]:active { cursor: grabbing; }
+  .rank-num {
+    position: absolute; top: 6px; left: 6px;
+    background: rgba(0,0,0,0.6); color: #fff; font-weight: 700;
+    width: 24px; height: 24px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; z-index: 1;
+  }
   .card img {
     width: 100%; aspect-ratio: 4/3; object-fit: contain;
     background: #0f2742;
@@ -188,17 +199,28 @@ async function loadBatch() {
 }
 
 function render() {
+  // For rank-aware soft labels: compute rank-within-beach in current batch order
+  const beachPosCounters = new Map();
   document.getElementById('grid').innerHTML = batch.map((p, i) => {
     const v = (p.source_meta || {}).vision || {};
     const dec = decisions.get(p.id);
     const cls = dec ? `card ${dec}` : 'card';
-    return `<div class="${cls}" data-id="${p.id}">
-      <a href="${escHtml(p.image_url)}" target="_blank" rel="noopener">
-        <img src="${escHtml(p.thumb_url || p.image_url)}" alt="" loading="lazy">
+    const fid = p.arena_group_id;
+    const posInBeach = (beachPosCounters.get(fid) || 0) + 1;
+    beachPosCounters.set(fid, posInBeach);
+    // Only show rank if 2+ photos from same beach in this batch
+    const beachCountInBatch = batch.filter(b => b.arena_group_id === fid).length;
+    const rankBadge = beachCountInBatch > 1
+      ? `<div class="rank-num" title="Rank within ${escHtml(p.beach_name)}">${posInBeach}</div>`
+      : '';
+    return `<div class="${cls}" data-id="${p.id}" data-fid="${fid}" draggable="true" style="position:relative">
+      ${rankBadge}
+      <a href="${escHtml(p.image_url)}" target="_blank" rel="noopener" draggable="false">
+        <img src="${escHtml(p.thumb_url || p.image_url)}" alt="" loading="lazy" draggable="false">
       </a>
       <div class="meta">
         <div class="beach-line">${escHtml(p.beach_name)}</div>
-        <div class="loc-line">${escHtml(p.beach_county)}, ${escHtml(p.beach_state)} · fid ${p.arena_group_id}</div>
+        <div class="loc-line">${escHtml(p.beach_county)}, ${escHtml(p.beach_state)} · fid ${fid}</div>
         <div class="badges">
           <span class="badge">${escHtml(p.source)}</span>
           ${v.has_dog ? '<span class="badge dog">🐶 dog</span>' : ''}
@@ -216,7 +238,45 @@ function render() {
   document.querySelectorAll('.actions button').forEach(b => {
     b.onclick = () => decide(parseInt(b.dataset.id, 10), b.dataset.act);
   });
+  wireDragAndDrop();
   updateSaveButton();
+}
+
+let dragSrcId = null;
+function wireDragAndDrop() {
+  document.querySelectorAll('.card').forEach(card => {
+    card.ondragstart = (e) => {
+      dragSrcId = parseInt(card.dataset.id, 10);
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    };
+    card.ondragend = () => {
+      card.classList.remove('dragging');
+      document.querySelectorAll('.drop-target').forEach(c => c.classList.remove('drop-target'));
+      dragSrcId = null;
+    };
+    card.ondragover = (e) => {
+      if (dragSrcId == null || parseInt(card.dataset.id, 10) === dragSrcId) return;
+      e.preventDefault();
+      card.classList.add('drop-target');
+    };
+    card.ondragleave = () => card.classList.remove('drop-target');
+    card.ondrop = (e) => {
+      e.preventDefault();
+      card.classList.remove('drop-target');
+      if (dragSrcId == null) return;
+      reorderBatch(dragSrcId, parseInt(card.dataset.id, 10));
+    };
+  });
+}
+
+function reorderBatch(srcId, dstId) {
+  const srcIdx = batch.findIndex(p => p.id === srcId);
+  const dstIdx = batch.findIndex(p => p.id === dstId);
+  if (srcIdx < 0 || dstIdx < 0 || srcIdx === dstIdx) return;
+  const [moved] = batch.splice(srcIdx, 1);
+  batch.splice(dstIdx, 0, moved);
+  render();
 }
 
 function decide(id, act) {
@@ -241,12 +301,15 @@ async function saveBatch() {
     if (!byBeach.has(p.arena_group_id)) byBeach.set(p.arena_group_id, []);
     byBeach.get(p.arena_group_id).push(p);
   }
-  // For each beach, build a photos[] payload and call admin-curate-beach
+  // For each beach, build a photos[] payload. The ORDER within each beach
+  // group reflects the curator's drag-sorted batch order — that becomes
+  // sort_order (100, 101, 102, …) so the rank-aware soft labels at
+  // training time see the curator's intended ranking.
   const calls = [];
   for (const [fid, photos] of byBeach.entries()) {
     const payload = photos.map((p, i) => ({
       id: p.id,
-      sort_order: p.sort_order || (100 + i),
+      sort_order: 100 + i,    // i = position within this beach in the dragged batch order
       keep: decisions.get(p.id) === 'keep',
       match_quality: decisions.get(p.id) === 'keep' ? 'very_likely' : null,
     }));

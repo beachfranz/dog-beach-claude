@@ -353,23 +353,27 @@ function updateSaveButton() {
 
 async function saveBatch() {
   if (!batch.length || decisions.size < batch.length) return;
-  // Group decisions by beach fid
+  // RPC returns deduped UNIQUE images, each carrying sibling_rows
+  // [{id, fid}, ...] for all beach_photos rows that share this image.
+  // We propagate the curator's single decision to every sibling so
+  // CDPR-fan-out gallery images get one click instead of N clicks.
   const byBeach = new Map();
   for (const p of batch) {
-    if (!byBeach.has(p.arena_group_id)) byBeach.set(p.arena_group_id, []);
-    byBeach.get(p.arena_group_id).push(p);
+    const decision = decisions.get(p.id);
+    const siblings = p.sibling_rows && p.sibling_rows.length
+      ? p.sibling_rows : [{ id: p.id, fid: p.arena_group_id }];
+    for (const sib of siblings) {
+      if (!byBeach.has(sib.fid)) byBeach.set(sib.fid, []);
+      byBeach.get(sib.fid).push({ id: sib.id, decision });
+    }
   }
-  // For each beach, build a photos[] payload. The ORDER within each beach
-  // group reflects the curator's drag-sorted batch order — that becomes
-  // sort_order (100, 101, 102, …) so the rank-aware soft labels at
-  // training time see the curator's intended ranking.
   const calls = [];
-  for (const [fid, photos] of byBeach.entries()) {
-    const payload = photos.map((p, i) => ({
-      id: p.id,
-      sort_order: 100 + i,    // i = position within this beach in the dragged batch order
-      keep: decisions.get(p.id) === 'keep',
-      match_quality: decisions.get(p.id) === 'keep' ? 'very_likely' : null,
+  for (const [fid, items] of byBeach.entries()) {
+    const payload = items.map((it, i) => ({
+      id: it.id,
+      sort_order: 100 + i,
+      keep: it.decision === 'keep',
+      match_quality: it.decision === 'keep' ? 'very_likely' : null,
     }));
     calls.push(fetch(`${SUPABASE_URL}/functions/v1/admin-curate-beach`, {
       method: 'POST',

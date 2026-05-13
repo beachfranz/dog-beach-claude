@@ -50,8 +50,8 @@
   main { padding: 16px; max-width: 1300px; margin: 0 auto; }
 
   .grid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 16px;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(364px, 1fr));
+    gap: 20px;
   }
   .card {
     background: var(--card); border: 1px solid var(--border); border-radius: 10px;
@@ -61,8 +61,8 @@
   .card.keep   { border-color: var(--green); box-shadow: 0 0 0 2px rgba(21,128,61,0.15); }
   .card.trash  { border-color: var(--red);   box-shadow: 0 0 0 2px rgba(185,28,28,0.15); opacity: 0.55; }
   .card img {
-    width: 100%; aspect-ratio: 4/3; object-fit: cover;
-    background: #f1f5f9; cursor: zoom-in;
+    width: 100%; aspect-ratio: 4/3; object-fit: contain;
+    background: #0f2742;
   }
   .card .meta { padding: 10px 12px; }
   .beach-line {

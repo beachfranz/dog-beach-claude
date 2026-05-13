@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dog curator — batch mode</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f8fafc; --card: #fff; --text: #0f2742; --muted: #64748b;
+    --border: #e2e8f0; --accent: #1d4ed8; --green: #15803d; --red: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'DM Sans', system-ui, sans-serif;
+         background: var(--bg); color: var(--text); }
+  header.bar {
+    padding: 12px 16px; background: #0f2742; color: #fff;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    position: sticky; top: 0; z-index: 100;
+  }
+  .bar-title { font-weight: 700; font-size: 15px; }
+  .bar .progress { font-size: 12px; opacity: 0.7; margin-left: auto; }
+  .bar button {
+    font-family: inherit; font-size: 13px; padding: 8px 14px;
+    border-radius: 6px; border: 0; background: var(--accent); color: #fff;
+    cursor: pointer; font-weight: 600;
+  }
+  .bar button[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+  #login {
+    max-width: 360px; margin: 80px auto; padding: 24px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  }
+  #login h1 { margin: 0 0 16px; font-size: 18px; }
+  #login label {
+    display: block; font-size: 12px; font-weight: 600;
+    color: var(--muted); margin: 12px 0 4px;
+  }
+  #login input {
+    width: 100%; padding: 8px 10px; font-size: 14px;
+    border: 1px solid var(--border); border-radius: 6px;
+  }
+  #login button {
+    margin-top: 16px; padding: 10px 18px; font-size: 14px; font-weight: 700;
+    background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+    cursor: pointer;
+  }
+  #login .err { color: var(--red); font-size: 13px; margin-top: 12px; min-height: 18px; }
+
+  main { padding: 16px; max-width: 1300px; margin: 0 auto; }
+
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden; display: flex; flex-direction: column;
+    transition: box-shadow 120ms, border-color 120ms;
+  }
+  .card.keep   { border-color: var(--green); box-shadow: 0 0 0 2px rgba(21,128,61,0.15); }
+  .card.trash  { border-color: var(--red);   box-shadow: 0 0 0 2px rgba(185,28,28,0.15); opacity: 0.55; }
+  .card img {
+    width: 100%; aspect-ratio: 4/3; object-fit: cover;
+    background: #f1f5f9; cursor: zoom-in;
+  }
+  .card .meta { padding: 10px 12px; }
+  .beach-line {
+    font-size: 14px; font-weight: 700; color: var(--text);
+    margin: 0 0 2px; line-height: 1.25;
+  }
+  .loc-line { font-size: 12px; color: var(--muted); }
+  .badges {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; font-size: 11px;
+  }
+  .badge {
+    padding: 2px 6px; border-radius: 4px; background: rgba(0,0,0,0.06);
+    color: var(--muted); font-weight: 600;
+  }
+  .badge.dog { background: rgba(21,128,61,0.10); color: var(--green); }
+  .badge.surf { background: rgba(29,78,216,0.10); color: var(--accent); }
+  .badge.prob { background: rgba(180,83,9,0.10); color: #b45309; }
+  .actions {
+    display: flex; gap: 8px; padding: 10px 12px;
+    border-top: 1px solid var(--border); background: #fafbfc;
+  }
+  .actions button {
+    flex: 1; padding: 8px; border-radius: 6px; border: 1px solid var(--border);
+    background: #fff; cursor: pointer; font-family: inherit; font-weight: 600; font-size: 13px;
+  }
+  .btn-trash { color: var(--red); }
+  .btn-trash:hover, .card.trash .btn-trash { background: var(--red); color: #fff; border-color: var(--red); }
+  .btn-keep { color: var(--green); }
+  .btn-keep:hover, .card.keep .btn-keep { background: var(--green); color: #fff; border-color: var(--green); }
+
+  .empty {
+    text-align: center; padding: 80px 16px; color: var(--muted); font-size: 16px;
+  }
+  .toast {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: #0f2742; color: #fff; padding: 10px 16px; border-radius: 8px;
+    font-size: 14px; opacity: 0; transition: opacity 200ms; pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header class="bar" id="bar" style="display:none">
+  <div class="bar-title">🐶 Dog batch curator</div>
+  <span class="progress" id="progress">—</span>
+  <button id="btn-save" disabled>Save & Next 6</button>
+  <button id="btn-skip" style="background:#475569">Skip batch</button>
+  <a href="curate.html" style="color:#fff;font-size:12px;text-decoration:underline;margin-left:8px">← Back to per-beach mode</a>
+</header>
+
+<div id="login">
+  <h1>Sign in to curate</h1>
+  <label>Username</label>
+  <input type="text" id="username" autocomplete="username">
+  <label>Token</label>
+  <input type="password" id="token" autocomplete="current-password">
+  <button id="btn-login">Sign in</button>
+  <div class="err" id="login-err"></div>
+</div>
+
+<main id="app" style="display:none">
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" style="display:none">
+    🎉 All dog photos curated. Nothing to review.
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVobHpid3Ryc3hhYXVrdXJla2F1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU2OTc0MDYsImV4cCI6MjA5MTI3MzQwNn0.BKGWJWwX99a39vzvpzFXduBn0vwHykKYliGlB2Ov0UU';
+const SS_TOKEN = 'curator_token';
+const SS_USER  = 'curator_username';
+
+let curatorUser = sessionStorage.getItem(SS_USER) || '';
+let token       = sessionStorage.getItem(SS_TOKEN) || '';
+let batch = [];                // current 6 photos
+let decisions = new Map();     // id -> 'keep' | 'trash'
+let sessionCount = 0;          // photos decided this session
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+function escHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function rpc(name, args) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
+    method: 'POST',
+    headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
+               'Content-Type': 'application/json' },
+    body: JSON.stringify(args || {}),
+  });
+  if (!r.ok) throw new Error(`rpc ${name} HTTP ${r.status}`);
+  return r.json();
+}
+
+async function loadBatch() {
+  document.getElementById('empty').style.display = 'none';
+  document.getElementById('grid').innerHTML = '<div class="empty">Loading…</div>';
+  const [total, photos] = await Promise.all([
+    rpc('get_uncurated_dog_count'),
+    rpc('get_uncurated_dog_batch', { p_limit: 6, p_offset: 0 }),
+  ]);
+  batch = photos;
+  decisions = new Map();
+  document.getElementById('progress').textContent =
+    `${total} uncurated · ${sessionCount} done this session`;
+  if (!photos.length) {
+    document.getElementById('grid').innerHTML = '';
+    document.getElementById('empty').style.display = 'block';
+    document.getElementById('btn-save').disabled = true;
+    return;
+  }
+  render();
+}
+
+function render() {
+  document.getElementById('grid').innerHTML = batch.map((p, i) => {
+    const v = (p.source_meta || {}).vision || {};
+    const dec = decisions.get(p.id);
+    const cls = dec ? `card ${dec}` : 'card';
+    return `<div class="${cls}" data-id="${p.id}">
+      <a href="${escHtml(p.image_url)}" target="_blank" rel="noopener">
+        <img src="${escHtml(p.thumb_url || p.image_url)}" alt="" loading="lazy">
+      </a>
+      <div class="meta">
+        <div class="beach-line">${escHtml(p.beach_name)}</div>
+        <div class="loc-line">${escHtml(p.beach_county)}, ${escHtml(p.beach_state)} · fid ${p.arena_group_id}</div>
+        <div class="badges">
+          <span class="badge">${escHtml(p.source)}</span>
+          ${v.has_dog ? '<span class="badge dog">🐶 dog</span>' : ''}
+          ${v.has_surfing ? '<span class="badge surf">🏄 surf</span>' : ''}
+          <span class="badge prob">🤖 ${Math.round((p.keep_prob||0)*100)}%</span>
+          ${p.distance_m != null ? `<span class="badge">📍 ${Math.round(p.distance_m)}m</span>` : ''}
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn-trash" data-act="trash" data-id="${p.id}">🗑 Trash</button>
+        <button class="btn-keep"  data-act="keep"  data-id="${p.id}">✅ Keep</button>
+      </div>
+    </div>`;
+  }).join('');
+  document.querySelectorAll('.actions button').forEach(b => {
+    b.onclick = () => decide(parseInt(b.dataset.id, 10), b.dataset.act);
+  });
+  updateSaveButton();
+}
+
+function decide(id, act) {
+  decisions.set(id, act);
+  render();
+}
+
+function updateSaveButton() {
+  const btn = document.getElementById('btn-save');
+  // Enabled when EVERY photo in the batch has a decision
+  btn.disabled = batch.length === 0 || decisions.size < batch.length;
+  btn.textContent = decisions.size >= batch.length ?
+    `Save & Next 6 (${decisions.size}/${batch.length})` :
+    `Decide all 6 first (${decisions.size}/${batch.length})`;
+}
+
+async function saveBatch() {
+  if (!batch.length || decisions.size < batch.length) return;
+  // Group decisions by beach fid
+  const byBeach = new Map();
+  for (const p of batch) {
+    if (!byBeach.has(p.arena_group_id)) byBeach.set(p.arena_group_id, []);
+    byBeach.get(p.arena_group_id).push(p);
+  }
+  // For each beach, build a photos[] payload and call admin-curate-beach
+  const calls = [];
+  for (const [fid, photos] of byBeach.entries()) {
+    const payload = photos.map((p, i) => ({
+      id: p.id,
+      sort_order: p.sort_order || (100 + i),
+      keep: decisions.get(p.id) === 'keep',
+      match_quality: decisions.get(p.id) === 'keep' ? 'very_likely' : null,
+    }));
+    calls.push(fetch(`${SUPABASE_URL}/functions/v1/admin-curate-beach`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY,
+                 'Content-Type': 'application/json', 'x-admin-secret': token },
+      body: JSON.stringify({ fid, photos: payload, curated_by: curatorUser }),
+    }).then(r => {
+      if (!r.ok) throw new Error(`fid=${fid} HTTP ${r.status}`);
+      return r.json();
+    }));
+  }
+  try {
+    document.getElementById('btn-save').disabled = true;
+    await Promise.all(calls);
+    sessionCount += batch.length;
+    showToast(`Saved ${batch.length} (${decisions.size === batch.length ? 'all decided' : 'partial'}). Loading next…`);
+    await loadBatch();
+  } catch (e) {
+    showToast(`Save failed: ${e.message}`);
+    document.getElementById('btn-save').disabled = false;
+  }
+}
+
+document.getElementById('btn-save').onclick = saveBatch;
+document.getElementById('btn-skip').onclick = loadBatch;
+
+// Keyboard: 1-6 = trash card N; q-y = keep card N; Enter = save
+window.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  const trashKeys = ['1','2','3','4','5','6'];
+  const keepKeys  = ['q','w','e','r','t','y'];
+  if (trashKeys.includes(e.key) && batch[trashKeys.indexOf(e.key)]) {
+    decide(batch[trashKeys.indexOf(e.key)].id, 'trash');
+  } else if (keepKeys.includes(e.key) && batch[keepKeys.indexOf(e.key)]) {
+    decide(batch[keepKeys.indexOf(e.key)].id, 'keep');
+  } else if (e.key === 'Enter' && !document.getElementById('btn-save').disabled) {
+    saveBatch();
+  }
+});
+
+// Login
+async function tryLogin() {
+  const user = document.getElementById('username').value.trim();
+  const tok  = document.getElementById('token').value;
+  if (!user || !tok) { document.getElementById('login-err').textContent = 'Both required'; return; }
+  // Sanity check: hit the admin-curate-beach edge with a dry-run-ish call
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/admin-curate-beach?fid=1`, {
+    headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY,
+               'x-admin-secret': tok },
+  });
+  if (r.status === 401 || r.status === 403) {
+    document.getElementById('login-err').textContent = 'Invalid token';
+    return;
+  }
+  curatorUser = user; token = tok;
+  sessionStorage.setItem(SS_USER, user);
+  sessionStorage.setItem(SS_TOKEN, tok);
+  document.getElementById('login').style.display = 'none';
+  document.getElementById('bar').style.display = 'flex';
+  document.getElementById('app').style.display = 'block';
+  await loadBatch();
+}
+document.getElementById('btn-login').onclick = tryLogin;
+document.getElementById('username').addEventListener('keydown', e => { if (e.key==='Enter') tryLogin(); });
+document.getElementById('token').addEventListener('keydown', e => { if (e.key==='Enter') tryLogin(); });
+
+if (curatorUser && token) {
+  document.getElementById('login').style.display = 'none';
+  document.getElementById('bar').style.display = 'flex';
+  document.getElementById('app').style.display = 'block';
+  loadBatch();
+}
+</script>
+</body>
+</html>

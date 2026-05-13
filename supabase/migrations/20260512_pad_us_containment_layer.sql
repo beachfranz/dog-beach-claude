@@ -42,11 +42,7 @@ begin
            pu.raw_attrs
       from public.beaches_gold g
       join public.pad_us_units pu
-        on (case
-              when p_buffer_m = 0 then st_intersects(pu.geom, g.geom::geometry)
-              else st_dwithin(pu.geom::geography,
-                              g.geom::geography, p_buffer_m)
-            end)
+        on st_dwithin(pu.geom_geog, g.geom::geography, p_buffer_m)
        and pu.state = g.state
      where (p_fid is null or g.fid = p_fid)
        and g.geom is not null

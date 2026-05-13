@@ -135,6 +135,40 @@ Deno.serve(async (req: Request) => {
       // trash time so the Tier 2 photo-quality model can train on
       // feature-parity labels (was: leakage via missingness — Polyzotis
       // 2018). Failure to tombstone is non-fatal — log and proceed.
+      //
+      // SIBLING PROPAGATION: a single trash decision on photo X (source,
+      // external_id) cascades to ALL beach_photos rows sharing that
+      // identity. CDPR/NPS gallery photos are fanned out to many sub-
+      // beaches; one curator click should not require seeing the same
+      // image at 5 different beaches. Expand toDelete to include all
+      // siblings before tombstoning + deleting.
+      const { data: seedRows } = await supabase
+        .from("beach_photos")
+        .select("source, external_id")
+        .in("id", toDelete);
+      const seedKeys = new Set(
+        (seedRows ?? [])
+          .filter(r => r.external_id != null)
+          .map(r => `${r.source}|${r.external_id}`)
+      );
+      if (seedKeys.size) {
+        const { data: allSiblings } = await supabase
+          .from("beach_photos")
+          .select("id, source, external_id")
+          .in("source", Array.from(new Set((seedRows ?? []).map(r => r.source))));
+        const expandedIds = new Set<number>(toDelete);
+        for (const s of allSiblings ?? []) {
+          if (s.external_id != null && seedKeys.has(`${s.source}|${s.external_id}`)) {
+            expandedIds.add(s.id as number);
+          }
+        }
+        if (expandedIds.size > toDelete.length) {
+          console.log(`sibling propagation: trash expanded ${toDelete.length} -> ${expandedIds.size} rows`);
+          toDelete.length = 0;
+          for (const id of expandedIds) toDelete.push(id);
+        }
+      }
+
       const { data: doomed } = await supabase
         .from("beach_photos")
         .select("arena_group_id, source, external_id, distance_m, license, source_meta")
@@ -182,7 +216,11 @@ Deno.serve(async (req: Request) => {
       deleted = count ?? 0;
     }
 
-    // Update sort_order + match_quality on kept photos
+    // Update sort_order + match_quality on kept photos.
+    // SIBLING PROPAGATION: a keep decision on photo X (source, external_id)
+    // also marks all sibling rows curated_at + match_quality. sort_order is
+    // local per-beach so it stays per-row (the explicit p.sort_order is for
+    // the beach the curator was on; siblings keep their own positions).
     for (const p of toKeep) {
       const update: Record<string, unknown> = {
         sort_order: p.sort_order,
@@ -196,6 +234,27 @@ Deno.serve(async (req: Request) => {
         .eq("id", p.id);
       if (upErr) return new Response(JSON.stringify({ error: upErr.message }),
         { status: 500, headers: cors });
+
+      // Find siblings sharing (source, external_id) at OTHER beaches
+      const { data: meta } = await supabase
+        .from("beach_photos")
+        .select("source, external_id")
+        .eq("id", p.id).single();
+      if (!meta?.external_id) continue;
+      const siblingUpdate: Record<string, unknown> = {
+        curated_at: update.curated_at,
+        curated_by: update.curated_by,
+      };
+      if (p.match_quality) siblingUpdate.match_quality = p.match_quality;
+      const { error: sibErr, count: sibCount } = await supabase
+        .from("beach_photos")
+        .update(siblingUpdate, { count: "exact" })
+        .eq("source", meta.source)
+        .eq("external_id", meta.external_id)
+        .neq("id", p.id)
+        .is("curated_at", null);
+      if (sibErr) console.warn("sibling keep propagation:", sibErr.message);
+      else if (sibCount) console.log(`keep propagated to ${sibCount} sibling rows`);
     }
 
     // Upsert curation status (mark beach as done)

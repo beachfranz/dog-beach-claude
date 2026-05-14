@@ -180,15 +180,18 @@ def operator_llm_extract_for_state(
         conn.close()
 
     # Chunk into groups of 5.
+    import time as _time
     chunk_size = 5
     chunks_done = 0
     chunks_failed = 0
     ops_skipped_recent = 0
     ops_with_errors = 0
+    ops_written_total = 0
     total_chunks = (len(ids) + chunk_size - 1) // chunk_size
     failed_chunks_detail: list[str] = []
     for i in range(0, len(ids), chunk_size):
         chunk = ids[i:i + chunk_size]
+        t_chunk = _time.time()
         result = subproc.run(
             "scripts/extract_operator_dogs_policy.py",
             # 2026-05-14: --skip-recent is in DAYS (not hours — was confusing).
@@ -199,7 +202,7 @@ def operator_llm_extract_for_state(
         if result.returncode != 0:
             chunks_failed += 1
             detail = (
-                f"chunk {chunks_done+chunks_failed} ops {chunk[0]}..{chunk[-1]}: "
+                f"chunk {chunks_done+chunks_failed}/{total_chunks} ops {chunk[0]}..{chunk[-1]}: "
                 f"{result.stderr[-200:] or result.stdout[-200:]}"
             )
             failed_chunks_detail.append(detail)
@@ -209,12 +212,24 @@ def operator_llm_extract_for_state(
         # - skipped_recent: ops cache-skipped via --skip-recent 24
         # - errors: ops where extraction raised/aborted (definitive failure signal)
         m = re.search(r"'skipped_recent':\s*(\d+)", result.stdout)
-        if m:
-            ops_skipped_recent += int(m.group(1))
+        chunk_skipped = int(m.group(1)) if m else 0
+        ops_skipped_recent += chunk_skipped
         m = re.search(r"'errors':\s*(\d+)", result.stdout)
-        if m:
-            ops_with_errors += int(m.group(1))
+        chunk_errors = int(m.group(1)) if m else 0
+        ops_with_errors += chunk_errors
+        # Sum non-meta src_* counters = ops where the script wrote something.
+        chunk_written = sum(
+            int(v) for k, v in re.findall(r"'(\w+)':\s*(\d+)", result.stdout)
+            if k.startswith('src_')
+        )
+        ops_written_total += chunk_written
         chunks_done += 1
+        context.log.info(
+            f"  chunk {chunks_done}/{total_chunks} "
+            f"(ops {chunk[0]}..{chunk[-1]}): +{chunk_written} written, "
+            f"{chunk_skipped} cached, {chunk_errors} errors "
+            f"in {_time.time()-t_chunk:.1f}s"
+        )
 
     # Snapshot DB count AFTER — delta = rows actually written by this run.
     conn = postgres.get_connection()

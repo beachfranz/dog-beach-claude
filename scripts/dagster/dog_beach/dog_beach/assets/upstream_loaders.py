@@ -123,11 +123,169 @@ def _ensure_loader_helper(
 
 
 # ════════════════════════════════════════════════════════════════════════
+#  Phase 0a — env_preflight (global, no partition)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Validates the execution environment BEFORE any other asset runs. Catches
+# the class of "Dagster Python is misconfigured" failures we hit on 2026-05-13
+# (truststore missing in Dagster Python → silent Phase 26 fail; nested
+# subprocess Windows-stdio issue → _parse_cli_rows AttributeError).
+#
+# Every state-launch run starts here. If preflight fails, downstream assets
+# don't run, no LLM dollars spent.
+
+@asset(
+    group_name="phase_0_upstream_loaders",
+    description=(
+        "Environment preflight. Validates: (1) env vars set; (2) truststore "
+        "importable in Dagster Python; (3) supabase CLI callable + writes "
+        "stdout; (4) DB pooler connection; (5) Anthropic API reachable; "
+        "(6) Tavily API reachable; (7) extract_operator_dogs_policy.py "
+        "subprocess smoke-test (--dry-run on one test op via SubprocessResource "
+        "— catches exact subprocess chain Phase 26 uses)."
+    ),
+)
+def env_preflight(
+    context: AssetExecutionContext,
+    postgres: PostgresPoolerResource,
+    subproc: SubprocessResource,
+) -> MaterializeResult:
+    import os
+    import subprocess as sp
+    failures: list[str] = []
+    checks_passed = 0
+
+    # ── 1. Required env vars ──────────────────────────────────────────
+    required_env = ['SUPABASE_URL', 'SUPABASE_SERVICE_KEY',
+                    'ANTHROPIC_API_KEY', 'TAVILY_API_KEY',
+                    'SUPABASE_DB_PASSWORD']
+    missing_env = [v for v in required_env if not os.environ.get(v)]
+    if missing_env:
+        failures.append(f"missing env vars: {', '.join(missing_env)}")
+    else:
+        checks_passed += 1
+
+    # ── 2. Truststore importable (in Dagster Python, same as subproc) ──
+    try:
+        import truststore  # noqa
+        truststore.inject_into_ssl()
+        checks_passed += 1
+    except ImportError:
+        failures.append(
+            "truststore not installed in Dagster Python. Install with: "
+            f'"{sys.executable}" -m pip install truststore'
+        )
+    except Exception as e:
+        failures.append(f"truststore.inject_into_ssl failed: {e}")
+
+    # ── 3. Supabase CLI callable + writes stdout ─────────────────────
+    try:
+        r = sp.run(['supabase', '--version'],
+                   capture_output=True, text=True, timeout=10,
+                   stdin=sp.DEVNULL)
+        if r.returncode != 0:
+            failures.append(
+                f"supabase CLI rc={r.returncode}: {r.stderr[:200]}"
+            )
+        elif not r.stdout or not r.stdout.strip():
+            failures.append(
+                f"supabase CLI returned empty stdout (rc=0) — "
+                f"likely Windows-stdio issue in Dagster subprocess"
+            )
+        else:
+            checks_passed += 1
+    except FileNotFoundError:
+        failures.append("supabase CLI not on PATH in Dagster Python's environment")
+    except Exception as e:
+        failures.append(f"supabase CLI: {e}")
+
+    # ── 4. DB pooler ─────────────────────────────────────────────────
+    try:
+        conn = postgres.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1, version()")
+                val, version = cur.fetchone()
+                assert val == 1
+            checks_passed += 1
+        finally:
+            conn.close()
+    except Exception as e:
+        failures.append(f"DB pooler: {e}")
+
+    # ── 5. Anthropic API reachable ───────────────────────────────────
+    try:
+        import httpx
+        # Any response (incl 4xx) proves DNS+TLS+auth roundtrip works.
+        r = httpx.get('https://api.anthropic.com/v1/messages',
+                      headers={'x-api-key': os.environ.get('ANTHROPIC_API_KEY', ''),
+                               'anthropic-version': '2023-06-01'},
+                      timeout=5)
+        if r.status_code >= 500:
+            failures.append(f"Anthropic API HTTP {r.status_code}")
+        else:
+            checks_passed += 1
+    except Exception as e:
+        failures.append(f"Anthropic reachability: {e}")
+
+    # ── 6. Tavily API reachable ──────────────────────────────────────
+    try:
+        import httpx
+        r = httpx.get('https://api.tavily.com/', timeout=5)
+        if r.status_code >= 500:
+            failures.append(f"Tavily API HTTP {r.status_code}")
+        else:
+            checks_passed += 1
+    except Exception as e:
+        failures.append(f"Tavily reachability: {e}")
+
+    # ── 7. Extract script subprocess smoke-test ──────────────────────
+    # The critical one — runs the exact Dagster→SubprocessResource→script
+    # →nested supabase subprocess chain that Phase 26 uses. If this works,
+    # Phase 26 will work.
+    test_op_id = "1820"  # City of Warrenton, OR — known-good op
+    try:
+        result = subproc.run(
+            "scripts/extract_operator_dogs_policy.py",
+            args=["--ids", test_op_id, "--skip-recent", "0", "--dry-run"],
+            timeout=120,
+        )
+        if result.returncode != 0:
+            failures.append(
+                f"extract_operator_dogs_policy.py smoke-test rc={result.returncode}: "
+                f"{(result.stderr or result.stdout or '(no output)')[-400:]}"
+            )
+        elif "Loaded 1 operators" not in (result.stdout or ""):
+            failures.append(
+                f"extract_operator_dogs_policy.py smoke-test missing 'Loaded 1 operators' "
+                f"in stdout — likely failed silently. "
+                f"stdout: {(result.stdout or '')[:400]}"
+            )
+        else:
+            checks_passed += 1
+    except Exception as e:
+        failures.append(f"extract_operator_dogs_policy.py smoke-test: {e}")
+
+    if failures:
+        msg = (
+            f"env_preflight FAILED ({len(failures)} of 7 checks).\n  "
+            + "\n  ".join(failures)
+        )
+        raise RuntimeError(msg)
+
+    return MaterializeResult(metadata={
+        "checks_passed": MetadataValue.int(checks_passed),
+        "checks_total":  MetadataValue.int(7),
+    })
+
+
+# ════════════════════════════════════════════════════════════════════════
 #  Phase 1 — chain_integrity_check (global, no partition)
 # ════════════════════════════════════════════════════════════════════════
 
 @asset(
     group_name="phase_0_upstream_loaders",
+    deps=[env_preflight],
     description=(
         "Code-side populator-chain audit. Fails fast if promote_to_gold or "
         "refire_bep_cascade are missing any expected populator call, or if "

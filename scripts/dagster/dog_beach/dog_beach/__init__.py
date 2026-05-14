@@ -59,6 +59,7 @@ from .resources import (
     NPSMultimediaResource,
 )
 from .assets.upstream_loaders import (
+    env_preflight,
     chain_integrity_check,
     state_policy_seed,
     seasonal_closure_seed,
@@ -89,7 +90,9 @@ from .assets.operator_llm_cascade import (
     operator_policy_extraction,
     operator_llm_extract_for_state,
     operator_merge,
-    bep_refire,
+    rebuild_beach_evidence,
+    gold_set_candidates,
+    gold_set_review_gate,
 )
 from .assets.per_fid_enrichment import (
     section_extract,
@@ -136,7 +139,7 @@ from .jobs import (
     llm_cascade_job,
     daily_refresh_job,
     pipeline_health_audit_job,
-    bep_refire_job,
+    rebuild_beach_evidence_job,
 )
 
 
@@ -147,7 +150,8 @@ _SUPABASE_URL = "https://ehlzbwtrsxaaukurekau.supabase.co"
 
 defs = Definitions(
     assets=[
-        # Phases 1-9 upstream loaders
+        # Phase 0 env preflight + upstream loaders
+        env_preflight,
         chain_integrity_check,
         state_policy_seed,
         seasonal_closure_seed,
@@ -177,7 +181,10 @@ defs = Definitions(
         operator_policy_extraction,
         operator_llm_extract_for_state,
         operator_merge,
-        bep_refire,
+        rebuild_beach_evidence,
+        # Phase 28.5 — gold-set curator queue + review gate
+        gold_set_candidates,
+        gold_set_review_gate,
         # Phases 29-31 per-fid LLM + photos
         section_extract,
         descriptions,
@@ -214,7 +221,7 @@ defs = Definitions(
         llm_cascade_job,
         daily_refresh_job,
         pipeline_health_audit_job,
-        bep_refire_job,
+        rebuild_beach_evidence_job,
     ],
     asset_checks=[
         operators_for_state_has_breadth,

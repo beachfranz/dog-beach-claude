@@ -9,7 +9,7 @@ Sensors:
   new_operators_sensor      operators table gets new ids → register operator_partitions
   new_fids_sensor           beaches_gold gets new active+scoreable rows → register fid_partitions
   arena_changed_sensor      arena gets new rows for a state → fire promote_to_gold
-  geom_change_sensor        beaches_gold geom changes → fire bep_refire
+  geom_change_sensor        beaches_gold geom changes → fire rebuild_beach_evidence
 
 Cursor strategy: each sensor stores its last-checked timestamp (ISO 8601
 string) as the cursor. On each tick the sensor queries for rows newer
@@ -29,7 +29,7 @@ from dagster import (
 
 from ..assets.operator_seeding import operators_for_state
 from ..assets.catalog_assembly import promote_to_gold
-from ..assets.operator_llm_cascade import bep_refire, operator_policy_extraction
+from ..assets.operator_llm_cascade import rebuild_beach_evidence, operator_policy_extraction
 from ..partitions import operator_partitions, fid_partitions
 from ..resources import PostgresPoolerResource
 
@@ -224,16 +224,16 @@ def arena_changed_sensor(
     return SensorResult(run_requests=run_requests, cursor=cursor_str)
 
 
-# ── Beach geom changed → bep_refire ───────────────────────────────────
+# ── Beach geom changed → rebuild_beach_evidence ───────────────────────────────────
 
 @sensor(
-    target=AssetSelection.assets(bep_refire),
+    target=AssetSelection.assets(rebuild_beach_evidence),
     minimum_interval_seconds=600,
     default_status=DefaultSensorStatus.STOPPED,
     description=(
         "Watches geom_change_queue table (populated by the geom-change trigger "
         "on beaches_gold). When any state has unprocessed entries, fires "
-        "bep_refire for that state."
+        "rebuild_beach_evidence for that state."
     ),
 )
 def geom_change_sensor(

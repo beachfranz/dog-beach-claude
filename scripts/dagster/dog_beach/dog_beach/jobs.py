@@ -7,10 +7,10 @@ encapsulates a recipe (e.g. "full state launch", "daily refresh only",
 Jobs:
   state_launch_job         All 33 phases for a single state (full launch path)
   catalog_assembly_job     Phases 1-25 (everything up through dedup_distance_name)
-  llm_cascade_job          Phases 26-29 (operator extract → merge → bep_refire → section)
+  llm_cascade_job          Phases 26-29 (operator extract → merge → rebuild_beach_evidence → section)
   daily_refresh_job        Phase 32 only (scoring fan-out)
   pipeline_health_audit_job Phase 33 only (population audit)
-  bep_refire_job           Phase 28 only (for ad-hoc refire after operator policy changes)
+  rebuild_beach_evidence_job           Phase 28 only (for ad-hoc refire after operator policy changes)
 
 Materializing via job: `dagster job execute -j state_launch_job --config-yaml ...`
 Or via UI's Launchpad.
@@ -19,6 +19,7 @@ Or via UI's Launchpad.
 from dagster import define_asset_job, AssetSelection
 
 from .assets.upstream_loaders import (
+    env_preflight,
     chain_integrity_check,
     state_policy_seed,
     seasonal_closure_seed,
@@ -39,7 +40,9 @@ from .assets.catalog_assembly import (
 from .assets.operator_llm_cascade import (
     operator_llm_extract_for_state,
     operator_merge,
-    bep_refire,
+    rebuild_beach_evidence,
+    gold_set_candidates,
+    gold_set_review_gate,
 )
 from .assets.per_fid_enrichment import (
     section_extract, descriptions, photos_wikimedia,
@@ -59,6 +62,7 @@ state_launch_job = define_asset_job(
         "Run from the launchpad: select state partition and launch."
     ),
     selection=AssetSelection.assets(
+        env_preflight,
         chain_integrity_check,
         state_policy_seed, seasonal_closure_seed,
         ensure_tiger_places, ensure_pad_us, ensure_overpass,
@@ -69,7 +73,8 @@ state_launch_job = define_asset_job(
         address_poi, address_city, name_source, strip_plus_codes,
         catchment_refresh,
         purge_pollution, dedup, dedup_distance_name, geom_queue,
-        operator_llm_extract_for_state, operator_merge, bep_refire,
+        operator_llm_extract_for_state, operator_merge, rebuild_beach_evidence,
+        gold_set_candidates, gold_set_review_gate,
         section_extract, descriptions, photos_wikimedia,
         daily_refresh_fire, field_population_check,
     ),
@@ -104,8 +109,11 @@ llm_cascade_job = define_asset_job(
         "per-beach section extract. Costs LLM dollars."
     ),
     selection=AssetSelection.assets(
+        env_preflight,
         operator_llm_extract_for_state, operator_merge,
-        bep_refire, section_extract,
+        rebuild_beach_evidence,
+        gold_set_candidates, gold_set_review_gate,
+        section_extract,
     ),
 )
 
@@ -130,11 +138,11 @@ pipeline_health_audit_job = define_asset_job(
 
 # ── BEP refire only (Phase 28) ───────────────────────────────────────
 
-bep_refire_job = define_asset_job(
-    name="bep_refire_job",
+rebuild_beach_evidence_job = define_asset_job(
+    name="rebuild_beach_evidence_job",
     description=(
         "Phase 28 only — refire_bep_cascade for state's tier-1+2 fids. "
         "Ad-hoc after operator policy changes or PAD-US re-loads."
     ),
-    selection=AssetSelection.assets(bep_refire),
+    selection=AssetSelection.assets(rebuild_beach_evidence),
 )

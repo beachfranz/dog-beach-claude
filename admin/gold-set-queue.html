@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Gold Set Curator Queue — Dog Beach Scout</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root {
+    --bg: #0b1020; --panel: #131a2e; --panel2: #1b2340;
+    --border: #2a3658; --text: #e6ecff; --muted: #9aa5c8;
+    --green: #4ade80; --blue: #38bdf8; --amber: #f59e0b; --red: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, sans-serif; }
+
+  header {
+    position: sticky; top: 0; z-index: 5;
+    padding: 12px 20px; background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  .spacer { flex: 1; }
+
+  select, button, input {
+    background: var(--panel2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 10px; font-size: 13px; cursor: pointer;
+    font-family: inherit;
+  }
+  button.primary { background: var(--green); color: #062012; border-color: var(--green); font-weight: 600; }
+  button.danger  { background: var(--red);   color: #fff; border-color: var(--red); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  main { padding: 16px 20px; max-width: 1200px; margin: 0 auto; }
+
+  .progress {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; margin-bottom: 16px;
+  }
+  .progress-bar {
+    height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden;
+    margin-top: 10px;
+  }
+  .progress-fill { height: 100%; background: var(--green); transition: width 0.3s; }
+  .progress-fill.done { background: var(--blue); }
+  .progress-meta { color: var(--muted); font-size: 12px; margin-top: 6px;
+    font-family: ui-monospace, Menlo, monospace; }
+
+  .gate-pill {
+    display: inline-block; padding: 3px 10px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; margin-left: 8px;
+  }
+  .gate-pill.ready  { background: rgba(74,222,128,0.18); color: var(--green); }
+  .gate-pill.blocked { background: rgba(239,68,68,0.18); color: var(--red); }
+  .gate-pill.approved { background: rgba(56,189,248,0.18); color: var(--blue); }
+
+  table { width: 100%; border-collapse: collapse; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border);
+    font-size: 13px; vertical-align: top; }
+  th { background: var(--panel2); color: var(--muted); font-weight: 600;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover { background: var(--panel2); }
+
+  .beach-name { font-weight: 600; }
+  .beach-meta { color: var(--muted); font-size: 11px; }
+  .field-name { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--blue); }
+  .stratum { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--muted); }
+  .value-cell { max-width: 280px; font-size: 12px; color: var(--text);
+    font-family: ui-monospace, Menlo, monospace; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+  .source-cell { font-size: 11px; color: var(--muted); }
+
+  .status-pending { color: var(--amber); }
+  .status-reviewed { color: var(--green); }
+  .status-skipped { color: var(--muted); text-decoration: line-through; }
+
+  .row-actions { display: flex; gap: 4px; flex-wrap: nowrap; }
+  .row-actions a, .row-actions button {
+    padding: 4px 8px; font-size: 11px; border-radius: 4px;
+    text-decoration: none; color: var(--text); background: var(--panel2);
+    border: 1px solid var(--border); cursor: pointer;
+  }
+  .row-actions a:hover, .row-actions button:hover { background: var(--border); }
+
+  #toast {
+    position: fixed; right: 16px; bottom: 16px;
+    background: var(--panel); border: 1px solid var(--border);
+    padding: 10px 14px; border-radius: 6px; font-size: 13px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4); opacity: 0;
+    transition: opacity 0.2s;
+  }
+  #toast.show { opacity: 1; }
+  #toast.err { border-color: var(--red); }
+
+  #auth-overlay {
+    position: fixed; inset: 0; background: rgba(11,16,32,0.95);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 99;
+  }
+  #auth-overlay.hidden { display: none; }
+  #auth-box {
+    background: var(--panel); border: 1px solid var(--border);
+    padding: 24px; border-radius: 12px; max-width: 360px; width: 100%;
+  }
+  #auth-box h2 { margin: 0 0 12px; font-size: 16px; }
+  #auth-box input { width: 100%; padding: 10px; margin-bottom: 12px; }
+  #auth-box button { width: 100%; }
+</style>
+</head>
+<body>
+
+<div id="auth-overlay">
+  <div id="auth-box">
+    <h2>Admin access</h2>
+    <input type="password" id="auth-input" placeholder="Admin secret" autofocus />
+    <button onclick="setSecret()">Continue</button>
+  </div>
+</div>
+
+<header>
+  <h1>Gold Set Curator Queue</h1>
+  <span class="spacer"></span>
+  <label>State:
+    <select id="state-picker" onchange="loadQueue()">
+      <option value="">— select —</option>
+      <option>CA</option><option>OR</option><option>WA</option>
+      <option>MA</option><option>MI</option><option>FL</option>
+    </select>
+  </label>
+  <label>Status:
+    <select id="status-picker" onchange="loadQueue()">
+      <option value="pending">Pending</option>
+      <option value="reviewed">Reviewed</option>
+      <option value="skipped">Skipped</option>
+      <option value="all">All</option>
+    </select>
+  </label>
+  <button onclick="loadQueue()">Refresh</button>
+  <button id="approve-btn" class="primary" onclick="approveForProduction()" disabled>
+    Approve for production
+  </button>
+  <button onclick="forgetSecret()">Sign out</button>
+</header>
+
+<main>
+  <div class="progress" id="progress-card">
+    <div><strong id="progress-title">Pick a state to begin.</strong>
+      <span id="gate-pill" class="gate-pill"></span></div>
+    <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+    <div class="progress-meta" id="progress-meta"></div>
+  </div>
+
+  <table id="queue-table" style="display:none">
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th>Beach</th>
+        <th>Field</th>
+        <th>Current value</th>
+        <th>Source</th>
+        <th>Stratum</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="queue-body"></tbody>
+  </table>
+  <div id="empty-state" style="text-align:center; color:var(--muted); padding:40px;">
+    No queue rows for this state + status combination.
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+const SUPABASE_URL = "https://ehlzbwtrsxaaukurekau.supabase.co";
+const ANON = "sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk";
+
+function getSecret() { return localStorage.getItem("admin_secret") || ""; }
+function setSecret() {
+  const v = document.getElementById("auth-input").value.trim();
+  if (!v) return;
+  localStorage.setItem("admin_secret", v);
+  document.getElementById("auth-overlay").classList.add("hidden");
+  init();
+}
+function forgetSecret() {
+  localStorage.removeItem("admin_secret");
+  location.reload();
+}
+
+function init() {
+  // Initial state from URL ?queue=STATE
+  const params = new URLSearchParams(location.search);
+  const queueState = params.get("queue") || params.get("state");
+  if (queueState) {
+    document.getElementById("state-picker").value = queueState.toUpperCase();
+    loadQueue();
+  }
+}
+
+if (getSecret()) {
+  document.getElementById("auth-overlay").classList.add("hidden");
+  init();
+}
+
+function authHeaders() {
+  return {
+    "x-admin-secret": getSecret(),
+    "Authorization":  `Bearer ${ANON}`,
+    "apikey":         ANON,
+    "Content-Type":   "application/json",
+  };
+}
+
+async function apiGet(path) {
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/${path}`, { headers: authHeaders() });
+  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+  return r.json();
+}
+async function apiPost(path, body) {
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/${path}`, {
+    method: "POST", headers: authHeaders(), body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+  return r.json();
+}
+
+function toast(msg, kind = "ok") {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.className = "show " + (kind === "err" ? "err" : "");
+  setTimeout(() => t.className = "", 2400);
+}
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+function fmtValue(v) {
+  if (v === null || v === undefined) return "<null>";
+  if (typeof v === "string") return v;
+  try { return JSON.stringify(v); } catch { return String(v); }
+}
+
+async function loadQueue() {
+  const state  = document.getElementById("state-picker").value.toUpperCase();
+  const status = document.getElementById("status-picker").value;
+  if (!state) return;
+
+  try {
+    const data = await apiGet(`admin-gold-queue-list?state=${state}&status=${status}`);
+    renderProgress(state, data);
+    renderTable(data.queue || []);
+  } catch (e) {
+    toast(e.message, "err");
+  }
+}
+
+function renderProgress(state, data) {
+  const c = (data.counts && data.counts[0]) || { pending: 0, reviewed: 0, skipped: 0, total: 0 };
+  const pct = c.total > 0 ? Math.round(((+c.reviewed + +c.skipped) / +c.total) * 100) : 0;
+
+  document.getElementById("progress-title").textContent =
+    `${state} — ${c.reviewed}/${c.total} reviewed (${c.skipped} skipped, ${c.pending} pending)`;
+  const fill = document.getElementById("progress-fill");
+  fill.style.width = pct + "%";
+  fill.classList.toggle("done", pct >= 100);
+  document.getElementById("progress-meta").textContent =
+    `Total: ${c.total} queue rows  •  Progress: ${pct}%`;
+
+  // Gate pill
+  const pill = document.getElementById("gate-pill");
+  pill.className = "gate-pill";
+  if (data.signoff?.approved) {
+    pill.textContent = `Approved ${data.signoff.approved_at?.substring(0,10)}`;
+    pill.classList.add("approved");
+  } else if (data.gate_ready) {
+    pill.textContent = "Gate ready";
+    pill.classList.add("ready");
+  } else {
+    pill.textContent = "Gate blocked";
+    pill.classList.add("blocked");
+  }
+
+  // Approve button enabled when queue cleared (no pending)
+  const approveBtn = document.getElementById("approve-btn");
+  approveBtn.disabled = +c.pending > 0 || !!data.signoff?.approved;
+}
+
+function renderTable(rows) {
+  const tbody = document.getElementById("queue-body");
+  const table = document.getElementById("queue-table");
+  const empty = document.getElementById("empty-state");
+  if (!rows.length) {
+    table.style.display = "none";
+    empty.style.display = "block";
+    return;
+  }
+  table.style.display = "table";
+  empty.style.display = "none";
+
+  tbody.innerHTML = rows.map(r => {
+    const beach = r.beach || {};
+    const v3url = `gold-set-curator-v3.html?fid=${r.gold_fid}&field=${encodeURIComponent(r.field_name)}`;
+    return `
+      <tr data-id="${r.id}">
+        <td class="status-${r.status}">${r.status}</td>
+        <td>
+          <div class="beach-name">${escapeHtml(beach.name || `(fid ${r.gold_fid})`)}</div>
+          <div class="beach-meta">${escapeHtml(beach.county_name || "")} · tier ${escapeHtml(beach.scoring_tier || "?")}</div>
+        </td>
+        <td><span class="field-name">${escapeHtml(r.field_name)}</span></td>
+        <td><div class="value-cell" title="${escapeHtml(fmtValue(r.current_extraction_value))}">${escapeHtml(fmtValue(r.current_extraction_value))}</div></td>
+        <td>
+          <div class="source-cell">${escapeHtml(r.current_source || "(none)")}</div>
+          <div class="source-cell">conf=${r.current_confidence ?? "?"}</div>
+        </td>
+        <td><span class="stratum">${escapeHtml(r.sampled_reason || "")}</span></td>
+        <td>
+          <div class="row-actions">
+            <a href="${v3url}" target="_blank">Review →</a>
+            <button onclick="markReviewed(${r.id})">✓ Reviewed</button>
+            <button onclick="markSkipped(${r.id})">Skip</button>
+            ${r.status !== "pending" ? `<button onclick="markPending(${r.id})">↺ Reopen</button>` : ""}
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join("");
+}
+
+async function updateStatus(queueId, status) {
+  try {
+    await apiPost("admin-gold-queue-update-status", {
+      queue_id: queueId, status, reviewed_by: "curator",
+    });
+    toast(`Marked ${status}`);
+    loadQueue();
+  } catch (e) {
+    toast(e.message, "err");
+  }
+}
+function markReviewed(id) { updateStatus(id, "reviewed"); }
+function markSkipped(id)  { updateStatus(id, "skipped"); }
+function markPending(id)  { updateStatus(id, "pending"); }
+
+async function approveForProduction() {
+  const state = document.getElementById("state-picker").value.toUpperCase();
+  if (!state) return;
+  const notes = prompt(`Sign off ${state} gold set for production?\n\nNotes (optional):`);
+  if (notes === null) return;  // cancelled
+  try {
+    const r = await apiPost("admin-gold-set-approve", {
+      state, approved: true, approved_by: "curator", notes,
+    });
+    toast(`✓ ${state} signed off — gate ${r.gate_ready ? "ready" : "still blocked"}`);
+    loadQueue();
+  } catch (e) {
+    toast(e.message, "err");
+  }
+}
+</script>
+
+</body>
+</html>

@@ -30,7 +30,7 @@ from dagster import (
 
 from ..partitions import state_partitions
 from ..resources import PostgresPoolerResource, SubprocessResource
-from .operator_llm_cascade import bep_refire
+from .operator_llm_cascade import rebuild_beach_evidence
 
 
 def _tier12_fids(postgres: PostgresPoolerResource, state: str) -> list[int]:
@@ -89,7 +89,7 @@ def _run_chunked(
 
 @asset(
     partitions_def=state_partitions,
-    deps=[bep_refire],
+    deps=[rebuild_beach_evidence],
     group_name="phase_29_to_33_per_fid",
     description=(
         "Per-beach section-rule extraction via Haiku. Reads operator_dogs_policy.summary "

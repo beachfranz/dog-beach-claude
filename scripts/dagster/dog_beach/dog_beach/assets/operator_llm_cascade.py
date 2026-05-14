@@ -1,4 +1,4 @@
-"""Phases 26-28 — operator LLM extraction + merge + BEP cascade.
+"""Phases 26-28 — operator LLM extraction + merge + beach evidence rebuild.
 
 Phase 26 (operator_llm_extract): per-operator, dynamically partitioned.
 Each operator gets its own partition + run history. Wraps
@@ -6,12 +6,14 @@ scripts/extract_operator_dogs_policy.py via SubprocessResource.
 
 Phase 27 (operator_merge): GLOBAL — merge_operator_dogs_policy.py is
 not state-scoped. Modeled as an unpartitioned asset that runs once and
-serves as a downstream gate for all states' bep_refire phases. Wraps
-scripts/one_off/merge_operator_dogs_policy.py.
+serves as a downstream gate for all states' rebuild_beach_evidence phases.
+Wraps scripts/one_off/merge_operator_dogs_policy.py.
 
-Phase 28 (bep_refire): per-state. Calls public.refire_bep_cascade(fids)
-with the state's tier-1+2 fids. Re-emits BEP for 5 regen field_groups
-and propagates to consumer tables.
+Phase 28 (rebuild_beach_evidence): per-state. Loops calling
+public.build_beach_evidence(fid) for the state's tier-1+2 fids. Each
+call clears regenerable BEP rows + re-runs the full populator/resolver
+chain + promotes canonical to consumer tables. Per-fid autocommit
+bounds memory (no monolithic refire_bep_cascade transaction).
 
 Cost model (Phase 26):
   ~$0.30 per operator (Tavily + 3-pass Sonnet)
@@ -32,7 +34,9 @@ from dagster import (
 )
 
 from ..partitions import state_partitions, operator_partitions
-from ..resources import PostgresPoolerResource, SubprocessResource
+from ..resources import PostgresPoolerResource, PostgresSessionResource, SubprocessResource
+from .catalog_assembly import promote_to_gold
+from .upstream_loaders import env_preflight
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -108,14 +112,22 @@ def operator_policy_extraction(
 
 @asset(
     partitions_def=state_partitions,
+    deps=[env_preflight],
     group_name="phase_26_to_28_operator_llm",
+    retry_policy=RetryPolicy(
+        max_retries=1,
+        delay=60,
+        backoff=Backoff.LINEAR,
+    ),
     description=(
         "State fanout for Phase 26. Calls extract_operator_dogs_policy.py "
-        "with all operator IDs returned by state_operator_ids_with_beaches(state), "
+        "with all operator IDs returned by state_operator_ids_for_scoreable_beaches(state), "
         "chunked at 5 ops/subprocess per the chunked-subprocess design rule. "
-        "Use this for first-time state launches. For ongoing per-operator "
-        "extraction (e.g. when a new operator is added), prefer the per-"
-        "operator partitioned asset operator_policy_extraction + sensor."
+        "Three-condition failure gate (2026-05-13): (1) raises if any rows "
+        "expected but zero written — catches silent failures like the "
+        "truststore SSL bug; (2) raises if >30% of chunks failed — catches "
+        "systemic environment issues; (3) warns on any chunk failure for "
+        "transient noise. Retry once on transient failures."
     ),
 )
 def operator_llm_extract_for_state(
@@ -126,13 +138,7 @@ def operator_llm_extract_for_state(
     state = context.partition_key
 
     # 2026-05-13 cost gate: only operators "definitively assigned" to
-    # a scoreable (daily/hourly tier) beach via BEP attribution. Prevents
-    # extracting policy for the 3000+ raw OR operators when only ~60
-    # actually touch a scoreable beach. See:
-    #   - migration 20260513_operator_ids_for_scoreable_beaches.sql
-    #   - migration 20260513_city_county_governance_populator.sql
-    #     (added city/county FK-based attribution; before this only
-    #      PAD-US federal/state ops were "definitive")
+    # a scoreable (daily/hourly tier) beach via BEP attribution.
     conn = postgres.get_connection()
     try:
         with conn.cursor() as cur:
@@ -157,6 +163,8 @@ def operator_llm_extract_for_state(
     total_rows = 0
     chunks_done = 0
     chunks_failed = 0
+    total_chunks = (len(ids) + chunk_size - 1) // chunk_size
+    failed_chunks_detail: list[str] = []
     for i in range(0, len(ids), chunk_size):
         chunk = ids[i:i + chunk_size]
         result = subproc.run(
@@ -166,15 +174,46 @@ def operator_llm_extract_for_state(
         )
         if result.returncode != 0:
             chunks_failed += 1
-            context.log.warning(
-                f"Chunk {chunks_done+1} failed (operators {chunk[0]}..{chunk[-1]}): "
-                f"{result.stderr[-300:]}"
+            detail = (
+                f"chunk {chunks_done+chunks_failed} ops {chunk[0]}..{chunk[-1]}: "
+                f"{result.stderr[-200:] or result.stdout[-200:]}"
             )
+            failed_chunks_detail.append(detail)
+            context.log.warning(detail)
             continue
         m = re.search(r"upserted\s+(\d+)", result.stdout)
         if m:
             total_rows += int(m.group(1))
         chunks_done += 1
+
+    # ── Three-condition failure gate (see asset description) ────────────
+    #
+    # (1) Total no-op: expected work but produced nothing — catches the
+    #     silent-success bug class (truststore SSL fail before today).
+    # (2) High chunk-failure rate (>30%): catches systemic issues like
+    #     SSL config, key revocation, or upstream API outage.
+    # (3) Any chunk failure: log warning, surface in metadata, but don't
+    #     fail (transient single-chunk errors are recoverable).
+    failure_threshold = 0.30
+    fail_rate = chunks_failed / total_chunks if total_chunks else 0.0
+    hard_fails: list[str] = []
+    if total_rows == 0 and len(ids) > 0:
+        hard_fails.append(
+            f"Phase 26 produced ZERO rows for {len(ids)} operators — likely "
+            f"silent failure. See chunks_failed_detail in metadata."
+        )
+    if fail_rate > failure_threshold:
+        hard_fails.append(
+            f"Phase 26 chunk failure rate {chunks_failed}/{total_chunks} "
+            f"({fail_rate:.1%}) exceeds {failure_threshold:.0%} threshold — "
+            f"likely systemic issue (env/API/auth). See failed_chunks_detail."
+        )
+
+    if hard_fails:
+        # Log all failed chunks for debugging before raising
+        for d in failed_chunks_detail[:5]:
+            context.log.error(d)
+        raise RuntimeError(" | ".join(hard_fails))
 
     return MaterializeResult(
         metadata={
@@ -182,7 +221,11 @@ def operator_llm_extract_for_state(
             "operators_total": MetadataValue.int(len(ids)),
             "chunks_done": MetadataValue.int(chunks_done),
             "chunks_failed": MetadataValue.int(chunks_failed),
+            "fail_rate_pct": MetadataValue.float(round(fail_rate * 100, 1)),
             "rows_written": MetadataValue.int(total_rows),
+            "failed_chunks_detail": MetadataValue.text(
+                "\n".join(failed_chunks_detail[:10]) or "(none)"
+            ),
         }
     )
 
@@ -226,22 +269,105 @@ def operator_merge(
 
 
 # ════════════════════════════════════════════════════════════════════════
-#  Phase 28 — bep_refire (per-state)
+#  Phase 28 — rebuild_beach_evidence (per-state)
 # ════════════════════════════════════════════════════════════════════════
 
 @asset(
+    name="rebuild_beach_evidence",
     partitions_def=state_partitions,
-    deps=[operator_merge, operator_llm_extract_for_state],
+    # 2026-05-13: added promote_to_gold dep to serialize after catalog
+    # assembly. Without this, Dagster scheduled rebuild_beach_evidence in
+    # parallel with promote_to_gold (both run build_beach_evidence per fid
+    # on the same BEP rows), wasting compute + racing on the same writes.
+    # See project_build_beach_evidence_perf.md.
+    deps=[operator_merge, operator_llm_extract_for_state, promote_to_gold],
     group_name="phase_26_to_28_operator_llm",
+    code_version="2026-05-13-v4-operator-only-mode",
     description=(
-        "Refire BEP cascade for state's tier-1+2 fids. Calls "
-        "public.refire_bep_cascade(fids) which deletes 5 regen field_groups "
-        "from BEP for each fid and re-emits via the populator chain. "
-        "Resolves canonical evidence and promotes to consumer tables "
-        "(beach_dog_policy, beach_amenities)."
+        "Rebuilds beach-evidence rows for state's tier-1+2 fids in "
+        "operator_only mode — only re-runs the 5 operator-dependent "
+        "populators (and their resolvers/consensus/promote_canonical). "
+        "Skips the 9 upstream-data-only populators (polygon_containment, "
+        "cpad, pad_us, pad_us_dogs, state_default, research, park_url, "
+        "park_url_governance, unified_v1, osm_amenities) that already ran "
+        "in promote_to_gold's first-pass full-mode build. Cuts Phase 28 "
+        "wall-clock ~60-80% (45min → 5-10min on 151 fids). "
+        "Per-fid autocommit; race-safe because we serialized after "
+        "promote_to_gold via deps."
     ),
 )
-def bep_refire(
+def rebuild_beach_evidence(
+    context: AssetExecutionContext,
+    postgres_session: PostgresSessionResource,
+) -> MaterializeResult:
+    import time as _time
+    state = context.partition_key
+    conn = postgres_session.get_connection()
+    conn.set_session(autocommit=True)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET statement_timeout = '300s'")  # per-fid ceiling
+            cur.execute(
+                "SELECT array_agg(distinct g.fid) "
+                "  FROM public.beaches_gold g "
+                " WHERE g.state=%s AND g.is_active AND g.scoring_tier IN ('daily','hourly')",
+                (state,),
+            )
+            fids = cur.fetchone()[0] or []
+            if not fids:
+                return MaterializeResult(
+                    metadata={"state": state, "fids": 0, "skipped": True}
+                )
+
+            t0 = _time.time()
+            done = 0
+            failed = 0
+            for fid in fids:
+                try:
+                    cur.execute(
+                        "SELECT public.build_beach_evidence(%s, 'operator_only')",
+                        (fid,),
+                    )
+                    done += 1
+                except Exception as e:
+                    failed += 1
+                    context.log.warning(f"fid {fid} failed: {str(e)[:200]}")
+            wall_s = round(_time.time() - t0, 1)
+    finally:
+        conn.close()
+    return MaterializeResult(
+        metadata={
+            "state":          MetadataValue.text(state),
+            "fids_total":     MetadataValue.int(len(fids)),
+            "fids_succeeded": MetadataValue.int(done),
+            "fids_failed":    MetadataValue.int(failed),
+            "wall_clock_s":   MetadataValue.float(wall_s),
+            "mode":           MetadataValue.text("operator_only"),
+        }
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  Phase 28.5 — gold_set_candidates (per-state)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Auto-samples ~25 beaches × 7 fields per state into gold_set_curation_queue
+# with stratified diversity (operator level × dogs outcome × confidence band).
+# See project_gold_set_curator_queue.md for the design.
+
+@asset(
+    name="gold_set_candidates",
+    partitions_def=state_partitions,
+    deps=[rebuild_beach_evidence],
+    group_name="phase_28p5_gold_set_curation",
+    description=(
+        "Auto-samples ~25 beaches × 7 priority fields per state into "
+        "gold_set_curation_queue with stratified diversity. Idempotent — "
+        "ON CONFLICT DO NOTHING on (state, gold_fid, field_name). Re-running "
+        "after curator review only adds new strata, never duplicates existing."
+    ),
+)
+def gold_set_candidates(
     context: AssetExecutionContext,
     postgres: PostgresPoolerResource,
 ) -> MaterializeResult:
@@ -249,34 +375,109 @@ def bep_refire(
     conn = postgres.get_connection()
     try:
         with conn.cursor() as cur:
-            # Get tier-1+2 fids for state (mirrors _state_tier12_fids).
+            cur.execute("SELECT public.sample_gold_set_candidates(%s)", (state,))
+            rows_enqueued = cur.fetchone()[0]
             cur.execute(
-                "SELECT array_agg(distinct g.fid) "
-                "  FROM public.beaches_gold g "
-                "  LEFT JOIN public.beach_dog_policy bdp ON bdp.arena_group_id=g.fid "
-                " WHERE g.state=%s AND g.is_active AND g.scoring_tier IN ('daily','hourly')",
+                "SELECT count(*) FILTER (WHERE status='pending'), "
+                "       count(*) FILTER (WHERE status='reviewed'), "
+                "       count(*) "
+                "  FROM public.gold_set_curation_queue WHERE state=%s",
                 (state,),
             )
-            fids = cur.fetchone()[0] or []
-
-            if not fids:
-                return MaterializeResult(
-                    metadata={"state": state, "fids": 0, "skipped": True}
-                )
-
-            cur.execute("SET statement_timeout = '900s'")
-            cur.execute(
-                "SELECT * FROM public.refire_bep_cascade(%s)", (fids,)
-            )
-            result = cur.fetchone()
-            rows = int(result[0] if result else 0)
+            pending, reviewed, total = cur.fetchone()
         conn.commit()
     finally:
         conn.close()
     return MaterializeResult(
         metadata={
-            "state": MetadataValue.text(state),
-            "fids_processed": MetadataValue.int(len(fids)),
-            "rows_affected": MetadataValue.int(rows),
+            "state":          MetadataValue.text(state),
+            "rows_enqueued":  MetadataValue.int(rows_enqueued),
+            "queue_pending":  MetadataValue.int(pending),
+            "queue_reviewed": MetadataValue.int(reviewed),
+            "queue_total":    MetadataValue.int(total),
+            "curator_url":    MetadataValue.url(
+                f"https://beachfranz.github.io/admin/gold-set-curator-v3.html?queue={state}"
+            ),
+        }
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  Phase 28.6 — gold_set_review_gate (per-state, blocking)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Blocks downstream phases until the curator queue is cleared OR the state
+# has an explicit signoff OR the run carries tag gold_set_bypass=true.
+# Bypass is logged to gold_set_bypass_audit — engineering use only.
+
+@asset(
+    name="gold_set_review_gate",
+    partitions_def=state_partitions,
+    deps=[gold_set_candidates],
+    group_name="phase_28p5_gold_set_curation",
+    description=(
+        "Blocks downstream until gold-set queue is cleared (status != 'pending' "
+        "for all rows) OR gold_set_signoff(state).approved=true OR run carries "
+        "tag gold_set_bypass=true. Bypass logs to gold_set_bypass_audit. "
+        "Re-materialize after curator clears the queue to unblock."
+    ),
+)
+def gold_set_review_gate(
+    context: AssetExecutionContext,
+    postgres: PostgresPoolerResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    run_tags = context.run.tags if context.run else {}
+    bypass = str(run_tags.get("gold_set_bypass", "")).lower() in ("true", "1", "yes")
+    bypass_reason = run_tags.get("gold_set_bypass_reason", "no reason provided")
+
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT public.gold_set_curation_complete_for_state(%s)", (state,)
+            )
+            ready = bool(cur.fetchone()[0])
+            cur.execute(
+                "SELECT count(*) FILTER (WHERE status='pending'), "
+                "       count(*) "
+                "  FROM public.gold_set_curation_queue WHERE state=%s",
+                (state,),
+            )
+            pending, total = cur.fetchone()
+
+            if not ready and not bypass:
+                raise RuntimeError(
+                    f"gold_set_review_gate: state={state} not ready. "
+                    f"queue_pending={pending}/{total}. "
+                    f"To unblock: (a) curator clears queue via "
+                    f"https://beachfranz.github.io/admin/gold-set-curator-v3.html?queue={state} "
+                    f"then re-materialize this asset; OR (b) write gold_set_signoff "
+                    f"row with approved=true for engineering-validated states; OR "
+                    f"(c) re-launch with run tag gold_set_bypass=true (engineering only — "
+                    f"logged to gold_set_bypass_audit)."
+                )
+
+            if bypass and not ready:
+                cur.execute(
+                    "SELECT public.gold_set_log_bypass(%s, %s, %s, 'dagster_tag')",
+                    (state, str(context.run_id), bypass_reason),
+                )
+                conn.commit()
+                context.log.warning(
+                    f"GATE BYPASSED state={state} run_id={context.run_id} "
+                    f"queue_pending={pending}/{total} reason={bypass_reason!r}"
+                )
+    finally:
+        conn.close()
+
+    return MaterializeResult(
+        metadata={
+            "state":         MetadataValue.text(state),
+            "ready":         MetadataValue.bool(ready),
+            "bypassed":      MetadataValue.bool(bypass and not ready),
+            "queue_pending": MetadataValue.int(pending),
+            "queue_total":   MetadataValue.int(total),
+            "bypass_reason": MetadataValue.text(bypass_reason if bypass else "n/a"),
         }
     )

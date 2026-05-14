@@ -17,6 +17,10 @@ Usage:
 """
 
 from __future__ import annotations
+# 2026-05-13: truststore injection MUST happen before httpx imports its TLS
+# context. Without this, Tavily/Anthropic calls fail with
+# CERTIFICATE_VERIFY_FAILED on Windows. See project_python_ssl_truststore.md.
+import truststore; truststore.inject_into_ssl()
 import argparse, json, os, re, sys, time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -39,7 +43,7 @@ CHROME_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
              "Chrome/120.0.0.0 Safari/537.36")
 
 
-def _parse_cli_rows(stdout: str) -> list[dict]:
+def _parse_cli_rows(stdout: str | None) -> list[dict]:
     """Parse `supabase db query --linked` JSON output.
 
     The CLI prints `Initialising login role...` prefix, then a JSON
@@ -50,6 +54,18 @@ def _parse_cli_rows(stdout: str) -> list[dict]:
     find the first `{` and last `}`, parse the slice as JSON, pluck
     `rows`.
     """
+    if stdout is None:
+        raise RuntimeError(
+            "supabase CLI returned None stdout — likely Windows-stdio issue "
+            "when nested under Dagster subprocess. capture_output=True should "
+            "always return a string."
+        )
+    if not stdout.strip():
+        raise RuntimeError(
+            "supabase CLI returned empty stdout — likely CLI didn't run or "
+            "was redirected. Check that 'supabase' is on PATH and cwd has "
+            "supabase/.temp/pooler-url (run `supabase link --project-ref ...`)."
+        )
     start = stdout.find('{')
     end = stdout.rfind('}')
     if start == -1 or end == -1 or start >= end:
@@ -71,6 +87,24 @@ def _parse_cli_rows(stdout: str) -> list[dict]:
 
 # ── Operator data ────────────────────────────────────────────────────
 def fetch_top_operators(limit: int, counties: list[str] | None = None) -> list[dict]:
+    # 2026-05-13: REST/RPC path (avoids Dagster-nested-subprocess None-stdout bug)
+    headers = {"apikey": SERVICE_KEY,
+               "Authorization": f"Bearer {SERVICE_KEY}",
+               "Content-Type": "application/json"}
+    payload = {"p_limit": limit}
+    if counties:
+        payload["p_counties"] = counties
+    r = httpx.post(
+        f"{SUPABASE_URL}/rest/v1/rpc/fetch_top_operators_for_extraction",
+        json=payload, headers=headers, timeout=60,
+    )
+    if not r.is_success:
+        raise RuntimeError(f"fetch_top_operators RPC failed ({r.status_code}): {r.text[:500]}")
+    return r.json()
+
+
+def fetch_top_operators_LEGACY_CLI(limit: int, counties: list[str] | None = None) -> list[dict]:
+    """DEPRECATED 2026-05-13 — preserved for reference. Use fetch_top_operators above."""
     headers = {"apikey": SERVICE_KEY, "Authorization": f"Bearer {SERVICE_KEY}"}
     if counties:
         # Scope to operators that match a CPAD agency intersecting beach_locations
@@ -111,7 +145,8 @@ def fetch_top_operators(limit: int, counties: list[str] | None = None) -> list[d
     r = subprocess.run(
         ["supabase","db","query","--linked",sql],
         capture_output=True, text=True, timeout=60,
-        cwd=str(Path(__file__).parent.parent)
+        cwd=str(Path(__file__).parent.parent),
+        stdin=subprocess.DEVNULL,  # 2026-05-13: Windows-stdio safety when run from Dagster subprocess
     )
     if r.returncode != 0:
         raise RuntimeError(f"db query failed: {r.stderr[:500]}")
@@ -157,23 +192,23 @@ def domain_state_hint(url: str) -> str | None:
 
 
 def fetch_operators_by_ids(ids: list[int]) -> list[dict]:
-    id_list = ",".join(str(i) for i in ids)
-    sql = f"""
-      select op.id, op.slug, op.canonical_name, op.website, op.level, op.subtype, op.state_code,
-             (select count(*) from public.beach_locations bl where bl.operator_id = op.id) as beach_count
-        from public.operators op
-       where op.id in ({id_list})
-       order by beach_count desc nulls last;
-    """
-    import subprocess
-    r = subprocess.run(
-        ["supabase","db","query","--linked",sql],
-        capture_output=True, text=True, timeout=60,
-        cwd=str(Path(__file__).parent.parent)
+    # 2026-05-13: Use REST/RPC instead of `supabase db query --linked`
+    # subprocess. The CLI returned None stdout when double-nested under
+    # Dagster's SubprocessResource (Python 3.14 / Windows stdio quirk).
+    # REST/PostgREST has no such issue.
+    headers = {"apikey": SERVICE_KEY,
+               "Authorization": f"Bearer {SERVICE_KEY}",
+               "Content-Type": "application/json"}
+    r = httpx.post(
+        f"{SUPABASE_URL}/rest/v1/rpc/fetch_operators_for_extraction",
+        json={"p_ids": ids},
+        headers=headers,
+        timeout=30,
     )
-    if r.returncode != 0:
-        raise RuntimeError(f"db query failed: {r.stderr[:500]}")
-    return _parse_cli_rows(r.stdout)
+    if not r.is_success:
+        raise RuntimeError(f"fetch_operators_for_extraction RPC failed "
+                           f"({r.status_code}): {r.text[:500]}")
+    return r.json()
 
 
 def domain_of(url: str | None) -> str | None:

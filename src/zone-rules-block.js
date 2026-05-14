@@ -1,0 +1,257 @@
+// zone-rules-block.js — shared renderer for the zone_rules section.
+//
+// Consumes beach_dog_policy.zone_rules (jsonb) — schema locked
+// 2026-05-04 (project_zone_rules_design_locked.md). Renders the
+// active season's regions and sections with rule chips + time-window
+// tabs. Currently used on detail.html; future entity pages (operator,
+// agency) will reuse the same block.
+//
+// Usage:
+//   ZoneRulesBlock.render(targetEl, zoneRules, {
+//     beachName: 'Coronado Dog Beach',
+//     viewMonthDay: '06-15',         // optional, for season filtering
+//     isToday: true,                  // optional, for tab auto-select
+//     currentLocalHour: 14,           // 0-23 if isToday
+//     bestWindowMidHour: 10,          // fallback when not today
+//   });
+//
+// Notes:
+//   - render() replaces targetEl.innerHTML. Pass a wrapper element.
+//   - When zoneRules is null/empty, the target is cleared (caller can
+//     hide the wrapper).
+//   - Tab + section click handlers are attached on the document once,
+//     reusable across multiple block instances.
+
+(function (global) {
+  function escHtml(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  const ZR_SECTION_LABEL = {
+    sand: '🏖️ Sand', trails: '🥾 Trails', boardwalk: '🚶 Boardwalk',
+    bluff: '🏔️ Bluff', dunes: '🏜️ Dunes', picnic_area: '🧺 Picnic area',
+    campground: '🏕️ Campground', playground: '🤸 Playground',
+    tide_pools: '🐚 Tide pools', nesting_zones: '🪺 Nesting zones',
+    water_swim: '🌊 Water', parking_lot: '🅿️ Parking',
+    restrooms: '🚻 Restrooms', showers: '🚿 Showers',
+    restrooms_showers: '🚿 Restrooms',
+  };
+  const ZR_RULE_LABEL = {
+    off_leash: '🟢 Off-leash', on_leash: '⚪ On-leash',
+    not_allowed: '🔴 Not allowed', unknown: '❓ Unknown',
+  };
+
+  function parseHHMM(s) {
+    const [h, m] = String(s).split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+  }
+  function prettyRange(start, end) {
+    const fmt = (s) => {
+      const [h, m] = String(s).split(':').map(Number);
+      const hh = h === 0 ? 12 : h > 12 ? h - 12 : h;
+      const ap = h >= 12 ? 'pm' : 'am';
+      return m ? `${hh}:${String(m).padStart(2,'0')}${ap}` : `${hh}${ap}`;
+    };
+    return `${fmt(start)}–${fmt(end)}`;
+  }
+  function coverageMins(tabs) {
+    let total = 0;
+    for (const t of tabs) {
+      if (!t.start || !t.end) continue;
+      const sm = parseHHMM(t.start);
+      const em = parseHHMM(t.end);
+      total += em > sm ? (em - sm) : (24*60 - sm + em);
+    }
+    return total;
+  }
+  function ruleInTab(section, tab) {
+    if (!tab || tab.isOther || !tab.start) return section?.rule || 'unknown';
+    for (const tw of (section?.time_windows || [])) {
+      if (tw.start === tab.start && tw.end === tab.end) return tw.rule || section?.rule || 'unknown';
+    }
+    return section?.rule || 'unknown';
+  }
+  function pickActiveTab(tabs, ctx) {
+    const h = (ctx?.isToday && ctx.currentLocalHour != null)
+      ? ctx.currentLocalHour
+      : (ctx?.bestWindowMidHour != null ? ctx.bestWindowMidHour : null);
+    if (h == null) return 0;
+    for (let i = 0; i < tabs.length; i++) {
+      const t = tabs[i];
+      if (t.isOther || !t.start || !t.end) continue;
+      const sh = parseHHMM(t.start) / 60;
+      const eh = parseHHMM(t.end) / 60;
+      const inWindow = sh <= eh ? (h >= sh && h < eh) : (h >= sh || h < eh);
+      if (inWindow) return i;
+    }
+    const otherIdx = tabs.findIndex(t => t.isOther);
+    return otherIdx >= 0 ? otherIdx : 0;
+  }
+
+  function sectionPill(name, rule, sec) {
+    const safeRule = ['off_leash','on_leash','not_allowed'].includes(rule) ? rule : 'unknown';
+    const ruleLabel = ZR_RULE_LABEL[safeRule] || rule;
+    const evidence = sec?.evidence?.quote
+      ? `<div class="zr-section-evidence">${escHtml(sec.evidence.quote)}</div>` : '';
+    return `<div class="zr-section" onclick="this.classList.toggle('open')">
+              <span class="zr-section-name">${ZR_SECTION_LABEL[name] || escHtml(name)}</span>
+              <span class="zr-rule ${safeRule}">${ruleLabel}</span>
+            </div>${evidence}`;
+  }
+
+  function renderZoneCard(reg, ctx, beachName, seasonName, sIdx, rIdx) {
+    const sections = reg.sections || {};
+    const sectionList = Object.entries(sections);
+    if (sectionList.length === 0) return '';
+
+    const zoneName = reg.name || 'Whole beach';
+    const seasonSuffix = seasonName ? ` · ${escHtml(seasonName)}` : '';
+    const header = `<div class="zr-header">🐾 ${escHtml(beachName)}
+                      <span class="zr-zone-name">${escHtml(zoneName)}</span>${seasonSuffix}</div>`;
+
+    const winMap = new Map();
+    for (const [, sec] of sectionList) {
+      for (const tw of (sec?.time_windows || [])) {
+        if (tw.start && tw.end) {
+          const key = `${tw.start}|${tw.end}`;
+          if (!winMap.has(key)) winMap.set(key, { start: tw.start, end: tw.end });
+        }
+      }
+    }
+    const tabs = Array.from(winMap.values()).sort((a, b) =>
+      parseHHMM(a.start) - parseHHMM(b.start));
+
+    if (tabs.length === 0) {
+      const rows = sectionList.map(([name, sec]) =>
+        sectionPill(name, sec?.rule || 'unknown', sec)).join('');
+      return `<div class="zr-card">${header}
+                <div class="zr-sections">${rows}</div>
+              </div>`;
+    }
+
+    if ((24*60) - coverageMins(tabs) > 5) tabs.push({ isOther: true });
+    const activeIdx = pickActiveTab(tabs, ctx);
+    const tabKey = `${sIdx}-${rIdx}`;
+
+    const tabBtns = tabs.map((t, i) => {
+      const label = t.isOther ? 'Other times' : prettyRange(t.start, t.end);
+      return `<button class="zr-time-tab ${i === activeIdx ? 'active' : ''}"
+                data-zr-time-key="${tabKey}" data-zr-time-tab="${i}">${escHtml(label)}</button>`;
+    }).join('');
+
+    const tabPanes = tabs.map((t, i) => {
+      const rows = sectionList.map(([name, sec]) =>
+        sectionPill(name, ruleInTab(sec, t), sec)).join('');
+      return `<div class="zr-time-pane" data-zr-time-key="${tabKey}" data-zr-time-pane="${i}"
+                   style="${i === activeIdx ? '' : 'display:none;'}">
+                <div class="zr-sections">${rows}</div>
+              </div>`;
+    }).join('');
+
+    return `<div class="zr-card">
+              ${header}
+              <div class="zr-time-tabs">${tabBtns}</div>
+              ${tabPanes}
+            </div>`;
+  }
+
+  function seasonContainsDate(season, viewMd) {
+    if (!season) return false;
+    const d = season.dates;
+    if (!d || !d.start || !d.end) return true;
+    const s = d.start, e = d.end, v = viewMd;
+    return s <= e ? (v >= s && v <= e) : (v >= s || v <= e);
+  }
+  function filterToCurrentSeason(seasons, viewMd) {
+    if (!Array.isArray(seasons) || seasons.length <= 1) return seasons;
+    const bounded = seasons.filter(s =>
+      s?.dates && s.dates.start && s.dates.end &&
+      seasonContainsDate(s, viewMd));
+    if (bounded.length) return bounded;
+    const allYear = seasons.filter(s => !s?.dates || !s.dates.start);
+    if (allYear.length) return allYear;
+    return [seasons[0]];
+  }
+
+  function buildHtml(zr, ctx, beachName) {
+    // Ensure click handlers are wired even when callers use the
+    // string-returning buildHtml() instead of render(). Idempotent.
+    installHandlers();
+    if (!zr) return '';
+    let seasons = (Array.isArray(zr.seasons) && zr.seasons.length)
+      ? zr.seasons
+      : (Array.isArray(zr.regions) ? [{ name: null, regions: zr.regions }] : []);
+    if (!seasons.length) return '';
+    const viewMd = ctx?.viewMonthDay;
+    if (viewMd) seasons = filterToCurrentSeason(seasons, viewMd);
+
+    const cards = [];
+    seasons.forEach((season, sIdx) => {
+      const regions = Array.isArray(season.regions) ? season.regions : [];
+      const seasonName = seasons.length > 1 ? (season.name || `Season ${sIdx+1}`) : null;
+
+      const namedSections = new Set();
+      regions.forEach(reg => {
+        if (reg && reg.name) {
+          for (const sn of Object.keys(reg.sections || {})) namedSections.add(sn);
+        }
+      });
+      const hasNamedZones = namedSections.size > 0;
+
+      regions.forEach((reg, rIdx) => {
+        if (!reg) return;
+        let regToRender = reg;
+
+        if (!reg.name && hasNamedZones) {
+          const filtered = {};
+          for (const [name, sec] of Object.entries(reg.sections || {})) {
+            if (!namedSections.has(name)) filtered[name] = sec;
+          }
+          if (Object.keys(filtered).length === 0) return;
+          regToRender = { ...reg, sections: filtered };
+        }
+
+        const card = renderZoneCard(regToRender, ctx, beachName, seasonName, sIdx, rIdx);
+        if (card) cards.push(card);
+      });
+    });
+    return cards.join('');
+  }
+
+  // Document-level tab handler. Installed once on first render so the
+  // block stays standalone (no setup call required by caller).
+  let handlersInstalled = false;
+  function installHandlers() {
+    if (handlersInstalled) return;
+    handlersInstalled = true;
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('.zr-time-tab');
+      if (!btn) return;
+      const key = btn.dataset.zrTimeKey;
+      const idx = btn.dataset.zrTimeTab;
+      document.querySelectorAll(`.zr-time-tab[data-zr-time-key="${key}"]`)
+        .forEach(t => t.classList.toggle('active', t === btn));
+      document.querySelectorAll(`[data-zr-time-pane][data-zr-time-key="${key}"]`).forEach(p => {
+        p.style.display = p.dataset.zrTimePane === idx ? '' : 'none';
+      });
+    });
+  }
+
+  function render(targetEl, zoneRules, opts) {
+    opts = opts || {};
+    if (!targetEl) return;
+    const beachName = opts.beachName || 'this beach';
+    const ctx = {
+      viewMonthDay:     opts.viewMonthDay,
+      isToday:          opts.isToday,
+      currentLocalHour: opts.currentLocalHour,
+      bestWindowMidHour: opts.bestWindowMidHour,
+    };
+    targetEl.innerHTML = buildHtml(zoneRules, ctx, beachName);
+    installHandlers();
+  }
+
+  global.ZoneRulesBlock = { render, buildHtml, SECTION_LABEL: ZR_SECTION_LABEL, RULE_LABEL: ZR_RULE_LABEL };
+})(window);

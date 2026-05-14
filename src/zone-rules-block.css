@@ -1,0 +1,101 @@
+/* zone-rules-block.css — extracted from detail.html.
+ *
+ * Locked color/icon system per project_zone_rules_design_locked.md:
+ * 🟢 off_leash · ⚪ on_leash · 🔴 not_allowed · 🟡 time-restricted
+ * 🟠 seasonal · ❓ unknown
+ *
+ * Assumes the host page defines these CSS vars (detail.html does;
+ * future consumers should declare or override):
+ *   --border, --text, --text-muted
+ */
+
+.zr-card {
+  background: #fff; border: 1px solid var(--border, #e2e8f0); border-radius: 12px;
+  padding: 14px 16px; margin: 12px 16px;
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+.zr-header {
+  font-size: 14px; font-weight: 700; color: var(--text, #0f172a); margin-bottom: 6px;
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+}
+.zr-zone-name {
+  font-size: 12px; font-weight: 500; color: var(--text-muted, #64748b);
+  letter-spacing: 0.02em;
+}
+.zr-zone-name::before { content: '· '; opacity: 0.5; }
+.zr-sub {
+  font-size: 11px; color: var(--text-muted, #64748b); font-weight: 500; margin-left: 6px;
+}
+.zr-season-tabs { display: flex; gap: 4px; margin: 10px 0 6px; flex-wrap: wrap; }
+.zr-season-tab {
+  font-size: 11px; padding: 4px 10px; border-radius: 999px;
+  background: rgba(0,0,0,0.04); border: 1px solid var(--border, #e2e8f0);
+  color: var(--text-muted, #64748b); cursor: pointer; font-family: inherit;
+}
+.zr-season-tab.active { background: #1e293b; color: #fff; border-color: #1e293b; }
+
+.zr-time-tabs {
+  display: flex; gap: 4px; margin: 8px 0 8px; flex-wrap: wrap;
+}
+.zr-time-tab {
+  font-size: 11px; padding: 4px 10px; border-radius: 999px;
+  background: rgba(0,0,0,0.04); border: 1px solid var(--border, #e2e8f0);
+  color: var(--text-muted, #64748b); cursor: pointer; font-family: inherit;
+}
+.zr-time-tab.active {
+  background: #f59e0b22; color: #92400e; border-color: #f59e0b66;
+  font-weight: 600;
+}
+
+.zr-region { margin-top: 10px; padding-top: 10px;
+             border-top: 1px dashed rgba(0,0,0,0.08); }
+.zr-region:first-of-type { border-top: none; padding-top: 0; }
+.zr-region-name {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--text-muted, #64748b); margin-bottom: 4px;
+}
+.zr-region-time {
+  display: inline-block; font-size: 11px; color: #92400e;
+  background: rgba(245, 158, 11, 0.1); padding: 2px 8px; border-radius: 4px;
+  margin-bottom: 6px;
+}
+
+.zr-sections {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 6px 12px; margin-top: 4px;
+}
+.zr-section {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 0; font-size: 13px; cursor: pointer;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.1s;
+}
+.zr-section:hover { border-bottom-color: var(--border, #e2e8f0); }
+.zr-section-name { color: var(--text, #0f172a); }
+.zr-rule {
+  font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  font-weight: 600; white-space: nowrap;
+}
+.zr-rule.off_leash   { background: rgba(34,197,94,0.12);  color: #15803d; }
+.zr-rule.on_leash    { background: rgba(0,0,0,0.06);      color: #475569; }
+.zr-rule.not_allowed { background: rgba(239,68,68,0.12);  color: #991b1b; }
+.zr-rule.time_window { background: rgba(245,158,11,0.12); color: #92400e; }
+.zr-rule.unknown     { background: rgba(0,0,0,0.04);      color: #94a3b8; }
+
+.zr-section-evidence {
+  grid-column: 1 / -1;
+  font-size: 11px; color: var(--text-muted, #64748b);
+  font-style: italic; padding: 6px 10px;
+  background: rgba(0,0,0,0.02); border-left: 3px solid var(--border, #e2e8f0);
+  border-radius: 0 4px 4px 0;
+  margin: 2px 0;
+  display: none;
+}
+.zr-section.open + .zr-section-evidence,
+.zr-section.open .zr-section-evidence { display: block; }
+
+.zr-notes {
+  font-size: 12px; color: var(--text-muted, #64748b); margin-top: 10px;
+  padding-top: 10px; border-top: 1px dashed rgba(0,0,0,0.08);
+  line-height: 1.5;
+}

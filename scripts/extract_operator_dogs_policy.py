@@ -718,6 +718,10 @@ def upsert_extraction(operator_id: int, source_kind: str, source_url: str,
         "source_query": source_query,
         "fetch_status": fetch_status,
         "page_chars":   page_chars,
+        # 2026-05-14: explicit extracted_at so UPDATE-on-conflict refreshes
+        # the timestamp. Previously this column only got DEFAULT now() on
+        # INSERT — UPDATEs left it stale, breaking recently_extracted() cache.
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
         "pass_a_policy_found":   a.get("policy_found"),
         "pass_a_default_rule":   a.get("default_rule"),
         "pass_a_applies_to_all": a.get("applies_to_all"),

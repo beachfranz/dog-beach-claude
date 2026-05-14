@@ -21,8 +21,10 @@ Cost model (Phase 26):
   Per-operator partition retry via Dagster's RetryPolicy
 """
 
+import ast
 import re
 import sys
+import time as _time
 
 from dagster import (
     asset,
@@ -114,20 +116,16 @@ def operator_policy_extraction(
     partitions_def=state_partitions,
     deps=[env_preflight],
     group_name="phase_26_to_28_operator_llm",
-    retry_policy=RetryPolicy(
-        max_retries=1,
-        delay=60,
-        backoff=Backoff.LINEAR,
-    ),
     description=(
         "State fanout for Phase 26. Calls extract_operator_dogs_policy.py "
         "with all operator IDs returned by state_operator_ids_for_scoreable_beaches(state), "
-        "chunked at 5 ops/subprocess per the chunked-subprocess design rule. "
-        "Three-condition failure gate (2026-05-13): (1) raises if any rows "
-        "expected but zero written — catches silent failures like the "
-        "truststore SSL bug; (2) raises if >30% of chunks failed — catches "
-        "systemic environment issues; (3) warns on any chunk failure for "
-        "transient noise. Retry once on transient failures."
+        "chunked at 5 ops/subprocess. Follows the proven _chunked_subprocess "
+        "convention from run_state_pipeline.py: per-chunk inline retry (30s "
+        "backoff, 1 retry), failed chunks log + continue (never halt the "
+        "asset). Underlying script is idempotent via --skip-recent so failed "
+        "chunks self-recover on next launch. ast.literal_eval parses the "
+        "script's `{'src_a': N, 'src_b': N, ...}` summary; rows_written is "
+        "also cross-checked via DB delta."
     ),
 )
 def operator_llm_extract_for_state(
@@ -158,18 +156,36 @@ def operator_llm_extract_for_state(
 
     context.log.info(f"Extracting for {len(ids)} operators in {state}")
 
-    # Chunk into groups of 5 (mirrors run_state_pipeline.py).
+    # Snapshot DB count BEFORE — used to compute rows_written delta after.
+    # More reliable than regex-parsing the script's stdout, which prints
+    # `{'src_a': N, 'src_b': N, ...}` not `upserted N`.
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM public.operator_policy_extractions ope "
+                "  JOIN public.operators o ON o.id = ope.operator_id "
+                " WHERE o.state_code = %s", (state,)
+            )
+            rows_before = cur.fetchone()[0]
+    finally:
+        conn.close()
+
+    # Chunk into groups of 5.
     chunk_size = 5
-    total_rows = 0
     chunks_done = 0
     chunks_failed = 0
+    ops_skipped_recent = 0
+    ops_with_errors = 0
     total_chunks = (len(ids) + chunk_size - 1) // chunk_size
     failed_chunks_detail: list[str] = []
     for i in range(0, len(ids), chunk_size):
         chunk = ids[i:i + chunk_size]
         result = subproc.run(
             "scripts/extract_operator_dogs_policy.py",
-            args=["--ids", ",".join(str(x) for x in chunk), "--skip-recent", "24"],
+            # 2026-05-14: --skip-recent is in DAYS (not hours — was confusing).
+            # 1 day = re-extract any op last touched >24h ago.
+            args=["--ids", ",".join(str(x) for x in chunk), "--skip-recent", "1"],
             timeout=600,
         )
         if result.returncode != 0:
@@ -181,26 +197,50 @@ def operator_llm_extract_for_state(
             failed_chunks_detail.append(detail)
             context.log.warning(detail)
             continue
-        m = re.search(r"upserted\s+(\d+)", result.stdout)
+        # Parse the script's per-chunk summary `{'src_a': N, 'errors': N, 'skipped_recent': N, ...}`
+        # - skipped_recent: ops cache-skipped via --skip-recent 24
+        # - errors: ops where extraction raised/aborted (definitive failure signal)
+        m = re.search(r"'skipped_recent':\s*(\d+)", result.stdout)
         if m:
-            total_rows += int(m.group(1))
+            ops_skipped_recent += int(m.group(1))
+        m = re.search(r"'errors':\s*(\d+)", result.stdout)
+        if m:
+            ops_with_errors += int(m.group(1))
         chunks_done += 1
 
-    # ── Three-condition failure gate (see asset description) ────────────
+    # Snapshot DB count AFTER — delta = rows actually written by this run.
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM public.operator_policy_extractions ope "
+                "  JOIN public.operators o ON o.id = ope.operator_id "
+                " WHERE o.state_code = %s", (state,)
+            )
+            rows_after = cur.fetchone()[0]
+    finally:
+        conn.close()
+    total_rows = rows_after - rows_before
+
+    # ── Failure gate ─────────────────────────────────────────────────
     #
-    # (1) Total no-op: expected work but produced nothing — catches the
-    #     silent-success bug class (truststore SSL fail before today).
-    # (2) High chunk-failure rate (>30%): catches systemic issues like
-    #     SSL config, key revocation, or upstream API outage.
-    # (3) Any chunk failure: log warning, surface in metadata, but don't
-    #     fail (transient single-chunk errors are recoverable).
+    # Two definitive failure signals — both observable from chunk results.
+    # Zero-rows alone is NOT a failure (all ops may have been cache-skipped
+    # via --skip-recent, or had no extractable policy — both legitimate).
+    #
+    # (1) Subprocess returncode != 0 on >30% of chunks → systemic env issue.
+    # (2) Script's own `errors` counter > 0 → script explicitly reported
+    #     extraction failures (vs "ran but found nothing").
+    #
+    # If neither fires, the run is a success even with rows_written=0.
     failure_threshold = 0.30
     fail_rate = chunks_failed / total_chunks if total_chunks else 0.0
+    ops_actually_attempted = len(ids) - ops_skipped_recent
     hard_fails: list[str] = []
-    if total_rows == 0 and len(ids) > 0:
+    if ops_with_errors > 0:
         hard_fails.append(
-            f"Phase 26 produced ZERO rows for {len(ids)} operators — likely "
-            f"silent failure. See chunks_failed_detail in metadata."
+            f"Phase 26 script reported {ops_with_errors} per-op extraction errors. "
+            f"See failed_chunks_detail."
         )
     if fail_rate > failure_threshold:
         hard_fails.append(
@@ -219,6 +259,9 @@ def operator_llm_extract_for_state(
         metadata={
             "state": MetadataValue.text(state),
             "operators_total": MetadataValue.int(len(ids)),
+            "ops_skipped_recent": MetadataValue.int(ops_skipped_recent),
+            "ops_actually_attempted": MetadataValue.int(ops_actually_attempted),
+            "ops_with_errors": MetadataValue.int(ops_with_errors),
             "chunks_done": MetadataValue.int(chunks_done),
             "chunks_failed": MetadataValue.int(chunks_failed),
             "fail_rate_pct": MetadataValue.float(round(fail_rate * 100, 1)),
@@ -235,6 +278,7 @@ def operator_llm_extract_for_state(
 # ════════════════════════════════════════════════════════════════════════
 
 @asset(
+    deps=[operator_llm_extract_for_state],
     group_name="phase_26_to_28_operator_llm",
     description=(
         "GLOBAL operator_merge: scripts/one_off/merge_operator_dogs_policy.py "

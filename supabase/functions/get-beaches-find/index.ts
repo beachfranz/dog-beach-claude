@@ -40,8 +40,9 @@ Deno.serve(async (req: Request) => {
     // scored=true → only beaches with day_recommendations rows.
     // scored=false (NEW DEFAULT) → full catalog visible; client renders
     // tier-aware icons (1+2 normal, 3 muted, 4 grey-no-dog). The cost
-    // gate (is_scoreable) is enforced upstream by daily-beach-refresh,
-    // not by this read query — display gates are tier-based.
+    // gate (scoring_tier IN ('daily','hourly')) is enforced upstream by
+    // daily-beach-refresh, not by this read query — display gates are
+    // tier-based.
     const scoredParam = url.searchParams.get("scored");
     const scoredOnly  = scoredParam === "true" ? true : false;
 

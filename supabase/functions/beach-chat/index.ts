@@ -98,7 +98,7 @@ Deno.serve(async (req: Request) => {
         supabase
           .from("beaches_gold")
           .select("fid, location_id, name, display_name_override, timezone")
-          .eq("is_scoreable", true)
+          .in("scoring_tier", ["daily", "hourly"])
           .eq("is_active", true),
         supabase
           .from("beach_day_recommendations")

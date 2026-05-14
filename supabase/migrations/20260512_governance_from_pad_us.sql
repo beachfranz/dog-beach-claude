@@ -96,35 +96,43 @@ end;
 $$;
 
 -- ─── populator ────────────────────────────────────────────────────────
-create or replace function public.populate_governance_from_pad_us_gold(p_fid bigint)
+-- p_buffer_m: extend each PAD-US polygon by this many meters before
+-- testing containment. Default 0 (strict). For Oregon beaches, 100m
+-- captures the wet-sand strip just seaward of state-park polygon
+-- boundaries (Oregon Beach Bill territory). Uses ST_DWithin which is
+-- GiST-index-friendly (same pattern as our 450m photo distance filter
+-- and dedup proximity checks).
+create or replace function public.populate_governance_from_pad_us_gold(
+  p_fid bigint, p_buffer_m int default 0
+)
 returns integer
 language plpgsql
 as $$
 declare
   v_inserted int := 0;
   v_beach_pt geometry;
+  v_beach_geog geography;
   v_state text;
   v_op_id bigint;
   v_op_name text;
   v_normalized jsonb;
   r record;
 begin
-  -- Get beach centroid + state
-  select st_setsrid(st_makepoint(lon, lat), 4326), state
-    into v_beach_pt, v_state
+  select st_setsrid(st_makepoint(lon, lat), 4326),
+         st_setsrid(st_makepoint(lon, lat), 4326)::geography,
+         state
+    into v_beach_pt, v_beach_geog, v_state
     from public.beaches_gold
    where fid = p_fid and is_active and lat is not null;
 
   if v_beach_pt is null then return 0; end if;
 
-  -- Idempotency: clear prior rows from this source before re-inserting.
-  -- Lets us re-run after fixing the resolver logic without duplicates.
   delete from public.beach_enrichment_provenance
    where gold_fid = p_fid
      and field_group = 'governance'
      and source = 'pad_us_governance_v1';
 
-  -- Find the best containing polygon. Use OWNER priority not MANAGER
+  -- Find the best containing/nearby polygon. Use OWNER priority not MANAGER
   -- because PAD-US has data anomalies where mng_type says "LOC/CITY"
   -- on a polygon that's actually State Parks (own_type=STAT/SPR,
   -- unit_name='X State Park'). Owner is semantically stable; manager
@@ -151,8 +159,11 @@ begin
                  when 'NGO' then 2 when 'PVT' then 1 else 0 end
            end priority
       from public.pad_us_units pu
-     where st_intersects(pu.geom, v_beach_pt)
-       and pu.state = v_state
+     where pu.state = v_state
+       and (case
+              when p_buffer_m = 0 then st_intersects(pu.geom, v_beach_pt)
+              else st_dwithin(pu.geom::geography, v_beach_geog, p_buffer_m)
+            end)
      order by priority desc, st_area(pu.geom::geography) asc
      limit 1
   loop

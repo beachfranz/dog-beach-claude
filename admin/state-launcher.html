@@ -434,7 +434,7 @@ function renderProgress(stats, opts = {}) {
     { label: 'Promoted',    num: gold,      den: arena,      tip: 'arena → gold' },
     { label: 'BEP enriched', num: goldBep,  den: gold,       tip: 'gold rows with at least one BEP row' },
     { label: 'Governance',  num: goldGov,   den: gold,       tip: 'gold rows with PAD-US/operator governance evidence' },
-    { label: 'Scoreable',   num: scoreable, den: gold,       tip: 'gold rows with is_scoreable=true' },
+    { label: 'Scoreable',   num: scoreable, den: gold,       tip: 'gold rows with scoring_tier in (daily,hourly)' },
     { label: 'Extracted',   num: queueDone, den: queueTotal, tip: 'queued LLM extractions completed' },
   ];
 
@@ -520,7 +520,7 @@ async function loadMap() {
   stationLayer.clearLayers();
 
   const beaches = await restGet(
-    `beaches_gold?state=eq.${currentState}&select=fid,name,county_name,lat,lon,location_id,is_scoreable,noaa_station_id,promoted_at&is_active=eq.true&order=lat`
+    `beaches_gold?state=eq.${currentState}&select=fid,name,county_name,lat,lon,location_id,scoring_tier,noaa_station_id,promoted_at&is_active=eq.true&order=lat`
   );
   if (!beaches.length) {
     toast(`No beaches in ${STATE_NAMES[currentState]} yet — click Process to start.`);
@@ -596,7 +596,7 @@ async function loadMap() {
       </div>
       <div class="popup-fid">fid ${b.fid} · ${b.location_id || '—'}</div>
       <div class="popup-row"><span class="label">county</span><span class="value">${b.county_name || '—'}</span></div>
-      <div class="popup-row"><span class="label">scoreable</span><span class="value">${b.is_scoreable ? '✓' : '—'}</span></div>
+      <div class="popup-row"><span class="label">scoreable</span><span class="value">${(b.scoring_tier === 'daily' || b.scoring_tier === 'hourly') ? '✓' : '—'}</span></div>
       <div class="popup-row"><span class="label">NOAA</span><span class="value">${station ? station.name + ' (' + station.state + ')' : '—'}</span></div>
       <div class="popup-row"><span class="label">distance</span><span class="value">${distPill}</span></div>
       ${govLine}

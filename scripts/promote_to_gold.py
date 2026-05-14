@@ -17,7 +17,8 @@ Calls the public.promote_to_gold(bigint[], boolean) PL/pgSQL function which:
   4. Run 5 source populators (cpad/park_operators/research/park_url/governance)
   5. Run all 4 resolvers (dogs/governance/practical/access)
   6. Auto-promote canonical evidence to beach_dog_policy + beach_amenities
-  7. Optionally flip is_scoreable=true (--score)
+  7. --score is now a no-op (is_scoreable retired 2026-05-13).
+     scoring_tier is derived by refresh_scoring_tier().
 
 Idempotent — re-running on existing gold beaches just refreshes evidence.
 
@@ -28,8 +29,8 @@ Usage:
   # Promote all unpromoted active CA beaches in a county
   python scripts/promote_to_gold.py --county "San Mateo"
 
-  # Promote and immediately flip is_scoreable
-  python scripts/promote_to_gold.py --fids 9716 --score
+  # Promote (--score is now a no-op; scoring_tier auto-derives)
+  python scripts/promote_to_gold.py --fids 9716
 
   # Dry-run (show what would be promoted without doing it)
   python scripts/promote_to_gold.py --county "Marin" --dry-run
@@ -109,7 +110,7 @@ def main() -> int:
     ap.add_argument("--limit", type=int,
                     help="Cap the number of fids selected.")
     ap.add_argument("--score", action="store_true",
-                    help="Also flip is_scoreable=true on the promoted beaches.")
+                    help="DEPRECATED (2026-05-13): is_scoreable was retired. The scoring_tier (Matrix C') is now derived from catchment + dog policy via refresh_scoring_tier(). This flag is preserved for callsite compatibility but is a no-op in the SQL function.")
     ap.add_argument("--with-extraction", action="store_true",
                     help="After promotion, auto-fire discover_urls.py + extract_for_beach.py "
                          "+ re-run populator/resolver/promoter for the promoted beaches. "

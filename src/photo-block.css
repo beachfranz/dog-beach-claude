@@ -1,0 +1,122 @@
+/* photo-block.css — shared photo display for detail.html + beach.html.
+   Renders the get_beach_photos_diverse response: 1 hero + up to 5
+   supporting thumbnails + "View all" link.
+
+   Sized to fit alongside other page content (not full-bleed). For full-
+   bleed, wrap in a container that doesn't constrain width.
+*/
+
+.photo-block {
+  margin: 0 0 16px;
+}
+
+/* Hero — single large photo, native aspect ratio, caps at 60vh. */
+.photo-block-hero {
+  position: relative;
+  width: 100%;
+  background: #0f172a;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.photo-block-hero img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 60vh;
+  object-fit: contain;
+  background: #0f172a;
+}
+.photo-block-hero-attr {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 8px 12px;
+  background: linear-gradient(to top, rgba(0,0,0,0.55), rgba(0,0,0,0));
+  color: white;
+  font-size: 12px;
+}
+.photo-block-hero-attr a {
+  color: white;
+  text-decoration: underline;
+}
+
+/* Supporting grid — up to 5 thumbnails. Responsive 5/3/2 cols. */
+.photo-block-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  margin-bottom: 8px;
+}
+@media (max-width: 900px) {
+  .photo-block-grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 560px) {
+  .photo-block-grid { grid-template-columns: repeat(2, 1fr); }
+}
+.photo-block-thumb {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  background: #0f172a;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.photo-block-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.photo-block-thumb:hover img { opacity: 0.85; }
+
+/* View-all link — right-aligned below the grid */
+.photo-block-viewall {
+  text-align: right;
+  font-size: 13px;
+}
+.photo-block-viewall a {
+  color: #1d4ed8;
+  text-decoration: none;
+  font-weight: 600;
+}
+.photo-block-viewall a:hover { text-decoration: underline; }
+
+/* Empty state */
+.photo-block-empty {
+  padding: 32px;
+  text-align: center;
+  color: #64748b;
+  font-size: 14px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+}
+
+/* Lightbox — fired by clicking a thumbnail */
+.photo-block-lightbox {
+  position: fixed; inset: 0;
+  background: rgba(15, 23, 42, 0.92);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 24px;
+}
+.photo-block-lightbox.open { display: flex; }
+.photo-block-lightbox img {
+  max-width: 95vw;
+  max-height: 95vh;
+  object-fit: contain;
+  border-radius: 8px;
+}
+.photo-block-lightbox-close {
+  position: absolute;
+  top: 16px; right: 24px;
+  background: rgba(0,0,0,0.6);
+  color: white;
+  border: 0;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 18px;
+}

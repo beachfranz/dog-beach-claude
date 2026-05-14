@@ -1,36 +1,28 @@
 [project]
-name = "dog-beach-dagster"
-version = "0.1.0"
-description = "Dagster orchestration for Dog Beach Scout"
-requires-python = ">=3.11,<3.14"
-
-# Dagster + dagster-dbt move in lockstep — version-skew between dagster
-# and dagster-dbt causes pip resolver to fail. Pinned to the matching
-# 1.13 / 0.29 line. Bump intentionally.
-# Python 3.14 lacks dagster wheels as of late-2026 — keep on 3.12 / 3.13.
+name = "dog_beach_dagster"
+version = "0.2.0"
+description = "Dagster project for Dog Beach Scout pipeline (v2, fresh start 2026-05-13)."
+requires-python = ">=3.11"
 dependencies = [
-  "dagster>=1.13,<1.14",
-  "dagster-webserver>=1.13,<1.14",
-  "dagster-postgres>=0.29,<0.30",
-  "dagster-dbt>=0.29,<0.30",
-  "dbt-postgres>=1.10,<1.12",
-  "dbt-core>=1.11,<1.12",
-  "psycopg2-binary>=2.9",
-  "python-dotenv>=1.0",
-  "httpx>=0.27",
-  "beautifulsoup4>=4.12",
+    "dagster>=1.13",
+    "dagster-webserver>=1.13",
+    "psycopg2-binary>=2.9",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8",
-  "ruff>=0.6",
+    "dagster-webserver>=1.13",
 ]
 
+[tool.dagster]
+module_name = "dog_beach"
+code_location_name = "dog_beach"
+
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.dagster]
-module_name = "dog_beach.definitions"
-code_location_name = "dog_beach"
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dog_beach*"]

@@ -247,13 +247,8 @@
             <option value="false">false</option>
           </select>
         </div>
-        <div class="field"><label>is_scoreable</label>
-          <select data-table="gold" data-field="is_scoreable">
-            <option value="">(unchanged)</option>
-            <option value="true">true</option>
-            <option value="false">false</option>
-          </select>
-        </div>
+        <!-- is_scoreable retired 2026-05-13. Gate is now scoring_tier
+             (Matrix C'). Edit it via the dog-policy / tier path, not here. -->
       </div>
       <div class="field"><label>inactive_reason</label><input data-table="gold" data-field="inactive_reason" type="text"></div>
       <div class="field"><label>review_status</label>
@@ -584,7 +579,7 @@ async function loadBeach() {
     document.getElementById('beach-meta').innerHTML =
       `<strong>${g.name || '(unnamed)'}</strong> ` +
       `<span class="meta">— ${g.county_name || '?'} ` +
-      `(scoreable: ${g.is_scoreable}; active: ${g.is_active}) ` +
+      `(scoreable: ${(g.scoring_tier === 'daily' || g.scoring_tier === 'hourly')}; active: ${g.is_active}) ` +
       `· dog policy: ${dogRows.length ? 'present' : 'none'} ` +
       `· amenities: ${amenRows.length ? 'present' : 'none'}</span>`;
 
@@ -737,7 +732,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // ─── Queue: step through a defined set of beaches ────────────────────
 // Supports ?queue=<name>. Currently defined:
-//   ca_t1t2  → CA, is_active, is_scoreable (= Tier 1 + Tier 2). Ordered
+//   ca_t1t2  → CA, is_active, scoring_tier in (daily,hourly) (≈ Tier 1+2 traffic). Ordered
 //              by county_name, then name.
 let _queue = [];     // [{fid, name, county_name}]
 let _queueIdx = -1;
@@ -750,12 +745,12 @@ async function loadQueue(name, preferFid) {
     // T1 (off-leash) only — joined-inner on beach_dog_policy.has_off_leash.
     url = 'beaches_gold?select=fid,name,display_name_override,county_name,'
         + 'beach_dog_policy!inner(has_off_leash)'
-        + '&state=eq.CA&is_active=eq.true&is_scoreable=eq.true'
+        + '&state=eq.CA&is_active=eq.true&scoring_tier=in.(daily,hourly)'
         + '&beach_dog_policy.has_off_leash=eq.true'
         + '&order=county_name.asc,name.asc&limit=2000';
   } else if (name === 'ca_t1t2') {
     url = 'beaches_gold?select=fid,name,display_name_override,county_name'
-        + '&state=eq.CA&is_active=eq.true&is_scoreable=eq.true'
+        + '&state=eq.CA&is_active=eq.true&scoring_tier=in.(daily,hourly)'
         + '&order=county_name.asc,name.asc&limit=2000';
   } else if (name === 'review_military') {
     // scoreability_review_queue: beaches flagged by the military-base

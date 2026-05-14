@@ -112,6 +112,7 @@ def feature_to_row(feat: dict, state_filter: str) -> tuple | None:
         props.get("Agg_Src"),
         psycopg2.extras.Json(props),
         geom_str,
+        geom_str,  # geom_geog uses the same GeoJSON — cast happens server-side
     )
 
 
@@ -119,12 +120,14 @@ INSERT_SQL = """
 insert into public.pad_us_units (
   unit_id, feat_class, category, own_type, own_name, loc_own,
   mng_type, mng_name, loc_mang, des_tp, loc_ds,
-  unit_name, loc_name, state, agg_src, raw_attrs, geom
+  unit_name, loc_name, state, agg_src, raw_attrs, geom, geom_geog
 ) values (
   %s, %s, %s, %s, %s, %s,
   %s, %s, %s, %s, %s,
   %s, %s, %s, %s, %s,
-  ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326))::geometry(MultiPolygon, 4326)
+  ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326))::geometry(MultiPolygon, 4326),
+  -- geom_geog mirrors geom; required by populate_pad_us_containment_gold
+  ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326))::geometry(MultiPolygon, 4326)::geography
 )
 on conflict (unit_id) do update set
   feat_class = excluded.feat_class,
@@ -143,6 +146,7 @@ on conflict (unit_id) do update set
   agg_src    = excluded.agg_src,
   raw_attrs  = excluded.raw_attrs,
   geom       = excluded.geom,
+  geom_geog  = excluded.geom_geog,
   loaded_at  = now()
 """
 

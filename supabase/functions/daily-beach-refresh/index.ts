@@ -156,6 +156,7 @@ Deno.serve(async (req: Request) => {
   let targetLocationIds: string[] | null = null;
   let tideWindowDays = 7;       // default: refresh fetches up to 7 days
   let forceTideRefresh = false; // default: skip NOAA when buffer is fresh
+  let skipRecentHours: number | null = null;  // skip beaches refreshed within N hours
   try {
     const body = await req.json().catch(() => ({}));
     if (Array.isArray(body?.location_ids) && body.location_ids.length > 0) {
@@ -165,12 +166,16 @@ Deno.serve(async (req: Request) => {
       tideWindowDays = Math.min(body.tide_window_days, 30);
     }
     if (body?.force_tide_refresh === true) forceTideRefresh = true;
+    if (typeof body?.skip_recent_hours === "number" && body.skip_recent_hours > 0) {
+      skipRecentHours = Math.min(body.skip_recent_hours, 168);  // cap at 1 week
+    }
   } catch { /* no body — refresh all with defaults */ }
 
   console.log("Request received —",
     "targetLocationIds:", targetLocationIds,
     "tideWindowDays:",   tideWindowDays,
-    "forceTideRefresh:", forceTideRefresh);
+    "forceTideRefresh:", forceTideRefresh,
+    "skipRecentHours:",  skipRecentHours);
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
   const runAt    = new Date();
@@ -179,15 +184,11 @@ Deno.serve(async (req: Request) => {
   try {
     // 1. Load scoreable beaches from the spine.
     //
-    // Path 3b-3.1: source of truth is beaches_gold + the is_scoreable gate.
-    // INNER JOIN to public.beaches because the scoring tables still PK on
-    // location_id (NOT NULL) until the next migration retires that column.
-    // beach_dog_policy supplies dogs_prohibited_start/end (overlay table).
-    //
-    // The big swap was 15 → 15: today's curated set is exactly the rows
-    // where beaches_gold.is_scoreable=true. Future seeds opt in via
-    // seed_arena_beach.py --score (sets is_scoreable=true).
-    console.log("Loading beaches from beaches_gold (is_scoreable=true)...");
+    // 2026-05-13 cutover: is_scoreable retired. The gate is now
+    // scoring_tier ∈ ('daily','hourly') as produced by Matrix C'
+    // (refresh_scoring_tier). 'none' excludes Tier 4 + low-traffic
+    // Tier 3 by construction.
+    console.log("Loading beaches from beaches_gold (scoring_tier in daily/hourly)...");
     let beachQuery = supabase.from("beaches_gold")
       .select(`
         fid,
@@ -201,7 +202,7 @@ Deno.serve(async (req: Request) => {
         timezone,
         open_time,
         close_time,
-        is_scoreable,
+        scoring_tier,
         is_active,
         address,
         website,
@@ -209,7 +210,7 @@ Deno.serve(async (req: Request) => {
         parking_text,
         beach_dog_policy(dogs_prohibited_start, dogs_prohibited_end)
       `)
-      .eq("is_scoreable", true)
+      .in("scoring_tier", ["daily", "hourly"])
       .eq("is_active", true);
     if (targetLocationIds && targetLocationIds.length > 0) {
       beachQuery = beachQuery.in("location_id", targetLocationIds);
@@ -226,7 +227,7 @@ Deno.serve(async (req: Request) => {
       lat: number; lon: number;
       noaa_station_id: string | null; besttime_venue_id: string | null;
       timezone: string; open_time: string | null; close_time: string | null;
-      is_scoreable: boolean; is_active: boolean;
+      scoring_tier: string | null; is_active: boolean;
       address: string | null; website: string | null;
       description: string | null; parking_text: string | null;
       beach_dog_policy: { dogs_prohibited_start: string | null; dogs_prohibited_end: string | null }
@@ -258,13 +259,46 @@ Deno.serve(async (req: Request) => {
         created_at:     "",
       };
     };
-    const beaches: Beach[] | null = goldRows ? (goldRows as GoldRow[]).map(flatten) : null;
+    let beaches: Beach[] | null = goldRows ? (goldRows as GoldRow[]).map(flatten) : null;
 
     console.log("Beach query result — data:", beaches?.length ?? "null", "error:", beachErr?.message ?? "none");
 
     if (beachErr) throw new Error(`Failed to load beaches: ${beachErr.message}`);
     if (!beaches || beaches.length === 0) {
       return json({ ok: true, message: "No active beaches found", results: [] }, 200, cors);
+    }
+
+    // 1b. Optional skip_recent_hours filter — drop beaches whose today's
+    //     beach_day_recommendations row was updated within the cutoff.
+    //     Lets pg_cron / failed-batch retries / ad-hoc fires be idempotent
+    //     without client-side dedup. Mirrors --skip-recent semantics from
+    //     the LLM extractors.
+    let skippedRecent = 0;
+    if (skipRecentHours !== null) {
+      const cutoffIso = new Date(runAt.getTime() - skipRecentHours * 3600 * 1000).toISOString();
+      const beachFids = beaches.map(b => b.arena_group_id);
+      const { data: recentRows, error: recentErr } = await supabase
+        .from("beach_day_recommendations")
+        .select("arena_group_id")
+        .in("arena_group_id", beachFids)
+        .gte("updated_at", cutoffIso);
+      if (recentErr) {
+        console.warn(`skip_recent_hours query failed: ${recentErr.message} — proceeding without skip`);
+      } else {
+        const recentSet = new Set((recentRows ?? []).map((r: { arena_group_id: number }) => r.arena_group_id));
+        const before = beaches.length;
+        beaches = beaches.filter(b => !recentSet.has(b.arena_group_id));
+        skippedRecent = before - beaches.length;
+        console.log(`skip_recent_hours=${skipRecentHours} → skipped ${skippedRecent}/${before} beaches; ${beaches.length} remaining`);
+      }
+    }
+
+    if (beaches.length === 0) {
+      return json({
+        ok: true,
+        message: `All beaches refreshed within skip_recent_hours=${skipRecentHours} — nothing to do`,
+        results: [], skipped_recent: skippedRecent,
+      }, 200, cors);
     }
 
     // 2. Load scoring config
@@ -284,7 +318,11 @@ Deno.serve(async (req: Request) => {
     // 4. Trigger notification dispatch (non-fatal)
     // await triggerNotificationDispatch(supabase);
 
-    return json({ ok: true, runAt: runAt.toISOString(), results }, 200, cors);
+    return json({
+      ok: true, runAt: runAt.toISOString(),
+      results,
+      skipped_recent: skippedRecent,
+    }, 200, cors);
 
   } catch (err) {
     console.error("Top-level error:", String(err));

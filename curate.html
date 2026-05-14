@@ -27,6 +27,33 @@
     border-radius: 6px; border: 1px solid #1e3a5f;
     background: #1e293b; color: #fff; min-width: 220px;
   }
+  /* Multi-source picker — button + dropdown panel with checkboxes */
+  .source-picker { position: relative; }
+  .source-picker > button {
+    font-family: inherit; font-size: 13px; padding: 6px 10px;
+    border-radius: 6px; border: 1px solid #1e3a5f;
+    background: #1e293b; color: #fff; cursor: pointer;
+    min-width: 140px; text-align: left;
+  }
+  .source-picker > button::after {
+    content: ' ▾'; opacity: 0.6;
+  }
+  .source-picker .panel {
+    position: absolute; top: 100%; left: 0; margin-top: 4px;
+    background: #fff; color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 12px; min-width: 200px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+    z-index: 200; display: none;
+  }
+  .source-picker.open .panel { display: block; }
+  .source-picker .panel label {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 0; font-size: 13px; cursor: pointer;
+  }
+  .source-picker .panel hr {
+    border: 0; border-top: 1px solid var(--border); margin: 4px 0;
+  }
   .bar .progress { font-size: 12px; opacity: 0.7; margin-left: auto; }
   .bar button {
     font-family: inherit; font-size: 13px; padding: 6px 12px;
@@ -62,10 +89,10 @@
   }
 
   /* Main UI */
-  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  main { max-width: 1600px; margin: 0 auto; padding: 12px 16px; }
   .header-row {
     display: flex; justify-content: space-between; align-items: baseline;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
   }
   .beach-name {
     font-size: 22px; font-weight: 700; margin: 0;
@@ -78,14 +105,24 @@
   }
   .beach-sub { font-size: 13px; color: var(--muted); }
 
+  /* Photo grid — exactly 3 columns on desktop. Photos at native aspect ratio.
+     Falls back to 2 columns on tablet (<1200px), 1 column on phone (<800px). */
   .photo-grid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 14px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+  }
+  @media (max-width: 1200px) {
+    .photo-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 800px) {
+    .photo-grid { grid-template-columns: 1fr; }
   }
   .photo-card {
     background: var(--card); border: 1px solid var(--border);
     border-radius: 10px; overflow: hidden;
     cursor: grab; user-select: none;
+    position: relative;
     transition: opacity 0.15s, transform 0.15s, box-shadow 0.15s;
   }
   .photo-card.dragging { opacity: 0.4; }
@@ -98,11 +135,45 @@
     text-align: center; padding: 6px; color: var(--red);
     font-size: 11px; font-weight: 700;
   }
-  .photo-card { position: relative; }
+  /* Hidden: removed from this beach's display but NOT penalized.
+     Distinguished from deleted so curator + model can tell them apart. */
+  .photo-card.hidden {
+    opacity: 0.35; background: #f1f5f9; border-color: #cbd5e1;
+  }
+  .photo-card.hidden::after {
+    content: "HIDDEN — click restore"; display: block;
+    text-align: center; padding: 6px; color: var(--muted);
+    font-size: 11px; font-weight: 700;
+  }
+  /* Photo at native size unless it would overflow the card or viewport.
+     - max-width: 100% caps width to the card's column width
+     - max-height: 90vh caps tall portraits so they don't run off-screen
+     - no upscaling: smaller-than-column images render at native pixels
+     - centered in the card via margin auto */
   .photo-card img {
-    width: 100%; height: 140px; object-fit: cover; display: block;
-    background: #1e293b;
-    pointer-events: none; /* let drag pass through */
+    display: block;
+    max-width: 100%;
+    max-height: 90vh;
+    width: auto; height: auto;
+    margin: 0 auto;
+    background: #0f172a;
+    pointer-events: none;
+  }
+  /* Curator-promoted slides — gold ring around the card so they're
+     visually distinct from machine-ranked candidates. */
+  .photo-card.is-curator {
+    border-color: #d4a017;
+    box-shadow: 0 0 0 2px rgba(212, 160, 23, 0.25);
+  }
+  /* Curator chip — separate badge in the meta-row, gold-styled. Sits
+     alongside the original source chip (cdpr / flickr / etc.) so
+     provenance is preserved AND curator-status is marked. */
+  .curator-chip {
+    display: inline-block; font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 1px 6px; border-radius: 4px;
+    background: rgba(212, 160, 23, 0.18); color: #92740a;
+    border: 1px solid rgba(212, 160, 23, 0.4);
   }
   /* Number badge top-left of card image (matches the on-map dot label) */
   .photo-num {
@@ -153,6 +224,42 @@
   .ml-badge.ml-mid  { background: rgba(180,83,9,0.10);  color: var(--amber); }
   .ml-badge.ml-low  { background: rgba(185,28,28,0.10); color: var(--red);   }
   .ml-badge.ml-na   { color: var(--muted); }
+
+  /* Score-detail row (below the source-row): word-match, score override
+     input, and tag chips. Curator can type a number 0-1 to override the
+     model's predicted_keep_prob. Override is captured into dirtyMap and
+     saved with the rest of the curation state. */
+  .score-row {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 4px 0; font-size: 11px;
+  }
+  .score-row .label {
+    color: var(--muted); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px;
+  }
+  .score-row .word-match { color: var(--text); font-weight: 600; }
+  .score-row .override-input {
+    width: 56px; padding: 2px 4px;
+    font-family: inherit; font-size: 11px; font-weight: 700;
+    border: 1px solid var(--border); border-radius: 4px;
+    background: var(--card); color: var(--accent);
+    text-align: right;
+  }
+  .score-row .override-input.dirty {
+    border-color: var(--accent); background: rgba(29,78,216,0.06);
+  }
+  .tags-row {
+    display: flex; flex-wrap: wrap; gap: 4px;
+    padding: 4px 0;
+  }
+  .tag-chip {
+    font-size: 10px; padding: 2px 6px; border-radius: 999px;
+    background: rgba(0,0,0,0.04); color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .tag-chip.warn { background: rgba(180,83,9,0.10); color: var(--amber); border-color: rgba(180,83,9,0.2); }
+  .tag-chip.bad  { background: rgba(185,28,28,0.10); color: var(--red);   border-color: rgba(185,28,28,0.2); }
+  .tag-chip.good { background: rgba(21,128,61,0.10); color: var(--green); border-color: rgba(21,128,61,0.2); }
   .photo-caption {
     font-size: 11px; color: var(--text); line-height: 1.3;
     margin: 4px 0; max-height: 2.6em; overflow: hidden;
@@ -241,10 +348,11 @@
     text-align: center; padding: 60px 20px; color: var(--muted);
   }
 
-  /* Map sits below the beach-name header, full-width, above the photo grid */
-  #curate-map { height: 320px; width: 100%;
+  /* Map sits below the beach-name header — kept compact so it doesn't
+     compete with photos for vertical space. */
+  #curate-map { height: 180px; width: 100%;
                 border-radius: 10px; overflow: hidden;
-                border: 1px solid var(--border); margin-bottom: 16px;
+                border: 1px solid var(--border); margin-bottom: 12px;
                 background: #1e293b; }
   /* Permanent number-label tooltip on each photo marker */
   .leaflet-tooltip.photo-num-label {
@@ -278,15 +386,21 @@
 <!-- App (hidden until logged in) -->
 <header class="bar" style="display:none" id="app-bar">
   <div class="bar-title">Photo curator</div>
-  <select id="sel-source" style="min-width:120px">
-    <option value="all">All sources</option>
-    <option value="wikimedia">Wikimedia</option>
-    <option value="flickr">Flickr</option>
-    <option value="ccc">CCC</option>
-    <option value="cdpr">CDPR</option>
-    <option value="nps">NPS</option>
-    <option value="unsplash">Unsplash</option>
-  </select>
+  <div class="source-picker" id="source-picker">
+    <button type="button" id="source-picker-btn">All sources</button>
+    <div class="panel">
+      <label><input type="checkbox" id="src-all" checked> <b>All sources</b></label>
+      <hr>
+      <label><input type="checkbox" class="src-chk" value="curator"> Curator (manual keeps)</label>
+      <label><input type="checkbox" class="src-chk" value="wikimedia"> Wikimedia</label>
+      <label><input type="checkbox" class="src-chk" value="flickr"> Flickr</label>
+      <label><input type="checkbox" class="src-chk" value="ccc"> CCC</label>
+      <label><input type="checkbox" class="src-chk" value="cdpr"> CDPR</label>
+      <label><input type="checkbox" class="src-chk" value="nps"> NPS</label>
+      <label><input type="checkbox" class="src-chk" value="unsplash"> Unsplash</label>
+      <label><input type="checkbox" class="src-chk" value="mapillary"> Mapillary</label>
+    </div>
+  </div>
   <select id="sel-state" style="min-width:140px"></select>
   <label style="display:flex;align-items:center;gap:6px;color:#fff;font-size:12px;cursor:pointer;">
     <input type="checkbox" id="chk-dog-only" style="cursor:pointer;"> 🐶 Dog only
@@ -327,7 +441,7 @@
 
 <script>
 const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
-const ANON_KEY     = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVobHpid3Ryc3hhYXVrdXJla2F1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU2OTc0MDYsImV4cCI6MjA5MTI3MzQwNn0.BKGWJWwX99a39vzvpzFXduBn0vwHykKYliGlB2Ov0UU';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
 
 const MATCH_OPTIONS = [
   { v:'exact',           label:'Exact' },
@@ -337,16 +451,50 @@ const MATCH_OPTIONS = [
   { v:'wtf',             label:'WTF!' },
 ];
 
-const SS_TOKEN  = 'curator_token';
-const SS_USER   = 'curator_username';
-const SS_STATE  = 'curator_state';
-const SS_SOURCE = 'curator_source';
-const SS_DOGONLY= 'curator_dog_only';
-const SS_NOPHOTO= 'curator_no_photo';
+const SS_TOKEN   = 'curator_token';
+const SS_USER    = 'curator_username';
+const SS_STATE   = 'curator_state';
+const SS_SOURCES = 'curator_sources';   // comma-list of source codes; empty = all
+const SS_DOGONLY = 'curator_dog_only';
+const SS_NOPHOTO = 'curator_no_photo';
 let token = sessionStorage.getItem(SS_TOKEN);
 let curatorUser = sessionStorage.getItem(SS_USER) || 'curator';
 let currentState  = sessionStorage.getItem(SS_STATE)  || 'CA';
-let currentSource = sessionStorage.getItem(SS_SOURCE) || 'all';
+// Multi-select. Empty set = all sources. 'curator' is a synthetic source
+// (means: photos with curated_at != null OR source='manual') applied
+// client-side; the other values map to DB source codes.
+let currentSources = new Set(
+  (sessionStorage.getItem(SS_SOURCES) || '')
+    .split(',').filter(Boolean)
+);
+// Legacy single-source value passed to RPCs that take p_source.
+// Two RPCs (get_curation_states, get_curation_progress) accept the literal
+// 'all'; one (get_no_photo_fids) wants null. Helpers return both forms.
+function rpcSourceAll() {
+  // Returns 'all' for default/multi, single-source code for single.
+  if (currentSources.size === 0) return 'all';
+  if (currentSources.size === 1) {
+    const v = [...currentSources][0];
+    return v === 'curator' ? 'all' : v;
+  }
+  return 'all';
+}
+function rpcSourceNull() {
+  // Returns null for default/multi/curator, single-source code for single non-curator.
+  if (currentSources.size === 0) return null;
+  if (currentSources.size === 1) {
+    const v = [...currentSources][0];
+    return v === 'curator' ? null : v;
+  }
+  return null;
+}
+// Sources displayed on the photo grid — includes the synthetic 'curator'.
+function photoMatchesSources(p) {
+  if (currentSources.size === 0) return true;
+  const isCurator = !!p.curated_at || p.source === 'manual';
+  if (currentSources.has('curator') && isCurator) return true;
+  return currentSources.has(p.source);
+}
 let dogOnly       = sessionStorage.getItem(SS_DOGONLY) === '1';
 let noPhotoOnly   = sessionStorage.getItem(SS_NOPHOTO) === '1';
 let dogFidSet     = null;  // Set of fids with uncurated dog-titled photos, populated when filter is on
@@ -409,19 +557,62 @@ async function showApp() {
   document.getElementById('app-bar').style.display = '';
   document.getElementById('county-bar').style.display = '';
   document.getElementById('app').style.display = '';
-  // Wire source dropdown
-  const srcSel = document.getElementById('sel-source');
-  srcSel.value = currentSource;
-  srcSel.onchange = async () => {
-    currentSource = srcSel.value;
-    sessionStorage.setItem(SS_SOURCE, currentSource);
+  // Wire multi-select source picker. Open/close panel via button, checkbox
+  // group for individual sources, "All sources" master toggle.
+  const sp = document.getElementById('source-picker');
+  const spBtn = document.getElementById('source-picker-btn');
+  const spAll = document.getElementById('src-all');
+  const spChks = [...document.querySelectorAll('.src-chk')];
+
+  function refreshSourcePickerUI() {
+    // Sync checkbox state from currentSources
+    spAll.checked = currentSources.size === 0;
+    for (const c of spChks) c.checked = currentSources.has(c.value);
+    // Update button label
+    if (currentSources.size === 0) {
+      spBtn.textContent = 'All sources';
+    } else if (currentSources.size <= 2) {
+      spBtn.textContent = [...currentSources].join(' + ');
+    } else {
+      spBtn.textContent = `${currentSources.size} sources`;
+    }
+  }
+
+  async function applySourceChange() {
+    sessionStorage.setItem(SS_SOURCES, [...currentSources].join(','));
+    refreshSourcePickerUI();
     currentCounty = null;
     currentBeach = null;
-    // No-photo filter is source-aware — re-fetch when source changes
     if (noPhotoOnly) await loadNoPhotoFids();
     await loadStates();
     await loadProgress();
+  }
+
+  spBtn.onclick = (e) => {
+    e.stopPropagation();
+    sp.classList.toggle('open');
   };
+  document.addEventListener('click', (e) => {
+    if (!sp.contains(e.target)) sp.classList.remove('open');
+  });
+  spAll.onchange = async () => {
+    if (spAll.checked) currentSources.clear();
+    else if (currentSources.size === 0) {
+      // Force at least one; default to wikimedia + flickr as a sane subset
+      currentSources = new Set(['wikimedia', 'flickr']);
+    }
+    await applySourceChange();
+  };
+  for (const c of spChks) {
+    c.onchange = async () => {
+      if (c.checked) currentSources.add(c.value);
+      else currentSources.delete(c.value);
+      // If nothing is selected, treat as "all"
+      if (currentSources.size === 0) spAll.checked = true;
+      await applySourceChange();
+    };
+  }
+  refreshSourcePickerUI();
   // Wire 🐶 Dog only checkbox
   const dogChk = document.getElementById('chk-dog-only');
   dogChk.checked = dogOnly;
@@ -456,27 +647,52 @@ async function showApp() {
 }
 
 // Fetch fids that have zero photos in the current source filter.
+// Defensive: matches loadDogFids — failure of this side-filter shouldn't
+// block the state/county/beach dropdowns.
 async function loadNoPhotoFids() {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_no_photo_fids`, {
-    method: 'POST',
-    headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
-               'Content-Type': 'application/json' },
-    body: JSON.stringify({ p_source: currentSource === 'all' ? null : currentSource }),
-  });
-  const arr = await res.json().catch(()=>[]);
-  noPhotoFidSet = new Set((arr || []).map(r => r.fid));
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_no_photo_fids`, {
+      method: 'POST',
+      headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
+                 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_source: rpcSourceNull() }),
+    });
+    if (!res.ok) {
+      console.warn(`loadNoPhotoFids: HTTP ${res.status}; no-photo filter inactive`);
+      noPhotoFidSet = new Set();
+      return;
+    }
+    const arr = await res.json().catch(() => []);
+    noPhotoFidSet = new Set((arr || []).map(r => r.fid));
+  } catch (e) {
+    console.warn('loadNoPhotoFids failed:', e);
+    noPhotoFidSet = new Set();
+  }
 }
 
 // Fetch fids that currently have at least one uncurated dog-titled photo.
+// Defensive: this RPC has historically been slow and sometimes returns 522
+// (Cloudflare timeout). Catch failures so they don't block the rest of
+// showApp() from loading the state/county/beach dropdowns.
 async function loadDogFids() {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_dog_photo_fids`, {
-    method: 'POST',
-    headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
-               'Content-Type': 'application/json' },
-    body: '{}',
-  });
-  const arr = await res.json().catch(()=>[]);
-  dogFidSet = new Set((arr || []).map(r => r.fid));
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_dog_photo_fids`, {
+      method: 'POST',
+      headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
+                 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    if (!res.ok) {
+      console.warn(`loadDogFids: HTTP ${res.status}; dog-filter will be inactive`);
+      dogFidSet = new Set();
+      return;
+    }
+    const arr = await res.json().catch(() => []);
+    dogFidSet = new Set((arr || []).map(r => r.fid));
+  } catch (e) {
+    console.warn('loadDogFids failed:', e);
+    dogFidSet = new Set();
+  }
 }
 
 // Get set of state codes that contain at least one dog-photo fid.
@@ -497,7 +713,7 @@ async function loadStates() {
     method: 'POST',
     headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
                'Content-Type': 'application/json' },
-    body: JSON.stringify({ p_source: currentSource }),
+    body: JSON.stringify({ p_source: rpcSourceAll() }),
   });
   let states = (await res.json()) || [];
   // When dog-only filter is on, restrict to states that actually contain a
@@ -542,7 +758,7 @@ async function loadProgress(opts = {}) {
     method: 'POST',
     headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
                'Content-Type': 'application/json' },
-    body: JSON.stringify({ p_state: currentState, p_source: currentSource }),
+    body: JSON.stringify({ p_state: currentState, p_source: rpcSourceAll() }),
   });
   progress = (await res.json()) || [];
   renderCountyDropdown();
@@ -728,6 +944,8 @@ async function loadBeach(fid) {
     return;
   }
   beachData = await res.json();
+  // Reset "show all" when navigating to a new beach so each starts top-N.
+  _showAllPhotos = false;
   // Hybrid sort: ML keep-probability with a distance penalty.
   //   base = predicted_keep_prob (0-1) when present, else composite_score/10, else 0
   //   final = base - (distance_m / 1000) * 0.15   ← ~0.15 cost per km
@@ -811,6 +1029,8 @@ function renderMap() {
       radius: 7, fillColor: MQ_COLOR[mq] || '#64748b', color: '#fff',
       weight: 2, fillOpacity: 0.95, opacity: 1,
     }).addTo(map);
+    // Tooltip = just the number (for grid-card cross-reference).
+    // Distance lives on the card's score-row, not on the map label.
     m.bindTooltip(String(i + 1), {
       permanent: true, direction: 'top', offset: [0, -6],
       className: 'photo-num-label',
@@ -854,6 +1074,128 @@ function flashMarker(photoId) {
   setTimeout(() => m.setRadius(orig), 900);
 }
 
+// ───── Photo display: curator-first + diversity + top-10 ─────────────
+// Curator photos = manually-kept (curated_at IS NOT NULL) OR source='manual'.
+// Always render first, in their existing sort_order. Then fill remaining
+// slots up to TOP_N with non-curator photos, picking round-robin across
+// sources so we don't repeat the same source 5 in a row (the variability
+// Franz called out). Within each source, take highest-scored first.
+// "Show all N" toggle expands beyond TOP_N to the full ranked list.
+const TOP_N = 10;
+let _showAllPhotos = false;
+
+function isCuratorPhoto(p) {
+  return !!p.curated_at || p.source === 'manual';
+}
+
+// Diversity penalties layered on the effective-score selection.
+// Higher values → variety kicks in earlier; lower → quality dominates.
+const DIVERSITY_PENALTY_PER_REPEAT = 0.05;  // each repeat of same source
+const VISION_SCENE_OVERLAP_PENALTY = 0.05;  // already-picked scene
+const VISION_ATMOSPHERE_OVERLAP_PENALTY = 0.02;  // already-picked atmosphere
+const VISION_SUBJECT_OVERLAP_PENALTY = 0.02;  // per previously-seen subject token
+
+// Effective keep-prob (mirrors get_beach_photos_diverse 2026-05-13):
+//   * override_keep_prob wins over predicted_keep_prob
+//   * +0.07 bonus for curator-promoted photos
+//   * Distance penalty: -0.15 per km from beach centroid
+function _sortScoreFor(p) {
+  const m = p.source_meta || {};
+  const override = parseFloat(m.override_keep_prob);
+  const pred = parseFloat(m.predicted_keep_prob);
+  let base = !isNaN(override) ? override
+           : !isNaN(pred)     ? pred
+           : (parseFloat(m.composite_score) || 0) / 10;
+  if (isCuratorPhoto(p)) base += 0.07;
+  const dist = parseFloat(p.distance_m);
+  const penalty = !isNaN(dist) ? (dist / 1000) * 0.15 : 0;
+  return base - penalty;
+}
+
+// Curator photos always qualify. Non-curator must clear the 0.65 floor on
+// effective keep-prob (override > predicted, no distance penalty here —
+// floor applies BEFORE the diversity selector, distance is a tiebreaker).
+function _meetsQualityFloor(p) {
+  if (isCuratorPhoto(p)) return true;
+  const m = p.source_meta || {};
+  const override = parseFloat(m.override_keep_prob);
+  const pred = parseFloat(m.predicted_keep_prob);
+  const base = !isNaN(override) ? override : (!isNaN(pred) ? pred : 0);
+  return base >= 0.65;
+}
+
+function selectDisplayPhotos(pool) {
+  // pool is the post-filter set of photos (already source/dog-filtered).
+  // Returns the ordered list to render, capped at TOP_N unless _showAllPhotos.
+  // Apply quality floor: curator always shows; non-curator needs >= 0.65.
+  // ("Show all" toggle bypasses the floor for inspection of borderline photos.)
+  const curator = pool.filter(isCuratorPhoto);
+  const rest = pool.filter(p => !isCuratorPhoto(p) && (_showAllPhotos || _meetsQualityFloor(p)));
+
+  if (_showAllPhotos) return [...curator, ...rest];
+
+  const remaining = Math.max(0, TOP_N - curator.length);
+  if (remaining === 0) return curator;
+
+  // Hybrid-weight selection: each slot picks the photo with the highest
+  // effective_score = sort_score - source_penalty - vision_overlap_penalty.
+  //   source_penalty       = times_source_already_picked × 0.05
+  //   vision_overlap       = matches against scene/atmosphere/subjects
+  //                          already in the slate
+  // Visual-similarity is treated as a first-class diversity dimension
+  // alongside source, so two "beach_with_sand + water+sand" photos
+  // get pushed apart even when they're from different sources.
+  const remaining_pool = [...rest];
+  const sourceCount = new Map();
+  const seenScenes = new Set();
+  const seenAtmospheres = new Set();
+  const seenSubjects = new Map(); // subject → count
+
+  // Pre-record curator-source counts AND vision-tag state from the
+  // curator-promoted photos already in the slate.
+  function _record(p) {
+    sourceCount.set(p.source, (sourceCount.get(p.source) || 0) + 1);
+    const v = (p.source_meta || {}).vision || {};
+    if (v.scene) seenScenes.add(v.scene);
+    if (v.atmosphere) seenAtmospheres.add(v.atmosphere);
+    for (const s of (v.subjects || [])) {
+      seenSubjects.set(s, (seenSubjects.get(s) || 0) + 1);
+    }
+  }
+  for (const p of curator) _record(p);
+
+  function _effectiveScore(p) {
+    let eff = _sortScoreFor(p);
+    eff -= (sourceCount.get(p.source) || 0) * DIVERSITY_PENALTY_PER_REPEAT;
+    const v = (p.source_meta || {}).vision || {};
+    if (v.scene && seenScenes.has(v.scene))            eff -= VISION_SCENE_OVERLAP_PENALTY;
+    if (v.atmosphere && seenAtmospheres.has(v.atmosphere)) eff -= VISION_ATMOSPHERE_OVERLAP_PENALTY;
+    for (const s of (v.subjects || [])) {
+      const c = seenSubjects.get(s) || 0;
+      eff -= c * VISION_SUBJECT_OVERLAP_PENALTY;
+    }
+    return eff;
+  }
+
+  const diverse = [];
+  while (diverse.length < remaining && remaining_pool.length > 0) {
+    let bestIdx = -1;
+    let bestEff = -Infinity;
+    for (let i = 0; i < remaining_pool.length; i++) {
+      const eff = _effectiveScore(remaining_pool[i]);
+      if (eff > bestEff) {
+        bestEff = eff;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx === -1) break;
+    const picked = remaining_pool.splice(bestIdx, 1)[0];
+    diverse.push(picked);
+    _record(picked);
+  }
+  return [...curator, ...diverse];
+}
+
 function renderBeach() {
   if (!beachData) return;
   const nameEl = document.getElementById('beach-name');
@@ -872,13 +1214,17 @@ function renderBeach() {
   renderMap();
 
   const grid = document.getElementById('photo-grid');
-  // When 🐶 Dog only is on, restrict the photo grid to dog photos.
-  // Checks vision.has_dog first (strong pixel signal); falls back to
-  // title/description regex for photos not yet vision-tagged.
+  // 1) Source filter (multi-select) — applies to non-curator photos. Curator
+  //    photos always show (they're already curator-promoted regardless of source).
+  let pool = (beachData.photos || []).filter(p =>
+    isCuratorPhoto(p) || photoMatchesSources(p)
+  );
+
+  // 2) Dog filter — applies to both curator and non-curator. Checks
+  //    vision.has_dog first; falls back to title/description regex.
   const DOG_RE = /\b(dog|dogs|puppy|pup|pups|puppies|pooch|canine|hound|doggie|doggy)\b/i;
-  let display = beachData.photos || [];
   if (dogOnly) {
-    display = display.filter(p => {
+    pool = pool.filter(p => {
       const m = p.source_meta || {};
       const v = m.vision || {};
       return v.has_dog === true
@@ -886,14 +1232,44 @@ function renderBeach() {
           || DOG_RE.test(m.description || '');
     });
   }
-  if (!display.length) {
+
+  if (!pool.length) {
     grid.innerHTML = dogOnly
       ? `<div class="empty">No dog photos here. (Beach is in the dog-filter cohort because uncurated dog photos exist; they may have just been curated.)</div>`
-      : `<div class="empty">No photos for this beach.</div>`;
+      : `<div class="empty">No photos for this beach (in the selected source set).</div>`;
     return;
   }
-  grid.innerHTML = display.map((p, i) => renderPhotoCard(p, i)).join('');
+
+  // 3) Curator-first + diversity + top-N
+  const display = selectDisplayPhotos(pool);
+  const hidden = pool.length - display.length;
+
+  grid.innerHTML = display.map((p, i) => renderPhotoCard(p, i)).join('') +
+    (hidden > 0
+      ? `<div style="grid-column: 1 / -1; text-align: center; padding: 12px;">
+           <button type="button" id="btn-show-all-photos"
+             style="font-size: 13px; padding: 8px 16px; border-radius: 6px;
+                    border: 1px solid var(--border); background: var(--card);
+                    cursor: pointer; font-weight: 600;">
+             Show all ${pool.length} photos (+${hidden} more) →
+           </button>
+         </div>`
+      : (_showAllPhotos && pool.length > TOP_N
+          ? `<div style="grid-column: 1 / -1; text-align: center; padding: 12px;">
+               <button type="button" id="btn-show-top-photos"
+                 style="font-size: 13px; padding: 8px 16px; border-radius: 6px;
+                        border: 1px solid var(--border); background: var(--card);
+                        cursor: pointer; font-weight: 600;">
+                 ← Show top ${TOP_N} only
+               </button>
+             </div>`
+          : ''));
   wireCardEvents();
+  // Wire the show-all toggle
+  const showAllBtn = document.getElementById('btn-show-all-photos');
+  if (showAllBtn) showAllBtn.onclick = () => { _showAllPhotos = true; renderBeach(); };
+  const showTopBtn = document.getElementById('btn-show-top-photos');
+  if (showTopBtn) showTopBtn.onclick = () => { _showAllPhotos = false; renderBeach(); };
   updateSummary();
 }
 
@@ -903,6 +1279,40 @@ function fmtDistance(m) {
   if (meters < 1000) return `${Math.round(meters)} m`;
   const mi = meters / 1609.344;
   return mi < 10 ? `${mi.toFixed(2)} mi` : `${mi.toFixed(1)} mi`;
+}
+
+// Extract top-5 tags from the vision-tagged source_meta. Priority:
+//   1. quality_issue (a 'bad' tag — warn-styled if present)
+//   2. has_X booleans that are true (dog, birds, surfing, active_people,
+//      human_face_closeup)
+//   3. scene (string)
+//   4. atmosphere (string)
+//   5. subjects[] / landscape_features[] (first few)
+// Returns array of { label, cls } where cls is 'good' / 'warn' / 'bad' / ''.
+function extractTopTags(p, max = 5) {
+  const v = (p.source_meta || {}).vision || {};
+  const out = [];
+  if (v.quality_issue && v.quality_issue !== 'none') {
+    out.push({ label: v.quality_issue, cls: 'bad' });
+  }
+  if (v.has_human_face_closeup) out.push({ label: 'face closeup', cls: 'warn' });
+  if (v.has_dog)                out.push({ label: 'dog', cls: 'good' });
+  if (v.has_birds)              out.push({ label: 'birds', cls: '' });
+  if (v.has_surfing)            out.push({ label: 'surf', cls: 'good' });
+  if (v.has_active_people)      out.push({ label: 'people', cls: '' });
+  if (v.scene)       out.push({ label: v.scene, cls: '' });
+  if (v.atmosphere)  out.push({ label: v.atmosphere, cls: '' });
+  for (const s of (v.subjects || [])) out.push({ label: s, cls: '' });
+  for (const f of (v.landscape_features || [])) out.push({ label: f, cls: '' });
+  // De-dupe by label
+  const seen = new Set();
+  const dedup = out.filter(t => {
+    const k = t.label.toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  return dedup.slice(0, max);
 }
 
 function renderPhotoCard(p, idx) {
@@ -931,21 +1341,85 @@ function renderPhotoCard(p, idx) {
   const captionHtml = captionText
     ? `<div class="photo-caption" title="${escHtml(captionText)}">${escHtml(captionText)}</div>`
     : '';
-  return `<div class="photo-card" data-id="${p.id}" data-num="${num}" draggable="true">
+  const curatorCls = isCuratorPhoto(p) ? ' is-curator' : '';
+  // Source stays as the original loader source (cdpr/flickr/etc.).
+  // Curator status shows as a separate chip when applicable.
+  const sourceLabel = p.source;
+  const curatorChipHtml = isCuratorPhoto(p)
+    ? `<span class="curator-chip" title="Curator-promoted: this photo was manually kept by a curator.">★ curator</span>`
+    : '';
+  // Preserve trash/hide state across re-renders (drag reorder rebuilds the
+  // grid via renderPhotoCard; without this the visual state from dirtyMap
+  // is lost). Source-of-truth for in-flight decisions is dirtyMap.
+  const dirtyState = dirtyMap.get(p.id) || {};
+  const stateCls = dirtyState.deleted ? ' deleted'
+                 : dirtyState.hidden  ? ' hidden'
+                 : '';
+  const isDecided = dirtyState.deleted || dirtyState.hidden;
+  const trashDisp   = isDecided ? 'none' : '';
+  const hideDisp    = isDecided ? 'none' : '';
+  const restoreDisp = isDecided ? '' : 'none';
+
+  // Distance — shown prominently in the score-row alongside word-match.
+  const distScoreHtml = distLabel
+    ? `<span class="label">dist</span><span class="word-match" title="Distance from beach point (used in rank: -0.15 per km).">${escHtml(distLabel)}</span>`
+    : `<span class="label">dist</span><span class="word-match" style="color:var(--muted)">—</span>`;
+
+  // Word-match score (name_match_score from source_meta).
+  // Range observed: 0-4 (NOT 0-1). Higher = more title/description tokens
+  // match the beach display name. Currently a tiebreaker in sortScore;
+  // not weighted into the primary rank.
+  const wordMatch = parseFloat(meta.name_match_score);
+  const wordMatchHtml = !isNaN(wordMatch)
+    ? `<span class="label">word</span><span class="word-match" title="Name-match score (token overlap with beach name). Range 0-4. Currently a tiebreaker — not weighted into primary rank.">${wordMatch.toFixed(2)}</span>`
+    : `<span class="label">word</span><span class="word-match" style="color:var(--muted)">—</span>`;
+
+  // Score override input. Pre-fills with override_keep_prob if set, else
+  // shows placeholder of current ML prob. Edits update dirtyMap.
+  const dirty = dirtyMap.get(p.id) || {};
+  const override = dirty.override_keep_prob != null
+    ? dirty.override_keep_prob
+    : (meta.override_keep_prob != null ? meta.override_keep_prob : '');
+  const overrideDirtyCls = dirty.override_keep_prob != null ? ' dirty' : '';
+  const overrideHtml = `<span class="label">override</span>
+    <input type="number" class="override-input${overrideDirtyCls}"
+           data-id="${p.id}" data-action="override-score"
+           min="0" max="1" step="0.01"
+           value="${escHtml(String(override))}"
+           placeholder="${mlProb != null ? mlProb.toFixed(2) : '—'}"
+           title="Override the ML keep-prob (0.00-1.00). Empty = use ML.">`;
+
+  // Top-5 tags from vision data
+  const tags = extractTopTags(p, 5);
+  const tagsHtml = tags.length
+    ? `<div class="tags-row">${
+        tags.map(t => `<span class="tag-chip${t.cls ? ' ' + t.cls : ''}">${escHtml(t.label)}</span>`).join('')
+      }</div>`
+    : '';
+
+  return `<div class="photo-card${curatorCls}${stateCls}" data-id="${p.id}" data-num="${num}" draggable="true">
     <div class="photo-num" title="click to highlight on map">${num}</div>
-    <img src="${p.thumb_url || p.image_url}" alt="" loading="lazy">
+    <img src="${p.image_url || p.thumb_url}" alt="" loading="lazy">
     <div class="photo-meta">
       <div class="meta-row">
-        <span class="photo-source">${escHtml(p.source)}</span>
-        ${distHtml}
+        <span class="photo-source">${escHtml(sourceLabel)}</span>
+        ${curatorChipHtml}
         ${mlHtml}
         <span class="match-label match-${escHtml(mq)}" title="Match quality (auto)">${escHtml(mqLabel)}</span>
       </div>
+      <div class="score-row">
+        ${distScoreHtml}
+        ${wordMatchHtml}
+        ${overrideHtml}
+      </div>
+      ${tagsHtml}
       ${captionHtml}
       <div class="photo-actions">
-        <button class="trash" type="button" data-action="trash" data-id="${p.id}" title="Trash this photo">🗑</button>
-        <button class="trash" type="button" data-action="trash-right" data-id="${p.id}" title="Trash this and everything after">🗑 →</button>
-        <button class="restore" type="button" data-action="restore" data-id="${p.id}" style="display:none">↩</button>
+        <button type="button" data-action="hide" data-id="${p.id}" title="Hide from this beach (no negative training signal)" style="display:${hideDisp}">🙈</button>
+        <button type="button" data-action="hide-right" data-id="${p.id}" title="Hide this and everything after (no negative training signal)" style="display:${hideDisp}">🙈 →</button>
+        <button class="trash" type="button" data-action="trash" data-id="${p.id}" title="Trash this photo (model learns to avoid similar)" style="display:${trashDisp}">🗑</button>
+        <button class="trash" type="button" data-action="trash-right" data-id="${p.id}" title="Trash this and everything after (model learns to avoid similar)" style="display:${trashDisp}">🗑 →</button>
+        <button class="restore" type="button" data-action="restore" data-id="${p.id}" style="display:${restoreDisp}">↩</button>
         <a href="${p.image_url}" target="_blank" rel="noopener" style="text-decoration:none">
           <button type="button" style="width:100%">🔍</button>
         </a>
@@ -980,9 +1454,54 @@ function wireCardEvents() {
       for (let i = startIdx; i < order.length; i++) trashPhoto(order[i]);
     };
   });
+  document.querySelectorAll('[data-action="hide"]').forEach(b => {
+    b.onclick = () => hidePhoto(parseInt(b.dataset.id, 10));
+  });
+  document.querySelectorAll('[data-action="hide-right"]').forEach(b => {
+    b.onclick = () => {
+      const startId = parseInt(b.dataset.id, 10);
+      const order = beachData.photos.map(p => p.id);
+      const startIdx = order.indexOf(startId);
+      if (startIdx < 0) return;
+      for (let i = startIdx; i < order.length; i++) hidePhoto(order[i]);
+    };
+  });
   document.querySelectorAll('[data-action="restore"]').forEach(b => {
     b.onclick = () => restorePhoto(parseInt(b.dataset.id, 10));
   });
+
+  // Score override — text input captures curator's manual keep-prob
+  // override. Updates dirtyMap; saved alongside trash/sort_order/match.
+  // Empty input clears the override (revert to ML score).
+  document.querySelectorAll('[data-action="override-score"]').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const id = parseInt(inp.dataset.id, 10);
+      const raw = inp.value.trim();
+      const existing = dirtyMap.get(id) || {};
+      if (raw === '') {
+        // Clearing the override
+        delete existing.override_keep_prob;
+        if (Object.keys(existing).length === 0) dirtyMap.delete(id);
+        else dirtyMap.set(id, existing);
+        inp.classList.remove('dirty');
+      } else {
+        const v = parseFloat(raw);
+        if (isNaN(v) || v < 0 || v > 1) {
+          inp.style.borderColor = 'var(--red)';
+          setTimeout(() => { inp.style.borderColor = ''; }, 1500);
+          return;
+        }
+        existing.override_keep_prob = v;
+        dirtyMap.set(id, existing);
+        inp.classList.add('dirty');
+      }
+      updateSummary();
+    });
+    // Prevent drag from initiating when typing in the input
+    inp.addEventListener('mousedown', e => e.stopPropagation());
+    inp.addEventListener('dragstart', e => e.preventDefault());
+  });
+
   // Drag-drop
   document.querySelectorAll('.photo-card').forEach(card => {
     card.ondragstart = (e) => {
@@ -1023,21 +1542,38 @@ function wireCardEvents() {
 
 function trashPhoto(id) {
   const card = document.querySelector(`.photo-card[data-id="${id}"]`);
-  if (card) card.classList.add('deleted');
+  if (card) { card.classList.add('deleted'); card.classList.remove('hidden'); }
   const trashBtn = card?.querySelector('[data-action="trash"]');
+  const hideBtn = card?.querySelector('[data-action="hide"]');
   const restoreBtn = card?.querySelector('[data-action="restore"]');
   if (trashBtn) trashBtn.style.display = 'none';
+  if (hideBtn) hideBtn.style.display = 'none';
   if (restoreBtn) restoreBtn.style.display = '';
-  markDirty(id, { deleted: true });
+  // {deleted: true} → tombstone + model training signal
+  markDirty(id, { deleted: true, hidden: false });
+}
+function hidePhoto(id) {
+  const card = document.querySelector(`.photo-card[data-id="${id}"]`);
+  if (card) { card.classList.add('hidden'); card.classList.remove('deleted'); }
+  const trashBtn = card?.querySelector('[data-action="trash"]');
+  const hideBtn = card?.querySelector('[data-action="hide"]');
+  const restoreBtn = card?.querySelector('[data-action="restore"]');
+  if (trashBtn) trashBtn.style.display = 'none';
+  if (hideBtn) hideBtn.style.display = 'none';
+  if (restoreBtn) restoreBtn.style.display = '';
+  // {hidden: true} → exclude from this beach's display but DO NOT train against
+  markDirty(id, { hidden: true, deleted: false });
 }
 function restorePhoto(id) {
   const card = document.querySelector(`.photo-card[data-id="${id}"]`);
-  if (card) card.classList.remove('deleted');
+  if (card) { card.classList.remove('deleted'); card.classList.remove('hidden'); }
   const trashBtn = card?.querySelector('[data-action="trash"]');
+  const hideBtn = card?.querySelector('[data-action="hide"]');
   const restoreBtn = card?.querySelector('[data-action="restore"]');
   if (trashBtn) trashBtn.style.display = '';
+  if (hideBtn) hideBtn.style.display = '';
   if (restoreBtn) restoreBtn.style.display = 'none';
-  markDirty(id, { deleted: false });
+  markDirty(id, { deleted: false, hidden: false });
 }
 
 function reorderPhotos(srcId, targetId) {
@@ -1092,7 +1628,9 @@ async function saveBeach() {
     return {
       id: p.id,
       sort_order: 100 + i,  // canonical: current grid order = show order
-      keep: !dirty.deleted,
+      keep: !dirty.deleted && !dirty.hidden,
+      hidden: !!dirty.hidden,            // distinct from deleted; no tombstone
+      override_keep_prob: dirty.override_keep_prob,  // may be undefined; edge fn skips if missing
       match_quality: p.match_quality || p.default_match_quality || null,
     };
   });

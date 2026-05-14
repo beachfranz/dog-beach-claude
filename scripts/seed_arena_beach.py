@@ -225,14 +225,14 @@ def main() -> int:
         if not noaa:
             print(f"\n  [refresh] skipped: no NOAA station — beach has no tide signal")
         else:
-            # Flip is_scoreable so the nightly daily-beach-refresh picks
-            # this beach up going forward (not just the one-off run below).
-            cur.execute(
-                "UPDATE public.beaches_gold SET is_scoreable = true WHERE fid = %s",
-                (arena_fid,)
-            )
+            # 2026-05-13: is_scoreable retired. Whether this beach is in
+            # the nightly fan-out is now decided by scoring_tier (Matrix C'),
+            # which refresh_scoring_tier() recomputes from catchment + dog
+            # policy. Force a recompute now so the new beach has a tier
+            # before we trigger the one-off refresh below.
+            cur.execute("SELECT public.refresh_scoring_tier(%s)", (arena_fid,))
             conn.commit()
-            print(f"  [score]   beaches_gold.is_scoreable = true")
+            print(f"  [score]   refresh_scoring_tier({arena_fid}) executed")
             print(f"\n  Triggering daily-beach-refresh for {slug}...")
             result = trigger_refresh(slug)
             if "error" in result:

@@ -1,6 +1,6 @@
 # Dog Beach Scout — End-to-End Pipeline Overview
 
-**Last verified:** 2026-05-08. Grounded in source code analysis (file:line refs throughout). This is the five-page overview; deeper per-phase docs live alongside.
+**Last verified:** 2026-05-12 (evening session refresh). Grounded in source code analysis (file:line refs throughout). This is the five-page overview; deeper per-phase docs live alongside. Section 16 below lists the deltas since the prior 2026-05-08 verification.
 
 The pipeline ingests raw geographic + policy data, dedupes it into a canonical beach inventory, attaches dog-policy and operational evidence, and serves daily scored recommendations to the UI. There are **ten distinct phases** in two halves: a **catalog half** (Phases 0–7) that builds the static beach record, and a **scoring half** (Phases 8–9) that runs daily over the curated subset. Phase 10 wraps both as orchestrators.
 
@@ -39,7 +39,7 @@ A `(fid, location_id)` row participates in many overlay tables (`beach_dog_polic
 
 | Source | Table | Loader | Endpoint kind |
 |---|---|---|---|
-| USGS PAD-US (per-state) | `pad_us_units` | `scripts/external_sources.py:332-346` | ArcGIS REST |
+| USGS PAD-US (per-state) | `pad_us_units` | **`scripts/load_pad_us_state.py`** ★ canonical as of 2026-05-12 | ArcGIS REST |
 | OSM amenities (per-state) | `osm_amenities` | `external_sources.py:320-364` + Overpass QL | Overpass |
 | OSM `natural=beach` | `osm_landing` | `scripts/load_state.py:91-200` | Overpass |
 | Google Places POIs | `poi_landing` | seeded separately | manual / one-off |
@@ -51,6 +51,16 @@ A `(fid, location_id)` row participates in many overlay tables (`beach_dog_polic
 | Closure polygons | `dog_policy_zones` | manual | shapefile |
 
 **Idempotency:** every loader checks `last_loaded_at()` (`external_sources.py:373-383`) and skips if within TTL (PAD-US 90d, OSM amenities 180d). Inserts use `ON CONFLICT (id_columns) DO UPDATE`.
+
+**⚠ PAD-US loader policy (set 2026-05-12):** the canonical loader for `pad_us_units` is **`scripts/load_pad_us_state.py`**. This is the one to use for queueing through states.
+
+DEPRECATED — do NOT use for PAD-US loads:
+- `scripts/external_sources.py` — writes `geom` only (missing `geom_geog`), do not invoke for PAD-US
+- `scripts/one_off/bulk_load_pad_us.py` — wraps the deprecated `external_sources.py`, do not invoke
+
+`scripts/load_pad_us_state.py` (patched 2026-05-12) writes both `geom` and `geom_geog` on INSERT + ON CONFLICT UPDATE. Spatial joins downstream (Method A + Method B containment) require `geom_geog`. CA worked by accident (initial CPAD path populated `geom_geog`); the 28 other loaded states had `geom_geog = NULL` → polygon-containment silently no-op'd. As of 2026-05-12: OR/WA/MA/MD reloaded via the canonical script; 24 states still null and need to be queued.
+
+Backfill migration `20260512_pad_us_backfill_geom_geog.sql` exists but **must NOT be run as a single bulk UPDATE** — crashed Supabase Postgres with DiskFull on ~257K geography casts. Use the canonical loader to reload affected states instead.
 
 **Freshness tracker (added 2026-05-08):** `public.external_source_status(source, state, last_loaded_at, row_count, status)` is written by every bulk loader and gates the pipeline via the Phase-10 precheck.
 
@@ -108,7 +118,7 @@ A `(fid, location_id)` row participates in many overlay tables (`beach_dog_polic
 
 **3.2 — Per-fid populator chain** (each emits BEP rows; see Phase 4):
 ```
-populate_polygon_containment_gold(fid)     -- cpad/jurisdictions/counties/military/tribal PIP
+populate_polygon_containment_gold(fid)     -- orchestrates cpad + pad_us (A) + pad_us_v2 (B) + jurisdictions + counties + military + tribal PIP
 populate_from_cpad_gold(fid)                -- CA park-unit names, governance
 populate_from_pad_us_gold(fid)              -- non-CA equivalent (added 2026-05-08)
 populate_from_park_operators_gold(fid)      -- agency-level dog policy from operators
@@ -120,6 +130,12 @@ populate_from_city_dog_policy_gold(fid)     -- city-ordinance evidence
 populate_from_county_dog_policy_gold(fid)   -- county-ordinance evidence
 _emit_evidence_from_osm_amenities(fid)      -- ★ wired 2026-05-08; OSM amenities → practical BEP
 ```
+
+**`populate_polygon_containment_gold` orchestrator** (`20260512_wire_pad_us_method_b_into_cascade.sql`) calls each containment populator and resolves canonical. PAD-US has TWO methods running in parallel:
+- **Method A**: `populate_pad_us_containment_gold(fid, 100)` — strict 100m buffer; writes `source='pad_us'`; confidence 0.95 inside / 0.85 within 100m.
+- **Method B**: `populate_pad_us_containment_gold_v2(fid)` — 5km buffer + name-token fuzzy match; writes `source='pad_us_v2'`; confidence 0.95 / 0.85 / 0.78 (name match strong) / 0.68 (name match weak). Catches OR Beach Bill territory (beach centroid seaward of state-park polygon boundary).
+
+Resolver (`_resolve_polygon_containment`) partitions by `polygon_kind`, picks canonical by source-rank → confidence desc → id asc. Net behavior: Method A wins when both find the same polygon (id tiebreak); Method B fills in only when A returns nothing. Comparison view: `vw_pad_us_method_comparison`.
 
 **3.3 — Per-fid resolvers** (consume BEP, write canonical columns):
 ```
@@ -291,7 +307,50 @@ URL-level voting within `unified_v1`: authority_score weighted by calibration we
 
 ## 12. Phase 10 — Orchestrators
 
-**`run_pipeline_for_state(p_state, p_fids, p_skip_precheck)`** — the integrated pipeline (`20260509_propagate_poi_address_to_gold.sql` is the latest definition; supersedes `20260508_pipeline_includes_operators.sql`). Order:
+**`scripts/run_state_pipeline.py`** is the canonical Python CLI orchestrator (added/evolved through 2026-05-12). It wraps the SQL orchestrator `run_pipeline_for_state` and executes 33 operational phases that map to the 10 conceptual phases above. Each phase has a `kind` (`sql` or `python`), an action, a criterion SQL, and is logged to `public.pipeline_phase_status`.
+
+CLI flags:
+- `--state CC` — required, two-letter state code
+- `--phase-from <phase_key>` — resume from a specific phase (e.g. `arena_seed` for a true "from landing" reset)
+- `--counties FIPS1,FIPS2,FIPS3` — (added 2026-05-12) narrows beach-scoped phases to specified counties. State-wide criterion failures become soft warnings (no halt). Operator phases run at full state scope regardless.
+- `--resume` — skip phases already `ok` for the given run_id
+- `--force` — ignore prior status, re-run all phases
+- `--skip-precheck` — skip the precheck phase only
+- `--dry-run` — print phase plan, do not execute
+
+`pipeline_phase_status` schema: `(run_id, state_code, phase, status, started_at, finished_at, rows_affected, criterion_met, criterion_text, error_message)`. **CHECK constraint:** `status IN ('in_progress','ok','failed','skipped')` — no `pending`. The admin UI reads from this table; states with zero rows don't render.
+
+**33-phase operational map → 10 conceptual phases:**
+
+| Operational | Conceptual | Notes |
+|---|---|---|
+| 1 chain_integrity_check | (validation) | code-side populator-chain audit |
+| 2-3 state_policy_seed, seasonal_closure_seed | Phase 0 | seed defaults |
+| 4-8 ensure_tiger_places, ensure_pad_us, ensure_overpass, ensure_amenities, ensure_dog_features | Phase 0 | upstream-loader gates; each wraps `scripts/one_off/bulk_load_*.py` |
+| 9 precheck | Phase 0 | `assert_state_upstream_loaded(state)` |
+| 10 operators | Phase 0 | `populate_operators_for_state(state)` |
+| 11 **arena_seed** | Phase 2 | landing→arena promotion (`--phase-from arena_seed` = "from landing") |
+| 12-13 cluster_group, cluster_extras | Phase 2 | dedup clustering |
+| 14 promote | Phase 3 | arena→gold via `promote_to_gold` |
+| 15-18 address_poi, address_city, name_source, strip_plus_codes | Phase 3 | post-promote enrichment |
+| 19-21 align_scoreable, catchment_refresh, noaa_station_check | Phase 3 | scoring-readiness checks |
+| 22 purge_pollution | Phase 3 | cross-state pollution cleanup |
+| 23-24 dedup, dedup_distance_name | Phase 3 | late-stage dedup |
+| 25 geom_queue | Phase 3 | drain geom-change cascade |
+| 26 operator_llm_extract | Phase 6 | wraps `extract_operator_dogs_policy.py`; chunked 5 ops/subprocess |
+| 27 operator_merge | Phase 6 | wraps `merge_operator_dogs_policy.py` (GLOBAL — not state-filtered) |
+| 28 bep_refire | Phase 4 | calls `refire_bep_cascade(fids)`; fids from `_state_tier12_fids(state)` |
+| 29 section_extract | Phase 6b | wraps `extract_beach_section_rules.py` |
+| 30 descriptions | Phase 7 | wraps `generate_beach_descriptions.py` |
+| 31 photos_wikimedia | Phase 7 | wraps `load_wikimedia_commons_photos.py` |
+| 32 daily_refresh_fire | Phase 8 | fires daily-beach-refresh per location_id |
+| 33 field_population_check | (validation) | per-state audit; hard thresholds |
+
+**Helper: `_state_tier12_fids(state)`** — returns tier-1+2 active fids for state. Used by phases 28-31. As of 2026-05-12 has a **bootstrap fallback**: when state has zero `beach_dog_policy` rows (fresh state or post-wipe), falls back to all active+scoreable beaches so `bep_refire` can populate `beach_dog_policy` on its first pass. Honors `COUNTIES_FILTER` when `--counties` is set.
+
+**Helper: `_state_operator_ids(state)`** — returns operators relevant for state (footprint contains state beaches via `state_operator_ids_with_beaches(state)`; falls back to all active operators in state if the footprint set is empty).
+
+**`run_pipeline_for_state(p_state, p_fids, p_skip_precheck)`** — the SQL orchestrator (`20260509_propagate_poi_address_to_gold.sql`). Called from inside the Python CLI but also runnable directly. Order:
 
 1. **`assert_state_upstream_loaded(state)`** — raises if any of `pad_us`, `osm_landing`, `osm_amenities`, `tiger_places` is not `status='ok'` in `external_source_status` for the state. Skippable for ad-hoc reruns.
 2. **`populate_operators_for_state(state)`** — TIGER cities + counties → `operators` (added 2026-05-08).
@@ -363,13 +422,30 @@ Phase 3  promote_to_gold ──┬──> populators emit BEP rows ──┐
 | Governing tiers (enrichment) | `state`, `city`, `county`, `federal` | `v2-enrich-operational/index.ts:35` |
 | Location Tiers (dog access) | `1_off-leash`, `2_on-leash`, `3_limited_access`, `4_no_dogs`, `unknown` | `public.beach_location_tier(dogs_allowed, has_off_leash, has_on_leash, dogs_prohibited_start)`; canonical SQL function as of 2026-05-09 |
 | BEP field groups | `dogs`, `practical`, `access`, `governance`, `polygon_containment` | `beach_enrichment_provenance.field_group` |
-| BEP sources (~24) | `manual, plz, cpad, ccc, llm, research, park_url, unified_v1, park_operators, nps_places, tribal_lands, military_bases, pad_us, jurisdictions, counties, json_explode, old_school_llm, osm_amenities_v1, ...` | `bep_source_catalog` |
+| BEP sources (~26 as of 2026-05-12) | `manual, plz, cpad, ccc, llm, research, park_url, unified_v1, park_operators, nps_places, tribal_lands, military_bases, pad_us, pad_us_v2 (new 2026-05-12), jurisdictions, counties, json_explode, old_school_llm, osm_amenities_v1, osm_amenities_v2, section_research_v1, polygon_containment_governance_v1, state_dogs_policy_v1, city_policy, county_policy, operator_pad_us, operator_city, operator_county` | `bep_source_catalog` |
 | Hour status | `go`, `advisory`, `caution`, `no_go` | `_shared/scoring.ts` |
 | Busyness category | `quiet`, `moderate`, `dog_party`, `too_crowded` | `_shared/scoring.ts` |
 | Bacteria risk | `none`, `low`, `moderate`, `high` | `_shared/scoring.ts` |
 | Summary weather | `sunny`, `partly_cloudy`, `cloudy`, `foggy`, `rainy`, `windy` | `daily-beach-refresh/openmeteo.ts` |
 | Zone rules | `regions[].sections.{sand|water|trails|picnic_area|asphalt}` | `beach_dog_policy.zone_rules` JSONB |
 | Quality anchor tiers (test fixtures only) | Tier 1 marquee, Tier 2 regional, Tier 3 long-tail | `tests/quality_anchors/*.yaml` |
+| Pipeline phase status | `in_progress`, `ok`, `failed`, `skipped` | `pipeline_phase_status.status` (CHECK constraint — no `pending`) |
+
+### Franz's operational vocabulary (read these literally)
+
+| Term | Literal codebase meaning |
+|---|---|
+| **landing** | The landing tables — `osm_landing`, `poi_landing`, `pad_us_units`. Raw external data BEFORE arena/gold promotion. |
+| **arena** | `arena` table — intermediate dedup spine between landing and gold |
+| **gold** | `beaches_gold` — the canonical consumer-facing beach table |
+| **cascade** | `public.refire_bep_cascade(fids)` SQL fn — wipes BEP for 5 regen field_groups, re-runs populators, resolves canonical, promotes to consumer tables |
+| **from landing** | `run_state_pipeline.py --phase-from arena_seed` — re-fires phases 11→33 (NOT just the LLM tail) |
+| **the pipeline** | `scripts/run_state_pipeline.py` orchestrator |
+| **every point every polygon** | Every active+scoreable beach must run through every polygon-containment populator (no picker-side skip) |
+| **"all the X go"** | The FULL functional set of X, including cross-state/federal cases — NOT a `state_code = state` filter |
+| **"the LLM extracts"** | Rows in `operator_policy_extractions`, `beach_policy_extractions`, `policy_research_extractions`, `beach_descriptions` — including operators returned by `state_operator_ids_with_beaches(state)`, not just `operators.state_code = state` |
+
+See `~/.claude/projects/C--Program-Files-Git/memory/feedback_vocabulary_hymnal.md` for the operational protocol.
 
 ---
 
@@ -409,4 +485,63 @@ Companion clean-up after Google reverse-geocode: a Plus-code-stripping pass (`^[
 
 ---
 
-*This document is the overview. Per-phase drilldowns (BEP source registry, scoring config, populator internals, calibration audit) belong in their own docs/ files. File:line refs throughout this doc are accurate as of 2026-05-08.*
+---
+
+## 16. Recent Pipeline Changes (2026-05-12)
+
+### 16.1 PAD-US `geom_geog` loader bug + loader policy
+
+**Symptom:** Methods A and B PAD-US containment populators returned zero matches for OR + WA + 22 other states. Method B (5km + name match) was suspected of being too narrow.
+
+**Root cause:** `pad_us_units.geom_geog` was NULL for 257,024 of 308,001 rows (28 of 29 loaded states). CA was the only state with `geom_geog` populated — by accident, via the older CPAD load path. Both Methods A and B spatial-join on `geom_geog` via `ST_DWithin`, so the join short-circuited to zero matches for every other state.
+
+**Loader policy (set 2026-05-12):**
+- **Canonical:** `scripts/load_pad_us_state.py` — patched to write `geom_geog`. Use this for queueing through states: `python scripts/load_pad_us_state.py STATE1 STATE2 ...`
+- **Deprecated (do not use for PAD-US):** `scripts/external_sources.py`, `scripts/one_off/bulk_load_pad_us.py`. These write `geom` only and would reintroduce the bug.
+- **Pipeline integration:** `action_ensure_pad_us` in `scripts/run_state_pipeline.py` rewired 2026-05-12 to subprocess the canonical loader and write `external_source_status` on success.
+
+**State coverage:** OR, WA, MA, MD have correct `geom_geog`. 24 states pending (MN, WI, NY, PA, CT, MI, NJ, IL, VA, TX, FL, OH, NH, ME, GA, NC, IN, SC, DE, RI, AL, LA, MS, HI). Queue them via the canonical loader to fill the gap.
+
+**Avoid:** running `20260512_pad_us_backfill_geom_geog.sql` as a single bulk UPDATE. The 257K geography casts crashed Supabase Postgres with DiskFull → forced manual restart. Use the canonical loader per-state instead.
+
+### 16.2 PAD-US Method B (5km + name-token fuzzy match)
+
+- New function: `populate_pad_us_containment_gold_v2(fid)` in `20260512_pad_us_method_b_with_name_match.sql`.
+- Wired into `populate_polygon_containment_gold` orchestrator via `20260512_wire_pad_us_method_b_into_cascade.sql`.
+- Writes `source='pad_us_v2'`. Confidence ladder: inside (0.95) / within_100m (0.85) / name_match_strong ≥2 tokens (0.78) / name_match_weak 1 token within 2km (0.68).
+- Resolver picks Method A on confidence tiebreak; Method B fills gaps (OR Beach Bill: beach centroid seaward of state-park polygon).
+- Comparison view: `public.vw_pad_us_method_comparison`.
+
+### 16.3 `run_state_pipeline.py --counties` flag
+
+Added a `--counties FIPS1,FIPS2,FIPS3` flag for narrowed test runs.
+
+- Module-global `COUNTIES_FILTER` set from CLI arg.
+- `_state_tier12_fids(state)` and `action_daily_refresh_fire(state)` filter to specified counties when set.
+- State-wide criterion failures become **soft warnings (status='skipped')** rather than halts.
+- Operator phases (`operator_llm_extract`, `operator_merge`) run at full state scope — they operate on operators, not beaches.
+
+### 16.4 `_state_tier12_fids` bootstrap fallback
+
+When a state has zero `beach_dog_policy` rows (fresh state or post-wipe), `_state_tier12_fids(state)` now falls back to all active+scoreable beaches in the state. Lets `bep_refire` populate `beach_dog_policy` on its first pass instead of returning empty.
+
+### 16.5 Operational gotchas worth documenting
+
+- **`bulk_load_pad_us.py` (one-off wrapper) has hardcoded skip-logic**: `if pad_us_count(state) > 100: skip`. No `--force` flag. To force a reload, delete the state's `pad_us_units` rows first OR patch the script.
+- **`extract_operator_dogs_policy.py --skip-recent 24h`** — skips operators with extractions newer than 24h. To force re-extract for a state, wipe `operator_policy_extractions` for the full functional operator scope (`state_operator_ids_with_beaches(state)` — NOT just `operators.state_code = state`, which misses federal/NPS/multi-state operators whose footprint contains the target state's beaches).
+- **`pipeline_phase_status.status` CHECK constraint** allows only `in_progress / ok / failed / skipped` (no `pending`). The admin UI doesn't enumerate phases that have no rows; states with zero rows drop off the dashboard entirely.
+
+### 16.6 TRUNCATE `census_tracts` (disk recovery)
+
+Truncated `public.census_tracts` (85,529 rows, 710 MB) on 2026-05-12 to recover disk after the geom_geog bulk-UPDATE DiskFull incident. Table is empty as of session end. May need re-load if any downstream code references it.
+
+### 16.7 New memory pins (2026-05-12 evening session)
+
+Three behavioral pins added to `~/.claude/projects/C--Program-Files-Git/memory/`:
+- `feedback_no_silent_narrowing.md` — don't narrow Franz's explicit directives based on my own judgment
+- `feedback_vocabulary_hymnal.md` — literal codebase mapping for Franz's recurring terms
+- `project_session_state_2026_05_12_evening.md` — comprehensive session state hand-off
+
+---
+
+*This document is the overview. Per-phase drilldowns (BEP source registry, scoring config, populator internals, calibration audit) belong in their own docs/ files. File:line refs throughout this doc are accurate as of 2026-05-12.*

@@ -39,6 +39,36 @@ CHROME_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
              "Chrome/120.0.0.0 Safari/537.36")
 
 
+def _parse_cli_rows(stdout: str) -> list[dict]:
+    """Parse `supabase db query --linked` JSON output.
+
+    The CLI prints `Initialising login role...` prefix, then a JSON
+    envelope `{"boundary": "...", "rows": [...], "warning": "..."}`,
+    then a `A new version of Supabase CLI` suffix. Previously this
+    used a brittle regex (`"rows"\\s*:\\s*(\\[.*?\\])\\s*[},]`) that
+    failed when the CLI changed envelope shape. Robust approach:
+    find the first `{` and last `}`, parse the slice as JSON, pluck
+    `rows`.
+    """
+    start = stdout.find('{')
+    end = stdout.rfind('}')
+    if start == -1 or end == -1 or start >= end:
+        raise RuntimeError(
+            f"no JSON envelope found in CLI output:\n{stdout[:500]}"
+        )
+    try:
+        envelope = json.loads(stdout[start:end + 1])
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"could not parse CLI JSON envelope: {e}\n{stdout[start:start+500]}"
+        )
+    if not isinstance(envelope, dict) or 'rows' not in envelope:
+        raise RuntimeError(
+            f"CLI envelope missing 'rows' key:\n{stdout[:500]}"
+        )
+    return envelope['rows']
+
+
 # ── Operator data ────────────────────────────────────────────────────
 def fetch_top_operators(limit: int, counties: list[str] | None = None) -> list[dict]:
     headers = {"apikey": SERVICE_KEY, "Authorization": f"Bearer {SERVICE_KEY}"}
@@ -85,13 +115,7 @@ def fetch_top_operators(limit: int, counties: list[str] | None = None) -> list[d
     )
     if r.returncode != 0:
         raise RuntimeError(f"db query failed: {r.stderr[:500]}")
-    # parse JSON-ish output (supabase CLI prints JSON)
-    out = r.stdout
-    # extract the rows list — the CLI prints a JSON envelope around it
-    m = re.search(r'"rows"\s*:\s*(\[.*?\])\s*[},]', out, re.DOTALL)
-    if not m:
-        raise RuntimeError(f"could not parse rows from CLI output:\n{out[:500]}")
-    return json.loads(m.group(1))
+    return _parse_cli_rows(r.stdout)
 
 
 STATE_NAME = {
@@ -149,10 +173,7 @@ def fetch_operators_by_ids(ids: list[int]) -> list[dict]:
     )
     if r.returncode != 0:
         raise RuntimeError(f"db query failed: {r.stderr[:500]}")
-    m = re.search(r'"rows"\s*:\s*(\[.*?\])\s*[},]', r.stdout, re.DOTALL)
-    if not m:
-        raise RuntimeError(f"could not parse rows from CLI output:\n{r.stdout[:500]}")
-    return json.loads(m.group(1))
+    return _parse_cli_rows(r.stdout)
 
 
 def domain_of(url: str | None) -> str | None:

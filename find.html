@@ -271,7 +271,8 @@
     .day-card.status-no_go    { border-left: 3px solid var(--red); opacity: 0.7; }
 
     /* Tier-based display gates: 1+2 normal, 3 muted, 4 grey-no-dog.
-       is_scoreable is the cost gate (LLM/refresh); tier is the display gate. */
+       scoring_tier is the cost gate (daily/hourly/none); this is the
+       display gate. */
     .day-card.tier-3_limited_access {
       opacity: 0.62;
       filter: grayscale(0.45);

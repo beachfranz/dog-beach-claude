@@ -266,7 +266,7 @@ const PHASE_LABELS = {
   '06_complete':                 'Complete (consumer-ready)',
 };
 
-// Canonical 31-phase order for run_state_pipeline.py (2026-05-09 canon).
+// Canonical 33-phase order for run_state_pipeline.py.
 // Mirror of PHASES list in scripts/run_state_pipeline.py — keep in sync.
 const CANON_PHASE_ORDER = [
   'chain_integrity_check', 'state_policy_seed', 'seasonal_closure_seed',
@@ -274,9 +274,9 @@ const CANON_PHASE_ORDER = [
   'ensure_amenities', 'ensure_dog_features', 'precheck',
   'operators', 'arena_seed', 'cluster_group', 'cluster_extras',
   'promote', 'address_poi', 'address_city', 'name_source',
-  'strip_plus_codes', 'align_scoreable', 'noaa_station_check',
-  'purge_pollution', 'dedup', 'geom_queue',
-  'operator_llm_extract', 'operator_merge', 'bep_refire',
+  'strip_plus_codes', 'align_scoreable', 'catchment_refresh',
+  'noaa_station_check', 'purge_pollution', 'dedup', 'dedup_distance_name',
+  'geom_queue', 'operator_llm_extract', 'operator_merge', 'bep_refire',
   'section_extract', 'descriptions', 'photos_wikimedia',
   'daily_refresh_fire', 'field_population_check',
 ];

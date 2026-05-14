@@ -51,19 +51,23 @@ Deno.serve(async (req: Request) => {
     //   2. Untouched photos (sort_order >= 1000 from loaders) come in by
     //      model predicted_keep_prob DESC — best-first per the Tier 2
     //      photo classifier. Curator drags only when the model is wrong.
+    // 2026-05-13: removed the `is("curated_at", null)` filter so the
+    // curator UI can render curator-promoted photos with their gold-frame
+    // styling (the frontend's isCuratorPhoto() check needs to see them).
+    // Curators can now re-trash a previously-kept photo or restore a
+    // trashed one without re-fetching.
+    //
+    // Also excludes hidden photos here — hidden_at != NULL means
+    // "explicitly hidden from this beach by an earlier curate pass";
+    // re-surfacing them requires the curator to flip an "include hidden"
+    // toggle (TODO if needed).
     const { data: photos } = await supabase
       .from("beach_photos")
       .select("id, source, image_url, thumb_url, attribution, license, " +
               "page_url, distance_m, sort_order, source_meta, match_quality, " +
-              "curated_at, lat, lng")
+              "curated_at, hidden_at, lat, lng")
       .eq("arena_group_id", fid)
-      .is("curated_at", null);   // hide already-decided photos; curator only
-                                  // sees what they still need to decide.
-                                  // Propagated decisions from sibling beaches
-                                  // mark photos curated_at — they then drop
-                                  // out of the grid here, so a Marin beach
-                                  // whose 30 gallery photos were already
-                                  // decided at sister-beach-1 shows empty.
+      .is("hidden_at", null);
     (photos ?? []).sort((a, b) => {
       const aTouched = (a.sort_order ?? 9999) < 1000;
       const bTouched = (b.sort_order ?? 9999) < 1000;
@@ -115,7 +119,14 @@ Deno.serve(async (req: Request) => {
   if (req.method === "POST") {
     let body: {
       fid?: number;
-      photos?: Array<{ id: number; sort_order: number; keep: boolean; match_quality?: string }>;
+      photos?: Array<{
+        id: number;
+        sort_order: number;
+        keep: boolean;
+        hidden?: boolean;                 // hide w/o tombstone (no model penalty)
+        override_keep_prob?: number;      // curator-set keep-prob override (0-1)
+        match_quality?: string;
+      }>;
       match_quality?: string;
       notes?: string;
       curated_by?: string;
@@ -132,8 +143,31 @@ Deno.serve(async (req: Request) => {
     }
 
     const photos = body.photos ?? [];
-    const toDelete = photos.filter(p => !p.keep).map(p => p.id);
+    // Partition: kept (visible on this beach), hidden (set hidden_at, no
+    // tombstone — model doesn't see negative signal), trashed (tombstone
+    // + delete, model penalized).
+    const toHide   = photos.filter(p => !p.keep && p.hidden).map(p => p.id);
+    const toDelete = photos.filter(p => !p.keep && !p.hidden).map(p => p.id);
     const toKeep   = photos.filter(p => p.keep);
+
+    // Process hides first — set hidden_at, hidden_by. No tombstone, no
+    // deletion. Photo stays in beach_photos table; consumer-facing
+    // selection filters on hidden_at IS NULL.
+    let hidden = 0;
+    if (toHide.length) {
+      const { error: hideErr, count } = await supabase
+        .from("beach_photos")
+        .update({
+          hidden_at: new Date().toISOString(),
+          hidden_by: body.curated_by ?? null,
+        }, { count: "exact" })
+        .in("id", toHide);
+      if (hideErr) {
+        return new Response(JSON.stringify({ error: hideErr.message }),
+          { status: 500, headers: cors });
+      }
+      hidden = count ?? 0;
+    }
 
     let deleted = 0;
     if (toDelete.length) {
@@ -233,8 +267,25 @@ Deno.serve(async (req: Request) => {
         sort_order: p.sort_order,
         curated_at: new Date().toISOString(),
         curated_by: body.curated_by ?? null,
+        // Always clear hidden_at on keep — covers the un-hide-via-restore path.
+        hidden_at: null,
+        hidden_by: null,
       };
       if (p.match_quality) update.match_quality = p.match_quality;
+      // Persist curator override into source_meta.override_keep_prob.
+      // Clearing the input sends undefined → no-op. Setting an explicit
+      // null would clear it server-side (future use, not wired yet).
+      if (typeof p.override_keep_prob === "number") {
+        // Pull current meta, merge override, write back. (Supabase JS doesn't
+        // support JSONB field-level UPDATEs cleanly — read-modify-write.)
+        const { data: cur } = await supabase
+          .from("beach_photos")
+          .select("source_meta")
+          .eq("id", p.id).single();
+        const meta = (cur?.source_meta ?? {}) as Record<string, unknown>;
+        meta.override_keep_prob = p.override_keep_prob;
+        update.source_meta = meta;
+      }
       const { error: upErr } = await supabase
         .from("beach_photos")
         .update(update)
@@ -274,7 +325,10 @@ Deno.serve(async (req: Request) => {
     });
 
     return new Response(JSON.stringify({
-      ok: true, kept_count: toKeep.length, deleted_count: deleted,
+      ok: true,
+      kept_count: toKeep.length,
+      hidden_count: hidden,
+      deleted_count: deleted,
     }), { status: 200, headers: cors });
   }
 

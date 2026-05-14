@@ -1,15 +1,8 @@
-"""Aggregate every asset module into a single all_assets list for the
-Definitions root."""
-from . import (dbt_assets, ingest, verdicts, consumer_pipeline,
-               frontend, external_sources, arena, gold)
+"""Asset modules — one file per pipeline phase or tightly-coupled phase group.
 
-all_assets = [
-    *dbt_assets.dbt_models_assets_list,
-    *ingest.assets,
-    *verdicts.assets,
-    *consumer_pipeline.assets,
-    *frontend.assets,
-    *external_sources.assets,
-    *arena.assets,
-    *gold.assets,
-]
+Naming convention: filenames mirror the phase key in
+scripts/run_state_pipeline.py PHASES list (operators -> operator_seeding,
+arena_seed -> arena_seeding, etc.) so the mapping is obvious.
+
+v0.2.0 (2026-05-13) covers Phase 10 only.
+"""

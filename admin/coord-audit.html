@@ -191,7 +191,7 @@ const ANON_KEY     = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 
 const SS_TOKEN = 'curator_token';
 let token = sessionStorage.getItem(SS_TOKEN);
-let queue = [];        // [{fid, beach_name, county, is_active, is_scoreable, tier, our_lat, our_lon, source, their_lat, their_lng, their_name, their_url, divergence_m}]
+let queue = [];        // [{fid, beach_name, county, is_active, scoring_tier, tier, our_lat, our_lon, source, their_lat, their_lng, their_name, their_url, divergence_m}]
 let qIdx = -1;
 let movedLat = null, movedLng = null;  // pending drag changes
 
@@ -243,7 +243,7 @@ async function showApp() {
 // ─── Queue ────────────────────────────────────────────────────────
 async function loadQueue() {
   const url = `${SUPABASE_URL}/rest/v1/coord_audit_pairs`
-            + `?select=*&is_active=eq.true&is_scoreable=eq.true`
+            + `?select=*&is_active=eq.true&scoring_tier=in.(daily,hourly)`
             + `&order=divergence_m.desc&limit=500`;
   const res = await fetch(url, { headers: {
     apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } });
@@ -320,7 +320,7 @@ function renderBeach(p) {
   sub.innerHTML =
     `fid ${p.fid} · ${escHtml(p.county_name || '')}, ${escHtml(p.state || 'CA')}` +
     ` <span class="pill">${escHtml(p.tier || '-')}</span>` +
-    (p.is_scoreable ? ' <span class="pill">scoreable</span>' :
+    ((p.scoring_tier === 'daily' || p.scoring_tier === 'hourly') ? ' <span class="pill">scoreable</span>' :
                       ' <span class="pill muted">not scoreable</span>') +
     ` <span class="pill warn">${p.divergence_m}m divergence</span>`;
 

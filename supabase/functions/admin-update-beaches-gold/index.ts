@@ -49,8 +49,8 @@ const EDITABLE_FIELDS = new Set<string>([
   "open_time", "close_time",
   // Lifecycle
   "is_active", "inactive_reason",
-  "is_scoreable",
   "timezone",
+  // scoring_tier is derived by refresh_scoring_tier(); not curator-editable.
   // Review workflow (slice 4 — added 2026-05-03)
   // CHECK constraint enforces: needs_review | verified | flagged | null
   "review_status", "review_notes",

@@ -1,0 +1,280 @@
+"""Photo enrichment + vision tagging + ML scoring.
+
+Closes the lineage gaps Franz called out 2026-05-13: photo loaders
+beyond Wikimedia were declared as resources but had no asset wired,
+and the two-pass Haiku vision tagger + the logreg keep_prob model
+weren't in Dagster at all.
+
+Layout:
+  photos_<source>(state)          — per-state photo loaders
+  photo_vision_tags(source)       — Haiku two-pass tagger, per-source partition
+  photo_keep_prob_model()         — non-partitioned: train + write predictions
+
+The photo loaders mirror photos_wikimedia's chunked-fanout pattern:
+  - Per-state partition
+  - Pulls tier-1+2 fids for the state via the same _tier12_fids helper
+  - Chunked subprocess to the load_*_photos.py script
+  - Counts photos saved by parsing the script's stdout
+
+Vision tagging is per-source-partitioned (not per-state) because the
+script's filter is `source`, not `state` — and budget control is more
+naturally per-source (Flickr is cheap, Wikimedia ran $9.76 / 2,144 photos).
+A second-pass call against an existing source is the common operational
+mode (e.g. retag after a prompt change).
+
+ML training is non-partitioned. One model, one prediction set, refreshed
+when curator labels grow enough to move the needle.
+"""
+
+import re
+
+from dagster import (
+    asset,
+    AssetExecutionContext,
+    MaterializeResult,
+    MetadataValue,
+    StaticPartitionsDefinition,
+)
+
+from ..partitions import state_partitions
+from ..resources import PostgresPoolerResource, SubprocessResource
+
+
+# Per-source partition def for vision tagging. Mirrors the photo loader
+# inventory; if you add another loader, add it here too.
+vision_source_partitions = StaticPartitionsDefinition(
+    ["wikimedia", "flickr", "pixabay", "pexels", "unsplash", "ccc"]
+)
+
+
+def _tier12_fids(postgres: PostgresPoolerResource, state: str) -> list[int]:
+    """Same gate as per_fid_enrichment._tier12_fids — kept duplicated to
+    avoid cross-module imports for one helper. If a third file needs it,
+    promote to a shared helpers module."""
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT array_agg(distinct g.fid) "
+                "  FROM public.beaches_gold g "
+                " WHERE g.state=%s AND g.is_active AND g.scoring_tier IN ('daily','hourly')",
+                (state,),
+            )
+            return cur.fetchone()[0] or []
+    finally:
+        conn.close()
+
+
+def _run_chunked(
+    context: AssetExecutionContext,
+    subproc: SubprocessResource,
+    script_path: str,
+    fids: list[int],
+    chunk_size: int,
+    per_chunk_timeout: int,
+    parse_pattern: str,
+) -> tuple[int, int, int]:
+    """Returns (total_parsed_value, chunks_done, chunks_failed)."""
+    total = 0
+    done = 0
+    failed = 0
+    for i in range(0, len(fids), chunk_size):
+        chunk = fids[i:i + chunk_size]
+        result = subproc.run(
+            script_path,
+            args=["--fids", ",".join(str(x) for x in chunk)],
+            timeout=per_chunk_timeout,
+        )
+        if result.returncode != 0:
+            failed += 1
+            context.log.warning(
+                f"Chunk {done+1} failed (fids {chunk[0]}..{chunk[-1]}): "
+                f"{result.stderr[-300:]}"
+            )
+            continue
+        m = re.search(parse_pattern, result.stdout)
+        if m:
+            total += int(m.group(1))
+        done += 1
+    return total, done, failed
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  Photo loaders — one per source, per-state partitioned
+# ════════════════════════════════════════════════════════════════════════
+
+def _make_photo_loader_asset(
+    *,
+    name: str,
+    script: str,
+    chunk_size: int,
+    timeout: int,
+    parse_pattern: str,
+    description: str,
+):
+    """Factory for the photo-loader-per-source asset. All loaders share
+    the same shape (per-state, chunked subprocess, parse "N saved")."""
+    @asset(
+        name=name,
+        partitions_def=state_partitions,
+        group_name="phase_31_photos",
+        description=description,
+    )
+    def _asset(
+        context: AssetExecutionContext,
+        postgres: PostgresPoolerResource,
+        subproc: SubprocessResource,
+    ) -> MaterializeResult:
+        state = context.partition_key
+        fids = _tier12_fids(postgres, state)
+        if not fids:
+            return MaterializeResult(metadata={"state": state, "fids": 0, "skipped": True})
+        total, done, failed = _run_chunked(
+            context, subproc, script, fids,
+            chunk_size=chunk_size, per_chunk_timeout=timeout,
+            parse_pattern=parse_pattern,
+        )
+        return MaterializeResult(metadata={
+            "state":         MetadataValue.text(state),
+            "fids_total":    MetadataValue.int(len(fids)),
+            "photos_saved":  MetadataValue.int(total),
+            "chunks_done":   MetadataValue.int(done),
+            "chunks_failed": MetadataValue.int(failed),
+        })
+    return _asset
+
+
+photos_flickr = _make_photo_loader_asset(
+    name="photos_flickr",
+    script="scripts/load_flickr_photos.py",
+    chunk_size=50, timeout=600,
+    parse_pattern=r"saved=(\d+)",
+    description=(
+        "Flickr Commons photo loader. CC-licensed only (skips All Rights "
+        "Reserved). Spatial search by beach lat/lng + radius. Variable "
+        "coverage — urban beaches yield more."
+    ),
+)
+
+photos_pixabay = _make_photo_loader_asset(
+    name="photos_pixabay",
+    script="scripts/load_pixabay_photos.py",
+    chunk_size=80, timeout=600,
+    parse_pattern=r"saved=(\d+)",
+    description="Pixabay photo loader. Royalty-free, name-based query.",
+)
+
+photos_pexels = _make_photo_loader_asset(
+    name="photos_pexels",
+    script="scripts/load_pexels_photos.py",
+    chunk_size=80, timeout=600,
+    parse_pattern=r"saved=(\d+)",
+    description="Pexels photo loader. Royalty-free, name-based query.",
+)
+
+photos_unsplash = _make_photo_loader_asset(
+    name="photos_unsplash",
+    script="scripts/load_unsplash_photos.py",
+    chunk_size=80, timeout=600,
+    parse_pattern=r"saved=(\d+)",
+    description="Unsplash photo loader. Free use, name-based query.",
+)
+
+photos_ccc = _make_photo_loader_asset(
+    name="photos_ccc",
+    script="scripts/load_ccc_photos.py",
+    chunk_size=80, timeout=600,
+    parse_pattern=r"saved=(\d+)",
+    description=(
+        "California Coastal Commission photo loader. CA-only by source "
+        "scope — non-CA partitions will find 0 matches and skip."
+    ),
+)
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  Phase 31b — vision tagging (Haiku two-pass), per-source partition
+# ════════════════════════════════════════════════════════════════════════
+
+@asset(
+    partitions_def=vision_source_partitions,
+    group_name="phase_31_photos",
+    description=(
+        "Two-pass Haiku vision tagger for beach_photos.source_meta.vision. "
+        "Writes has_dog / has_birds / has_surfing / has_active_people / "
+        "has_human_face_closeup / scene / atmosphere / quality_issue / etc. "
+        "Skips photos already tagged unless --no-skip-existing. Budget gate "
+        "is per-source via --budget-usd (default $20). Pricing reference: "
+        "Wikimedia ran ~$9.76 / 2,144 photos. Chunk-size 50/call (Haiku 4.5)."
+    ),
+)
+def photo_vision_tags(
+    context: AssetExecutionContext,
+    subproc: SubprocessResource,
+) -> MaterializeResult:
+    source = context.partition_key
+    result = subproc.run(
+        "scripts/load_photo_vision_tags.py",
+        args=["--source", source, "--chunk-size", "50", "--workers", "1"],
+        timeout=14400,  # 4h — Wikimedia ran ~3h
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"photo_vision_tags failed for source={source}: "
+            f"{result.stderr[-500:]}"
+        )
+    # Parse the "ok=N err=N" + "est cost=$X" footer
+    ok_match  = re.search(r"ok=(\d+)\s+err=(\d+)", result.stdout)
+    cost_match = re.search(r"est cost=\$([\d.]+)", result.stdout)
+    ok_n  = int(ok_match.group(1))  if ok_match  else 0
+    err_n = int(ok_match.group(2))  if ok_match  else 0
+    cost  = float(cost_match.group(1)) if cost_match else 0.0
+    return MaterializeResult(metadata={
+        "source":     MetadataValue.text(source),
+        "photos_ok":  MetadataValue.int(ok_n),
+        "photos_err": MetadataValue.int(err_n),
+        "est_cost_usd": MetadataValue.float(round(cost, 2)),
+    })
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  Phase 31c — keep_prob model (logreg) training + prediction write
+# ════════════════════════════════════════════════════════════════════════
+
+@asset(
+    deps=[photo_vision_tags],
+    group_name="phase_31_photos",
+    description=(
+        "Trains the logreg classifier on curator labels + vision features, "
+        "then writes predicted_keep_prob to beach_photos.source_meta for "
+        "EVERY photo in the table. Output is consumed by curate.html (Tier 2 "
+        "ML badge) and get_beach_photos_diverse (eligibility floor 0.65). "
+        "Also applies the apply_vision_rules layer (has_dog=0.85 floor, "
+        "has_human_face_closeup=0.05 hard reject, screenshot/interior=0.10). "
+        "Non-partitioned — one model, one prediction set."
+    ),
+)
+def photo_keep_prob_model(
+    context: AssetExecutionContext,
+    subproc: SubprocessResource,
+) -> MaterializeResult:
+    result = subproc.run(
+        "scripts/train_photo_model.py",
+        args=[],
+        timeout=1800,  # 30 min — model fits in <2 min, prediction write is the long part
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"photo_keep_prob_model failed: {result.stderr[-500:]}"
+        )
+    # Parse "Writing N predictions" and "vision rules applied: X/Y"
+    write_match  = re.search(r"Writing (\d+) predictions", result.stdout)
+    rules_match  = re.search(r"vision rules applied:\s+(\d+)/(\d+)", result.stdout)
+    written = int(write_match.group(1)) if write_match else 0
+    rules_changed = int(rules_match.group(1)) if rules_match else 0
+    rules_total   = int(rules_match.group(2)) if rules_match else 0
+    return MaterializeResult(metadata={
+        "predictions_written": MetadataValue.int(written),
+        "vision_rules_changed": MetadataValue.int(rules_changed),
+        "vision_rules_total":   MetadataValue.int(rules_total),
+    })

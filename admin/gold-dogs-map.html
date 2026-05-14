@@ -215,7 +215,7 @@ const STATUS_COLORS = {
 const STATUS_ORDER = ['both', 'off_leash', 'on_leash', 'no_dogs', 'unknown'];
 
 // State
-const allBeaches = [];          // merged rows: {fid, name, lat, lon, county, state, is_scoreable, dogs_allowed, leash_policy, off_leash_flag, has_on_leash, has_off_leash}
+const allBeaches = [];          // merged rows: {fid, name, lat, lon, county, state, scoring_tier, dogs_allowed, leash_policy, off_leash_flag, has_on_leash, has_off_leash}
 const markers = [];             // {beach, marker}
 const policyZoneLayers = [];    // L.geoJSON layers for dog_policy_zones
 let map;
@@ -262,7 +262,7 @@ async function init() {
 
   try {
     const [gold, dogs, polys, zones] = await Promise.all([
-      restGetAll('beaches_gold?select=fid,name,lat,lon,county_name,state,is_scoreable,location_id&is_active=eq.true'),
+      restGetAll('beaches_gold?select=fid,name,lat,lon,county_name,state,scoring_tier,location_id&is_active=eq.true'),
       restGetAll('beach_dog_policy?select=arena_group_id,dogs_allowed,leash_policy,off_leash_flag,has_on_leash,has_off_leash,access_rule,source,consensus_confidence,disagreement_flag'),
       restGetAll('beach_polygons_geojson?select=fid,source_tier,is_split_loser,area_m2,geom'),
       restGetAll('dog_policy_zones_geojson?select=id,category,name,species,source_agency,source_url,effective_dates,notes,area_m2,geom'),
@@ -288,7 +288,7 @@ async function init() {
       allBeaches.push({
         fid: g.fid, name: g.name, lat: g.lat, lon: g.lon,
         county: g.county_name, state: g.state,
-        location_id: g.location_id, is_scoreable: g.is_scoreable,
+        location_id: g.location_id, is_scoring_active: (g.scoring_tier === 'daily' || g.scoring_tier === 'hourly'),
         dogs_allowed: d.dogs_allowed,
         leash_policy: d.leash_policy,
         off_leash_flag: d.off_leash_flag,
@@ -370,7 +370,7 @@ function buildFilterRows() {
     root.appendChild(row);
   });
 
-  const scoreableCount = allBeaches.filter(b => b.is_scoreable).length;
+  const scoreableCount = allBeaches.filter(b => (b.scoring_tier === 'daily' || b.scoring_tier === 'hourly')).length;
   document.getElementById('scoreable-count').textContent = scoreableCount;
   document.getElementById('scoreable-only').addEventListener('change', e => {
     filterState.scoreable_only = e.target.checked;
@@ -410,7 +410,7 @@ function buildFilterRows() {
 // ============================================================================
 function visible(b) {
   if (!filterState.status.has(statusOf(b))) return false;
-  if (filterState.scoreable_only && !b.is_scoreable) return false;
+  if (filterState.scoreable_only && !(b.scoring_tier === 'daily' || b.scoring_tier === 'hourly')) return false;
   if (filterState.offleash_only && !b.off_leash_flag) return false;
   return true;
 }
@@ -497,7 +497,7 @@ function renderMarkers() {
 
     // Point marker (small dot to mark canonical lat/lon, on top of polygon)
     const marker = L.circleMarker([b.lat, b.lon], {
-      radius: b.is_scoreable ? 5 : 3,
+      radius: (b.scoring_tier === 'daily' || b.scoring_tier === 'hourly') ? 5 : 3,
       fillColor: fill,
       color: b.off_leash_flag ? '#0f172a' : '#ffffff',
       weight: b.off_leash_flag ? 2 : 1,
@@ -529,7 +529,7 @@ function buildPopup(b) {
   return `
     <div class="popup-name">${escapeHtml(b.name)}</div>
     <div class="popup-fid">fid=${b.fid} · ${escapeHtml(b.county || '')} · ${b.state || ''}
-      ${b.is_scoreable ? '<span class="popup-badge badge-scoreable">scoreable</span>' : ''}
+      ${(b.scoring_tier === 'daily' || b.scoring_tier === 'hourly') ? '<span class="popup-badge badge-scoreable">scoreable</span>' : ''}
       ${b.off_leash_flag ? '<span class="popup-badge badge-offleash">off-leash flag</span>' : ''}
     </div>
 
@@ -666,7 +666,7 @@ function setupSearch() {
         <div class="search-result ${i === activeIdx ? 'active' : ''}" data-fid="${b.fid}">
           <div class="sr-name">${highlight(b.name || '', q)}</div>
           <div class="sr-county">${countyHtml}${b.state ? `, ${escapeHtml(b.state)}` : ''}</div>
-          <div class="sr-meta">fid=${b.fid}${b.is_scoreable ? ' · scoreable' : ''}</div>
+          <div class="sr-meta">fid=${b.fid}${(b.scoring_tier === 'daily' || b.scoring_tier === 'hourly') ? ' · scoreable' : ''}</div>
         </div>`;
       }).join('');
     }

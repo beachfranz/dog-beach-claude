@@ -4506,7 +4506,7 @@ function init() {
     searchTimer = setTimeout(async () => {
       try {
         const rows = await restGet(
-          `beaches_gold?select=fid,name,county_name,is_scoreable&is_active=eq.true&name=ilike.*${encodeURIComponent(q)}*&order=name&limit=12`
+          `beaches_gold?select=fid,name,county_name,scoring_tier&is_active=eq.true&name=ilike.*${encodeURIComponent(q)}*&order=name&limit=12`
         );
         if (!rows.length) {
           searchResults.innerHTML = '<div style="padding: 10px; color: var(--text-muted); font-size: 12px;">No matches</div>';
@@ -4516,7 +4516,7 @@ function init() {
         searchResults.innerHTML = rows.map(r =>
           `<div class="prod-search-row" data-fid="${r.fid}" style="padding: 8px 12px; cursor: pointer; border-bottom: 1px solid var(--border);">
             <div style="font-weight: 600; color: var(--text);">${escapeHtml(r.name)}</div>
-            <div style="font-size: 11px; color: var(--text-muted);">${escapeHtml(r.county_name || '?')} · fid ${r.fid}${r.is_scoreable ? ' · scoreable' : ''}</div>
+            <div style="font-size: 11px; color: var(--text-muted);">${escapeHtml(r.county_name || '?')} · fid ${r.fid}${(r.scoring_tier === 'daily' || r.scoring_tier === 'hourly') ? ' · scoreable' : ''}</div>
           </div>`
         ).join('');
         searchResults.style.display = 'block';

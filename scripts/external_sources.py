@@ -330,9 +330,17 @@ out tags center;
 """.strip()
 
 SOURCES: dict[str, Source] = {
+    # DEPRECATED 2026-05-12 — DO NOT USE for PAD-US loads.
+    # This loader writes `geom` only, NOT `geom_geog`. Downstream Method A
+    # and Method B containment populators spatial-join on `geom_geog`, so
+    # loads through this path leave the spatial index unusable. Use
+    # `scripts/load_pad_us_state.py` instead — it writes both columns.
+    # The entry is retained for completeness of the SOURCES registry but
+    # should not be invoked. action_ensure_pad_us in run_state_pipeline.py
+    # was rewired to call load_pad_us_state.py directly.
     "pad_us": Source(
         name="pad_us",
-        description="USGS PAD-US protected-area boundaries (per-state).",
+        description="USGS PAD-US protected-area boundaries (per-state). DEPRECATED — use scripts/load_pad_us_state.py instead.",
         fetcher_kind="arcgis_rest",
         endpoint=("https://services.arcgis.com/v01gqwM5QqNysAAi/arcgis/rest/services/"
                   "Manager_Name/FeatureServer/0"),

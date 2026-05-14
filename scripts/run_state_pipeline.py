@@ -22,9 +22,7 @@ Phases (in order):
    address_city           — _enrich_address_city_for_state
    name_source            — _enrich_name_source_for_state
    strip_plus_codes       — strip_plus_codes_from_addresses
-   align_scoreable        — align_is_scoreable_to_tier
    catchment_refresh      — refresh_catchment_cascade (catchment_score → state_pct → scoring_tier)
-   noaa_station_check     — assert_scoreable_have_noaa_for_state
    purge_pollution        — purge_cross_state_extractions
    dedup                  — run_late_stage_dedup (arena-cluster based)
    dedup_distance_name    — run_distance_name_dedup (same-name + same-county + 1km)
@@ -195,14 +193,13 @@ PHASES = [
         'criterion_text': 'all 4 required sources status in (ok, skipped) + noaa_stations(global) loaded',
     },
     {
+        # 2026-05-13 split: each pass runs in its own autocommitted
+        # transaction to bound memory. The monolithic SQL FUNCTION used
+        # to OOM Supabase on states with heavy PAD-US (OR's max 915K-
+        # vertex polygons). See 20260513_split_operator_seeding.sql.
         'key': 'operators',
-        'action':
-            # Now seeds cities + counties + federal coastal units (per
-            # 20260509_federal_operators_per_state.sql). Federal collapses
-            # the old federal_policy_seed phase into the standard operator
-            # pipeline.
-            "select cities_added + counties_added + federal_added "
-            "  from public.populate_operators_for_state($STATE)",
+        'kind': 'python',
+        'action': 'operators_chunked',
         'criterion':
             "select (count(*) > 0)::boolean from public.operators "
             "where state_code = $STATE and is_active",
@@ -312,22 +309,13 @@ PHASES = [
             "  and address ~* '^[2-9CFGHJMPQRVWX]{4,}\\+[2-9CFGHJMPQRVWX]+\\s+'",
         'criterion_text': 'no plus-code-prefixed addresses remain',
     },
-    {
-        'key': 'align_scoreable',
-        'action':
-            "select promoted + demoted from public.align_is_scoreable_to_tier($STATE)",
-        'criterion':
-            "select (count(*) filter (where g.is_scoreable and "
-            "    public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
-            "    not in ('1_off-leash','2_on-leash')) = 0)::boolean "
-            "from public.beaches_gold g join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
-            "where g.state = $STATE and g.is_active",
-        'criterion_text': 'no Tier 3/4 beach is scoreable',
-    },
-    # Refresh catchment → state_pct → scoring_tier. Runs after align_scoreable
-    # so the is_scoreable cohort is settled, before noaa_station_check so
-    # the scoring_tier reflects the final scoreable population. The wrapper
-    # chains: recompute_beach_catchment(state) → refresh_catchment_state_pct(state)
+    # ── align_scoreable + noaa_station_check phases retired 2026-05-13 ──
+    # is_scoreable column is gone. scoring_tier (Matrix C') is the only
+    # gate now. NOAA absence is a data-quality flag (noaa_station_id IS
+    # NULL → tide score null), not a hard exclusion. Catchment phase
+    # below produces the canonical tier directly.
+    # Refresh catchment → state_pct → scoring_tier. Chains:
+    # recompute_beach_catchment(state) → refresh_catchment_state_pct(state)
     # → refresh_scoring_tier(null). Idempotent.
     {
         'key': 'catchment_refresh',
@@ -338,18 +326,6 @@ PHASES = [
             "select (count(*) filter (where scoring_tier is null) = 0)::boolean "
             "from public.beaches_gold where state = $STATE and is_active",
         'criterion_text': 'every active beach in state has scoring_tier set',
-    },
-    # Asserts every scoreable beach has a NOAA station (issue #21 guard).
-    # Inland beaches without stations should be is_scoreable=false; the
-    # align_scoreable phase above sets that. This phase double-checks.
-    {
-        'key': 'noaa_station_check',
-        'action':
-            "select case when public.assert_scoreable_have_noaa_for_state($STATE) then 1 else 0 end::int",
-        'criterion':
-            "select public.assert_scoreable_have_noaa_for_state($STATE)",
-        'criterion_text':
-            'every scoreable beach in state has noaa_station_id set (issue #21 guard)',
     },
     {
         'key': 'purge_pollution',
@@ -502,7 +478,7 @@ PHASES = [
         'action': 'daily_refresh_fire',
         'criterion':
             "with sc as (select count(*) c from public.beaches_gold "
-            "             where state = $STATE and is_active and is_scoreable), "
+            "             where state = $STATE and is_active and scoring_tier in ('daily','hourly')), "
             "     rec as (select count(distinct r.location_id) c "
             "               from public.beach_day_recommendations r "
             "               join public.beaches_gold g on g.location_id = r.location_id "
@@ -511,7 +487,7 @@ PHASES = [
         'criterion_text': 'today rec exists for >= 95% of scoreable beaches',
         'progress_sql':
             "with t as (select count(*)::int n from public.beaches_gold "
-            "             where state=$STATE and is_active and is_scoreable), "
+            "             where state=$STATE and is_active and scoring_tier in ('daily','hourly')), "
             "     d as (select count(distinct r.location_id)::int n "
             "             from public.beach_day_recommendations r "
             "             join public.beaches_gold g on g.location_id=r.location_id "
@@ -549,8 +525,13 @@ def _state_operator_ids(state: str) -> list[int]:
     where polygon containment hasn't resolved yet).
     """
     with open_conn() as c, c.cursor() as cur:
+        # 2026-05-13: switched from state_operator_ids_with_beaches
+        # (114 OR ops, includes spatial 1km proximity to ANY beach) to
+        # state_operator_ids_for_scoreable_beaches (60 OR ops, strict
+        # BEP attribution to daily/hourly-tier beaches only). The cost
+        # gate Franz wanted.
         cur.execute(
-            'select operator_id from public.state_operator_ids_with_beaches(%s) '
+            'select operator_id from public.state_operator_ids_for_scoreable_beaches(%s) '
             'order by operator_id',
             (state,)
         )
@@ -576,18 +557,58 @@ def _state_operator_ids(state: str) -> list[int]:
         return [r[0] for r in cur.fetchall()]
 
 
+# Optional county filter for "test 3 counties" runs. CSV of county_fips
+# strings (e.g. ['41041','41015','41007']). When set, every beach-scoped
+# phase is restricted to beaches in these counties. Operator-scoped
+# phases (operator_llm_extract / operator_merge) still run at full state
+# scope — operator-level filtering is harder and the LLM cost is bounded.
+COUNTIES_FILTER: list[str] | None = None
+
+
 def _state_tier12_fids(state: str) -> list[int]:
-    """Tier 1_off-leash + 2_on-leash active fids in state."""
+    """Tier 1_off-leash + 2_on-leash active fids in state.
+
+    When COUNTIES_FILTER is set, additionally restricts to beaches whose
+    county_fips is in that list. Used by bep_refire / section_extract /
+    descriptions / photos_wikimedia phases.
+
+    Bootstrap: if state has zero beach_dog_policy rows (fresh state or
+    post-wipe), falls back to all active+scoreable beaches so bep_refire
+    can populate beach_dog_policy on its first pass. Subsequent calls
+    once beach_dog_policy is populated will correctly narrow to tier-1+2.
+    """
+    # Detect bootstrap state: no beach_dog_policy rows for this state yet.
     with open_conn() as c, c.cursor() as cur:
         cur.execute(
-            "select g.fid from public.beaches_gold g "
-            "join public.beach_dog_policy bdp on bdp.arena_group_id = g.fid "
-            "where g.is_active and g.state = %s "
-            "  and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
-            "      in ('1_off-leash','2_on-leash') "
-            "order by g.fid",
+            "select exists(select 1 from public.beach_dog_policy bdp "
+            "  join public.beaches_gold g on g.fid = bdp.arena_group_id "
+            "  where g.state = %s)",
             (state,)
         )
+        has_dog_policy = cur.fetchone()[0]
+
+    args: tuple
+    if has_dog_policy:
+        sql = ("select g.fid from public.beaches_gold g "
+               "join public.beach_dog_policy bdp on bdp.arena_group_id = g.fid "
+               "where g.is_active and g.state = %s "
+               "  and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+               "      in ('1_off-leash','2_on-leash') ")
+        args = (state,)
+    else:
+        # Bootstrap: refire on all active+scoreable beaches to populate beach_dog_policy.
+        log(f'    bootstrap: no beach_dog_policy for {state}, using all active+scoreable beaches')
+        sql = ("select g.fid from public.beaches_gold g "
+               "where g.is_active and g.scoring_tier in ('daily','hourly') and g.state = %s ")
+        args = (state,)
+
+    if COUNTIES_FILTER:
+        sql += "  and g.county_fips = any(%s) "
+        args = args + (COUNTIES_FILTER,)
+    sql += "order by g.fid"
+
+    with open_conn() as c, c.cursor() as cur:
+        cur.execute(sql, args)
         return [r[0] for r in cur.fetchall()]
 
 
@@ -632,8 +653,112 @@ def _ensure_loader(state: str, source: str, script_name: str,
     return 1
 
 
+def action_operators_chunked(state: str) -> int:
+    """Phase 10: seed operators for a state via 14 per-pass calls.
+
+    2026-05-13 split (post-OOM): the monolithic SQL function used to OOM
+    Supabase for states with heavy PAD-US (OR's max 915K-vertex polygons).
+    Each pass now runs as a separate function call in its own auto-
+    committed transaction, bounding memory to a single pass's working set.
+
+    Skip-CA: passes 4-11 are no-op for CA (legacy CPAD seeding covers).
+    Returns the total rows added/changed across all passes (sums everything
+    that contributes to the criterion 'operators has rows for state')."""
+    passes = [
+        # (label, fn_name, skip_for_ca)
+        ('cities',        '_op_pass1_cities',        False),
+        ('counties',      '_op_pass2_counties',      False),
+        ('federal',       '_op_pass3_federal',       False),
+        ('state',         '_op_pass4_state',          True),
+        ('district',      '_op_pass5_district',       True),
+        ('ngo',           '_op_pass6a_ngo',           True),
+        ('pvt',           '_op_pass6b_pvt',           True),
+        ('tribal',        '_op_pass7_tribal',         True),
+        ('joint',         '_op_pass8_joint',          True),
+        ('bia',           '_op_pass9_bia',            True),
+        ('osm',           '_op_pass10_osm',           True),
+        ('bep',           '_op_pass11_bep',           True),
+        ('linkage',       '_op_linkage',             False),
+        ('consolidation', '_op_pass12_consolidation', False),
+    ]
+    is_ca = (state == 'CA')
+    total = 0
+    # Open a dedicated autocommit connection so each pass commits on its own.
+    c = psycopg2.connect(**PG)
+    c.set_session(autocommit=True)
+    try:
+        with c.cursor() as cur:
+            cur.execute("SET statement_timeout = '1800s'")  # 30 min per pass
+            for label, fn_name, skip_for_ca in passes:
+                if skip_for_ca and is_ca:
+                    log(f'    {label}: SKIP (CA)')
+                    continue
+                t0 = time.time()
+                cur.execute(f"SELECT public.{fn_name}(%s)", (state,))
+                n = int(cur.fetchone()[0])
+                dt = time.time() - t0
+                total += n
+                log(f'    {label}: +{n} rows in {dt:.1f}s')
+    finally:
+        c.close()
+    return total
+
+
 def action_ensure_pad_us(state: str) -> int:
-    return _ensure_loader(state, 'pad_us', 'bulk_load_pad_us.py', timeout=2400)
+    """Load PAD-US for state via the canonical loader scripts/load_pad_us_state.py.
+
+    Policy 2026-05-12 (Franz): do NOT use scripts/one_off/bulk_load_pad_us.py
+    or scripts/external_sources.py for PAD-US — both write `geom` only and
+    miss `geom_geog`, which downstream Method A + Method B containment
+    populators spatial-join on. load_pad_us_state.py is patched to write
+    geom_geog correctly on INSERT + ON CONFLICT UPDATE.
+
+    Honors external_source_status skip-logic (skip if status=ok and <30d).
+    Writes the success row itself since load_pad_us_state.py doesn't track
+    external_source_status today.
+    """
+    from datetime import datetime, timezone, timedelta
+    source = 'pad_us'
+    max_age_days = 30
+
+    # Skip if already loaded recently
+    with open_conn() as c, c.cursor() as cur:
+        cur.execute(
+            "select status, last_loaded_at from public.external_source_status "
+            " where source=%s and state=%s",
+            (source, state),
+        )
+        r = cur.fetchone()
+    if r:
+        status, last = r
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+        if status in ('ok', 'skipped') and last and last > cutoff:
+            log(f'    {source} already loaded for {state} ({status}, '
+                f'age <{max_age_days}d); skip')
+            return 0
+
+    # Invoke canonical loader
+    log(f'    invoking scripts/load_pad_us_state.py {state}  (canonical PAD-US loader)')
+    rc, out, err = _run_subprocess(
+        [sys.executable, 'scripts/load_pad_us_state.py', state],
+        timeout=2400,
+    )
+    if rc != 0:
+        raise RuntimeError(f'load_pad_us_state.py exit {rc}: {err[-500:]}')
+
+    # Write success row to external_source_status (loader doesn't do this itself)
+    with open_conn() as c, c.cursor() as cur:
+        cur.execute("select count(*) from public.pad_us_units where state=%s", (state,))
+        row_count = cur.fetchone()[0]
+        cur.execute(
+            "insert into public.external_source_status "
+            " (source, state, status, last_loaded_at, row_count) "
+            "values (%s, %s, 'ok', now(), %s) "
+            "on conflict (source, state) do update set "
+            " status='ok', last_loaded_at=now(), row_count=excluded.row_count",
+            (source, state, row_count),
+        )
+    return 1
 
 def action_ensure_overpass(state: str) -> int:
     return _ensure_loader(state, 'osm_landing', 'bulk_load_overpass.py', timeout=1200)
@@ -756,6 +881,7 @@ def action_operator_llm_extract(state: str) -> int:
     return _chunked_subprocess(
         'scripts/extract_operator_dogs_policy.py', ids,
         flag_name='--ids', chunk_size=5, per_chunk_timeout=600,
+        extra_args=['--skip-recent', '24'],
         parse_fn=_parse_op_extract,
     )
 
@@ -829,13 +955,16 @@ def action_photos_wikimedia(state: str) -> int:
 
 
 def action_daily_refresh_fire(state: str) -> int:
-    """Fire daily-beach-refresh with state's scoreable location_ids in batches."""
+    """Fire daily-beach-refresh with state's scoreable location_ids in batches.
+    Honors COUNTIES_FILTER if set."""
+    sql = ("select location_id from public.beaches_gold "
+           "where state = %s and is_active and scoring_tier in ('daily','hourly')")
+    args: tuple = (state,)
+    if COUNTIES_FILTER:
+        sql += " and county_fips = any(%s)"
+        args = (state, COUNTIES_FILTER)
     with open_conn() as c, c.cursor() as cur:
-        cur.execute(
-            "select location_id from public.beaches_gold "
-            "where state = %s and is_active and is_scoreable",
-            (state,)
-        )
+        cur.execute(sql, args)
         ids = [r[0] for r in cur.fetchall()]
     if not ids:
         return 0
@@ -851,7 +980,9 @@ def action_daily_refresh_fire(state: str) -> int:
     for i in range(0, len(ids), BATCH):
         batch = ids[i:i+BATCH]
         try:
-            r = httpx.post(url, headers=headers, json={'location_ids': batch, 'tide_window_days': 7},
+            r = httpx.post(url, headers=headers,
+                           json={'location_ids': batch, 'tide_window_days': 7,
+                                 'skip_recent_hours': 24},
                            timeout=300.0)
             if r.is_success:
                 ok += len(batch)
@@ -994,9 +1125,19 @@ def main():
     ap.add_argument('--skip-precheck', action='store_true', help='Skip precheck phase only')
     ap.add_argument('--dry-run', action='store_true', help='Print phase plan; do not execute')
     ap.add_argument('--phase-from', help='Start at a specific phase (skip prior)')
+    ap.add_argument('--counties', help='CSV of county_fips to scope beach phases (test mode). '
+                                       'State-wide criteria are downgraded to warnings.')
     args = ap.parse_args()
 
     state = args.state.upper()
+
+    # Apply county filter mode if requested
+    global COUNTIES_FILTER
+    if args.counties:
+        COUNTIES_FILTER = [c.strip() for c in args.counties.split(',') if c.strip()]
+        log(f'COUNTY-FILTERED MODE: restricting beach phases to {len(COUNTIES_FILTER)} counties: '
+            f'{",".join(COUNTIES_FILTER)}')
+        log('  state-wide criteria will be downgraded to warnings (no halt on failure)')
 
     if args.dry_run:
         print(f'Plan for state={state}, {len(PHASES)} phases:')
@@ -1107,15 +1248,33 @@ def main():
                         """, (rows, ph['criterion_text'], run_id, state, ph['key']))
                 else:
                     err = f"criterion failed: {ph['criterion_text']}"
-                    with open_conn() as c, c.cursor() as cur:
-                        cur.execute("""
-                          update public.pipeline_phase_status
-                             set status='failed', finished_at=now(),
-                                 rows_affected=%s, criterion_met=false,
-                                 criterion_text=%s, error_message=%s
-                           where run_id=%s and state_code=%s and phase=%s
-                        """, (rows, ph['criterion_text'], err, run_id, state, ph['key']))
-                    raise RuntimeError(err)
+                    # County-filtered mode: criteria are state-wide thresholds that
+                    # won't be met when we only ran 3 counties. Record as 'skipped'
+                    # (criterion_met=false) and continue rather than halting.
+                    if COUNTIES_FILTER is not None:
+                        with open_conn() as c, c.cursor() as cur:
+                            cur.execute("""
+                              update public.pipeline_phase_status
+                                 set status='skipped', finished_at=now(),
+                                     rows_affected=%s, criterion_met=false,
+                                     criterion_text=%s,
+                                     error_message=%s
+                               where run_id=%s and state_code=%s and phase=%s
+                            """, (rows, ph['criterion_text'],
+                                  f'county-mode soft-warn: {err}',
+                                  run_id, state, ph['key']))
+                        log(f'    WARN [{phase_num}/{len(PHASES)}] {ph["key"]:<22} '
+                            f'state-wide criterion failed but county-mode continues')
+                    else:
+                        with open_conn() as c, c.cursor() as cur:
+                            cur.execute("""
+                              update public.pipeline_phase_status
+                                 set status='failed', finished_at=now(),
+                                     rows_affected=%s, criterion_met=false,
+                                     criterion_text=%s, error_message=%s
+                               where run_id=%s and state_code=%s and phase=%s
+                            """, (rows, ph['criterion_text'], err, run_id, state, ph['key']))
+                        raise RuntimeError(err)
 
             stop_heartbeat.set()
             elapsed = time.time() - t0

@@ -4,8 +4,9 @@ bulk_promote_socal.py — promote all SoCal coastal beaches to scoreable.
 Backfills slug + nearest NOAA station + timezone + open/close on
 beaches_gold for every active CA coastal beach in the SB → Mexico
 corridor (5 counties: Santa Barbara, Ventura, Los Angeles, Orange,
-San Diego). Sets is_scoreable=true. Then chunked daily-beach-refresh
-to seed forecasts.
+San Diego). Calls refresh_scoring_tier() so scoring_tier lands in
+('daily','hourly'). Then chunked daily-beach-refresh to seed forecasts.
+(2026-05-13 cutover: is_scoreable was retired.)
 
 Usage:
   python scripts/bulk_promote_socal.py            # dry-run
@@ -104,7 +105,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--skip-score", action="store_true",
-                    help="Update metadata + flip is_scoreable but don't fire daily-beach-refresh")
+                    help="Update metadata + refresh scoring_tier but don't fire daily-beach-refresh")
     args = ap.parse_args()
 
     conn = psycopg2.connect(**PG)
@@ -114,7 +115,7 @@ def main() -> int:
     # 1. Pull SoCal coastal beaches needing metadata
     cur.execute(f"""
         SELECT fid, name, county_name, lat, lon,
-               location_id, noaa_station_id, timezone, is_scoreable
+               location_id, noaa_station_id, timezone, scoring_tier
           FROM public.beaches_gold
          WHERE is_active = true AND state = 'CA'
            AND county_name IN %s
@@ -157,7 +158,7 @@ def main() -> int:
                 b["location_id"] != slug or
                 b["noaa_station_id"] != noaa or
                 b["timezone"] != tz or
-                not b["is_scoreable"]
+                b["scoring_tier"] not in ('daily','hourly')
             ),
         })
 
@@ -170,7 +171,9 @@ def main() -> int:
         print("\n(dry-run; rerun with --apply)")
         return 0
 
-    # 3. Apply per-row UPDATEs
+    # 3. Apply per-row UPDATEs. 2026-05-13: is_scoreable retired; the
+    # daily/hourly gate is now scoring_tier (Matrix C'), recomputed by
+    # refresh_scoring_tier() after the metadata UPDATEs land.
     print(f"\nApplying...")
     for i, u in enumerate(updates, 1):
         cur.execute("""
@@ -179,14 +182,17 @@ def main() -> int:
                    noaa_station_id = COALESCE(noaa_station_id, %s),
                    timezone        = COALESCE(timezone, %s),
                    open_time       = COALESCE(open_time, %s),
-                   close_time      = COALESCE(close_time, %s),
-                   is_scoreable    = true
+                   close_time      = COALESCE(close_time, %s)
              WHERE fid = %s
         """, (u["slug"], u["noaa"], u["tz"], OPEN_T, CLOSE_T, u["fid"]))
         if i % 50 == 0:
             print(f"  ... {i}/{len(updates)}")
+    # Recompute scoring_tier for every touched fid
+    fids = [u["fid"] for u in updates]
+    if fids:
+        cur.execute("SELECT public.refresh_scoring_tier(unnest(%s::bigint[]))", (fids,))
     conn.commit()
-    print(f"  applied {len(updates)} updates.")
+    print(f"  applied {len(updates)} updates + refresh_scoring_tier.")
 
     if args.skip_score:
         print("\n(--skip-score; not triggering daily-beach-refresh)")

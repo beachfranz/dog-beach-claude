@@ -96,7 +96,9 @@ def fetch_labels(conn) -> pd.DataFrame:
     # Franz 2026-05-12: "left-most best, right-most still solid."
     kept_sql = """
     with ranked as (
-      select bp.*, g.state, g.scoring_tier, g.lat, g.lon,
+      select bp.id, bp.arena_group_id, bp.source, bp.distance_m,
+             bp.license, bp.source_meta, bp.captured_at, bp.loaded_at,
+             g.state, g.scoring_tier, g.lat, g.lon,
              coalesce(g.display_name_override, g.name) beach_name,
              row_number() over (
                partition by bp.arena_group_id

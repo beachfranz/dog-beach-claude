@@ -1,6 +1,3 @@
-__pycache__/
 *.egg-info/
-.dagster_home/
-*.pyc
-.dagster/
-target/
+__pycache__/
+.tmp_dagster_home_*/

@@ -33,6 +33,10 @@ Deno.serve(async (req: Request) => {
   // new spine). Path 3b dual-input — both work; 3c will drop location_id.
   let locationIds:    string[] | null = null;
   let arenaGroupIds:  number[] | null = null;
+  // skip beaches whose is_now row was updated within the cutoff. Fractional
+  // hours OK (e.g. 0.9 = 54 min — pairs well with hourly pg_cron + a 6 min
+  // grace buffer). Capped at 24h.
+  let skipRecentHours: number | null = null;
 
   if (req.method === "GET") {
     const params = new URL(req.url).searchParams;
@@ -49,6 +53,9 @@ Deno.serve(async (req: Request) => {
       arenaGroupIds = body.arena_group_ids
         .map((x: unknown) => typeof x === "number" ? x : parseInt(String(x), 10))
         .filter(Number.isFinite);
+    }
+    if (typeof body?.skip_recent_hours === "number" && body.skip_recent_hours > 0) {
+      skipRecentHours = Math.min(body.skip_recent_hours, 24);
     }
   }
 
@@ -93,8 +100,10 @@ Deno.serve(async (req: Request) => {
   }
   // If neither key was provided, fall through to "all active scoreable
   // beaches" — same semantic as the hourly cron call (POST {} → batch).
+  // 2026-05-13: scoring_tier replaces is_scoreable. Hourly tier only
+  // — daily tier doesn't need NOW refreshes (rolled-up by daily-beach-refresh).
   if (!locationIds?.length && !arenaGroupIds?.length) {
-    beachQuery = beachQuery.eq("is_scoreable", true);
+    beachQuery = beachQuery.eq("scoring_tier", "hourly");
   }
 
   const [goldRes, configRes] = await Promise.all([
@@ -124,7 +133,7 @@ Deno.serve(async (req: Request) => {
                       | null
                       | { dogs_prohibited_start: string | null; dogs_prohibited_end: string | null }[];
   };
-  const beaches = (goldRes.data as GoldRow[]).map(g => {
+  let beaches = (goldRes.data as GoldRow[]).map(g => {
     const dp = Array.isArray(g.beach_dog_policy) ? g.beach_dog_policy[0] : g.beach_dog_policy;
     return {
       location_id:    g.location_id,
@@ -146,6 +155,34 @@ Deno.serve(async (req: Request) => {
       parking_text:   g.parking_text,
     };
   });
+
+  // ── Optional skip_recent_hours filter ────────────────────────────────────
+  // Drop beaches whose is_now row was updated within the cutoff. Mirrors
+  // the same flag on daily-beach-refresh; idempotent for cron retries and
+  // ad-hoc fires. For hourly cron pass ~0.9 (= 54min, gives 6min slack
+  // before the next firing).
+  let skippedRecent = 0;
+  if (skipRecentHours !== null && beaches.length > 0) {
+    const cutoffMs = runAt.getTime() - skipRecentHours * 3600 * 1000;
+    const cutoffIso = new Date(cutoffMs).toISOString();
+    const beachFids = beaches.map(b => b.arena_group_id);
+    const { data: recentRows, error: recentErr } = await supabase
+      .from("beach_day_hourly_scores")
+      .select("arena_group_id, updated_at")
+      .eq("is_now", true)
+      .in("arena_group_id", beachFids)
+      .gte("updated_at", cutoffIso);
+    if (recentErr) {
+      console.warn(`skip_recent_hours query failed: ${recentErr.message} — proceeding without skip`);
+    } else {
+      const recentSet = new Set((recentRows ?? []).map((r: { arena_group_id: number }) => r.arena_group_id));
+      const before = beaches.length;
+      beaches = beaches.filter(b => !recentSet.has(b.arena_group_id));
+      skippedRecent = before - beaches.length;
+      console.log(`skip_recent_hours=${skipRecentHours} → skipped ${skippedRecent}/${before}; ${beaches.length} remaining`);
+    }
+  }
+
   const config = configRes.data;
 
   // ── Process each beach ───────────────────────────────────────────────────────
@@ -165,6 +202,7 @@ Deno.serve(async (req: Request) => {
     ok:      true,
     runAt:   runAt.toISOString(),
     results: results.map(r => ({ locationId: r.locationId, ok: r.ok, error: r.error })),
+    skipped_recent: skippedRecent,
   });
 });
 

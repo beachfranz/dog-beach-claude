@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&family=DM+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="src/photo-block.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
   integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
   crossorigin="">
@@ -258,62 +259,10 @@
     border-radius: 0 8px 8px 0;
   }
 
-  /* Hero photo carousel — banner-style, ~50% shorter than before */
-  .hero-carousel {
-    position: relative; margin: 0 16px 12px;
-    aspect-ratio: 16 / 5;
-    background: #1e293b;
-    border-radius: 10px; overflow: hidden;
-    border: 1px solid var(--border);
-  }
-  .hero-carousel-track {
-    position: absolute; inset: 0;
-    display: flex; transition: transform 0.35s ease;
-  }
-  .hero-carousel-slide {
-    flex: 0 0 100%; height: 100%;
-    background-size: cover; background-position: center;
-    background-color: #1e293b;
-    position: relative;
-  }
-  .hero-carousel-attr {
-    position: absolute; left: 0; right: 0; bottom: 0;
-    background: linear-gradient(to top, rgba(0,0,0,0.65), rgba(0,0,0,0));
-    color: white; font-size: 11px; padding: 24px 12px 8px;
-    line-height: 1.3;
-  }
-  .hero-carousel-attr a { color: white; text-decoration: underline; }
-  .hero-carousel-nav {
-    position: absolute; top: 50%; transform: translateY(-50%);
-    width: 38px; height: 38px; border-radius: 999px;
-    background: rgba(255,255,255,0.85); border: none;
-    color: #0f2742; font-size: 22px; line-height: 1;
-    cursor: pointer; transition: background 0.1s;
-    display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
-    user-select: none;
-  }
-  .hero-carousel-nav:hover { background: white; }
-  .hero-carousel-nav.prev { left: 10px; }
-  .hero-carousel-nav.next { right: 10px; }
-  .hero-carousel-nav[disabled] { opacity: 0.3; cursor: not-allowed; }
-  .hero-carousel-dots {
-    position: absolute; left: 0; right: 0; bottom: 8px;
-    display: flex; justify-content: center; gap: 6px; pointer-events: none;
-  }
-  .hero-carousel-dot {
-    width: 6px; height: 6px; border-radius: 999px;
-    background: rgba(255,255,255,0.4);
-    transition: background 0.15s, width 0.15s;
-  }
-  .hero-carousel-dot.active {
-    background: white; width: 18px;
-  }
-  .hero-carousel-empty {
-    position: absolute; inset: 0; display: flex;
-    align-items: center; justify-content: center;
-    color: var(--text-muted); font-size: 13px;
-  }
+  /* Hero photo block — shared component in src/photo-block.css. The
+     wrapper just provides page-edge gutter; sizing/layout is owned by
+     .photo-block in the shared sheet. */
+  .photo-block-wrap { margin: 0 16px 12px; }
 
   /* Sidebar map (smaller, sticky on desktop) */
   .sidebar-map {
@@ -364,6 +313,7 @@
   </div>
 </div>
 
+<script src="src/photo-block.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
   integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
   crossorigin=""></script>
@@ -529,7 +479,7 @@ function render(data, beachFid) {
   // These are TWO distinct things — Franz, 2026-05-10.
   const sections = [];
   sections.push(buildDescriptionSection(data.description));
-  sections.push(buildHeroCarousel(data.photos));
+  sections.push('<div class="photo-block-wrap" id="photo-block-mount"></div>');
   sections.push(buildHoursSection(beach, amenities));
   sections.push(buildAmenitiesSection(amenities));
   sections.push(buildZoneRulesSection(dog_policy, beach.display_name, _currentLocalHour(beach.timezone)));
@@ -537,11 +487,18 @@ function render(data, beachFid) {
   sections.push(buildLinksSection(beach, beachFid));
   document.getElementById('main-content').innerHTML = sections.filter(Boolean).join('');
 
+  // Shared photo block — 1 hero + 5 thumbs + view-all (src/photo-block.js).
+  // Mount AFTER the section HTML has been injected so the target exists.
+  PhotoBlock.render(
+    document.getElementById('photo-block-mount'),
+    data.photos,
+    { viewAllHref: `gallery.html?fid=${beachFid}` }
+  );
+
   // Sidebar: map + directions
   document.getElementById('sidebar').innerHTML = buildSidebarMap(beach);
 
   wireCopyButtons();
-  wireCarousel();
   initMap(beach);
 }
 
@@ -555,33 +512,6 @@ function buildMapsUrl(beach) {
 function buildDescriptionSection(description) {
   if (!description?.text) return '';
   return `<div class="beach-description">${escHtml(description.text)}</div>`;
-}
-
-// Hero carousel — full-width single photo with prev/next arrows.
-// Replaces the old photo-strip + map block; map now lives in sidebar.
-function buildHeroCarousel(photos) {
-  if (!Array.isArray(photos) || photos.length === 0) {
-    return `<div class="hero-carousel"><div class="hero-carousel-empty">📷 No photos yet</div></div>`;
-  }
-  const slides = photos.map(p => {
-    const url   = p.image_url || p.thumb_url || '';
-    const link  = p.page_url || url;
-    const attr  = p.attribution || '';
-    return `<div class="hero-carousel-slide" style="background-image:url('${escHtml(url)}')">
-      ${attr ? `<div class="hero-carousel-attr"><a href="${escHtml(link)}" target="_blank" rel="noopener">${escHtml(attr)}</a></div>` : ''}
-    </div>`;
-  }).join('');
-  const dots = photos.length > 1
-    ? `<div class="hero-carousel-dots" id="hero-dots">${
-         photos.map((_, i) => `<div class="hero-carousel-dot${i===0?' active':''}"></div>`).join('')
-       }</div>` : '';
-  const navs = photos.length > 1
-    ? `<button class="hero-carousel-nav prev" id="hero-prev" aria-label="Previous">‹</button>
-       <button class="hero-carousel-nav next" id="hero-next" aria-label="Next">›</button>` : '';
-  return `<div class="hero-carousel" id="hero-carousel" data-count="${photos.length}">
-    <div class="hero-carousel-track" id="hero-track">${slides}</div>
-    ${navs}${dots}
-  </div>`;
 }
 
 function buildSidebarMap(beach) {
@@ -831,42 +761,6 @@ function buildLinksSection(beach, beachFid) {
   return `<section class="card"><h2>More info</h2>${rows.join('')}</section>`;
 }
 
-function wireCarousel() {
-  const root = document.getElementById('hero-carousel');
-  if (!root) return;
-  const track = document.getElementById('hero-track');
-  const prev  = document.getElementById('hero-prev');
-  const next  = document.getElementById('hero-next');
-  const count = parseInt(root.dataset.count || '0', 10);
-  if (!track || count <= 1) return;
-  let idx = 0;
-  const update = () => {
-    track.style.transform = `translateX(-${idx * 100}%)`;
-    if (prev) prev.disabled = idx === 0;
-    if (next) next.disabled = idx === count - 1;
-    document.querySelectorAll('.hero-carousel-dot').forEach((d, i) =>
-      d.classList.toggle('active', i === idx));
-  };
-  prev?.addEventListener('click', () => { if (idx > 0) { idx--; update(); }});
-  next?.addEventListener('click', () => { if (idx < count - 1) { idx++; update(); }});
-  // Keyboard arrows when carousel is in focus
-  root.tabIndex = 0;
-  root.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowLeft' && idx > 0) { idx--; update(); e.preventDefault(); }
-    else if (e.key === 'ArrowRight' && idx < count - 1) { idx++; update(); e.preventDefault(); }
-  });
-  // Basic touch swipe
-  let touchX = null;
-  track.addEventListener('touchstart', (e) => { touchX = e.touches[0].clientX; });
-  track.addEventListener('touchend', (e) => {
-    if (touchX == null) return;
-    const dx = (e.changedTouches[0].clientX) - touchX;
-    if (dx > 50 && idx > 0) { idx--; update(); }
-    else if (dx < -50 && idx < count - 1) { idx++; update(); }
-    touchX = null;
-  });
-  update();
-}
 
 function wireCopyButtons() {
   document.querySelectorAll('.copy-btn').forEach(btn => {

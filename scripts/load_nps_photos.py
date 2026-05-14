@@ -104,12 +104,34 @@ def fetch_park_gallery_assets(park_code: str, limit: int = 50) -> list[dict]:
     return images
 
 
+def _fetch_all_nps_parks() -> list[dict]:
+    """One-shot fetch of every NPS park via /parks API. ~470 parks total."""
+    url = f"{NPS_BASE}/parks?limit=600&api_key={NPS_API_KEY}"
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        d = json.loads(r.read())
+    return d.get("data", []) or []
+
+
+def _haversine_km(lat1, lon1, lat2, lon2):
+    from math import asin, cos, radians, sin, sqrt
+    la1, lo1, la2, lo2 = map(radians, [lat1, lon1, lat2, lon2])
+    a = sin((la2-la1)/2)**2 + cos(la1)*cos(la2)*sin((lo2-lo1)/2)**2
+    return 2*6371*asin(sqrt(a))
+
+
 def park_codes_from_db(conn) -> dict[str, list[int]]:
     """{parkCode: [beach_fid, ...]} for NPS-governed beaches.
-    Extracted from nps.gov/<code>/ URLs in beach_enrichment_provenance."""
-    sql = """
-    select bep.source_url, c.gold_fid, g.state
-      from beach_enrichment_provenance bep
+    Two-tier resolution:
+      1) extract parkCode from any nps.gov/<code>/ URL in BEP source_url
+      2) for beaches without (1), fuzzy-match nearest NPS park by lat/lng
+         using the /parks API. Catches beaches whose governance is
+         NPS-attributed but the URL didn't carry the parkCode (e.g.
+         attributed via PAD-US polygon-containment or operator_id rather
+         than a park-URL extraction)."""
+    nps_gov_sql = """
+    select c.gold_fid, g.lat, g.lon
+      from beaches_gold g
       join (
         select gold_fid from beach_enrichment_provenance
          where field_group='governance' and is_canonical=true
@@ -119,21 +141,62 @@ def park_codes_from_db(conn) -> dict[str, list[int]]:
                 or claimed_values->>'name' ilike '%national recreation area%'
                 or claimed_values->>'name' ilike '%national monument%'
                 or claimed_values->>'name' ilike '%national park%')
-      ) c on c.gold_fid = bep.gold_fid
-      join beaches_gold g on g.fid = c.gold_fid
-     where bep.source_url ilike '%nps.gov/%'
-       and g.is_active
+      ) c on c.gold_fid = g.fid
+     where g.is_active
+    """
+    nps_url_sql = """
+    select distinct gold_fid, source_url
+      from beach_enrichment_provenance
+     where source_url ilike '%nps.gov/%'
     """
     by_code: dict[str, list[int]] = {}
+    fid_to_pos: dict[int, tuple[float, float]] = {}
     with conn.cursor() as cur:
-        cur.execute(sql)
-        for url, fid, state in cur.fetchall():
+        cur.execute(nps_gov_sql)
+        for fid, lat, lon in cur.fetchall():
+            fid_to_pos[fid] = (lat, lon)
+
+        # Tier 1: parkCode from BEP URL
+        cur.execute(nps_url_sql)
+        for fid, url in cur.fetchall():
+            if fid not in fid_to_pos: continue
             m = PARKCODE_RE.search(url)
             if not m: continue
             code = m.group(1).lower()
             by_code.setdefault(code, [])
             if fid not in by_code[code]:
                 by_code[code].append(fid)
+
+    # Tier 2: fuzzy-match orphans by nearest NPS park
+    already_attributed = {f for fids in by_code.values() for f in fids}
+    orphans = [(fid, lat, lon) for fid, (lat, lon) in fid_to_pos.items()
+               if fid not in already_attributed and lat and lon]
+    if orphans:
+        print(f"  {len(orphans)} orphan NPS beaches; fetching /parks for fuzzy match")
+        parks = _fetch_all_nps_parks()
+        # Build park centroids from latLong field (format "lat:X, long:Y")
+        park_geo = []
+        for p in parks:
+            ll = p.get("latLong", "")
+            try:
+                la = float(ll.split("lat:")[1].split(",")[0])
+                lo = float(ll.split("long:")[1].strip().rstrip(")"))
+                park_geo.append((p["parkCode"], la, lo, p.get("fullName")))
+            except (ValueError, IndexError):
+                continue
+        # Match each orphan to nearest park within 30km
+        matched = 0
+        for fid, lat, lon in orphans:
+            best = min(park_geo, key=lambda p: _haversine_km(lat, lon, p[1], p[2]))
+            d = _haversine_km(lat, lon, best[1], best[2])
+            if d <= 30:
+                code = best[0]
+                by_code.setdefault(code, [])
+                by_code[code].append(fid)
+                matched += 1
+                if matched <= 5:
+                    print(f"    fid={fid} → {code} ({best[3][:40]}) {d:.1f}km")
+        print(f"  matched {matched}/{len(orphans)} orphans within 30km")
     return by_code
 
 

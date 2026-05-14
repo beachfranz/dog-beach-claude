@@ -79,7 +79,7 @@ def run(states: list[str], check_mode: bool = False) -> int:
     hdr(f'B. CATALOG — beaches_gold ({", ".join(states)})')
     for r in fetch(f"""select state, count(*) tot,
                               count(*) filter (where is_active) act,
-                              count(*) filter (where is_scoreable and is_active) score_act
+                              count(*) filter (where scoring_tier IN ('daily','hourly') and is_active) score_act
                          from public.beaches_gold where state in ({s_clause})
                          group by 1 order by 1"""):
         print(f"  {r['state']}: total={r['tot']:>5} active={r['act']:>5} scoreable_active={r['score_act']:>5}")
@@ -150,7 +150,7 @@ def run(states: list[str], check_mode: bool = False) -> int:
                          from public.beaches_gold g
                          left join public.beach_day_recommendations r
                            on r.location_id=g.location_id and r.local_date = current_date
-                        where g.is_scoreable and g.is_active and g.state in ({s_clause})
+                        where g.scoring_tier IN ('daily','hourly') and g.is_active and g.state in ({s_clause})
                         group by 1 order by 1"""):
         print(f"  {r['state']}: scoreable={r['scoreable']:>4} with_today_rec={r['with_today']:>4}")
         if check_mode and r['scoreable']:

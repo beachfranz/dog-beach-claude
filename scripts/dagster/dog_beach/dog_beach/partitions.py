@@ -47,6 +47,7 @@ state_partitions = StaticPartitionsDefinition(
         "FL",
         "MI",
         "MD",
+        "OH",
     ]
 )
 

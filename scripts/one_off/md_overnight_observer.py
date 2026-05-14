@@ -19,7 +19,7 @@ load_dotenv(REPO / 'scripts' / 'pipeline' / '.env')
 import psycopg2
 import psycopg2.extras
 
-RUN_ID  = '2fdb4445-0873-48a1-9648-93bb7cd4e686'
+RUN_ID  = '260d4d91-a6ee-45d3-b850-168ff80e7f7b'
 REPORT  = REPO / 'tmp' / 'md_morning_report.md'
 GRAPHQL = 'http://127.0.0.1:3000/graphql'
 PG = dict(

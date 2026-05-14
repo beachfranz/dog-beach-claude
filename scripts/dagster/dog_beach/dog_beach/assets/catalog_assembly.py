@@ -151,17 +151,37 @@ def promote_to_gold(
     """Chunked promote: SQL function processes the fid array in a single
     transaction, calling ~14 populator/resolver fns per fid. For OR with
     220 arena rows that's ~3,000 fn calls — hits the 120s pooler timeout.
-    Chunk to 10 fids/call with autocommit between so each batch lands
-    independently. Session-mode pooler so statement_timeout actually sticks."""
-    import time
+    Chunk to 10 fids/call. Fresh connection per chunk so a network blip
+    only kills one chunk (then we retry once with a new connection),
+    instead of dropping the entire run after ~18 min.
+
+    Matches the chunked-subprocess convention: per-chunk inline retry,
+    log + continue on permanent failure, never halt the whole run."""
+    import time, psycopg2
     state = context.partition_key
     state_fp = _STATE_FIPS[state]
     CHUNK = 10
-    conn = postgres_session.get_connection()
-    conn.set_session(autocommit=True)
+
+    def _run_chunk(chunk):
+        c = postgres_session.get_connection()
+        c.set_session(autocommit=True)
+        try:
+            with c.cursor() as cur:
+                cur.execute("SET statement_timeout = '600s'")
+                cur.execute(
+                    "SELECT coalesce((SELECT rows_promoted + rows_already_in_gold "
+                    "                   FROM public.promote_to_gold(%s::bigint[], false::boolean, true::boolean)), 0)::int",
+                    (chunk,),
+                )
+                return int(cur.fetchone()[0] or 0)
+        finally:
+            c.close()
+
+    # Bootstrap connection just to enumerate fids
+    boot = postgres_session.get_connection()
+    boot.set_session(autocommit=True)
     try:
-        with conn.cursor() as cur:
-            cur.execute("SET statement_timeout = '600s'")
+        with boot.cursor() as cur:
             cur.execute(
                 "SELECT array_agg(a.fid) "
                 "  FROM public.arena a "
@@ -170,31 +190,50 @@ def promote_to_gold(
                 (state_fp,),
             )
             fids = cur.fetchone()[0] or []
-            total_rows = 0
-            chunks_done = 0
-            t0 = time.time()
-            for i in range(0, len(fids), CHUNK):
-                chunk = fids[i:i + CHUNK]
-                t_chunk = time.time()
-                cur.execute(
-                    "SELECT coalesce((SELECT rows_promoted + rows_already_in_gold "
-                    "                   FROM public.promote_to_gold(%s::bigint[], false::boolean, true::boolean)), 0)::int",
-                    (chunk,),
-                )
-                rows = int(cur.fetchone()[0] or 0)
-                total_rows += rows
-                chunks_done += 1
-                context.log.info(
-                    f"  chunk {chunks_done}/{(len(fids)+CHUNK-1)//CHUNK} "
-                    f"(fids {chunk[0]}..{chunk[-1]}): +{rows} in {time.time()-t_chunk:.1f}s"
-                )
-            wall_s = round(time.time() - t0, 1)
     finally:
-        conn.close()
+        boot.close()
+
+    total_rows = 0
+    chunks_done = 0
+    chunks_failed = 0
+    t0 = time.time()
+    n_chunks = (len(fids) + CHUNK - 1) // CHUNK
+    for i in range(0, len(fids), CHUNK):
+        chunk = fids[i:i + CHUNK]
+        t_chunk = time.time()
+        try:
+            rows = _run_chunk(chunk)
+        except psycopg2.OperationalError as e:
+            context.log.warning(
+                f"  chunk {chunks_done+1}/{n_chunks} OperationalError: {e}; "
+                f"sleeping 30s, retrying with fresh connection"
+            )
+            time.sleep(30)
+            try:
+                rows = _run_chunk(chunk)
+            except psycopg2.OperationalError as e2:
+                context.log.error(
+                    f"  chunk {chunks_done+1}/{n_chunks} failed twice "
+                    f"(fids {chunk[0]}..{chunk[-1]}): {e2}; continuing"
+                )
+                chunks_failed += 1
+                chunks_done += 1
+                continue
+        total_rows += rows
+        chunks_done += 1
+        context.log.info(
+            f"  chunk {chunks_done}/{n_chunks} "
+            f"(fids {chunk[0]}..{chunk[-1]}): +{rows} in {time.time()-t_chunk:.1f}s"
+        )
+    wall_s = round(time.time() - t0, 1)
+    if chunks_failed:
+        context.log.warning(f"  {chunks_failed} chunks failed after retry; "
+                            f"re-materialize asset to resume (race-safe).")
     return _materialize_with_rows(
         state, total_rows,
         fids_processed=len(fids),
         chunks_done=chunks_done,
+        chunks_failed=chunks_failed,
         wall_clock_s=wall_s,
     )
 

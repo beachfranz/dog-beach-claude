@@ -417,6 +417,15 @@
 
     /* zone-rules-block styles now live in src/zone-rules-block.css */
 
+    /* Embed mode (?embed=charts) — used by beach.html's Best Window
+     * modal. Hides the sticky header and chat trigger so only the
+     * bar charts + legend appear inside the iframe. */
+    html.embed-charts header.header,
+    html.embed-charts .chat-wrap,
+    html.embed-charts .scout-trigger { display: none !important; }
+    html.embed-charts body { padding: 0; }
+    html.embed-charts #main-content { padding: 12px 4px 24px; }
+
     /* ── Details card — bottom-of-page narrative ────────────────────
        Carries zone_rules.global_notes (LLM operator/ordinance/sibling
        prose). One per page, appended after charts + legend + narrative. */
@@ -586,6 +595,11 @@
   let   locationId     = params.get('location') ?? (arenaGroupId ? null : 'huntington-dog-beach');
   const today          = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const date           = params.get('date') ?? today;
+  // Embed mode — chart-only popup (used by beach.html's Best Window
+  // modal). Hides header + skips zone-rules / scout blurb / alternatives
+  // / details / photos / chat. Renders only the bar charts + legend.
+  const embedMode      = params.get('embed') === 'charts';
+  if (embedMode) document.documentElement.classList.add('embed-charts');
 
   // Close button preserves whichever key the user came in with
   const backQs = arenaGroupId ? `fid=${arenaGroupId}` : `location=${locationId}`;
@@ -854,6 +868,24 @@
       wrap.innerHTML = html;
       while (wrap.firstChild) main.appendChild(wrap.firstChild);
     };
+
+    // Embed-charts mode: skip every section EXCEPT the bar charts +
+    // legend block (#4 below). Returns early after the charts append.
+    if (embedMode) {
+      appendHtml(`
+        <div class="board-and-charts">
+          <div class="charts">${chartsHtml}</div>
+        </div>
+        <div class="legend">
+          <div class="legend-item"><div class="legend-dot" style="background:var(--bar-window)"></div> Best Time</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--bar-go)"></div> Go</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--bar-advisory)"></div> Advisory</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--bar-caution)"></div> Caution</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--bar-no_go)"></div> No Go</div>
+        </div>
+      `);
+      return;
+    }
 
     // 1. Zone rules — section-aware dog policy. Pass context so the
     // tab UI can pick the most relevant time-window tab (current hour

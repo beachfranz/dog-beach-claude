@@ -100,21 +100,47 @@
 
   function sectionPill(name, rule, sec) {
     const safeRule = ['off_leash','on_leash','not_allowed'].includes(rule) ? rule : 'unknown';
+    const ruleShort = ZR_RULE_SHORT[safeRule];
     const evidence = sec?.evidence?.quote
       ? `<div class="zr-section-evidence">${escHtml(sec.evidence.quote)}</div>` : '';
-    // Single color-coded row. Row class carries the rule (drives the
-    // background tint AND the rule-label text color). Plain text label
-    // on the right reinforces the color signal without a pill chip.
+    const sectionLabel = ZR_SECTION_LABEL[name] || name;
+    // Icon-only swatch. The section emoji is the only visible content;
+    // background tint carries the rule. Hover/touch shows title with
+    // section name + rule. Click toggles evidence.
     return `<div class="zr-section ${safeRule}"
+                 title="${escHtml(sectionLabel)} — ${escHtml(ruleShort)}"
+                 aria-label="${escHtml(sectionLabel)} — ${escHtml(ruleShort)}"
                  onclick="this.classList.toggle('open')">
-              <span class="zr-section-name">${ZR_SECTION_LABEL[name] || escHtml(name)}</span>
-              <span class="zr-rule-label">${escHtml(ZR_RULE_SHORT[safeRule])}</span>
+              <span class="zr-section-icon">${escHtml(sectionLabel.split(' ')[0])}</span>
             </div>${evidence}`;
+  }
+
+  // Render the legend strip at the top of the zone-rules block.
+  function legendHtml() {
+    return `<div class="zr-legend">
+      <span class="zr-legend-item"><span class="zr-legend-swatch off_leash"></span>Off-leash</span>
+      <span class="zr-legend-item"><span class="zr-legend-swatch on_leash"></span>On-leash</span>
+      <span class="zr-legend-item"><span class="zr-legend-swatch not_allowed"></span>No dogs</span>
+      <span class="zr-legend-item"><span class="zr-legend-swatch unknown"></span>Unknown</span>
+    </div>`;
+  }
+
+  // Most-favorable first: off-leash → on-leash → not-allowed → unknown.
+  // Ordering uses the section's default rule (sec.rule) so the visual
+  // sequence stays stable across time-window tabs.
+  const RULE_RANK = { off_leash: 0, on_leash: 1, not_allowed: 2, unknown: 3 };
+  function _rankRule(r) {
+    return r in RULE_RANK ? RULE_RANK[r] : 4;
   }
 
   function renderZoneCard(reg, ctx, beachName, seasonName, sIdx, rIdx) {
     const sections = reg.sections || {};
-    const sectionList = Object.entries(sections);
+    const sectionList = Object.entries(sections).sort(([aName, aSec], [bName, bSec]) => {
+      const ar = _rankRule(aSec?.rule || 'unknown');
+      const br = _rankRule(bSec?.rule || 'unknown');
+      if (ar !== br) return ar - br;
+      return aName.localeCompare(bName);
+    });
     if (sectionList.length === 0) return '';
 
     const zoneName = reg.name || 'Whole beach';
@@ -232,6 +258,12 @@
         if (card) cards.push(card);
       });
     });
+    if (cards.length === 0) return '';
+    // When there's exactly one zone card, hide its header — the "Whole
+    // beach"/zone-name label is redundant noise without a comparison.
+    if (cards.length === 1) {
+      return cards[0].replace(/<div class="zr-header">[\s\S]*?<\/div>/, '');
+    }
     return cards.join('');
   }
 

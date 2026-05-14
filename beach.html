@@ -157,41 +157,139 @@
    * filter out at the JS layer until the user-feedback affordance
    * lands (project_amenity_user_feedback.md). */
 
-  /* Best-time card — compact today's window summary. */
-  .besttime-card {
+  /* Weather card — compact icon + chips row, mimics index.html. */
+  .weather-card .weather-now {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 8px; padding: 4px 0 2px;
+  }
+  .weather-now-cond {
+    font-size: 36px; line-height: 1;
+  }
+  .weather-chips {
+    display: flex; flex-wrap: wrap; justify-content: center;
+    gap: 6px 8px;
+  }
+  .weather-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 12px; padding: 3px 8px;
+    border-radius: 999px;
+    background: rgba(0,0,0,0.05); color: var(--text);
+  }
+  .weather-loading { color: var(--text-muted); font-size: 12px; padding: 8px 0; }
+
+  /* Best-window card — title + time + status pill, all black text.
+   * Pill backgrounds retain status color for at-a-glance signal.
+   * When hourly detail is available, the title + row become a
+   * clickable affordance (cursor + underline-on-hover) that opens
+   * a modal with the per-hour bar charts. */
+  .besttime-row {
     display: flex; align-items: center; gap: 10px;
-    padding: 10px 14px;
+    font-size: 16px; font-weight: 600; color: var(--text);
   }
-  .besttime-label {
-    font-size: 11px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.05em; color: var(--text-muted);
+  .besttime-time { color: var(--text); }
+  .besttime-card.clickable h2,
+  .besttime-card.clickable .besttime-time {
+    cursor: pointer;
+    text-decoration: underline; text-decoration-color: rgba(0,0,0,0.18);
+    text-underline-offset: 2px;
   }
-  .besttime-window {
-    font-size: 16px; font-weight: 700; color: var(--text);
+  .besttime-card.clickable h2:hover,
+  .besttime-card.clickable .besttime-time:hover {
+    text-decoration-color: var(--text);
+  }
+
+  /* Detail modal — iframe overlay opened from the Best Window card. */
+  .detail-modal {
+    position: fixed; inset: 0;
+    background: rgba(15,23,42,0.72);
+    display: none;
+    z-index: 9999;
+    padding: 24px;
+    align-items: center; justify-content: center;
+  }
+  .detail-modal.open { display: flex; }
+  .detail-modal-inner {
+    position: relative;
+    background: var(--bg);
+    width: 100%; max-width: 900px; height: 90vh;
+    border-radius: 12px; overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .detail-modal-inner iframe { width: 100%; height: 100%; border: 0; }
+  .detail-modal-close {
+    position: absolute; top: 10px; right: 12px;
+    background: rgba(0,0,0,0.55); color: white;
+    border: 0; width: 32px; height: 32px; border-radius: 50%;
+    cursor: pointer; font-size: 16px; line-height: 1;
+    z-index: 1;
   }
   .besttime-status-pill {
-    font-size: 10px; font-weight: 600; padding: 2px 8px;
+    font-size: 11px; font-weight: 600; padding: 2px 10px;
     border-radius: 999px; letter-spacing: 0.04em; text-transform: uppercase;
     margin-left: auto;
+    color: var(--text);  /* black text — only background carries color signal */
   }
+  .besttime-status-pill.go       { background: rgba(22,163,74,0.18); }
+  .besttime-status-pill.advisory { background: rgba(37,99,235,0.18); }
+  .besttime-status-pill.caution  { background: rgba(245,158,11,0.22); }
+  .besttime-status-pill.no_go    { background: rgba(239,68,68,0.20); }
+  .besttime-status-pill.no_data  { background: rgba(0,0,0,0.08); }
   .besttime-status-pill.go       { color: #15803d; background: rgba(22,163,74,0.10); }
   .besttime-status-pill.advisory { color: #1d4ed8; background: rgba(37,99,235,0.10); }
   .besttime-status-pill.caution  { color: #b45309; background: rgba(245,158,11,0.10); }
   .besttime-status-pill.no_go    { color: #b91c1c; background: rgba(239,68,68,0.10); }
 
-  /* Scout blurb — narrative paragraph that lives at the top of main.
-   * Fades in once the LLM call returns; visible-but-muted placeholder
-   * keeps the layout stable during fetch. */
+  /* Scout blurb — now nested inside the Best Time card. Paragraph
+   * narrative; fades in when LLM call returns. */
   #scout-blurb {
     font-family: 'DM Sans', sans-serif;
-    font-size: 13px; line-height: 1.5;
-    color: var(--text-muted);
-    margin: 4px 0 8px;
-    padding: 8px 14px;
+    font-size: 14px; line-height: 1.55;
+    color: var(--text);
+    margin-top: 8px;
     opacity: 0.55;
     transition: opacity 0.15s;
   }
   #scout-blurb.loaded { opacity: 1; }
+
+  /* Cautions list — left rail card with warning rows. */
+  .cautions-card ul.cautions-list {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .cautions-card li {
+    font-size: 12px; line-height: 1.4; color: var(--text);
+    padding: 6px 8px;
+    background: rgba(245,158,11,0.08);
+    border-left: 3px solid #f59e0b;
+    border-radius: 0 4px 4px 0;
+  }
+
+  /* Tide card — SVG curve with hi/lo markers + now indicator. */
+  .tide-card svg.tide-curve {
+    display: block; width: 100%; height: 80px;
+    background: linear-gradient(to bottom, rgba(56,189,248,0.05), transparent);
+    border-radius: 6px;
+  }
+  .tide-card .tide-curve-path {
+    fill: rgba(56,189,248,0.12);
+    stroke: #0369a1; stroke-width: 1.8;
+  }
+  .tide-card .tide-marker-dot { fill: #0369a1; }
+  .tide-card .tide-marker-label {
+    font-size: 9px; fill: var(--text); font-weight: 600;
+  }
+  .tide-card .tide-now-line {
+    stroke: #f59e0b; stroke-width: 1; stroke-dasharray: 2 2;
+  }
+  .tide-card .tide-now-label {
+    font-size: 9px; fill: #92400e; font-weight: 700;
+  }
+  .tide-card .tide-events {
+    display: flex; flex-wrap: wrap; gap: 4px 10px;
+    font-size: 11px; color: var(--text-muted); margin-top: 6px;
+  }
+  .tide-card .tide-events strong { color: var(--text); font-weight: 600; }
+  .tide-card .tide-empty { color: var(--text-muted); font-size: 12px; font-style: italic; }
 
   /* Alternatives card — shows on beaches where dogs aren't allowed
    * or where sand/water access is prohibited. Mirrors detail.html's
@@ -251,11 +349,27 @@
 
   /* Beach description (LLM-generated, voice-led) */
   .beach-description {
-    font-size: 14px; color: var(--text); line-height: 1.6;
-    padding: 14px 16px; margin: 0 16px 12px;
-    background: var(--card); border: 1px solid var(--border);
-    border-left: 3px solid var(--accent);
-    border-radius: 0 8px 8px 0;
+    /* legacy class kept for any inline use; the overview card supersedes it. */
+    font-size: 14px; color: var(--text); line-height: 1.55;
+  }
+  /* Overview card — beach name title + uniform 14px body text
+   * (blurb prose, best-window row, scout blurb) so the card reads
+   * as one typographic block. */
+  .overview-card h2 {
+    font-size: 18px; font-weight: 700; margin: 0 0 10px;
+    color: var(--text); letter-spacing: -0.01em;
+  }
+  .overview-blurb {
+    font-size: 14px; color: var(--text); line-height: 1.55;
+    margin: 0 0 12px;
+  }
+  /* Scout blurb now lives inside the Best Time card. Black text,
+   * uniform 14px / 1.55 line-height — matches the overview blurb. */
+  .besttime-card #scout-blurb {
+    font-size: 14px; line-height: 1.55;
+    color: var(--text);
+    margin: 10px 0 0; padding: 0;
+    opacity: 1;
   }
 
   /* Hero photo block — shared component in src/photo-block.css. The
@@ -410,30 +524,30 @@ function render(data, beachFid) {
   // Details = structured / curated facts (currently from
   // dog_policy.zone_rules.global_notes; hidden when empty).
   // Two distinct things — Franz, 2026-05-10.
-  const leftRail = [];
-  leftRail.push(buildAmenitiesSection(amenities));
-  // Pass empty beachName — the page hero already shows it above.
+  // LEFT RAIL (top → bottom):
+  //   Dog Policy, Hours, Weather, Tides, Cautions, Amenities
   const _zrHtml = window.ZoneRulesBlock.buildHtml(
     dog_policy?.zone_rules,
     { isToday: true, currentLocalHour: _currentLocalHour(beach.timezone) },
     ''
   );
+  const leftRail = [];
   if (_zrHtml) leftRail.push(`<section class="card"><h2>Dog Policy</h2>${_zrHtml}</section>`);
+  leftRail.push(buildHoursSection(beach, amenities));
+  leftRail.push(buildWeatherSection());
+  leftRail.push(buildTideSection(beach));
+  leftRail.push(buildCautionsSection(data.today, dog_policy));
+  leftRail.push(buildAmenitiesSection(amenities));
   document.getElementById('left-rail').innerHTML = leftRail.filter(Boolean).join('');
 
+  // MAIN (top → bottom):
+  //   Alternatives (if triggered), Photos, Overview, Best Window,
+  //   Location, Details, Links
   const main = [];
-  // Scout blurb (today's narrative — also carries the apology when
-  // dogs aren't allowed / sand prohibited / no-go day). Element
-  // mount; async fill in loadScoutBlurb() below.
-  main.push('<div id="scout-blurb">…</div>');
-  // Best Time card — today's best window + status. Hidden when
-  // beach has no recommendation row (non-scoreable / pre-refresh).
-  main.push(buildBestTimeSection(data.today));
-  // Alternatives card — prominent redirect when dogs/sand prohibited.
   main.push(buildAlternativesSection(dog_policy, data.alternatives));
-  main.push(buildDescriptionSection(data.description));
   main.push('<div class="photo-block-wrap" id="photo-block-mount"></div>');
-  main.push(buildHoursSection(beach, amenities));
+  main.push(buildOverviewCard(beach, data.description));
+  main.push(buildBestTimeCard(data.today, dog_policy, beachFid));
   main.push(buildLocationSection(beach));
   main.push(buildDetailsSection(dog_policy));
   main.push(buildLinksSection(beach, beachFid));
@@ -450,8 +564,10 @@ function render(data, beachFid) {
   wireCopyButtons();
   initMap(beach);
 
-  // Fire Scout blurb async after DOM is mounted.
+  // Fire async loads after DOM is mounted.
   loadScoutBlurb(beach, data.today, dog_policy);
+  loadWeather(beach);
+  _wireBestTimeClick();
 }
 
 function buildMapsUrl(beach) {
@@ -549,19 +665,32 @@ function _parkingCostLabel(amenities) {
   return '';
 }
 
+function _renderParkingTile(def, type, subtype, fee) {
+  const typeLabel = PARKING_TYPE_LABEL[type] || PARKING_SUBTYPE_LABEL[subtype] || '';
+  const costLabel = fee === true ? 'Paid' : fee === false ? 'Free' : '';
+  const sub = [typeLabel, costLabel].filter(Boolean).join(' · ');
+  return `<div class="amenity">
+    <span class="amenity-icon">${def.icon}</span>
+    <span class="amenity-text">
+      <span class="amenity-label">${def.label}</span>
+      ${sub ? `<span class="amenity-sub">${escHtml(sub)}</span>` : ''}
+    </span>
+  </div>`;
+}
+
 function _renderAmenityTile(def, amenities) {
   if (def.key === 'has_parking') {
-    const sub = [
-      _parkingTypeLabel(amenities),
-      _parkingCostLabel(amenities),
-    ].filter(Boolean).join(' · ');
-    return `<div class="amenity">
-      <span class="amenity-icon">${def.icon}</span>
-      <span class="amenity-text">
-        <span class="amenity-label">${def.label}</span>
-        ${sub ? `<span class="amenity-sub">${escHtml(sub)}</span>` : ''}
-      </span>
-    </div>`;
+    // Multi-option: render one tile per distinct parking option.
+    if (Array.isArray(amenities.parking_options) && amenities.parking_options.length > 0) {
+      return amenities.parking_options
+        .map(opt => _renderParkingTile(def, opt.type, opt.subtype, opt.fee))
+        .join('');
+    }
+    // Legacy single-option fallback.
+    return _renderParkingTile(def,
+      amenities.parking_type, amenities.parking_subtype,
+      _parkingCostLabel(amenities) === 'Paid' ? true
+        : _parkingCostLabel(amenities) === 'Free' ? false : null);
   }
   return `<div class="amenity">
     <span class="amenity-icon">${def.icon}</span>
@@ -585,7 +714,8 @@ function buildAmenitiesSection(amenities) {
     .filter(d => {
       if (amenities[d.key] === true) return true;
       if (d.key === 'has_parking') {
-        return amenities.parking_fee !== null && amenities.parking_fee !== undefined
+        return (Array.isArray(amenities.parking_options) && amenities.parking_options.length > 0)
+            || (amenities.parking_fee !== null && amenities.parking_fee !== undefined)
             || amenities.parking_subtype
             || amenities.parking_type
             || amenities.parking_notes;
@@ -604,18 +734,300 @@ function buildAmenitiesSection(amenities) {
 // buildZoneRulesSection / time-tab handler all moved to
 // src/zone-rules-block.js (shared with detail.html).
 
-// Best-time card. Renders when today has a recommendation row.
-// Hidden for non-scoreable beaches or before daily refresh runs.
-function buildBestTimeSection(today) {
-  if (!today || !today.best_window_label) return '';
-  const status = today.best_window_status || today.day_status || 'no_data';
-  const STATUS_LABEL = { go:'Go', advisory:'Advisory', caution:'Caution', no_go:'No-go', no_data:'—' };
-  return `<section class="card besttime-card">
-    <div>
-      <div class="besttime-label">Best window today</div>
-      <div class="besttime-window">${escHtml(today.best_window_label)}</div>
-    </div>
-    <span class="besttime-status-pill ${status}">${STATUS_LABEL[status] || status}</span>
+// ─── Weather card ────────────────────────────────────────────────
+// Live against Open-Meteo (forecast) + NOAA CO-OPS (tides). No cache.
+// Renders empty mount; loadWeather() fills it after fetch.
+
+// WMO weather code → emoji + label.
+const WMO_ICON = {
+  0:['☀️','Clear'], 1:['🌤️','Mostly sunny'], 2:['⛅','Partly cloudy'], 3:['☁️','Overcast'],
+  45:['🌫️','Fog'], 48:['🌫️','Fog'],
+  51:['🌦️','Drizzle'], 53:['🌦️','Drizzle'], 55:['🌦️','Drizzle'],
+  61:['🌧️','Light rain'], 63:['🌧️','Rain'], 65:['🌧️','Heavy rain'],
+  71:['🌨️','Snow'], 73:['🌨️','Snow'], 75:['🌨️','Heavy snow'],
+  80:['🌧️','Showers'], 81:['🌧️','Showers'], 82:['🌧️','Heavy showers'],
+  95:['⛈️','Thunderstorm'], 96:['⛈️','Thunderstorm'], 99:['⛈️','Thunderstorm'],
+};
+function wmoIcon(code) { return (WMO_ICON[code] || ['🌡️','—'])[0]; }
+function wmoLabel(code) { return (WMO_ICON[code] || ['🌡️','—'])[1]; }
+
+function buildWeatherSection() {
+  return `<section class="card weather-card">
+    <h2>Weather</h2>
+    <div id="weather-mount" class="weather-loading">Loading conditions…</div>
+  </section>`;
+}
+
+function buildTideSection(beach) {
+  // Hide entirely when no NOAA station is associated.
+  if (!beach.noaa_station_id) return '';
+  return `<section class="card tide-card">
+    <h2>Tides today</h2>
+    <div id="tide-mount" class="weather-loading">Loading tides…</div>
+  </section>`;
+}
+
+function _fmtTideTime(iso) {
+  const d = new Date(iso);
+  const hh = d.getHours(), mm = d.getMinutes();
+  const h = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh;
+  const ap = hh >= 12 ? 'pm' : 'am';
+  return mm ? `${h}:${String(mm).padStart(2,'0')}${ap}` : `${h}${ap}`;
+}
+
+function _renderWeatherToday(forecast) {
+  const mount = document.getElementById('weather-mount');
+  if (!mount) return;
+  const f = forecast;
+  const code  = f.current?.weather_code ?? f.daily.weather_code[0];
+  const temp  = f.current?.temperature_2m != null
+    ? Math.round(f.current.temperature_2m)
+    : Math.round(f.daily.temperature_2m_max[0]);
+  const wind  = f.current?.wind_speed_10m != null
+    ? Math.round(f.current.wind_speed_10m)
+    : Math.round(f.daily.wind_speed_10m_max[0]);
+  const uvMax = f.daily.uv_index_max?.[0];
+  const uvNow = f.current?.uv_index;
+  const uv    = uvNow != null ? uvNow : uvMax;
+  const chips = [
+    `<span class="weather-chip">🌡 ${temp}°</span>`,
+    `<span class="weather-chip">💨 ${wind} mph</span>`,
+    uv != null ? `<span class="weather-chip">☀️ UV ${parseFloat(uv).toFixed(1)}</span>` : '',
+  ].filter(Boolean).join('');
+  mount.innerHTML = `<div class="weather-now">
+    <div class="weather-now-cond" title="${escHtml(wmoLabel(code))}"
+         aria-label="${escHtml(wmoLabel(code))}">${wmoIcon(code)}</div>
+    <div class="weather-chips">${chips}</div>
+  </div>`;
+  mount.classList.remove('weather-loading');
+}
+
+function _renderTidesToday(tides, forecast) {
+  const mount = document.getElementById('tide-mount');
+  if (!mount) return;
+  const hourly = tides?.hourly;
+  const hilo   = tides?.hilo;
+  if (!Array.isArray(hourly) || hourly.length === 0) {
+    // Fall back to hilo-only text if we got hilo but no hourly.
+    if (Array.isArray(hilo) && hilo.length) {
+      const rows = hilo.slice(0,4).map(p => `
+        <span>${p.type === 'H' ? '⬆' : '⬇'} <strong>${_fmtTideTime(p.t.replace(' ','T'))}</strong> · ${parseFloat(p.v).toFixed(1)}ft</span>`).join('');
+      mount.innerHTML = `<div class="tide-events">${rows}</div>`;
+    } else {
+      mount.innerHTML = `<div class="tide-empty">Tide predictions unavailable.</div>`;
+    }
+    mount.classList.remove('weather-loading');
+    return;
+  }
+
+  // Build SVG curve. X = hours 0..24, Y = tide height normalized.
+  const W = 240, H = 80, padY = 8;
+  const minV = Math.min(...hourly.map(p => parseFloat(p.v)));
+  const maxV = Math.max(...hourly.map(p => parseFloat(p.v)));
+  const rng = Math.max(maxV - minV, 0.5);
+  // Each hourly point's time is "YYYY-MM-DD HH:MM". Get fractional hour.
+  const xOf = (t) => {
+    const hh = parseInt(t.slice(11,13), 10);
+    const mm = parseInt(t.slice(14,16), 10);
+    return ((hh + mm/60) / 24) * W;
+  };
+  const yOf = (v) => H - padY - ((parseFloat(v) - minV) / rng) * (H - padY*2);
+  const pts = hourly.map(p => `${xOf(p.t).toFixed(1)},${yOf(p.v).toFixed(1)}`);
+  // Build a closed area path: start at bottom-left, line through points,
+  // close at bottom-right.
+  const linePath = `M ${pts[0]} ` + pts.slice(1).map(p => `L ${p}`).join(' ');
+  const areaPath = `M 0,${H} L ${pts.join(' L ')} L ${W},${H} Z`;
+
+  // Hi/lo markers
+  const markersHtml = Array.isArray(hilo) ? hilo.slice(0,4).map(p => {
+    const x = xOf(p.t), y = yOf(p.v);
+    const label = `${p.type === 'H' ? '⬆' : '⬇'} ${parseFloat(p.v).toFixed(1)}ft`;
+    const labelY = p.type === 'H' ? y - 4 : y + 12;
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5" class="tide-marker-dot"/>
+            <text x="${x.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle" class="tide-marker-label">${label}</text>`;
+  }).join('') : '';
+
+  // Now line (current hour)
+  const now = new Date();
+  const nowX = ((now.getHours() + now.getMinutes()/60) / 24) * W;
+  const nowMarker = `<line x1="${nowX.toFixed(1)}" y1="0" x2="${nowX.toFixed(1)}" y2="${H}" class="tide-now-line"/>
+                     <text x="${nowX.toFixed(1)}" y="${H - 1}" text-anchor="middle" class="tide-now-label">NOW</text>`;
+
+  // Event row beneath the chart (text labels)
+  const eventsHtml = Array.isArray(hilo) ? hilo.slice(0,4).map(p =>
+    `<span>${p.type === 'H' ? '⬆' : '⬇'} <strong>${_fmtTideTime(p.t.replace(' ','T'))}</strong> · ${parseFloat(p.v).toFixed(1)}ft</span>`
+  ).join('') : '';
+
+  mount.innerHTML = `
+    <svg class="tide-curve" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <path d="${areaPath}" class="tide-curve-path"/>
+      <path d="${linePath}" class="tide-curve-path" fill="none"/>
+      ${nowMarker}
+      ${markersHtml}
+    </svg>
+    <div class="tide-events">${eventsHtml}</div>`;
+  mount.classList.remove('weather-loading');
+}
+
+async function loadWeather(beach) {
+  const weatherMount = document.getElementById('weather-mount');
+  const tideMount    = document.getElementById('tide-mount');
+  if (!weatherMount || beach.lat == null || beach.lng == null) {
+    if (weatherMount) weatherMount.parentElement.remove();
+    if (tideMount)    tideMount.parentElement.remove();
+    return;
+  }
+  const tz = beach.timezone || 'auto';
+  // Today only — drop forecast_days to 1.
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${beach.lat}&longitude=${beach.lng}`
+    + `&current=temperature_2m,weather_code,wind_speed_10m,uv_index`
+    + `&daily=temperature_2m_max,temperature_2m_min,weather_code,wind_speed_10m_max,precipitation_sum,uv_index_max`
+    + `&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch`
+    + `&timezone=${encodeURIComponent(tz)}&forecast_days=1`;
+  try {
+    const [forecast, tides] = await Promise.all([
+      fetch(url).then(r => r.json()),
+      beach.noaa_station_id ? _fetchTides(beach.noaa_station_id) : Promise.resolve(null),
+    ]);
+    _renderWeatherToday(forecast);
+    if (tideMount) _renderTidesToday(tides, forecast);
+  } catch (e) {
+    console.warn('weather fetch failed:', e);
+    weatherMount.textContent = 'Weather unavailable right now.';
+  }
+}
+
+async function _fetchTides(stationId) {
+  // Fetch BOTH the hourly height curve and the hi/lo event markers
+  // for today (24h). Hourly drives the SVG curve; hilo drives the
+  // text-event row + the marker dots.
+  const today = new Date();
+  const y = today.getFullYear(), m = String(today.getMonth()+1).padStart(2,'0'), d = String(today.getDate()).padStart(2,'0');
+  const base = `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter`
+    + `?station=${encodeURIComponent(stationId)}&product=predictions`
+    + `&begin_date=${y}${m}${d}&range=24&datum=MLLW&units=english&time_zone=lst_ldt&format=json`;
+  try {
+    const [hourly, hilo] = await Promise.all([
+      fetch(`${base}&interval=h`).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`${base}&interval=hilo`).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]);
+    return {
+      hourly: hourly?.predictions ?? null,
+      hilo:   hilo?.predictions   ?? null,
+    };
+  } catch { return null; }
+}
+
+// Beach overview card. Title = beach display name. Carries the
+// LLM static description + async Scout narrative. The best-window
+// info lives in its own card (buildBestTimeCard).
+function buildOverviewCard(beach, description) {
+  const blurb = description?.text;
+  if (!blurb) return '';
+  return `<section class="card overview-card">
+    <h2>${escHtml(beach.display_name || beach.name || 'Beach')}</h2>
+    <div class="overview-blurb">${escHtml(blurb)}</div>
+  </section>`;
+}
+
+// Best-window card — standalone, all black text. Status pill keeps
+// its tinted background for the at-a-glance signal but pill text is
+// black for typographic consistency.
+function buildBestTimeCard(today, dogPolicy, beachFid) {
+  const hasWindow = today && today.best_window_label;
+  const isNoDogs = !!dogPolicy && (
+    dogPolicy.dogs_allowed === 'no' ||
+    (dogPolicy.has_on_leash === false && dogPolicy.has_off_leash === false)
+  );
+  const isSandWaterProhibited = _sandOrWaterProhibited(dogPolicy?.zone_rules);
+  // Card shows when there's a window OR an apology to convey.
+  if (!hasWindow && !isNoDogs && !isSandWaterProhibited) return '';
+
+  // Clickable when hourly detail is available. day_status presence
+  // implies the hourly_scores row was computed, so detail.html will
+  // render. Skip the clickable affordance when there's no hourly.
+  const clickable = !!(today && today.day_status);
+  const clickAttr = clickable ? ' data-open-detail="1"' : '';
+
+  let headerRow = '';
+  if (hasWindow) {
+    const status = today.best_window_status || today.day_status || 'no_data';
+    const STATUS_LABEL = { go:'Go', advisory:'Advisory', caution:'Caution', no_go:'No-go', no_data:'—' };
+    headerRow = `<div class="besttime-row">
+      <span class="besttime-time"${clickAttr}>${escHtml(today.best_window_label)}</span>
+      <span class="besttime-status-pill ${status}">${STATUS_LABEL[status] || status}</span>
+    </div>`;
+  }
+  return `<section class="card besttime-card${clickable ? ' clickable' : ''}" data-fid="${beachFid}">
+    <h2${clickAttr}>Best window today</h2>
+    ${headerRow}
+    <div id="scout-blurb">…</div>
+  </section>`;
+}
+
+// Lazily-mounted detail modal — iframe to detail.html for the per-hour
+// bar charts. One modal element reused across clicks; appended to body
+// the first time we need it.
+function _ensureDetailModal() {
+  let m = document.getElementById('detail-modal');
+  if (m) return m;
+  m = document.createElement('div');
+  m.id = 'detail-modal';
+  m.className = 'detail-modal';
+  m.innerHTML = `
+    <div class="detail-modal-inner">
+      <button class="detail-modal-close" type="button" aria-label="Close">×</button>
+      <iframe src="about:blank" loading="lazy"></iframe>
+    </div>`;
+  document.body.appendChild(m);
+  const close = () => {
+    m.classList.remove('open');
+    // Blank the iframe so audio/animations stop.
+    m.querySelector('iframe').src = 'about:blank';
+  };
+  m.querySelector('.detail-modal-close').addEventListener('click', close);
+  m.addEventListener('click', e => { if (e.target === m) close(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && m.classList.contains('open')) close();
+  });
+  return m;
+}
+
+function _wireBestTimeClick() {
+  const card = document.querySelector('.besttime-card.clickable');
+  if (!card) return;
+  const fid = card.dataset.fid;
+  const open = (e) => {
+    if (!e.target.closest('[data-open-detail]')) return;
+    e.preventDefault();
+    const today = new Date().toISOString().slice(0, 10);
+    const m = _ensureDetailModal();
+    m.querySelector('iframe').src = `detail.html?fid=${fid}&date=${today}&embed=charts`;
+    m.classList.add('open');
+  };
+  card.addEventListener('click', open);
+}
+
+// Cautions card — bacteria, UV, wind, seasonal closures. Hidden
+// when no cautions apply. Sits in the left rail.
+function buildCautionsSection(today, dogPolicy) {
+  const items = [];
+  if (today?.bacteria_risk && today.bacteria_risk !== 'none' && today.bacteria_risk !== 'low') {
+    items.push(`🦠 Bacteria risk: <strong>${escHtml(today.bacteria_risk)}</strong>`);
+  }
+  if (today?.avg_uv != null && parseFloat(today.avg_uv) >= 8) {
+    items.push(`☀️ Strong UV today (${parseFloat(today.avg_uv).toFixed(1)}) — bring shade + water`);
+  }
+  if (today?.avg_wind != null && parseFloat(today.avg_wind) >= 20) {
+    items.push(`💨 Windy today (${Math.round(today.avg_wind)} mph avg)`);
+  }
+  if (dogPolicy?.dogs_prohibited_start && dogPolicy?.dogs_prohibited_end) {
+    items.push(`🚫 Dogs prohibited <strong>${escHtml(dogPolicy.dogs_prohibited_start)}–${escHtml(dogPolicy.dogs_prohibited_end)}</strong>`);
+  }
+  if (!items.length) return '';
+  return `<section class="card cautions-card">
+    <h2>Cautions</h2>
+    <ul class="cautions-list">${items.map(t => `<li>${t}</li>`).join('')}</ul>
   </section>`;
 }
 
@@ -642,8 +1054,9 @@ async function loadScoutBlurb(beach, today, dogPolicy) {
     el.classList.add('loaded'); return;
   }
   if (!today) {
-    // Non-scoreable / no recommendation today — leave the blurb empty.
-    el.remove();
+    // Non-scoreable / no recommendation today. The element lives
+    // inside the Best Time card; leave a soft note when present.
+    el.textContent = '';
     return;
   }
   if (noGoodWindows) {
@@ -681,7 +1094,7 @@ async function loadScoutBlurb(beach, today, dogPolicy) {
     el.classList.add('loaded');
   } catch (e) {
     console.warn('scout blurb fetch failed:', e);
-    el.remove();
+    el.textContent = '';
   }
 }
 

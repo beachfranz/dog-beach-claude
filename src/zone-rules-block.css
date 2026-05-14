@@ -60,41 +60,46 @@
   margin-bottom: 6px;
 }
 
-.zr-sections {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 6px 8px; margin-top: 6px;
+/* Legend strip — sits at the top of the block, lists each rule
+ * color → label so the icon-only section swatches make sense. */
+.zr-legend {
+  display: flex; flex-wrap: wrap; gap: 6px 10px;
+  font-size: 11px; color: var(--text-muted, #64748b);
+  margin-bottom: 10px;
 }
-/* Row carries the rule via class; background tint signals the rule.
- * A small dot on the right preserves the rule signal for color-blind
- * users. Verbose pill text removed — title attr carries it on hover. */
+.zr-legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.zr-legend-swatch {
+  display: inline-block; width: 12px; height: 12px;
+  border-radius: 3px;
+}
+.zr-legend-swatch.off_leash   { background: rgba(34,197,94,0.50); }
+.zr-legend-swatch.on_leash    { background: rgba(251,191,36,0.55); }
+.zr-legend-swatch.not_allowed { background: rgba(239,68,68,0.50); }
+.zr-legend-swatch.unknown     { background: rgba(0,0,0,0.18); }
+
+.zr-sections {
+  display: flex; flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+/* Icon-only swatch. Background tint carries the rule. Section emoji is
+ * the only visible mark. Hover/touch shows title with section + rule.
+ * Fixed-width squares so icons flow horizontally rather than stretching. */
 .zr-section {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 8px;
-  padding: 5px 10px; font-size: 13px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px;
+  cursor: pointer;
   border-radius: 6px;
   transition: filter 0.1s;
-  background: rgba(0,0,0,0.02); /* fallback when rule is unknown */
+  background: rgba(0,0,0,0.04);
+  flex: 0 0 36px;
 }
-.zr-section:hover { filter: brightness(0.96); }
-.zr-section-name { color: var(--text, #0f172a); }
-/* Plain text label on the right edge — color matches row tint so the
- * scan-color affordance and the readable-text affordance reinforce. */
-.zr-rule-label {
-  font-size: 11px; font-weight: 600; white-space: nowrap;
-  flex-shrink: 0; letter-spacing: 0.01em;
-}
-.zr-section.off_leash   { background: rgba(34,197,94,0.14); }
-.zr-section.off_leash .zr-section-name,
-.zr-section.off_leash .zr-rule-label   { color: #15803d; }
-.zr-section.on_leash    { background: rgba(100,116,139,0.10); }
-.zr-section.on_leash .zr-section-name,
-.zr-section.on_leash .zr-rule-label    { color: #334155; }
-.zr-section.not_allowed { background: rgba(239,68,68,0.13); }
-.zr-section.not_allowed .zr-section-name,
-.zr-section.not_allowed .zr-rule-label { color: #991b1b; }
-.zr-section.unknown     { background: rgba(0,0,0,0.03); }
-.zr-section.unknown .zr-section-name,
-.zr-section.unknown .zr-rule-label     { color: #64748b; }
+.zr-section:hover { filter: brightness(0.93); }
+.zr-section-icon { font-size: 18px; line-height: 1; }
+.zr-section.off_leash   { background: rgba(34,197,94,0.50); }
+.zr-section.on_leash    { background: rgba(251,191,36,0.55); }
+.zr-section.not_allowed { background: rgba(239,68,68,0.45); }
+.zr-section.unknown     { background: rgba(0,0,0,0.06); }
 
 .zr-section-evidence {
   grid-column: 1 / -1;

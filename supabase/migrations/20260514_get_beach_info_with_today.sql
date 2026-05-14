@@ -63,7 +63,8 @@ as $function$
       'lng',           st_x(g.geom),
       'geom',          st_asgeojson(g.geom)::jsonb,
       'open_time',     g.open_time,
-      'close_time',    g.close_time
+      'close_time',    g.close_time,
+      'noaa_station_id', g.noaa_station_id
       ),
     'dog_policy', case when bdp.arena_group_id is not null then
       jsonb_build_object(

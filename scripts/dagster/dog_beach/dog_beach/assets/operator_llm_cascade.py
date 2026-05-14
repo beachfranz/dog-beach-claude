@@ -37,7 +37,7 @@ from dagster import (
 
 from ..partitions import state_partitions, operator_partitions
 from ..resources import PostgresPoolerResource, PostgresSessionResource, SubprocessResource
-from .catalog_assembly import promote_to_gold
+from .catalog_assembly import promote_to_gold, catchment_refresh
 from .upstream_loaders import env_preflight
 
 
@@ -114,7 +114,15 @@ def operator_policy_extraction(
 
 @asset(
     partitions_def=state_partitions,
-    deps=[env_preflight],
+    # 2026-05-14: dep on catchment_refresh — Phase 26 must run AFTER
+    # scoring_tier is set, otherwise the cost gate
+    # (state_operator_ids_for_scoreable_beaches) returns empty on cold-launch
+    # states where no prior extractions exist. See bootstrap chain:
+    #   build_beach_evidence (first pass)
+    #     → state_default emits dogs row → beach_dog_policy populated
+    #     → catchment_refresh sets scoring_tier
+    #     → Phase 26 gated set now contains real operator ids
+    deps=[env_preflight, catchment_refresh],
     group_name="phase_26_to_28_operator_llm",
     description=(
         "State fanout for Phase 26. Calls extract_operator_dogs_policy.py "

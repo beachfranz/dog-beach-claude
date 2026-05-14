@@ -51,7 +51,7 @@
       overflow-y: auto;
     }
     /* Narrow-column overrides for blocks designed for wider layouts. */
-    #left-rail .amenity-grid { grid-template-columns: 1fr; }
+    #left-rail .amenity-grid { grid-template-columns: repeat(2, 1fr); }
     #left-rail .zr-sections  { grid-template-columns: 1fr; }
     #left-rail .zr-card { margin: 8px 0; padding: 10px 12px; }
   }
@@ -153,6 +153,8 @@
     margin-top: 1px;
   }
   .amenity-grid { gap: 4px; }
+  /* Long labels wrap inside the narrow 2-col cell. */
+  .amenity-label { white-space: normal; line-height: 1.2; }
   /* .amenity.absent and .amenity.unknown no longer rendered — both
    * filter out at the JS layer until the user-feedback affordance
    * lands (project_amenity_user_feedback.md). */
@@ -680,7 +682,9 @@ function _renderParkingTile(def, type, subtype, fee) {
 
 function _renderAmenityTile(def, amenities) {
   if (def.key === 'has_parking') {
-    // Multi-option: render one tile per distinct parking option.
+    // Multi-option: render N parking tiles. In the 2-column grid each
+    // tile takes its own cell, so 2 options naturally land side-by-side
+    // on the same row.
     if (Array.isArray(amenities.parking_options) && amenities.parking_options.length > 0) {
       return amenities.parking_options
         .map(opt => _renderParkingTile(def, opt.type, opt.subtype, opt.fee))
@@ -707,10 +711,13 @@ function buildAmenitiesSection(amenities) {
   //
   // Special-case parking: if we have any parking-derived field (fee /
   // subtype / type / notes), parking obviously exists. Render the tile
-  // even when has_parking itself is null. This handles the case where
-  // OSM's closest parking POI gave us fee+subtype tags but the
-  // consensus on has_parking remained unresolved.
-  const cells = AMENITY_DEFS
+  // even when has_parking itself is null.
+  //
+  // Sort by label length so short-named tiles fit the 2-column grid
+  // first and long names drop to the bottom (where wrapping is OK).
+  // Parking always sorts first since it's the "headliner" amenity.
+  const visible = AMENITY_DEFS
+    .map((d, i) => ({ ...d, _i: i }))
     .filter(d => {
       if (amenities[d.key] === true) return true;
       if (d.key === 'has_parking') {
@@ -722,7 +729,13 @@ function buildAmenitiesSection(amenities) {
       }
       return false;
     })
-    .map(d => _renderAmenityTile(d, amenities)).join('');
+    .sort((a, b) => {
+      if (a.key === 'has_parking') return -1;
+      if (b.key === 'has_parking') return 1;
+      const la = a.label.length, lb = b.label.length;
+      return la === lb ? a._i - b._i : la - lb;
+    });
+  const cells = visible.map(d => _renderAmenityTile(d, amenities)).join('');
   if (!cells) return '';
   return `<section class="card">
     <h2>Amenities</h2>

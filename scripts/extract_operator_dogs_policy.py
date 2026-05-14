@@ -546,7 +546,7 @@ def pass_a_user(t: dict, page_text: str, source_url: str) -> str:
 
 
 def pass_a_instruction(t: dict) -> str:
-    return """Extract ONLY four fields about this operator's beach dog policy.
+    return """Extract FIVE fields about this operator's beach dog policy.
 
 1. policy_found (bool): does the page meaningfully address whether dogs are allowed on this operator's beaches OR public spaces (parks, recreation areas, public property)?
    Set true even if the policy is implicit — e.g., a general leash ordinance for all public spaces with no beach-specific exception is itself a policy.
@@ -570,12 +570,15 @@ def pass_a_instruction(t: dict) -> str:
 
 4. leash_required (bool|null): does the page say leashes are required when dogs are present?
 
+5. ordinance_reference (text|null): formal municipal/county/state code reference if cited on the page (e.g. "LA County Code §17.12.080", "ORS 390.605", "PA 451 of 1994 NREPA Part 741"). Null if no citation appears. Do NOT invent.
+
 Return ONLY:
 {{
   "policy_found": <bool>,
   "default_rule": "yes" | "no" | "restricted" | null,
   "applies_to_all": <bool|null>,
   "leash_required": <bool|null>,
+  "ordinance_reference": <text|null>,
   "source_quotes": [<verbatim text>, ...],
   "confidence": <0.0-1.0>
 }}"""
@@ -651,11 +654,16 @@ def run_three_passes(t: dict, page_text: str, source_url: str) -> dict:
     out = {"total_input_tokens": 0, "total_output_tokens": 0,
            "cache_creation_tokens": 0, "cache_read_tokens": 0}
 
+    # 2026-05-14: Pass C dropped. ordinance_reference moved into Pass A.
+    # Pass C's other outputs (exceptions, summary, quotes) were
+    # curator-only and not consumer-surfaced → low value vs ~30% of
+    # per-op token spend. See project_llm_cost_cuts.md.
     passes = [
         ("a", HAIKU,  pass_a_instruction, 2048),
         ("b", SONNET, pass_b_instruction, 1500),
-        ("c", SONNET, pass_c_instruction, 2048),
     ]
+    # Default Pass C status to 'skipped' so downstream schema stays stable.
+    out["pass_c_status"] = "skipped"
 
     for label, model, instr_fn, max_tokens in passes:
         result = call_llm_cached(model, sys_block, cached_prefix,
@@ -672,14 +680,18 @@ def run_three_passes(t: dict, page_text: str, source_url: str) -> dict:
             out[f"pass_{label}_status"] = "ok"
             out[f"pass_{label}_json"]   = result["json"]
 
-        # Short-circuit: if Pass A says the page doesn't address dogs,
-        # skip B and C — they'd return empty arrays.
+        # Short-circuit conditions after Pass A:
+        # 1. policy_found=false → skip Pass B (no rule = no temporal data)
+        # 2. default_rule='no' → skip Pass B (dogs prohibited; no time windows possible)
         if label == "a":
             pa = out.get("pass_a_json") or {}
             if pa.get("policy_found") is False:
                 out["short_circuit"] = "pass_a_no_policy_found"
                 out["pass_b_status"] = "skipped"
-                out["pass_c_status"] = "skipped"
+                break
+            if pa.get("default_rule") == "no":
+                out["short_circuit"] = "pass_a_dogs_prohibited"
+                out["pass_b_status"] = "skipped"
                 break
 
     return out
@@ -710,7 +722,10 @@ def upsert_extraction(operator_id: int, source_kind: str, source_url: str,
     """Upsert one extraction row via supabase REST."""
     a = passes.get("pass_a_json", {}) if passes.get("pass_a_status") == "ok" else {}
     b = passes.get("pass_b_json", {}) if passes.get("pass_b_status") == "ok" else {}
-    c = passes.get("pass_c_json", {}) if passes.get("pass_c_status") == "ok" else {}
+    # 2026-05-14: Pass C dropped. ordinance_reference now extracted by Pass A
+    # but persisted under pass_c_ordinance for downstream compatibility with
+    # merge_operator_dogs_policy.py.
+    c = {"ordinance_reference": a.get("ordinance_reference")}
     row = {
         "operator_id":  operator_id,
         "source_kind":  source_kind,

@@ -157,6 +157,34 @@
    * filter out at the JS layer until the user-feedback affordance
    * lands (project_amenity_user_feedback.md). */
 
+  /* Alternatives card — shows on beaches where dogs aren't allowed
+   * or where sand/water access is prohibited. Mirrors detail.html's
+   * "Try these instead" card. */
+  .alt-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 14px;
+  }
+  .alt-card-header {
+    font-size: 14px; font-weight: 700; color: var(--text);
+    margin-bottom: 4px;
+  }
+  .alt-card-reason {
+    font-size: 12px; color: var(--text-muted); margin-bottom: 10px;
+  }
+  .alt-list { display: flex; flex-direction: column; gap: 8px; }
+  .alt-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; padding: 8px 10px;
+    border: 1px solid var(--border); border-radius: 8px;
+    text-decoration: none; color: inherit;
+    transition: background 0.1s;
+  }
+  .alt-row:hover { background: rgba(0,0,0,0.02); }
+  .alt-row-left { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .alt-name { font-weight: 600; font-size: 13px; color: var(--text); }
+  .alt-meta { font-size: 11px; color: var(--text-muted); }
+  .alt-row-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
   /* Zone-rules styles now in src/zone-rules-block.css (shared block) */
 
   /* Links block */
@@ -358,6 +386,10 @@ function render(data, beachFid) {
   document.getElementById('left-rail').innerHTML = leftRail.filter(Boolean).join('');
 
   const main = [];
+  // Alternatives card first — when current beach prohibits dogs or
+  // blocks sand/water access, surface the redirect prominently
+  // before description/photos/etc.
+  main.push(buildAlternativesSection(dog_policy, data.alternatives));
   main.push(buildDescriptionSection(data.description));
   main.push('<div class="photo-block-wrap" id="photo-block-mount"></div>');
   main.push(buildHoursSection(beach, amenities));
@@ -527,6 +559,64 @@ function buildAmenitiesSection(amenities) {
 // _renderSectionPill / _renderTimeCell / _renderZoneCard /
 // buildZoneRulesSection / time-tab handler all moved to
 // src/zone-rules-block.js (shared with detail.html).
+
+// True if zone_rules says any of sand/water/dunes/tide_pools is
+// 'not_allowed' — the "trails-only beach" pattern.
+function _sandOrWaterProhibited(zr) {
+  if (!zr || typeof zr !== 'object') return false;
+  const seasons = (Array.isArray(zr.seasons) && zr.seasons.length)
+    ? zr.seasons
+    : (Array.isArray(zr.regions) ? [{ regions: zr.regions }] : []);
+  const blocked = ['sand', 'water_swim', 'dunes', 'tide_pools'];
+  for (const s of seasons) {
+    const regions = Array.isArray(s.regions) ? s.regions : [];
+    for (const reg of regions) {
+      const sections = reg.sections || {};
+      for (const name of blocked) {
+        if (sections[name]?.rule === 'not_allowed') return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Alternatives card — renders when (a) dogs not allowed here, or
+// (b) sand/water prohibited (trails-only). Lists top 3 nearby beaches
+// from the alternatives array returned by get_beach_info.
+function buildAlternativesSection(dogPolicy, alternatives) {
+  if (!Array.isArray(alternatives) || alternatives.length === 0) return '';
+  const isNoDogs = !!dogPolicy && (
+    dogPolicy.dogs_allowed === 'no' ||
+    (dogPolicy.has_on_leash === false && dogPolicy.has_off_leash === false)
+  );
+  const isSandWaterProhibited = _sandOrWaterProhibited(dogPolicy?.zone_rules);
+  if (!isNoDogs && !isSandWaterProhibited) return '';
+
+  const alts = alternatives.slice(0, 3);
+  const reason = isNoDogs
+    ? "Dogs aren't allowed at this beach. Try one of these nearby spots instead."
+    : "Dogs can't go on the sand or in the water at this beach. These nearby spots welcome pups in the surf.";
+
+  const rows = alts.map(a => {
+    const miles = (a.distance_km || 0) * 0.621371;
+    const modes = [];
+    if (a.has_off_leash === true) modes.push('off-leash');
+    if (a.has_on_leash  === true) modes.push('on-leash');
+    return `
+      <a class="alt-row" href="beach.html?fid=${a.fid}">
+        <div class="alt-row-left">
+          <div class="alt-name">${escHtml(a.name)}</div>
+          <div class="alt-meta">${miles.toFixed(1)} mi away · ${modes.join(' + ') || 'dogs allowed'}</div>
+        </div>
+      </a>`;
+  }).join('');
+
+  return `<section class="card alt-card">
+    <div class="alt-card-header">🐾 Try these instead</div>
+    <div class="alt-card-reason">${escHtml(reason)}</div>
+    <div class="alt-list">${rows}</div>
+  </section>`;
+}
 
 function buildDetailsSection(dogPolicy) {
   // Bottom-of-page Details card. Structured / curated facts about the

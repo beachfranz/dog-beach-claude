@@ -283,7 +283,7 @@ def write_report(run_data, fail_causes, metrics):
 
 
 def main():
-    print(f'[observer] watching run {RUN_ID}, report → {REPORT}', flush=True)
+    print(f'[observer] watching run {RUN_ID}, report -> {REPORT}', flush=True)
     run_data = poll_until_terminal()
     print(f'[observer] terminal: {run_data.get("status")}', flush=True)
     fail_causes = fetch_failure_causes(run_data.get('stepStats') or [])

@@ -157,6 +157,42 @@
    * filter out at the JS layer until the user-feedback affordance
    * lands (project_amenity_user_feedback.md). */
 
+  /* Best-time card — compact today's window summary. */
+  .besttime-card {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+  }
+  .besttime-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--text-muted);
+  }
+  .besttime-window {
+    font-size: 16px; font-weight: 700; color: var(--text);
+  }
+  .besttime-status-pill {
+    font-size: 10px; font-weight: 600; padding: 2px 8px;
+    border-radius: 999px; letter-spacing: 0.04em; text-transform: uppercase;
+    margin-left: auto;
+  }
+  .besttime-status-pill.go       { color: #15803d; background: rgba(22,163,74,0.10); }
+  .besttime-status-pill.advisory { color: #1d4ed8; background: rgba(37,99,235,0.10); }
+  .besttime-status-pill.caution  { color: #b45309; background: rgba(245,158,11,0.10); }
+  .besttime-status-pill.no_go    { color: #b91c1c; background: rgba(239,68,68,0.10); }
+
+  /* Scout blurb — narrative paragraph that lives at the top of main.
+   * Fades in once the LLM call returns; visible-but-muted placeholder
+   * keeps the layout stable during fetch. */
+  #scout-blurb {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px; line-height: 1.5;
+    color: var(--text-muted);
+    margin: 4px 0 8px;
+    padding: 8px 14px;
+    opacity: 0.55;
+    transition: opacity 0.15s;
+  }
+  #scout-blurb.loaded { opacity: 1; }
+
   /* Alternatives card — shows on beaches where dogs aren't allowed
    * or where sand/water access is prohibited. Mirrors detail.html's
    * "Try these instead" card. */
@@ -386,9 +422,14 @@ function render(data, beachFid) {
   document.getElementById('left-rail').innerHTML = leftRail.filter(Boolean).join('');
 
   const main = [];
-  // Alternatives card first — when current beach prohibits dogs or
-  // blocks sand/water access, surface the redirect prominently
-  // before description/photos/etc.
+  // Scout blurb (today's narrative — also carries the apology when
+  // dogs aren't allowed / sand prohibited / no-go day). Element
+  // mount; async fill in loadScoutBlurb() below.
+  main.push('<div id="scout-blurb">…</div>');
+  // Best Time card — today's best window + status. Hidden when
+  // beach has no recommendation row (non-scoreable / pre-refresh).
+  main.push(buildBestTimeSection(data.today));
+  // Alternatives card — prominent redirect when dogs/sand prohibited.
   main.push(buildAlternativesSection(dog_policy, data.alternatives));
   main.push(buildDescriptionSection(data.description));
   main.push('<div class="photo-block-wrap" id="photo-block-mount"></div>');
@@ -408,6 +449,9 @@ function render(data, beachFid) {
 
   wireCopyButtons();
   initMap(beach);
+
+  // Fire Scout blurb async after DOM is mounted.
+  loadScoutBlurb(beach, data.today, dog_policy);
 }
 
 function buildMapsUrl(beach) {
@@ -559,6 +603,87 @@ function buildAmenitiesSection(amenities) {
 // _renderSectionPill / _renderTimeCell / _renderZoneCard /
 // buildZoneRulesSection / time-tab handler all moved to
 // src/zone-rules-block.js (shared with detail.html).
+
+// Best-time card. Renders when today has a recommendation row.
+// Hidden for non-scoreable beaches or before daily refresh runs.
+function buildBestTimeSection(today) {
+  if (!today || !today.best_window_label) return '';
+  const status = today.best_window_status || today.day_status || 'no_data';
+  const STATUS_LABEL = { go:'Go', advisory:'Advisory', caution:'Caution', no_go:'No-go', no_data:'—' };
+  return `<section class="card besttime-card">
+    <div>
+      <div class="besttime-label">Best window today</div>
+      <div class="besttime-window">${escHtml(today.best_window_label)}</div>
+    </div>
+    <span class="besttime-status-pill ${status}">${STATUS_LABEL[status] || status}</span>
+  </section>`;
+}
+
+// Scout blurb — narrative paragraph from beach-chat (Anthropic LLM)
+// describing today's conditions. Short-circuits to canned apologies
+// when dogs aren't allowed / sand prohibited / no good windows.
+async function loadScoutBlurb(beach, today, dogPolicy) {
+  const el = document.getElementById('scout-blurb');
+  if (!el) return;
+
+  const isNoDogs = !!dogPolicy && (
+    dogPolicy.dogs_allowed === 'no' ||
+    (dogPolicy.has_on_leash === false && dogPolicy.has_off_leash === false)
+  );
+  const isSandWaterProhibited = _sandOrWaterProhibited(dogPolicy?.zone_rules);
+  const noGoodWindows = today && today.day_status === 'no_go';
+
+  if (isNoDogs) {
+    el.textContent = "Sorry bud — dogs aren't allowed here. Check the alternatives below for a nearby spot that welcomes pups.";
+    el.classList.add('loaded'); return;
+  }
+  if (isSandWaterProhibited) {
+    el.textContent = "Sorry bud — dogs aren't allowed on the sand or in the water here. Check the alternatives below for a beach where pups can actually hit the surf.";
+    el.classList.add('loaded'); return;
+  }
+  if (!today) {
+    // Non-scoreable / no recommendation today — leave the blurb empty.
+    el.remove();
+    return;
+  }
+  if (noGoodWindows) {
+    el.textContent = "Today's looking rough at this beach — no go-quality hours. Check the alternatives below if you can travel.";
+    el.classList.add('loaded'); return;
+  }
+
+  const windowLabel  = today.best_window_label  ?? 'the best window';
+  const windowStatus = today.best_window_status ?? 'go';
+  const signals = [
+    today.lowest_tide_height != null ? `tide ${parseFloat(today.lowest_tide_height).toFixed(1)}ft` : null,
+    today.avg_wind  != null ? `wind ${Math.round(today.avg_wind)}mph` : null,
+    today.avg_temp  != null ? `temp ${Math.round(today.avg_temp)}°F` : null,
+    today.avg_uv    != null ? `UV index ${parseFloat(today.avg_uv).toFixed(1)}` : null,
+    today.busyness_category ? `crowds: ${today.busyness_category}` : null,
+    today.bacteria_risk && today.bacteria_risk !== 'none' ? `bacteria risk: ${today.bacteria_risk}` : null,
+  ].filter(Boolean).join(', ');
+
+  const question =
+    `Best window: ${windowLabel} (${windowStatus}). Conditions: ${signals}. ` +
+    `Write 1-2 short sentences of flowing prose — no headers, no bullets, no lists, no pack list, no gear recommendations: ` +
+    `Sentence 1: when the best window is and the main reason why, using vivid descriptive language not raw numbers. ` +
+    `Sentence 2 (optional, skip if conditions are clean): any cautions or advisories during that window. ` +
+    `STRICT: respect the DOG POLICY ZONE RULES in the system prompt. Never describe activities (fetch, swim, splashing, off-leash play) in sections marked not_allowed.`;
+
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/beach-chat`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ arena_group_id: beach.fid, question, conversation_history: [] }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { answer } = await res.json();
+    el.textContent = answer || '';
+    el.classList.add('loaded');
+  } catch (e) {
+    console.warn('scout blurb fetch failed:', e);
+    el.remove();
+  }
+}
 
 // True if zone_rules says any of sand/water/dunes/tide_pools is
 // 'not_allowed' — the "trails-only beach" pattern.

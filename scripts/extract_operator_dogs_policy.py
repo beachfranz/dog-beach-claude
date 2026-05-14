@@ -546,7 +546,7 @@ def pass_a_user(t: dict, page_text: str, source_url: str) -> str:
 
 
 def pass_a_instruction(t: dict) -> str:
-    return """Extract FIVE fields about this operator's beach dog policy.
+    return """Extract FOUR fields about this operator's beach dog policy.
 
 1. policy_found (bool): does the page meaningfully address whether dogs are allowed on this operator's beaches OR public spaces (parks, recreation areas, public property)?
    Set true even if the policy is implicit — e.g., a general leash ordinance for all public spaces with no beach-specific exception is itself a policy.
@@ -566,17 +566,14 @@ def pass_a_instruction(t: dict) -> str:
    IMPORTANT — public-space leash laws usually apply to beaches:
    If the page is a municipal/county code that requires dogs on leash in "public spaces" / "public property" / "city parks" with no beach-specific carve-out, treat the beach default as "restricted" (not null), since the leash law extends to beaches by default. Cite the leash-law quote in source_quotes.
 
-3. applies_to_all (bool|null): does the rule apply uniformly to every beach this operator manages?
+3. leash_required (bool|null): does the page say leashes are required when dogs are present?
 
-4. leash_required (bool|null): does the page say leashes are required when dogs are present?
-
-5. ordinance_reference (text|null): formal municipal/county/state code reference if cited on the page (e.g. "LA County Code §17.12.080", "ORS 390.605", "PA 451 of 1994 NREPA Part 741"). Null if no citation appears. Do NOT invent.
+4. ordinance_reference (text|null): formal municipal/county/state code reference if cited on the page (e.g. "LA County Code §17.12.080", "ORS 390.605", "PA 451 of 1994 NREPA Part 741"). Null if no citation appears. Do NOT invent.
 
 Return ONLY:
 {{
   "policy_found": <bool>,
   "default_rule": "yes" | "no" | "restricted" | null,
-  "applies_to_all": <bool|null>,
   "leash_required": <bool|null>,
   "ordinance_reference": <text|null>,
   "source_quotes": [<verbatim text>, ...],
@@ -589,26 +586,22 @@ def pass_b_user(t: dict, page_text: str, source_url: str) -> str:
 
 
 def pass_b_instruction(t: dict) -> str:
-    return """Extract operator-LEVEL restriction structure ONLY. If the page is a per-beach catalog (table of beach name → rule), return all fields empty/null — that detail belongs in Pass C.
+    return """Extract time-of-day restrictions ONLY. We already have:
+- spatial section rules (sand/water/trails/picnic) from a per-beach pass
+- seasonal closures (nesting season etc.) from the USFWS/CDFW GIS overlay
 
-1. time_windows: array of allowed time windows that apply at OPERATOR level.
+So focus on ONE thing here: when (time of day / season) are dogs restricted?
+
+1. time_windows: array of operator-level time restrictions.
    Each: {{"before": "HH:MM"|null, "after": "HH:MM"|null, "season": "summer"|"winter"|"year_round"|null, "leashed": <bool|null>}}
-   Empty array if page silent OR is a per-beach table.
-
-2. seasonal_closures: array of date-range closures at OPERATOR level.
-   Each: {{"reason": "snowy_plover"|"harbor_seal_pupping"|"other", "from": "MM-DD", "to": "MM-DD", "policy": "prohibited"|"restricted_zones"}}
-   Empty array if no operator-wide seasonal language.
-
-3. spatial_zones: where on operator's properties dogs ARE / AREN'T allowed at the operator level (campground vs beach vs trails, etc.).
-   {{"allowed_in": [<short text>, ...], "prohibited_in": [<short text>, ...]}}
-   Empty arrays if page doesn't differentiate at operator scope.
+   - "before"/"after": time of day in 24-hour HH:MM
+   - "season": "summer" = roughly May–Sep (often Memorial Day–Labor Day); "winter" = Oct–Apr; "year_round" = always
+   - "leashed": if there's a leash-only window (e.g. dogs on-leash 9am-6pm, off-leash otherwise), set true for those windows
+   Empty array if page doesn't mention time-of-day restrictions.
 
 Return ONLY:
 {{
   "time_windows": [...],
-  "seasonal_closures": [...],
-  "spatial_zones": {{"allowed_in": [...], "prohibited_in": [...]}},
-  "source_quotes": [<verbatim text>, ...],
   "confidence": <0.0-1.0>
 }}"""
 
@@ -658,9 +651,13 @@ def run_three_passes(t: dict, page_text: str, source_url: str) -> dict:
     # Pass C's other outputs (exceptions, summary, quotes) were
     # curator-only and not consumer-surfaced → low value vs ~30% of
     # per-op token spend. See project_llm_cost_cuts.md.
+    # 2026-05-14: Pass B slimmed to time_windows only. spatial_zones is now
+    # handled per-beach by section_extract (better granularity). seasonal_closures
+    # is handled by the USFWS/CDFW nesting-zones GIS overlay (definitive).
+    # Smaller max_tokens reflects the smaller output schema.
     passes = [
-        ("a", HAIKU,  pass_a_instruction, 2048),
-        ("b", SONNET, pass_b_instruction, 1500),
+        ("a", HAIKU,  pass_a_instruction, 1024),
+        ("b", SONNET, pass_b_instruction, 512),
     ]
     # Default Pass C status to 'skipped' so downstream schema stays stable.
     out["pass_c_status"] = "skipped"

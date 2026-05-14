@@ -62,25 +62,39 @@
 
 .zr-sections {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 6px 12px; margin-top: 4px;
+  gap: 6px 8px; margin-top: 6px;
 }
+/* Row carries the rule via class; background tint signals the rule.
+ * A small dot on the right preserves the rule signal for color-blind
+ * users. Verbose pill text removed — title attr carries it on hover. */
 .zr-section {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 4px 0; font-size: 13px; cursor: pointer;
-  border-bottom: 1px solid transparent;
-  transition: border-color 0.1s;
+  gap: 8px;
+  padding: 5px 10px; font-size: 13px; cursor: pointer;
+  border-radius: 6px;
+  transition: filter 0.1s;
+  background: rgba(0,0,0,0.02); /* fallback when rule is unknown */
 }
-.zr-section:hover { border-bottom-color: var(--border, #e2e8f0); }
+.zr-section:hover { filter: brightness(0.96); }
 .zr-section-name { color: var(--text, #0f172a); }
-.zr-rule {
-  font-size: 11px; padding: 2px 8px; border-radius: 999px;
-  font-weight: 600; white-space: nowrap;
+/* Plain text label on the right edge — color matches row tint so the
+ * scan-color affordance and the readable-text affordance reinforce. */
+.zr-rule-label {
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+  flex-shrink: 0; letter-spacing: 0.01em;
 }
-.zr-rule.off_leash   { background: rgba(34,197,94,0.12);  color: #15803d; }
-.zr-rule.on_leash    { background: rgba(0,0,0,0.06);      color: #475569; }
-.zr-rule.not_allowed { background: rgba(239,68,68,0.12);  color: #991b1b; }
-.zr-rule.time_window { background: rgba(245,158,11,0.12); color: #92400e; }
-.zr-rule.unknown     { background: rgba(0,0,0,0.04);      color: #94a3b8; }
+.zr-section.off_leash   { background: rgba(34,197,94,0.14); }
+.zr-section.off_leash .zr-section-name,
+.zr-section.off_leash .zr-rule-label   { color: #15803d; }
+.zr-section.on_leash    { background: rgba(100,116,139,0.10); }
+.zr-section.on_leash .zr-section-name,
+.zr-section.on_leash .zr-rule-label    { color: #334155; }
+.zr-section.not_allowed { background: rgba(239,68,68,0.13); }
+.zr-section.not_allowed .zr-section-name,
+.zr-section.not_allowed .zr-rule-label { color: #991b1b; }
+.zr-section.unknown     { background: rgba(0,0,0,0.03); }
+.zr-section.unknown .zr-section-name,
+.zr-section.unknown .zr-rule-label     { color: #64748b; }
 
 .zr-section-evidence {
   grid-column: 1 / -1;

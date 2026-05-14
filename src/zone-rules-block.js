@@ -90,14 +90,25 @@
     return otherIdx >= 0 ? otherIdx : 0;
   }
 
+  // Short rule label per rule class. Used as plain text on the right
+  // edge of each section row — color matches the row tint so the two
+  // reinforce each other (scan + read).
+  const ZR_RULE_SHORT = {
+    off_leash: 'Off-leash', on_leash: 'On-leash',
+    not_allowed: 'No dogs',  unknown: '—',
+  };
+
   function sectionPill(name, rule, sec) {
     const safeRule = ['off_leash','on_leash','not_allowed'].includes(rule) ? rule : 'unknown';
-    const ruleLabel = ZR_RULE_LABEL[safeRule] || rule;
     const evidence = sec?.evidence?.quote
       ? `<div class="zr-section-evidence">${escHtml(sec.evidence.quote)}</div>` : '';
-    return `<div class="zr-section" onclick="this.classList.toggle('open')">
+    // Single color-coded row. Row class carries the rule (drives the
+    // background tint AND the rule-label text color). Plain text label
+    // on the right reinforces the color signal without a pill chip.
+    return `<div class="zr-section ${safeRule}"
+                 onclick="this.classList.toggle('open')">
               <span class="zr-section-name">${ZR_SECTION_LABEL[name] || escHtml(name)}</span>
-              <span class="zr-rule ${safeRule}">${ruleLabel}</span>
+              <span class="zr-rule-label">${escHtml(ZR_RULE_SHORT[safeRule])}</span>
             </div>${evidence}`;
   }
 
@@ -108,8 +119,12 @@
 
     const zoneName = reg.name || 'Whole beach';
     const seasonSuffix = seasonName ? ` · ${escHtml(seasonName)}` : '';
-    const header = `<div class="zr-header">🐾 ${escHtml(beachName)}
-                      <span class="zr-zone-name">${escHtml(zoneName)}</span>${seasonSuffix}</div>`;
+    // When caller passes empty beachName (page already shows it elsewhere),
+    // drop the paw prefix entirely and make the zone name the primary label.
+    const header = beachName
+      ? `<div class="zr-header">🐾 ${escHtml(beachName)}
+            <span class="zr-zone-name">${escHtml(zoneName)}</span>${seasonSuffix}</div>`
+      : `<div class="zr-header">${escHtml(zoneName)}${seasonSuffix}</div>`;
 
     const winMap = new Map();
     for (const [, sec] of sectionList) {

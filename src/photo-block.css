@@ -10,7 +10,8 @@
   margin: 0 0 16px;
 }
 
-/* Hero — single large photo, native aspect ratio, caps at 60vh. */
+/* Hero — single photo, native aspect ratio, caps at 42vh
+ * (reduced 30% from 60vh on 2026-05-14). Arrows + counter overlay. */
 .photo-block-hero {
   position: relative;
   width: 100%;
@@ -23,9 +24,43 @@
   display: block;
   width: 100%;
   height: auto;
-  max-height: 60vh;
+  max-height: 42vh;
   object-fit: contain;
   background: #0f172a;
+  cursor: zoom-in;
+}
+
+/* Prev/Next arrow buttons — overlay on the hero. */
+.photo-block-nav {
+  position: absolute;
+  top: 50%; transform: translateY(-50%);
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.55);
+  color: white;
+  border: 0;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0;
+  z-index: 2;
+}
+.photo-block-nav:hover { background: rgba(0,0,0,0.75); }
+.photo-block-nav-prev { left: 10px; }
+.photo-block-nav-next { right: 10px; }
+
+/* Counter "3 / 14" badge — top-right of the hero. */
+.photo-block-counter {
+  position: absolute;
+  top: 10px; right: 10px;
+  background: rgba(0,0,0,0.55);
+  color: white;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  z-index: 2;
 }
 .photo-block-hero-attr {
   position: absolute;
@@ -40,36 +75,11 @@
   text-decoration: underline;
 }
 
-/* Supporting grid — up to 5 thumbnails. Responsive 5/3/2 cols. */
-.photo-block-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 8px;
-  margin-bottom: 8px;
-}
-@media (max-width: 900px) {
-  .photo-block-grid { grid-template-columns: repeat(3, 1fr); }
-}
-@media (max-width: 560px) {
-  .photo-block-grid { grid-template-columns: repeat(2, 1fr); }
-}
-.photo-block-thumb {
-  position: relative;
-  aspect-ratio: 1 / 1;
-  background: #0f172a;
-  border-radius: 8px;
-  overflow: hidden;
-  cursor: pointer;
-}
-.photo-block-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.photo-block-thumb:hover img { opacity: 0.85; }
+/* Supporting thumbnail grid retired 2026-05-14 — nav arrows on the
+ * hero replace the click-to-promote affordance. View-all link still
+ * exists for the gallery page. */
 
-/* View-all link — right-aligned below the grid */
+/* View-all link — right-aligned below the hero */
 .photo-block-viewall {
   text-align: right;
   font-size: 13px;

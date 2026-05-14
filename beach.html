@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&family=DM+Mono&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="src/photo-block.css">
+<link rel="stylesheet" href="src/zone-rules-block.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
   integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
   crossorigin="">
@@ -28,25 +29,31 @@
     margin: 0; font-family: 'DM Sans', system-ui, sans-serif;
     background: var(--bg); color: var(--text); line-height: 1.5;
   }
-  .page { max-width: 1100px; margin: 0 auto; }
+  .page { max-width: 1200px; margin: 0 auto; }
   .body-grid {
     display: grid;
-    grid-template-columns: 1fr;  /* mobile default — single column */
+    grid-template-columns: 1fr;  /* mobile default — single column, stacked */
     gap: 0;
   }
   @media (min-width: 900px) {
     .body-grid {
-      grid-template-columns: 1fr 300px;
+      grid-template-columns: minmax(260px, 30%) 1fr;  /* 30% left rail / 70% main */
       gap: 16px;
       padding: 0 16px;
     }
     .body-grid > main { padding: 0; }
-    .body-grid > aside {
+    .body-grid > aside#left-rail {
       position: sticky;
       top: 96px;  /* below sticky hero */
       align-self: start;
       padding-top: 12px;
+      max-height: calc(100vh - 110px);
+      overflow-y: auto;
     }
+    /* Narrow-column overrides for blocks designed for wider layouts. */
+    #left-rail .amenity-grid { grid-template-columns: 1fr; }
+    #left-rail .zr-sections  { grid-template-columns: 1fr; }
+    #left-rail .zr-card { margin: 8px 0; padding: 10px 12px; }
   }
   header.hero {
     padding: 24px 20px 16px; background: var(--card);
@@ -58,10 +65,14 @@
   .beach-name {
     font-family: 'Outfit', sans-serif;
     font-size: 24px; font-weight: 700; color: var(--text);
-    margin: 0 0 4px;
+    margin: 0 0 6px;
   }
-  .beach-context {
-    font-size: 13px; color: var(--text-muted); margin-bottom: 8px;
+  /* City · state inlined into the h1 — same font/size/weight,
+   * lighter color so it reads as supporting info to the name. */
+  .beach-region {
+    color: var(--text-muted);
+    margin-left: 0.4em;
+    font-weight: 600;
   }
   .beach-address {
     font-size: 13px; color: var(--text); display: flex;
@@ -130,99 +141,23 @@
     .amenity-grid { grid-template-columns: repeat(3, 1fr); }
   }
   .amenity {
-    display: flex; align-items: center; gap: 8px; padding: 10px 12px;
-    border: 1px solid var(--border); border-radius: 8px;
-    font-size: 13px;
+    display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+    border: 1px solid var(--border); border-radius: 6px;
+    font-size: 12px;
     background: var(--card);
   }
-  .amenity.absent { opacity: 0.35; }
-  .amenity.absent .amenity-label { color: var(--text-muted); text-decoration: line-through; }
-  .amenity.unknown { opacity: 0.55; }
-  .amenity-icon { font-size: 18px; flex-shrink: 0; }
+  .amenity-icon { font-size: 14px; flex-shrink: 0; }
+  .amenity-text { display: flex; flex-direction: column; line-height: 1.2; }
+  .amenity-sub {
+    font-size: 10px; color: var(--text-muted); font-weight: 500;
+    margin-top: 1px;
+  }
+  .amenity-grid { gap: 4px; }
+  /* .amenity.absent and .amenity.unknown no longer rendered — both
+   * filter out at the JS layer until the user-feedback affordance
+   * lands (project_amenity_user_feedback.md). */
 
-  /* Zone rules — full expanded view (no tabs, no current-season filter) */
-  .zone-card {
-    background: var(--card); border: 1px solid var(--border);
-    border-radius: 10px; padding: 12px 14px; margin-bottom: 10px;
-  }
-  .zone-card-header {
-    font-size: 13px; font-weight: 700; color: var(--text);
-    margin-bottom: 8px;
-  }
-  .zone-card-zone {
-    font-size: 12px; font-weight: 500; color: var(--text-muted);
-    margin-left: 4px;
-  }
-  .zone-card-zone::before { content: '· '; opacity: 0.5; }
-  .zone-card-season {
-    font-size: 11px; color: var(--amber);
-    background: rgba(245,158,11,0.08); padding: 2px 8px;
-    border-radius: 999px; margin-left: 6px;
-  }
-  .zone-sections {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 4px 12px;
-  }
-  .zone-section {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 4px 0; font-size: 13px;
-  }
-  .zone-section {
-    cursor: pointer;
-    border-bottom: 1px solid transparent;
-    transition: border-color 0.1s;
-  }
-  .zone-section:hover { border-bottom-color: var(--border); }
-  .zone-section-name { color: var(--text); }
-  .zone-rule {
-    font-size: 11px; padding: 2px 8px; border-radius: 999px;
-    font-weight: 600; white-space: nowrap;
-  }
-  .zone-rule.off_leash   { background: rgba(34,197,94,0.12); color: var(--green); }
-  .zone-rule.on_leash    { background: rgba(0,0,0,0.06);     color: #475569; }
-  .zone-rule.not_allowed { background: rgba(239,68,68,0.12); color: var(--red); }
-  .zone-rule.unknown     { background: rgba(0,0,0,0.04);     color: #94a3b8; }
-  .zone-evidence {
-    font-size: 11px; color: var(--text-muted); font-style: italic;
-    margin: 4px 0; padding: 6px 10px;
-    background: rgba(0,0,0,0.02);
-    border-left: 3px solid var(--border); border-radius: 0 4px 4px 0;
-    display: none;
-  }
-  .zone-section-block.open > .zone-evidence { display: block; }
-
-  /* Time-block rows — aligned grid: time-label column + one column
-     per time-shifting section. Header row carries section names. */
-  .zone-time-grid {
-    display: grid;
-    grid-template-columns: minmax(96px, max-content) repeat(var(--time-cols, 2), minmax(0, 1fr));
-    column-gap: 14px; row-gap: 4px;
-    margin-top: 8px;
-    align-items: center;
-  }
-  .zone-time-grid > .zone-time-label {
-    font-size: 11px; font-weight: 700; color: var(--amber);
-    letter-spacing: 0.02em; padding: 6px 0;
-  }
-  .zone-time-grid > .zone-time-label.is-other { color: var(--text-muted); }
-  .zone-time-grid > .zone-time-header {
-    font-size: 11px; font-weight: 600; color: var(--text-muted);
-    padding-bottom: 4px; border-bottom: 1px solid var(--border);
-  }
-  .zone-time-grid > .zone-time-cell {
-    padding: 4px 0; border-bottom: 1px dotted var(--border);
-  }
-  .zone-now-badge {
-    display: inline-block; font-size: 8px; font-weight: 700;
-    padding: 1px 5px; border-radius: 999px;
-    background: var(--amber); color: white; letter-spacing: 0.05em;
-    margin-left: 6px; vertical-align: middle;
-  }
-  .zone-always {
-    display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 6px;
-    padding: 6px 0; border-bottom: 1px dashed var(--border);
-  }
-  .zone-always .zone-section-block { padding: 0; }
+  /* Zone-rules styles now in src/zone-rules-block.css (shared block) */
 
   /* Links block */
   .link-row {
@@ -264,29 +199,21 @@
      .photo-block in the shared sheet. */
   .photo-block-wrap { margin: 0 16px 12px; }
 
-  /* Sidebar map (smaller, sticky on desktop) */
-  .sidebar-map {
-    background: var(--card); border: 1px solid var(--border);
-    border-radius: 10px; padding: 12px; margin: 0 16px 12px;
-  }
-  .sidebar-map h3 {
-    font-size: 12px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.04em; color: var(--text-muted);
-    margin: 0 0 8px;
-  }
-  .sidebar-map #map {
-    height: 220px; border-radius: 6px; border: 1px solid var(--border);
+  /* Location card — full-width map in main content. */
+  .location-card #map {
+    height: 360px; border-radius: 8px; border: 1px solid var(--border);
     margin-bottom: 10px;
   }
-  .sidebar-map .directions-btn {
-    background: var(--accent); color: white; padding: 8px 12px;
+  .location-card .directions-btn {
+    background: var(--accent); color: white; padding: 10px 14px;
     border-radius: 6px; text-decoration: none; font-weight: 600;
-    font-size: 13px; text-align: center; display: block;
-    margin-bottom: 6px;
+    font-size: 14px; text-align: center; display: inline-block;
+    margin-right: 8px;
   }
-  .sidebar-map .map-address {
-    font-size: 11px; color: var(--text-muted); display: flex;
+  .location-card .map-address {
+    font-size: 12px; color: var(--text-muted); display: inline-flex;
     align-items: center; gap: 6px; flex-wrap: wrap; line-height: 1.3;
+    margin-top: 6px;
   }
 </style>
 </head>
@@ -296,24 +223,24 @@
   <header class="hero">
     <div class="hero-main">
       <h1 class="beach-name" id="beach-name">Loading...</h1>
-      <div class="beach-context" id="beach-context"></div>
       <div class="beach-address" id="beach-address"></div>
     </div>
     <a class="close-btn" id="close-btn" href="index.html">✕</a>
   </header>
 
   <div class="body-grid" id="body-grid">
+    <aside id="left-rail"></aside>
     <main id="main-content">
       <div class="state">
         <div class="state-icon">🏖️</div>
         <div>Loading beach info…</div>
       </div>
     </main>
-    <aside id="sidebar"></aside>
   </div>
 </div>
 
 <script src="src/photo-block.js"></script>
+<script src="src/zone-rules-block.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
   integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
   crossorigin=""></script>
@@ -329,69 +256,14 @@ const dateFromQs   = params.get('date');
 document.getElementById('close-btn').href =
   fid ? `index.html?fid=${fid}` : (locationId ? `index.html?location=${locationId}` : 'index.html');
 
-const ZR_SECTION_LABEL = {
-  sand: '🏖️ Sand', trails: '🥾 Trails', boardwalk: '🚶 Boardwalk',
-  bluff: '🏔️ Bluff', dunes: '🏜️ Dunes', picnic_area: '🧺 Picnic area',
-  campground: '🏕️ Campground', playground: '🤸 Playground',
-  tide_pools: '🐚 Tide pools', nesting_zones: '🪺 Nesting zones',
-  water_swim: '🌊 Water', parking_lot: '🅿️ Parking',
-  restrooms: '🚻 Restrooms', showers: '🚿 Showers',
-  restrooms_showers: '🚿 Restrooms',
-};
-const ZR_RULE_LABEL = {
-  off_leash: '🟢 Off-leash', on_leash: '⚪ On-leash',
-  not_allowed: '🔴 Not allowed', unknown: '❓ Unknown',
-};
+// Zone-rules constants + helpers + renderers now live in
+// src/zone-rules-block.js (window.ZoneRulesBlock). escHtml is kept here
+// because it's used throughout beach.html.
 
 const escHtml = s => String(s ?? '')
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-function fmtTimeRange(start, end) {
-  const fmt = s => {
-    const [h, m] = String(s).split(':').map(Number);
-    const hh = h === 0 ? 12 : h > 12 ? h - 12 : h;
-    const ap = h >= 12 ? 'pm' : 'am';
-    return m ? `${hh}:${String(m).padStart(2,'0')}${ap}` : `${hh}${ap}`;
-  };
-  return `${fmt(start)}–${fmt(end)}`;
-}
-
-// Time-tab helpers (parity with detail.html)
-function _parseHHMM(s) {
-  const [h, m] = String(s).split(':').map(Number);
-  return (h || 0) * 60 + (m || 0);
-}
-function _coverageMins(tabs) {
-  let total = 0;
-  for (const t of tabs) {
-    if (!t.start || !t.end) continue;
-    const sm = _parseHHMM(t.start), em = _parseHHMM(t.end);
-    total += em > sm ? (em - sm) : (24*60 - sm + em);
-  }
-  return total;
-}
-function _ruleInTab(section, tab) {
-  if (!tab || tab.isOther || !tab.start) return section?.rule || 'unknown';
-  for (const tw of (section?.time_windows || [])) {
-    if (tw.start === tab.start && tw.end === tab.end) return tw.rule || section?.rule || 'unknown';
-  }
-  return section?.rule || 'unknown';
-}
-function _pickActiveTab(tabs, currentLocalHour) {
-  if (currentLocalHour == null) return 0;
-  for (let i = 0; i < tabs.length; i++) {
-    const t = tabs[i];
-    if (t.isOther || !t.start || !t.end) continue;
-    const sh = _parseHHMM(t.start) / 60, eh = _parseHHMM(t.end) / 60;
-    const inWindow = sh <= eh
-      ? (currentLocalHour >= sh && currentLocalHour < eh)
-      : (currentLocalHour >= sh || currentLocalHour < eh);
-    if (inWindow) return i;
-  }
-  const otherIdx = tabs.findIndex(t => t.isOther);
-  return otherIdx >= 0 ? otherIdx : 0;
-}
 function _currentLocalHour(timezone) {
   const tz = timezone || 'America/Los_Angeles';
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -399,16 +271,6 @@ function _currentLocalHour(timezone) {
   }).formatToParts(new Date());
   const h = parts.find(p => p.type === 'hour')?.value;
   return h != null ? (parseInt(h, 10) % 24) : null;
-}
-
-function fmtSeasonDates(d) {
-  if (!d || !d.start || !d.end) return null;
-  const months = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const fmt = md => {
-    const [m, day] = md.split('-').map(Number);
-    return `${months[m] || m} ${day}`;
-  };
-  return `${fmt(d.start)} – ${fmt(d.end)}`;
 }
 
 async function load() {
@@ -452,40 +314,57 @@ function showError(msg) {
 function render(data, beachFid) {
   const { beach, dog_policy, amenities } = data;
   document.title = `${beach.display_name} — Dog Beach Scout`;
-  document.getElementById('beach-name').textContent = beach.display_name;
+  // Beach name + inline region (city · state) — same h1, lighter color.
+  const nameEl = document.getElementById('beach-name');
+  nameEl.textContent = beach.display_name;
+  const regionParts = [];
+  if (beach.county) regionParts.push(beach.county);
+  if (beach.state)  regionParts.push(beach.state);
+  if (regionParts.length) {
+    const span = document.createElement('span');
+    span.className = 'beach-region';
+    span.textContent = regionParts.join(' · ');
+    nameEl.appendChild(span);
+  }
 
-  const ctx = [];
-  if (beach.county) ctx.push(beach.county);
-  if (beach.state)  ctx.push(beach.state);
-  document.getElementById('beach-context').textContent = ctx.join(' · ');
-
-  // Address with copy button + native maps deep-link
+  // Address with copy button + native maps deep-link.
+  // No address → no row (lat/lng fallback retired).
   const addrEl = document.getElementById('beach-address');
   if (beach.address) {
     const mapsUrl = buildMapsUrl(beach);
     addrEl.innerHTML = `📍 <a href="${escHtml(mapsUrl)}" target="_blank" rel="noopener">${escHtml(beach.address)}</a>
       <button class="copy-btn" type="button" data-copy="${escHtml(beach.address)}">Copy</button>`;
-  } else if (beach.lat != null && beach.lng != null) {
-    const coordStr = `${beach.lat.toFixed(4)}°, ${beach.lng.toFixed(4)}°`;
-    addrEl.innerHTML = `📍 <span>${escHtml(coordStr)}</span>
-      <button class="copy-btn" type="button" data-copy="${escHtml(coordStr)}">Copy</button>`;
+  } else {
+    addrEl.style.display = 'none';
   }
 
-  // Main column: description (top, prominent), hero carousel, hours,
-  // amenities, zone rules, details, links.
+  // Two-column layout (desktop):
+  //   LEFT RAIL (30%): at-a-glance compact info — amenities + zone rules.
+  //   MAIN  (70%): description, photos, hours, MAP, details, links.
+  // Mobile collapses to a single stacked column (left rail first).
   // Description = LLM-generated Scout-voice prose.
-  // Details = structured / curated facts (still TBD — currently sourced
-  // from dog_policy.zone_rules.global_notes; hidden when empty).
-  // These are TWO distinct things — Franz, 2026-05-10.
-  const sections = [];
-  sections.push(buildDescriptionSection(data.description));
-  sections.push('<div class="photo-block-wrap" id="photo-block-mount"></div>');
-  sections.push(buildHoursSection(beach, amenities));
-  sections.push(buildAmenitiesSection(amenities));
-  sections.push(buildZoneRulesSection(dog_policy, beach.display_name, _currentLocalHour(beach.timezone)));
-  sections.push(buildDetailsSection(dog_policy));
-  sections.push(buildLinksSection(beach, beachFid));
-  document.getElementById('main-content').innerHTML = sections.filter(Boolean).join('');
+  // Details = structured / curated facts (currently from
+  // dog_policy.zone_rules.global_notes; hidden when empty).
+  // Two distinct things — Franz, 2026-05-10.
+  const leftRail = [];
+  leftRail.push(buildAmenitiesSection(amenities));
+  // Pass empty beachName — the page hero already shows it above.
+  const _zrHtml = window.ZoneRulesBlock.buildHtml(
+    dog_policy?.zone_rules,
+    { isToday: true, currentLocalHour: _currentLocalHour(beach.timezone) },
+    ''
+  );
+  if (_zrHtml) leftRail.push(`<section class="card"><h2>Dog Policy</h2>${_zrHtml}</section>`);
+  document.getElementById('left-rail').innerHTML = leftRail.filter(Boolean).join('');
+
+  const main = [];
+  main.push(buildDescriptionSection(data.description));
+  main.push('<div class="photo-block-wrap" id="photo-block-mount"></div>');
+  main.push(buildHoursSection(beach, amenities));
+  main.push(buildLocationSection(beach));
+  main.push(buildDetailsSection(dog_policy));
+  main.push(buildLinksSection(beach, beachFid));
+  document.getElementById('main-content').innerHTML = main.filter(Boolean).join('');
 
   // Shared photo block — 1 hero + 5 thumbs + view-all (src/photo-block.js).
   // Mount AFTER the section HTML has been injected so the target exists.
@@ -494,9 +373,6 @@ function render(data, beachFid) {
     data.photos,
     { viewAllHref: `gallery.html?fid=${beachFid}` }
   );
-
-  // Sidebar: map + directions
-  document.getElementById('sidebar').innerHTML = buildSidebarMap(beach);
 
   wireCopyButtons();
   initMap(beach);
@@ -514,19 +390,19 @@ function buildDescriptionSection(description) {
   return `<div class="beach-description">${escHtml(description.text)}</div>`;
 }
 
-function buildSidebarMap(beach) {
+function buildLocationSection(beach) {
   if (beach.lat == null || beach.lng == null) return '';
   const directionsUrl = buildMapsUrl(beach);
   const addrLine = beach.address
     ? `<span>${escHtml(beach.address)}</span>
        <button class="copy-btn" type="button" data-copy="${escHtml(beach.address)}">Copy</button>`
     : `<span>${beach.lat.toFixed(4)}°, ${beach.lng.toFixed(4)}°</span>`;
-  return `<div class="sidebar-map">
-    <h3>Location</h3>
+  return `<section class="card location-card">
+    <h2>Location</h2>
     <div id="map"></div>
     <a class="directions-btn" href="${escHtml(directionsUrl)}" target="_blank" rel="noopener">📍 Get directions</a>
     <div class="map-address">${addrLine}</div>
-  </div>`;
+  </section>`;
 }
 
 function buildHoursSection(beach, amenities) {
@@ -565,165 +441,92 @@ const AMENITY_DEFS = [
   { key: 'has_disabled_access', icon: '♿',  label: 'ADA access' },
 ];
 
+const PARKING_TYPE_LABEL = {
+  lot: 'Lot', mixed: 'Mixed', metered: 'Metered',
+  street: 'Street', none: 'No parking',
+};
+// OSM-style subtypes — used when parking_type is missing but
+// parking_subtype is present (OSM emitter pathway).
+const PARKING_SUBTYPE_LABEL = {
+  surface: 'Lot', street_side: 'Street', 'multi-storey': 'Garage',
+  multi_storey: 'Garage', underground: 'Garage', carports: 'Carport',
+  rooftop: 'Rooftop',
+};
+
+function _parkingTypeLabel(amenities) {
+  // Prefer the LLM enum; fall back to OSM-style subtype mapping.
+  if (amenities.parking_type) return PARKING_TYPE_LABEL[amenities.parking_type] || '';
+  if (amenities.parking_subtype) return PARKING_SUBTYPE_LABEL[amenities.parking_subtype] || '';
+  return '';
+}
+
+function _parkingCostLabel(amenities) {
+  // Structured signal wins: parking_fee = true → Paid, false → Free.
+  if (amenities.parking_fee === true)  return 'Paid';
+  if (amenities.parking_fee === false) return 'Free';
+  // Fallback: metered is always paid by definition.
+  if (amenities.parking_type === 'metered') return 'Paid';
+  // Last resort: regex parking_notes prose (LLM-supplied "$5/day" etc).
+  const n = String(amenities.parking_notes || '');
+  if (/\$|\bfee\b|\bpaid\b/i.test(n)) return 'Paid';
+  if (/\bfree\b/i.test(n))           return 'Free';
+  return '';
+}
+
+function _renderAmenityTile(def, amenities) {
+  if (def.key === 'has_parking') {
+    const sub = [
+      _parkingTypeLabel(amenities),
+      _parkingCostLabel(amenities),
+    ].filter(Boolean).join(' · ');
+    return `<div class="amenity">
+      <span class="amenity-icon">${def.icon}</span>
+      <span class="amenity-text">
+        <span class="amenity-label">${def.label}</span>
+        ${sub ? `<span class="amenity-sub">${escHtml(sub)}</span>` : ''}
+      </span>
+    </div>`;
+  }
+  return `<div class="amenity">
+    <span class="amenity-icon">${def.icon}</span>
+    <span class="amenity-label">${def.label}</span>
+  </div>`;
+}
+
 function buildAmenitiesSection(amenities) {
   if (!amenities) return '';
-  const cells = AMENITY_DEFS.map(({ key, icon, label }) => {
-    const v = amenities[key];
-    const cls = v === true ? '' : v === false ? 'absent' : 'unknown';
-    return `<div class="amenity ${cls}">
-      <span class="amenity-icon">${icon}</span>
-      <span class="amenity-label">${label}</span>
-    </div>`;
-  }).join('');
+  // Show only confirmed-present amenities. Confirmed-absent are hidden
+  // entirely; unknowns (null/undefined) are also hidden for now —
+  // they become visible again once the user-feedback affordance ships
+  // (see project_amenity_user_feedback.md).
+  //
+  // Special-case parking: if we have any parking-derived field (fee /
+  // subtype / type / notes), parking obviously exists. Render the tile
+  // even when has_parking itself is null. This handles the case where
+  // OSM's closest parking POI gave us fee+subtype tags but the
+  // consensus on has_parking remained unresolved.
+  const cells = AMENITY_DEFS
+    .filter(d => {
+      if (amenities[d.key] === true) return true;
+      if (d.key === 'has_parking') {
+        return amenities.parking_fee !== null && amenities.parking_fee !== undefined
+            || amenities.parking_subtype
+            || amenities.parking_type
+            || amenities.parking_notes;
+      }
+      return false;
+    })
+    .map(d => _renderAmenityTile(d, amenities)).join('');
+  if (!cells) return '';
   return `<section class="card">
     <h2>Amenities</h2>
     <div class="amenity-grid">${cells}</div>
   </section>`;
 }
 
-function _renderSectionPill(name, rule, sec) {
-  const safeRule = ['off_leash','on_leash','not_allowed'].includes(rule) ? rule : 'unknown';
-  const ruleLabel = ZR_RULE_LABEL[safeRule] || rule;
-  const ev = sec?.evidence?.quote
-    ? `<div class="zone-evidence">${escHtml(sec.evidence.quote)}</div>` : '';
-  return `<div class="zone-section-block" onclick="this.classList.toggle('open')">
-    <div class="zone-section">
-      <span class="zone-section-name">${ZR_SECTION_LABEL[name] || escHtml(name)}</span>
-      <span class="zone-rule ${safeRule}">${ruleLabel}</span>
-    </div>${ev}
-  </div>`;
-}
-
-function _renderTimeCell(rule) {
-  const safeRule = ['off_leash','on_leash','not_allowed'].includes(rule) ? rule : 'unknown';
-  const ruleLabel = ZR_RULE_LABEL[safeRule] || rule;
-  return `<span class="zone-rule ${safeRule}">${ruleLabel}</span>`;
-}
-
-function _renderZoneCard(reg, beachName, zoneName, seasonLabel, currentLocalHour) {
-  const sections = reg.sections || {};
-  const sectionList = Object.entries(sections);
-  if (!sectionList.length) return '';
-
-  // Split sections into time-shifting (have time_windows) vs always
-  const timeShifting = sectionList.filter(([, s]) => Array.isArray(s?.time_windows) && s.time_windows.length);
-  const alwaysOn    = sectionList.filter(([, s]) => !Array.isArray(s?.time_windows) || !s.time_windows.length);
-
-  const header = `<div class="zone-card-header">🐾 ${escHtml(beachName || '')}<span class="zone-card-zone">${escHtml(zoneName)}</span>${seasonLabel}</div>`;
-
-  // No time-shifting sections → just render the simple grid
-  if (timeShifting.length === 0) {
-    const rows = sectionList.map(([n, s]) => _renderSectionPill(n, s?.rule || 'unknown', s)).join('');
-    return `<div class="zone-card">${header}<div class="zone-sections">${rows}</div></div>`;
-  }
-
-  // Collect distinct (start,end) windows from time-shifting sections
-  const winMap = new Map();
-  for (const [, sec] of timeShifting) {
-    for (const tw of (sec.time_windows || [])) {
-      if (tw.start && tw.end) {
-        const key = `${tw.start}|${tw.end}`;
-        if (!winMap.has(key)) winMap.set(key, { start: tw.start, end: tw.end });
-      }
-    }
-  }
-  const windows = Array.from(winMap.values()).sort((a, b) => _parseHHMM(a.start) - _parseHHMM(b.start));
-  // Tolerate 5-min gap (23:59 end-of-day convention); add explicit "Other times" otherwise
-  if ((24*60) - _coverageMins(windows) > 5) windows.push({ isOther: true });
-
-  // "Always" sections render once above the time rows
-  const alwaysHtml = alwaysOn.length
-    ? `<div class="zone-always">${alwaysOn.map(([n, s]) =>
-         _renderSectionPill(n, s?.rule || 'unknown', s)).join('')}</div>`
-    : '';
-
-  // Row-current detection (highlight only via NOW badge — no row tinting)
-  const isCurrent = (w) => {
-    if (currentLocalHour == null || w.isOther || !w.start || !w.end) return false;
-    const sh = _parseHHMM(w.start) / 60, eh = _parseHHMM(w.end) / 60;
-    return sh <= eh
-      ? (currentLocalHour >= sh && currentLocalHour < eh)
-      : (currentLocalHour >= sh || currentLocalHour < eh);
-  };
-  const matchingCurrent = windows.findIndex(isCurrent);
-  const otherIsCurrent = matchingCurrent === -1
-    && currentLocalHour != null
-    && windows.some(w => w.isOther);
-
-  // Header row (empty time-label cell + section name headers)
-  const headerCells =
-    `<div class="zone-time-header"></div>` +
-    timeShifting.map(([n]) =>
-      `<div class="zone-time-header">${ZR_SECTION_LABEL[n] || escHtml(n)}</div>`
-    ).join('');
-
-  // Data rows
-  const dataCells = windows.map((w, i) => {
-    const label = w.isOther ? 'Other times' : fmtTimeRange(w.start, w.end);
-    const cur = (i === matchingCurrent) || (w.isOther && otherIsCurrent);
-    const nowBadge = cur ? '<span class="zone-now-badge">NOW</span>' : '';
-    const labelCell = `<div class="zone-time-label${w.isOther ? ' is-other' : ''}">⏰ ${escHtml(label)}${nowBadge}</div>`;
-    const cells = timeShifting.map(([, s]) =>
-      `<div class="zone-time-cell">${_renderTimeCell(_ruleInTab(s, w))}</div>`
-    ).join('');
-    return labelCell + cells;
-  }).join('');
-
-  return `<div class="zone-card">${header}
-    ${alwaysHtml}
-    <div class="zone-time-grid" style="--time-cols:${timeShifting.length}">
-      ${headerCells}
-      ${dataCells}
-    </div>
-  </div>`;
-}
-
-function buildZoneRulesSection(dogPolicy, beachName, currentLocalHour) {
-  const zr = dogPolicy?.zone_rules;
-  if (!zr) return '';
-  const seasons = (Array.isArray(zr.seasons) && zr.seasons.length)
-    ? zr.seasons
-    : (Array.isArray(zr.regions) ? [{ name: null, regions: zr.regions, dates: null }] : []);
-  if (!seasons.length) return '';
-
-  const cards = [];
-  seasons.forEach(season => {
-    const regions = Array.isArray(season.regions) ? season.regions : [];
-    if (!regions.length) return;
-    const seasonLabel = season.name && season.name !== 'All year'
-      ? `<span class="zone-card-season">${escHtml(season.name)}${
-          fmtSeasonDates(season.dates) ? ` · ${escHtml(fmtSeasonDates(season.dates))}` : ''
-        }</span>`
-      : '';
-
-    const namedSections = new Set();
-    regions.forEach(r => {
-      if (r?.name) for (const k of Object.keys(r.sections || {})) namedSections.add(k);
-    });
-    const hasNamedZones = namedSections.size > 0;
-
-    regions.forEach(reg => {
-      let regToRender = reg;
-      if (!reg.name && hasNamedZones) {
-        const filtered = {};
-        for (const [n, s] of Object.entries(reg.sections || {})) {
-          if (!namedSections.has(n)) filtered[n] = s;
-        }
-        if (Object.keys(filtered).length === 0) return;
-        regToRender = { ...reg, sections: filtered };
-      }
-      const zoneName = reg.name || 'Whole beach';
-      const card = _renderZoneCard(regToRender, beachName, zoneName, seasonLabel, currentLocalHour);
-      if (card) cards.push(card);
-    });
-  });
-
-  if (!cards.length) return '';
-  return `<section class="card">
-    <h2>Zone rules</h2>
-    ${cards.join('')}
-  </section>`;
-}
+// _renderSectionPill / _renderTimeCell / _renderZoneCard /
+// buildZoneRulesSection / time-tab handler all moved to
+// src/zone-rules-block.js (shared with detail.html).
 
 function buildDetailsSection(dogPolicy) {
   // Bottom-of-page Details card. Structured / curated facts about the
@@ -777,18 +580,7 @@ function wireCopyButtons() {
   });
 }
 
-// Time-window tab click handler — scoped per region via data-zr-time-key
-document.addEventListener('click', (e) => {
-  const btn = e.target.closest('.zone-time-tab');
-  if (!btn) return;
-  const key = btn.dataset.zrTimeKey;
-  const idx = btn.dataset.zrTimeTab;
-  document.querySelectorAll(`.zone-time-tab[data-zr-time-key="${key}"]`)
-    .forEach(t => t.classList.toggle('active', t === btn));
-  document.querySelectorAll(`[data-zr-time-pane][data-zr-time-key="${key}"]`).forEach(p => {
-    p.style.display = p.dataset.zrTimePane === idx ? '' : 'none';
-  });
-});
+// Time-window tab click handler now in src/zone-rules-block.js
 
 function initMap(beach) {
   if (beach.lat == null || beach.lng == null) return;

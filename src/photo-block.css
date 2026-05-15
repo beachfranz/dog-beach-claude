@@ -10,8 +10,8 @@
   margin: 0 0 16px;
 }
 
-/* Hero — single photo, native aspect ratio, caps at 42vh
- * (reduced 30% from 60vh on 2026-05-14). Arrows + counter overlay. */
+/* Hero — single photo, native aspect ratio, caps at 34vh
+ * (reduced 20% from 42vh on 2026-05-15). Arrows + counter overlay. */
 .photo-block-hero {
   position: relative;
   width: 100%;
@@ -24,7 +24,7 @@
   display: block;
   width: 100%;
   height: auto;
-  max-height: 42vh;
+  max-height: 34vh;
   object-fit: contain;
   background: #0f172a;
   cursor: zoom-in;

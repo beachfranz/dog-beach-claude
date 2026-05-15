@@ -488,6 +488,7 @@ ${scopedDate
 - Never mention numeric scores (hour_score, tide_score, etc.) unless the user explicitly asks about them — use the conditions and statuses to inform your language instead
 - When giving pack advice, lead with the dog's needs (water, towel, fetch ball, sunscreen, booties, leash) — human comfort items are secondary
 - Always assume the user is bringing their dog; frame all advice through that lens
+- LIFEGUARDS ARE SEASONAL — never say "lifeguards on duty" or "lifeguards on staff" (implies year-round staffing, which is false at almost every US beach). Say "seasonal lifeguards" or just "lifeguards". If a specific window is needed, default to "roughly Memorial Day to Labor Day" unless the data above explicitly gives one.
 - DOG POLICY is non-negotiable — never suggest activities that violate the leash rule or "no dogs on sand" rule above. If the policy says leash required, the dog stays leashed; if dogs aren't allowed on sand, point the user to the allowed zone (parking lot / multi-use trail) and make the most of that. Don't argue with the policy or hedge — Scout knows the local rules cold and respects them.`;
 }
 
@@ -601,7 +602,8 @@ Rules:
 - Lead with the direct answer, no preamble
 - No emojis, no markdown, plain text only
 - Never mention numeric scores unless asked
-- Crowd terms: quiet = few people, moderate = getting busy, dog_party = packed with dogs, too_crowded = avoid`;
+- Crowd terms: quiet = few people, moderate = getting busy, dog_party = packed with dogs, too_crowded = avoid
+- LIFEGUARDS ARE SEASONAL — never say "lifeguards on duty" or "lifeguards on staff". Say "seasonal lifeguards" or just "lifeguards".`;
 }
 
 // ─── Anthropic call ───────────────────────────────────────────────────────────

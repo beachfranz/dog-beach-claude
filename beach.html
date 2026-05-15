@@ -116,6 +116,29 @@
     background: var(--card); border: 1px solid var(--border);
     border-radius: 12px; padding: 12px 16px; margin: 8px 16px;
   }
+  /* Tooltips on [data-tip] — subtle pill above the element with a
+   * 200ms hover-in delay (much faster than the native ~600ms) and
+   * an instant hover-out. */
+  [data-tip] { position: relative; }
+  [data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    left: 50%; bottom: calc(100% + 4px);
+    transform: translateX(-50%);
+    background: rgba(15,23,42,0.78);
+    color: rgba(255,255,255,0.95);
+    padding: 4px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 500; line-height: 1.35;
+    width: max-content; max-width: 220px;
+    text-align: center;
+    z-index: 1000; pointer-events: none;
+    opacity: 0;
+    transition: opacity 80ms ease-out 0s;
+  }
+  [data-tip]:hover::after {
+    opacity: 1;
+    transition-delay: 200ms;
+  }
   section.card h2 {
     font-size: 14px; font-weight: 700; margin: 0 0 8px;
     color: var(--text);
@@ -552,11 +575,15 @@
     margin: 0 16px 12px;
   }
   .photo-map-row .pm-photo-col { flex: 1; margin: 0; min-width: 0; }
+  /* Kill the hero's bottom margin in this row so the photo image's
+   * bottom edge aligns with the map's bottom edge. The "View all"
+   * link below the hero was retired; the gap is no longer needed. */
+  .photo-map-row .photo-block-hero { margin-bottom: 0; }
   .photo-map-row .pm-map-col {
-    flex: 0 0 220px; display: flex;
+    flex: 0 0 320px; display: flex;
   }
   .photo-map-row .pm-map-col #map {
-    width: 220px; height: 100%;
+    width: 320px; height: 100%;
     border-radius: 12px; border: 1px solid var(--border);
   }
   @media (max-width: 720px) {
@@ -801,10 +828,13 @@ function render(data, beachFid) {
 }
 
 function buildMapsUrl(beach) {
+  // Apple Maps universal handler — opens the Apple Maps app on iOS/macOS,
+  // falls back to the web map on Android/Windows. `daddr` (destination
+  // address) is Apple's directions parameter.
   const dest = beach.address
     ? encodeURIComponent(beach.address)
     : `${beach.lat},${beach.lng}`;
-  return `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
+  return `https://maps.apple.com/?daddr=${dest}`;
 }
 
 function buildDescriptionSection(description) {
@@ -1060,7 +1090,7 @@ function _renderParkingTile(def, type, subtype, fee, ruleClass, rule) {
   const costLabel = fee === true ? 'Paid' : fee === false ? 'Free' : '';
   const sub = [typeLabel, costLabel].filter(Boolean).join(' · ');
   const tip = _amenityTooltip(def, rule) + (sub ? ` · ${sub}` : '');
-  return `<div class="amenity${ruleClass || ''}" title="${escHtml(tip)}">
+  return `<div class="amenity${ruleClass || ''}" data-tip="${escHtml(tip)}">
     <span class="amenity-icon">${def.icon}</span>
     <span class="amenity-text">
       <span class="amenity-label">${def.label}</span>
@@ -1081,7 +1111,7 @@ function _renderAmenityTileWithRule(def, amenities, rule) {
   // Section-only tile (e.g. Sand, Trails) — no amenity boolean,
   // just emoji + label + rule color.
   if (def.sectionName) {
-    return `<div class="amenity${ruleClass}" title="${escHtml(tip)}">
+    return `<div class="amenity${ruleClass}" data-tip="${escHtml(tip)}">
       <span class="amenity-icon">${def.icon}</span>
       <span class="amenity-label">${def.label}</span>
     </div>`;
@@ -1102,7 +1132,7 @@ function _renderAmenityTileWithRule(def, amenities, rule) {
   // seasonal at almost every US beach, never year-round (see
   // [[lifeguards-seasonal-not-on-duty]]).
   if (def.key === 'has_lifeguards') {
-    return `<div class="amenity${ruleClass}" title="${escHtml(tip + ' · seasonal, typically Memorial Day–Labor Day')}">
+    return `<div class="amenity${ruleClass}" data-tip="${escHtml(tip + ' · seasonal, typically Memorial Day–Labor Day')}">
       <span class="amenity-icon">${def.icon}</span>
       <span class="amenity-text">
         <span class="amenity-label">${def.label}</span>
@@ -1110,7 +1140,7 @@ function _renderAmenityTileWithRule(def, amenities, rule) {
       </span>
     </div>`;
   }
-  return `<div class="amenity${ruleClass}" title="${escHtml(tip)}">
+  return `<div class="amenity${ruleClass}" data-tip="${escHtml(tip)}">
     <span class="amenity-icon">${def.icon}</span>
     <span class="amenity-label">${def.label}</span>
   </div>`;
@@ -1924,7 +1954,7 @@ function buildCautionsSection(today, dogPolicy, hoursToday) {
   const rows = items.map(it => {
     const tip = CAUTION_TIPS[it.label] || it.label;
     return `
-    <li class="advisory-row advisory-${it.status}" title="${escHtml(tip)}">
+    <li class="advisory-row advisory-${it.status}" data-tip="${escHtml(tip)}">
       <span class="advisory-icon">${it.icon}</span>
       <span class="advisory-body">
         <span class="advisory-headline">
@@ -2380,7 +2410,7 @@ function buildPackListCard(beach, dogPolicy, amenities, hoursToday) {
   const items = _packListItems(beach, dogPolicy, amenities, hoursToday);
   if (!items.length) return '';
   const chips = items.map(it => `
-    <div class="packlist-chip" title="${escHtml(it.reason)}">
+    <div class="packlist-chip" data-tip="${escHtml(it.reason)}">
       <span class="packlist-icon">${it.icon}</span>
       <span class="packlist-label">${escHtml(it.label)}</span>
     </div>`).join('');
@@ -2562,6 +2592,8 @@ function wireCopyButtons() {
 
 function initMap(beach) {
   if (beach.lat == null || beach.lng == null) return;
+  const mapEl = document.getElementById('map');
+  if (!mapEl) return;
   const map = L.map('map', {
     zoomControl: true, scrollWheelZoom: false,
   }).setView([beach.lat, beach.lng], 15);
@@ -2577,6 +2609,19 @@ function initMap(beach) {
   } else {
     L.marker([beach.lat, beach.lng]).addTo(map);
   }
+  // Map container is in a flex row whose height grows when the sibling
+  // photo image loads. Leaflet caches dimensions at init — stale once
+  // the photo expands the row. ResizeObserver keeps tiles fresh as the
+  // container changes size (photo load, window resize, devtools open).
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => map.invalidateSize());
+    ro.observe(mapEl);
+  }
+  // Belt-and-suspenders: also invalidate after the first paint cycle
+  // and after the photo block (if any) likely settles.
+  requestAnimationFrame(() => map.invalidateSize());
+  setTimeout(() => map.invalidateSize(), 400);
+  setTimeout(() => map.invalidateSize(), 1200);
 }
 
 load();

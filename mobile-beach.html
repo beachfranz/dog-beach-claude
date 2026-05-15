@@ -25,10 +25,17 @@
     --amber: #f59e0b;
   }
   * { box-sizing: border-box; }
-  html, body { overflow-x: hidden; }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { overflow-x: hidden; max-width: 100vw; }
   body {
     margin: 0; font-family: 'DM Sans', system-ui, sans-serif;
     background: var(--bg); color: var(--text); line-height: 1.5;
+  }
+  /* Mobile overflow guard — flex/grid containers need min-width: 0
+   * to let their children shrink under their content size. */
+  .body-grid, main, aside, section.card, .scout-card,
+  .combo-row, .beach-secondline, .scout-cta, .hero, .hero-main {
+    min-width: 0; max-width: 100%;
   }
   .page { max-width: 1200px; margin: 0 auto; }
   .body-grid {
@@ -62,11 +69,12 @@
     position: sticky; top: 0; z-index: 10;
     display: flex; align-items: flex-start; gap: 12px;
   }
-  .hero-main { flex: 1; min-width: 0; }
+  .hero-main { flex: 1; min-width: 0; text-align: center; }
   .beach-name {
     font-family: 'Outfit', sans-serif;
     font-size: 24px; font-weight: 700; color: var(--text);
     margin: 0 0 6px;
+    text-align: center;
   }
   /* Your-Fit overall as a colored badge to the left of the name.
    * 20% smaller than the h1 (24px → 19px) per Franz; colored by
@@ -83,6 +91,126 @@
   .fit-badge-go      { background: #16a34a; }
   .fit-badge-caution { background: #f59e0b; }
   .fit-badge-no_go   { background: #dc2626; }
+  /* Mobile second-line: park hours + best time + car chip — center
+   * justified beneath the h1. */
+  .beach-secondline {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    justify-content: center;
+    margin: 4px 0 0;
+    font-size: 13px; font-weight: 500; color: var(--text);
+  }
+  .beach-secondline .fit-badge {
+    font-size: 13px; padding: 1px 7px; margin-right: 0;
+  }
+  .secondline-sep { color: var(--text-muted); opacity: 0.55; }
+  .secondline-dist { display: inline-flex; align-items: center; gap: 6px; }
+  .secondline-pill {
+    font-size: 11px; padding: 2px 6px;
+    border-radius: 4px; background: rgba(0,0,0,0.05);
+    font-variant-numeric: tabular-nums;
+  }
+  .secondline-pill-best { background: rgba(34,197,94,0.18); }
+  .secondline-label {
+    font-size: 9px; font-weight: 800; color: var(--text-muted);
+    margin-right: 3px; letter-spacing: 0.06em;
+  }
+  .secondline-map {
+    width: 28px; height: 28px;
+    border: 1px solid var(--border); background: var(--card);
+    border-radius: 6px; padding: 0;
+    font-size: 14px; cursor: pointer; line-height: 1;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .secondline-map:hover { background: rgba(0,0,0,0.04); }
+  /* Car chip — combines 🚗 icon + miles value, tap opens map modal. */
+  .secondline-car {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--card);
+    font: inherit; cursor: pointer;
+    font-size: 12px; color: var(--text); line-height: 1.4;
+  }
+  .secondline-car:hover { background: rgba(0,0,0,0.04); }
+  .secondline-car-icon { font-size: 14px; line-height: 1; }
+  .secondline-car-dist { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  /* Combined Amenities & Activities card — two horizontal rows
+   * of icon+tiny-label chips. Each row scrolls if it overflows. */
+  .combo-row-label {
+    font-size: 9px; font-weight: 700; color: var(--text-muted);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    margin: 2px 0;
+    text-align: center;
+  }
+  .combo-row-label + .combo-row-label, .combo-row + .combo-row-label { margin-top: 8px; }
+  .combo-row {
+    display: flex; flex-wrap: nowrap; gap: 6px;
+    justify-content: center;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+  }
+  .combo-row::-webkit-scrollbar { display: none; }
+  .combo-chip {
+    position: relative;
+    display: flex; flex-direction: column; align-items: center;
+    flex: 0 0 auto;
+    min-width: 44px;
+    padding: 4px 5px 3px;
+    border-radius: 6px;
+    background: rgba(0,0,0,0.04);
+    border: 1px solid var(--border);
+  }
+  .combo-icon { font-size: 18px; line-height: 1; }
+  .combo-icon-row { display: flex; align-items: center; gap: 1px; line-height: 1; }
+  .combo-icon-row .amenity-paid { font-size: 11px; }
+  .combo-label {
+    font-size: 8px; font-weight: 700;
+    color: var(--text); margin-top: 2px;
+    letter-spacing: 0.04em; text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .combo-chip.rule-off_leash   { background: rgba(34,197,94,0.45); border-color: rgba(21,128,61,0.42); }
+  .combo-chip.rule-on_leash    { background: rgba(251,191,36,0.53); border-color: rgba(180,83,9,0.42); }
+  .combo-chip.rule-not_allowed { background: rgba(239,68,68,0.45); border-color: rgba(153,27,27,0.42); }
+
+  /* Map modal — full-screen-ish popup with OSRM route + distance/time. */
+  .map-modal {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(15,23,42,0.7);
+    z-index: 10000;
+    align-items: center; justify-content: center;
+    padding: 16px;
+  }
+  .map-modal.open { display: flex; }
+  .map-modal-inner {
+    position: relative;
+    background: var(--card); border-radius: 12px;
+    width: 100%; max-width: 600px; max-height: 90vh;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.4);
+  }
+  .map-modal-close {
+    position: absolute; top: 8px; right: 8px;
+    width: 32px; height: 32px; border-radius: 50%;
+    border: 0; background: rgba(0,0,0,0.55); color: white;
+    font-size: 18px; cursor: pointer; line-height: 1;
+    z-index: 1;
+  }
+  .map-modal-meta {
+    padding: 14px 48px 8px 16px;
+    font-size: 14px; color: var(--text);
+  }
+  .map-modal-map {
+    flex: 1 1 auto; min-height: 50vh;
+    width: 100%;
+  }
+  .map-modal-cta {
+    display: block; padding: 12px;
+    background: var(--accent); color: white;
+    text-align: center; text-decoration: none;
+    font-weight: 600; font-size: 14px;
+  }
   /* City · state inlined into the h1 — same font/size/weight,
    * lighter color so it reads as supporting info to the name. */
   .beach-region {
@@ -172,9 +300,28 @@
   .hours-grid dt { color: var(--text-muted); font-weight: 500; }
   .hours-grid dd { margin: 0; color: var(--text); }
   .hours-range { font-size: 14px; font-weight: 600; color: var(--text); margin: 0; }
-  .hours-row { display: flex; justify-content: space-between; align-items: baseline; padding: 2px 0; }
-  .hours-row-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
-  .hours-row-val { font-size: 14px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+  /* Mobile Hours card: two side-by-side mini-boxes for Park Hours
+   * and Best Time. The card's own h2 is suppressed (each box has
+   * its own label). */
+  .hours-card h2 { display: none; }
+  .hours-boxes { display: flex; gap: 8px; }
+  .hours-box {
+    flex: 1; min-width: 0;
+    background: rgba(0,0,0,0.04);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    text-align: center;
+  }
+  .hours-box-label {
+    font-size: 10px; font-weight: 700; color: var(--text-muted);
+    letter-spacing: 0.06em; text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .hours-box-val {
+    font-size: 14px; font-weight: 700; color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
   .hours-dogs-prohibited { margin: 8px 0 0; font-size: 13px; color: var(--text); }
   .hours-dogs-suggest    { margin: 2px 0 0; font-size: 13px; color: var(--text-muted); }
 
@@ -184,31 +331,32 @@
    * padding (12) + h2 line-height, this lands ≈ y=28. */
   .amenities-card { margin-top: 16px; }
   .amenities-card h2 { margin-bottom: 6px; }
+  /* Mobile amenity grid: tiny icon-only chips on a SINGLE row.
+   * Scrolls horizontally if too many to fit. Label moved to tooltip. */
   .amenity-grid {
-    display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
+    display: flex; flex-wrap: nowrap; gap: 4px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
   }
-  @media (min-width: 480px) {
-    .amenity-grid { grid-template-columns: repeat(3, 1fr); }
-  }
+  .amenity-grid::-webkit-scrollbar { display: none; }
   .amenity {
     display: flex; align-items: center; gap: 6px; padding: 6px 8px;
     border: 1px solid var(--border); border-radius: 6px;
     font-size: 12px;
     background: var(--card);
   }
-  /* Mobile: icon-only tile — square, label removed, tooltip carries it.
-   * Paid overlay ($) sits top-right on parking tiles. */
   .amenity.amenity-iconic {
-    position: relative;
     display: flex; align-items: center; justify-content: center;
-    aspect-ratio: 1; padding: 0; min-height: 40px;
+    gap: 1px;
+    min-width: 36px; height: 36px;
+    padding: 0 5px; flex: 0 0 auto;
+    border-radius: 6px;
   }
-  .amenity-iconic .amenity-icon { font-size: 20px; }
+  .amenity-iconic .amenity-icon { font-size: 20px; line-height: 1; }
+  /* Dollar sits inline to the right of the parking icon (not a floating
+   * badge). Subtle green so it reads as "paid" without shouting. */
   .amenity-paid {
-    position: absolute; top: 2px; right: 4px;
-    font-size: 10px; font-weight: 800; color: var(--text);
-    background: rgba(255,255,255,0.85); border-radius: 3px;
-    padding: 0 3px; line-height: 1.3;
+    font-size: 12px; font-weight: 800; line-height: 1;
+    color: #15803d;
   }
   .amenity-icon { font-size: 14px; flex-shrink: 0; }
   .amenity-text { display: flex; flex-direction: column; line-height: 1.2; }
@@ -235,15 +383,20 @@
    * filter out at the JS layer until the user-feedback affordance
    * lands (project_amenity_user_feedback.md). */
 
-  /* Weather card — single inline line: icon · temp · wind · UV. */
-  .weather-card .weather-line {
-    display: flex; flex-wrap: wrap; justify-content: center;
-    align-items: center; gap: 6px;
+  /* Weather line — lives in the page header now, centered. */
+  .weather-line, .weather-card .weather-line {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    justify-content: center;
     font-size: 13px; color: var(--text); padding: 2px 0;
   }
-  .weather-now-cond { font-size: 18px; line-height: 1; }
+  .hero-weather {
+    margin: 4px 0 0;
+    font-size: 13px; color: var(--text);
+    text-align: center;
+  }
+  .weather-now-cond { font-size: 16px; line-height: 1; }
   .weather-sep { color: var(--text-muted); opacity: 0.6; }
-  .weather-loading { color: var(--text-muted); font-size: 12px; padding: 8px 0; }
+  .weather-loading { color: var(--text-muted); font-size: 12px; padding: 2px 0; }
 
   /* Hourly score bar — ported from detail.html. Renders inside
    * the Best Window card. */
@@ -539,7 +692,9 @@
     margin: 28px 16px 16px;
   }
   /* Scout blurb — uniform 14px / 1.55 line-height. */
-  .scout-card #scout-blurb {
+  .scout-card #scout-blurb,
+  .scout-card #scout-beach-blurb,
+  .scout-card #scout-now-blurb {
     font-size: 14px; line-height: 1.55;
     color: var(--text);
     margin: 0; padding: 0;
@@ -551,17 +706,22 @@
     font-size: 14px; line-height: 1.55; color: var(--text);
     margin: 8px 0 0;
   }
-  /* Mobile activities — icon-only chip row. */
+  /* Mobile activities — icon-only chip row. Tints share the
+   * Amenities vocabulary (off_leash green, on_leash amber,
+   * not_allowed red) so the two surfaces speak one visual language. */
   .activity-chips {
     display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;
   }
   .activity-chip {
     width: 36px; height: 36px;
     display: flex; align-items: center; justify-content: center;
-    border-radius: 999px; background: rgba(34,197,94,0.14);
-    border: 1px solid rgba(34,197,94,0.35);
+    border-radius: 999px;
+    background: rgba(0,0,0,0.04); border: 1px solid var(--border);
   }
   .activity-icon { font-size: 18px; line-height: 1; }
+  .activity-chip.rule-off_leash   { background: rgba(34,197,94,0.45); border-color: rgba(21,128,61,0.42); }
+  .activity-chip.rule-on_leash    { background: rgba(251,191,36,0.53); border-color: rgba(180,83,9,0.42); }
+  .activity-chip.rule-not_allowed { background: rgba(239,68,68,0.45); border-color: rgba(153,27,27,0.42); }
   /* Scout CTA — "Wanna go? Drive ~XX min.   [🐾 Let Pack Know] [Get directions →]" */
   .scout-cta {
     margin-top: 12px;
@@ -627,9 +787,9 @@
    * block pulls the remaining slack so the page is thumb-scrollable
    * without burning real estate on padding. */
   @media (max-width: 600px) {
-    /* Outer chrome */
-    section.card { padding: 10px 12px; margin: 5px 10px; border-radius: 10px; }
-    section.card h2 { font-size: 13px; margin-bottom: 6px; }
+    /* Outer chrome — very tight vertical spacing on phone */
+    section.card { padding: 6px 10px; margin: 3px 10px; border-radius: 10px; }
+    section.card h2 { font-size: 12px; margin-bottom: 4px; }
 
     /* Beach name + badge + region (h1) */
     .beach-name { font-size: 20px; margin: 0 0 4px; }
@@ -663,7 +823,9 @@
     .hours-dogs-suggest { font-size: 12px; }
 
     /* Scout corpus */
-    .scout-card #scout-blurb { font-size: 13px; line-height: 1.5; }
+    .scout-card #scout-blurb,
+    .scout-card #scout-beach-blurb,
+    .scout-card #scout-now-blurb { font-size: 13px; line-height: 1.5; }
     .activities-prose { font-size: 13px; line-height: 1.5; margin-top: 6px; }
 
     /* CTA — keep centered, tighter buttons */
@@ -703,6 +865,8 @@
   <header class="hero">
     <div class="hero-main">
       <h1 class="beach-name" id="beach-name">Loading...</h1>
+      <div class="beach-secondline" id="beach-secondline"></div>
+      <div class="hero-weather" id="weather-mount"></div>
       <div class="beach-address" id="beach-address"></div>
     </div>
     <a class="close-btn" id="close-btn" href="index.html">✕</a>
@@ -827,26 +991,40 @@ function showError(msg) {
 function render(data, beachFid) {
   const { beach, dog_policy, amenities } = data;
   document.title = `${beach.display_name} — Dog Beach Scout`;
-  // Beach name + inline region (city · state) — same h1, lighter color.
-  // Your-Fit overall renders as a colored badge to the left of the name.
+  // Mobile header: h1 is JUST the beach name + state (no county). The
+  // Your-Fit badge and distance/drive-time move to the second line
+  // below the name.
   const nameEl = document.getElementById('beach-name');
-  nameEl.textContent = '';
-  const fitScores = _appealScores(beach, dog_policy, amenities, data.hours_today);
-  const badge = document.createElement('span');
-  badge.className = `fit-badge fit-badge-${
-    fitScores.overall >= 70 ? 'go' : fitScores.overall >= 40 ? 'caution' : 'no_go'}`;
-  badge.textContent = fitScores.overall;
-  badge.title = `Your Fit · ${_PREF_LABEL[fitScores.userPref] || fitScores.userPref}: ${fitScores.overall}/100`;
-  nameEl.appendChild(badge);
-  nameEl.appendChild(document.createTextNode(' ' + beach.display_name));
-  const regionParts = [];
-  if (beach.county) regionParts.push(beach.county);
-  if (beach.state)  regionParts.push(beach.state);
-  if (regionParts.length) {
+  nameEl.textContent = beach.display_name;
+  if (beach.state) {
     const span = document.createElement('span');
     span.className = 'beach-region';
-    span.textContent = regionParts.join(' · ');
+    span.textContent = beach.state;
     nameEl.appendChild(span);
+  }
+  // Second line: [score badge] · Park 6AM-10PM · Best 2PM-5PM · 12 mi · 32 min · [map]
+  const fitScores = _appealScores(beach, dog_policy, amenities, data.hours_today);
+  const secondline = document.getElementById('beach-secondline');
+  if (secondline) {
+    const badgeClass = fitScores.overall >= 70 ? 'go' : fitScores.overall >= 40 ? 'caution' : 'no_go';
+    const harmonized = _harmonizedHours(beach, amenities);
+    const parkHours = harmonized ? `${harmonized.openLabel || '?'}-${harmonized.closeLabel || '?'}` : null;
+    const nowWindow = _bestWindowFromNow(data.hours_today, beach, amenities, dog_policy);
+    const bestTime  = nowWindow ? `${_minutesToFmt(nowWindow.start * 60)}-${_minutesToFmt(nowWindow.end * 60)}` : null;
+    // Score badge hidden on mobile per Franz. Computed (fitScores) is
+    // still available if a future surface wants it; just not rendered.
+    void fitScores; void badgeClass;
+    const items = [];
+    if (parkHours) items.push(`<span class="secondline-pill"><span class="secondline-label">PARK</span> ${escHtml(parkHours)}</span>`);
+    if (bestTime)  items.push(`<span class="secondline-pill secondline-pill-best"><span class="secondline-label">BEST</span> ${escHtml(bestTime)}</span>`);
+    items.push(`<button class="secondline-car" type="button" id="secondline-car-btn" data-tip="Map + drive time" aria-label="Map">
+        <span class="secondline-car-icon">🚗</span>
+        <span class="secondline-car-dist" id="secondline-car-dist">— mi</span>
+      </button>`);
+    secondline.innerHTML = items.join('<span class="secondline-sep">·</span>');
+    _populateDistanceAndDrive(beach);
+    document.getElementById('secondline-car-btn')
+      ?.addEventListener('click', () => _openMapModal(beach));
   }
 
   // Pin-address row retired 2026-05-15 — address still appears on the
@@ -864,35 +1042,26 @@ function render(data, beachFid) {
   // LEFT RAIL (top → bottom):
   //   Amenities (merged with Dog Policy section-tiles — rule color
   //   tints them in place), Cautions, Hours, Weather and Tides.
+  const hasPhotos = Array.isArray(data.photos) && data.photos.length > 0;
   const leftRail = [];
-  leftRail.push(buildAmenitiesSection(amenities, dog_policy));
+  // Beach text → photos → amenities. Photos move out of main so they
+  // sit directly below the beach text on mobile (per Franz).
+  leftRail.push(buildBeachBlurbCard(data.today));
+  if (hasPhotos) leftRail.push('<div class="photo-block-wrap" id="photo-block-mount"></div>');
+  leftRail.push(buildAmenitiesAndActivitiesCard(beach, dog_policy, amenities, data.hours_today));
   leftRail.push(buildCautionsSection(data.today, dog_policy, data.hours_today));
-  leftRail.push(buildHoursSection(beach, amenities, dog_policy, data.hours_today));
-  leftRail.push(buildWeatherSection(beach));
+  // Weather/tide moved to the page header (third hero line). No card
+  // in the LHS now — _renderWeatherToday targets #weather-mount which
+  // lives in the hero.
   document.getElementById('left-rail').innerHTML = leftRail.filter(Boolean).join('');
 
-  // MAIN (top → bottom):
-  //   Appeal, Alternatives (if triggered), Photos (only when present),
-  //   Overview, Best Window, Location, Details, Links
-  const hasPhotos = Array.isArray(data.photos) && data.photos.length > 0;
+  // MAIN (top → bottom): Alternatives → Now blurb → Pack list → Details.
+  // Photos + Beach blurb moved to the LHS so they sit above amenities.
   const main = [];
-  // Static "Beach text" overview dropped on mobile — Scout's blurb
-  // now opens with 2 sentences describing the beach + zones (the
-  // BEACH half of its corpus), making the static card redundant.
   main.push(buildAlternativesSection(dog_policy, data.alternatives));
-  // Photos + Map share a row: photos take most of the width, map is
-  // square. Either alone takes the full row. Renders only if at least
-  // one is present.
-  const hasMap = beach.lat != null && beach.lng != null;
-  if (hasPhotos || hasMap) {
-    const photoCol = hasPhotos
-      ? '<div class="photo-block-wrap pm-photo-col" id="photo-block-mount"></div>'
-      : '';
-    const mapCol = hasMap ? '<div class="pm-map-col"><div id="map"></div></div>' : '';
-    main.push(`<div class="photo-map-row">${photoCol}${mapCol}</div>`);
-  }
-  main.push(buildActivitiesCard(beach, dog_policy, amenities, data.hours_today));
-  main.push(buildScoutCard(data.today, beach, dog_policy, amenities, data.hours_today));
+  // Activities moved to the LEFT rail under Amenities (color-coded
+  // with the same rule vocabulary). NOW blurb takes the spot in main.
+  main.push(buildNowBlurbCard(data.today));
   main.push(buildPackListCard(beach, dog_policy, amenities, data.hours_today));
   main.push(buildDetailsSection(dog_policy));
   main.push(buildLinksSection(beach, beachFid));
@@ -913,7 +1082,7 @@ function render(data, beachFid) {
 
   // Fire async loads after DOM is mounted.
   loadScoutBlurb(beach, data.today, dog_policy, data.hours_today, amenities);
-  loadWeather(beach, data.hours_today);
+  loadWeather(beach, data.hours_today, data.today);
   _wireBestTimeClick();
 }
 
@@ -960,7 +1129,9 @@ function buildLocationSection(beach) {
 function _fmt12(hour24, minute) {
   const ap = hour24 >= 12 ? 'PM' : 'AM';
   const h12 = hour24 === 0 ? 12 : hour24 > 12 ? hour24 - 12 : hour24;
-  return `${h12}:${String(minute || 0).padStart(2, '0')}${ap}`;
+  // Drop ":00" when on the hour — mobile prefers "6AM" over "6:00AM".
+  if (!minute) return `${h12}${ap}`;
+  return `${h12}:${String(minute).padStart(2, '0')}${ap}`;
 }
 
 function _hhmmToFmt(hhmm) {
@@ -1114,12 +1285,11 @@ function buildHoursSection(beach, amenities, dogPolicy, hoursToday) {
     ? `<p class="hours-dogs-prohibited"><strong>Dogs not allowed ${escHtml(prohibStart)}–${escHtml(prohibEnd)}</strong></p>`
       + _suggestPostProhibitionTime(prohibStart, prohibEnd, beach.timezone)
     : '';
-  const rows = [];
-  if (rangeLabel) rows.push(`<div class="hours-row"><span class="hours-row-label">Open</span><span class="hours-row-val">${escHtml(rangeLabel)}</span></div>`);
-  if (bestLabel)  rows.push(`<div class="hours-row"><span class="hours-row-label">Best</span><span class="hours-row-val">${escHtml(bestLabel)}</span></div>`);
-  return `<section class="card">
-    <h2>Hours</h2>
-    ${rows.join('')}
+  const boxes = [];
+  if (rangeLabel) boxes.push(`<div class="hours-box"><div class="hours-box-label">Park Hours</div><div class="hours-box-val">${escHtml(rangeLabel)}</div></div>`);
+  if (bestLabel)  boxes.push(`<div class="hours-box"><div class="hours-box-label">Best Time</div><div class="hours-box-val">${escHtml(bestLabel)}</div></div>`);
+  return `<section class="card hours-card">
+    <div class="hours-boxes">${boxes.join('')}</div>
     ${prohibNote}
   </section>`;
 }
@@ -1450,13 +1620,11 @@ function wmoIcon(code) { return (WMO_ICON[code] || ['🌡️','—'])[0]; }
 function wmoLabel(code) { return (WMO_ICON[code] || ['🌡️','—'])[1]; }
 
 function buildWeatherSection(beach) {
-  const tideMount = beach.noaa_station_id
-    ? `<div id="tide-mount" class="weather-loading">Loading tides…</div>`
-    : '';
+  // Mobile: tide is reduced to a single icon + height in the weather
+  // line above; the SVG curve + hi/lo events are dropped entirely.
   return `<section class="card weather-card">
     <h2>Weather and Tides</h2>
     <div id="weather-mount" class="weather-loading">Loading conditions…</div>
-    ${tideMount}
   </section>`;
 }
 
@@ -1468,27 +1636,29 @@ function _fmtTideTime(iso) {
   return mm ? `${h}:${String(mm).padStart(2,'0')}${ap}` : `${h}${ap}`;
 }
 
-function _renderWeatherToday(forecast) {
+// Mobile weather line — sourced from server data, not a browser fetch.
+// Reads the current local hour's row from hours_today for temp/wind/
+// UV/tide; falls back to today's averages when the row is missing.
+// Weather code icon comes from today.weather_code (daily summary).
+function _renderWeatherToday(hoursToday, today, timezone) {
   const mount = document.getElementById('weather-mount');
   if (!mount) return;
-  const f = forecast;
-  const code  = f.current?.weather_code ?? f.daily.weather_code[0];
-  const temp  = f.current?.temperature_2m != null
-    ? Math.round(f.current.temperature_2m)
-    : Math.round(f.daily.temperature_2m_max[0]);
-  const wind  = f.current?.wind_speed_10m != null
-    ? Math.round(f.current.wind_speed_10m)
-    : Math.round(f.daily.wind_speed_10m_max[0]);
-  const uvMax = f.daily.uv_index_max?.[0];
-  const uvNow = f.current?.uv_index;
-  const uv    = uvNow != null ? uvNow : uvMax;
-  // Single inline line: icon · temp · wind · UV
-  const parts = [
-    `<span class="weather-now-cond" title="${escHtml(wmoLabel(code))}">${wmoIcon(code)}</span>`,
-    `<span>${temp}°</span>`,
-    `<span>💨 ${wind} mph</span>`,
-    uv != null ? `<span>☀️ UV ${parseFloat(uv).toFixed(1)}</span>` : '',
-  ].filter(Boolean);
+  const nowH = _currentLocalHour(timezone);
+  const row  = Array.isArray(hoursToday)
+    ? hoursToday.find(h => h?.local_hour === nowH) || hoursToday.find(h => h?.is_now)
+    : null;
+  const code = today?.weather_code ?? null;
+  const temp = row?.temp_air ?? today?.avg_temp ?? null;
+  const wind = row?.wind_speed ?? today?.avg_wind ?? null;
+  const uv   = row?.uv_index ?? today?.avg_uv ?? null;
+  const tide = row?.tide_height != null ? parseFloat(row.tide_height) : null;
+  const parts = [];
+  if (code != null) parts.push(`<span class="weather-now-cond" title="${escHtml(wmoLabel(code))}">${wmoIcon(code)}</span>`);
+  if (temp != null) parts.push(`<span>${Math.round(parseFloat(temp))}°</span>`);
+  if (wind != null) parts.push(`<span>💨 ${Math.round(parseFloat(wind))}mph</span>`);
+  if (uv != null)   parts.push(`<span>☀️ ${Math.round(parseFloat(uv))}</span>`);
+  if (Number.isFinite(tide)) parts.push(`<span>🌊 ${tide.toFixed(1)}ft</span>`);
+  if (!parts.length) { mount.innerHTML = ''; return; }
   mount.innerHTML = `<div class="weather-line">${parts.join('<span class="weather-sep">·</span>')}</div>`;
   mount.classList.remove('weather-loading');
 }
@@ -1626,35 +1796,14 @@ function _renderTidesToday(tides, forecast) {
   mount.classList.remove('weather-loading');
 }
 
-async function loadWeather(beach, hoursToday) {
+// Mobile: NO browser→Open-Meteo fetch. The weather line is rendered
+// entirely from server-side data already in the get_beach_info
+// payload (today's summary + hours_today), so the page never hits a
+// 3rd-party CORS / 502 / network error.
+async function loadWeather(beach, hoursToday, today) {
   const weatherMount = document.getElementById('weather-mount');
-  const tideMount    = document.getElementById('tide-mount');
-  if (!weatherMount || beach.lat == null || beach.lng == null) {
-    if (weatherMount) weatherMount.parentElement.remove();
-    if (tideMount)    tideMount.parentElement.remove();
-    return;
-  }
-  const tz = beach.timezone || 'auto';
-  // Today only — drop forecast_days to 1.
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${beach.lat}&longitude=${beach.lng}`
-    + `&current=temperature_2m,weather_code,wind_speed_10m,uv_index`
-    + `&daily=temperature_2m_max,temperature_2m_min,weather_code,wind_speed_10m_max,precipitation_sum,uv_index_max`
-    + `&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch`
-    + `&timezone=${encodeURIComponent(tz)}&forecast_days=1`;
-  // Tides now derive from hours_today.tide_height (already in the
-  // get_beach_info payload; populated by daily-beach-refresh from the
-  // weekly NOAA pull). No browser→NOAA fetch.
-  const tides = tideMount ? _deriveTideCurveFromHours(hoursToday) : null;
-  try {
-    const forecast = await fetch(url).then(r => r.json());
-    _renderWeatherToday(forecast);
-    if (tideMount) _renderTidesToday(tides, forecast);
-  } catch (e) {
-    console.warn('weather fetch failed:', e);
-    weatherMount.textContent = 'Weather unavailable right now.';
-    // Tides can still render even if Open-Meteo fails.
-    if (tideMount && tides) _renderTidesToday(tides, null);
-  }
+  if (!weatherMount) return;
+  _renderWeatherToday(hoursToday, today, beach.timezone);
 }
 
 // Build the {hourly, hilo} shape _renderTidesToday expects, derived
@@ -1899,16 +2048,26 @@ function buildBestTimeCard(today, dogPolicy, beachFid, hoursToday, beach, amenit
 // the codebase for now in case they come back. Activities prose
 // renders statically below the async Scout blurb — the deterministic
 // "what to do" sentence is the backbone; Scout adds today-flavor.
-function buildScoutCard(today, beach, dogPolicy, amenities, hoursToday) {
+// Scout's blurb splits into two cards on mobile: BEACH (top of main,
+// 2 sentences on the beach + zones) and NOW (below Activities,
+// 2 sentences on why the window is firing + concrete cautions + CTA).
+function buildBeachBlurbCard(today) {
   if (!today) return '';
-  // Single corpus: activities + pack-list now fold INTO Scout's blurb
-  // (LLM weaves them naturally). CTA mount sits below; fills async
-  // once user location is known. Both surfaces collapse if data
-  // is missing rather than blocking.
-  return `<section class="card scout-card">
-    <div id="scout-blurb">…</div>
+  return `<section class="card scout-card scout-beach-card">
+    <div id="scout-beach-blurb">…</div>
+  </section>`;
+}
+function buildNowBlurbCard(today) {
+  if (!today) return '';
+  return `<section class="card scout-card scout-now-card">
+    <div id="scout-now-blurb">…</div>
     <div id="scout-cta" class="scout-cta"></div>
   </section>`;
+}
+// Legacy alias retained so the existing callers don't break — emits
+// the NOW card only (BEACH renders separately in the new layout).
+function buildScoutCard(today) {
+  return buildNowBlurbCard(today);
 }
 
 // Lazily-mounted detail modal — iframe to detail.html for the per-hour
@@ -2063,8 +2222,13 @@ function buildCautionsSection(today, dogPolicy, hoursToday) {
 // describing today's conditions. Short-circuits to canned apologies
 // when dogs aren't allowed / sand prohibited / no good windows.
 async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
-  const el = document.getElementById('scout-blurb');
-  if (!el) return;
+  // Mobile splits Scout into BEACH (top) + NOW (after Activities)
+  // cards. Single chat call returns both halves separated by markers;
+  // we parse and render into the two mounts.
+  const beachEl = document.getElementById('scout-beach-blurb');
+  const nowEl   = document.getElementById('scout-now-blurb');
+  const el = nowEl; // legacy alias used by the short-circuits below
+  if (!nowEl && !beachEl) return;
 
   const isNoDogs = !!dogPolicy && (
     dogPolicy.dogs_allowed === 'no' ||
@@ -2073,23 +2237,26 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
   const isSandWaterProhibited = _sandOrWaterProhibited(dogPolicy?.zone_rules);
   const noGoodWindows = today && today.day_status === 'no_go';
 
+  // Hide the BEACH card during apology cases — single message in NOW.
+  const hideBeach = () => {
+    const card = document.querySelector('.scout-beach-card');
+    if (card) card.style.display = 'none';
+  };
   if (isNoDogs) {
-    el.textContent = "Sorry bud — dogs aren't allowed here. Check the alternatives below for a nearby spot that welcomes pups.";
-    el.classList.add('loaded'); return;
+    if (el) el.textContent = "Sorry bud — dogs aren't allowed here. Check the alternatives below for a nearby spot that welcomes pups.";
+    el?.classList.add('loaded'); hideBeach(); return;
   }
   if (isSandWaterProhibited) {
-    el.textContent = "Sorry bud — dogs aren't allowed on the sand or in the water here. Check the alternatives below for a beach where pups can actually hit the surf.";
-    el.classList.add('loaded'); return;
+    if (el) el.textContent = "Sorry bud — dogs aren't allowed on the sand or in the water here. Check the alternatives below for a beach where pups can actually hit the surf.";
+    el?.classList.add('loaded'); hideBeach(); return;
   }
   if (!today) {
-    // Non-scoreable / no recommendation today. The element lives
-    // inside the Best Time card; leave a soft note when present.
-    el.textContent = '';
-    return;
+    if (el) el.textContent = '';
+    hideBeach(); return;
   }
   if (noGoodWindows) {
-    el.textContent = "Today's looking rough at this beach — no go-quality hours. Check the alternatives below if you can travel.";
-    el.classList.add('loaded'); return;
+    if (el) el.textContent = "Today's looking rough at this beach — no go-quality hours. Check the alternatives below if you can travel.";
+    el?.classList.add('loaded'); hideBeach(); return;
   }
 
   // Time-aware window: only consider hours from the current local hour
@@ -2098,8 +2265,8 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
   // LEFT today, not what was great at 6am.
   const nowWindow = _bestWindowFromNow(hoursToday, beach, amenities, dogPolicy);
   if (!nowWindow) {
-    el.textContent = "Today's good windows have already passed at this beach — check back tomorrow morning.";
-    el.classList.add('loaded'); return;
+    if (el) el.textContent = "Today's good windows have already passed at this beach — check back tomorrow morning.";
+    el?.classList.add('loaded'); hideBeach(); return;
   }
   const windowLabel  = _formatHourRange(nowWindow.start, nowWindow.end);
   const windowStatus = today.best_window_status ?? 'go';
@@ -2129,15 +2296,12 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
   // handles that. Scout's prose stays about beach + window only.
   const question =
     `Current local time: ${nowLabel || 'now'}. Best window remaining: ${windowLabel} (${windowStatus}). Conditions: ${signals}. ` +
-    `Activities the zone rules ALLOW today (weave 1-2 of these into the NOW part naturally — DON'T invent, DON'T list all): ${actPhrases.join(' · ')}. ` +
-    `Write exactly FOUR short sentences in ONE paragraph: ` +
-    `Sentence 1-2 (BEACH): describe this beach and its zones — what kind of place it is, what makes it good for dogs, the character of the sand / water / trails. Stick to static beach features, not today's weather. ` +
-    `Sentence 3-4 (NOW): why the **${windowLabel}** window is a great time to be there today (bold the window in markdown). Weave in 1-2 activities and emphasize the FUN the kahu and pup will have. Address any active cautions for BOTH the dog AND the kahu with CONCRETE guidance — examples: ` +
-    `high tide → "stick to the upper beach, watch for kids and dogs being pushed toward the cliffs/rocks"; ` +
-    `high UV (≥8) → "sunscreen for you and a shade break, pup's coat is its sunscreen"; ` +
-    `high wind (≥15mph) → "secure hats and treats, your pup will want shelter"; ` +
-    `bacteria → "keep your dog out of the surf, don't let them drink seawater". ` +
-    `BOLD ONLY the time window using **markdown asterisks**. No headers, no bullets, no pack list, no gear recommendations. ` +
+    `Activities the zone rules ALLOW today (weave 1-2 of these into the NOW part — DON'T invent, DON'T list all): ${actPhrases.join(' · ')}. ` +
+    `Write the response in EXACTLY this two-part format on separate lines (the labels are MANDATORY): ` +
+    `\n\nBEACH: <2 short sentences describing the beach and its zones — character, what kind of place it is, what makes it good for dogs. Stick to static beach features, NOT today's weather.>` +
+    `\n\nNOW: <2 short sentences on why the **${windowLabel}** window is a great time today (bold the window in **markdown**). Weave in 1-2 activities and emphasize the FUN the kahu and pup will have. Address active cautions for BOTH the dog AND the kahu with CONCRETE guidance.>` +
+    `\n\nExamples of caution framing: high tide → "stick to the upper beach, watch for kids and dogs being pushed toward the cliffs/rocks"; high UV (≥8) → "sunscreen for you and a shade break, pup's coat is its sunscreen"; high wind (≥15mph) → "secure hats and treats, your pup will want shelter"; bacteria → "keep your dog out of the surf, don't let them drink seawater". ` +
+    `BOLD ONLY the time window. No headers beyond BEACH: / NOW:, no bullets, no pack list, no gear recommendations. ` +
     `STRICT: respect the DOG POLICY ZONE RULES in the system prompt. Never describe activities in sections marked not_allowed. Never reference times before the current local time. Use only the activities provided above — don't invent.`;
 
   try {
@@ -2148,14 +2312,27 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const { answer } = await res.json();
-    // Escape HTML first, then convert **markdown bold** to <strong>.
-    // No other markdown is accepted from the model.
-    const safe = escHtml(answer || '');
-    el.innerHTML = safe.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
-    el.classList.add('loaded');
+    // Parse the answer into BEACH / NOW halves. The prompt asks the
+    // model to emit them on labeled lines; fall back to first-half /
+    // second-half split if labels are missing.
+    const raw = String(answer || '');
+    const mB = raw.match(/^\s*BEACH\s*:\s*([\s\S]*?)\s*(?:\n+\s*)?(?=NOW\s*:|$)/i);
+    const mN = raw.match(/NOW\s*:\s*([\s\S]*)$/i);
+    let beachText = mB ? mB[1].trim() : '';
+    let nowText   = mN ? mN[1].trim() : '';
+    if (!beachText && !nowText) {
+      const sentences = raw.split(/(?<=[.!?])\s+/);
+      const halfIdx = Math.ceil(sentences.length / 2);
+      beachText = sentences.slice(0, halfIdx).join(' ').trim();
+      nowText   = sentences.slice(halfIdx).join(' ').trim();
+    }
+    const toHtml = s => escHtml(s).replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+    if (beachEl) { beachEl.innerHTML = toHtml(beachText); beachEl.classList.add('loaded'); }
+    if (nowEl)   { nowEl.innerHTML   = toHtml(nowText);   nowEl.classList.add('loaded'); }
   } catch (e) {
     console.warn('scout blurb fetch failed:', e);
-    el.textContent = '';
+    if (beachEl) beachEl.textContent = '';
+    if (nowEl)   nowEl.textContent   = '';
   }
   _renderScoutCTA(beach);
 }
@@ -2225,11 +2402,9 @@ function _estimateDriveMinutes(user, beach) {
 }
 
 async function _getUserLocation() {
-  // Never auto-prompt for browser geolocation on this page. Drive time
-  // is opt-in — only surfaces when location is already known via:
-  //   1. URL param: ?user_lat=…&user_lng=…
-  //   2. localStorage cache from a prior session/other page (find.html
-  //      already prompts when the user explicitly asks for distance sort)
+  // Mobile: solicit browser geolocation on page load (one-shot, cached
+  // 24h in localStorage). Per Franz "Solicit location from user".
+  // Priority: URL param → cached → browser prompt → null.
   const qp = new URLSearchParams(location.search);
   const ulat = parseFloat(qp.get('user_lat'));
   const ulng = parseFloat(qp.get('user_lng'));
@@ -2238,10 +2413,126 @@ async function _getUserLocation() {
     const raw = localStorage.getItem('dogbeach.user_loc');
     if (raw) {
       const cached = JSON.parse(raw);
-      if (cached && Number.isFinite(cached.lat) && Number.isFinite(cached.lng)) return cached;
+      if (cached && Number.isFinite(cached.lat) && Number.isFinite(cached.lng)
+          && Date.now() - (cached.t || 0) < 86400000) return cached;
     }
   } catch {}
-  return null;
+  if (!navigator.geolocation) return null;
+  return new Promise(resolve => {
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+    const timeout = setTimeout(() => done(null), 6000);
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        clearTimeout(timeout);
+        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude, t: Date.now() };
+        try { localStorage.setItem('dogbeach.user_loc', JSON.stringify(loc)); } catch {}
+        done(loc);
+      },
+      () => { clearTimeout(timeout); done(null); },
+      { timeout: 6000, maximumAge: 86400000 },
+    );
+  });
+}
+
+// Map popup — lazy-mounted modal with Leaflet + OSRM-driven nav route.
+async function _openMapModal(beach) {
+  if (beach.lat == null || beach.lng == null) return;
+  let modal = document.getElementById('map-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'map-modal';
+    modal.className = 'map-modal';
+    modal.innerHTML = `
+      <div class="map-modal-inner">
+        <button class="map-modal-close" type="button" aria-label="Close">×</button>
+        <div class="map-modal-meta" id="map-modal-meta">Calculating route…</div>
+        <div id="map-modal-map" class="map-modal-map"></div>
+        <a class="map-modal-cta" id="map-modal-dirs" target="_blank" rel="noopener">Get directions →</a>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => {
+      if (e.target === modal) modal.classList.remove('open');
+    });
+    modal.querySelector('.map-modal-close').addEventListener('click', () => modal.classList.remove('open'));
+  }
+  modal.classList.add('open');
+  document.getElementById('map-modal-dirs').href = buildMapsUrl(beach);
+  const meta = document.getElementById('map-modal-meta');
+  // Init Leaflet on first open
+  if (!modal._map) {
+    const m = L.map('map-modal-map', { zoomControl: true, scrollWheelZoom: false })
+      .setView([beach.lat, beach.lng], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+      attribution: '© OSM', maxZoom: 19,
+    }).addTo(m);
+    L.marker([beach.lat, beach.lng]).addTo(m);
+    modal._map = m;
+  }
+  // Always invalidate after opening — modal display:none → flex
+  // means Leaflet had stale dimensions.
+  requestAnimationFrame(() => modal._map.invalidateSize());
+  setTimeout(() => modal._map.invalidateSize(), 200);
+
+  const user = await _getUserLocation();
+  if (!user) {
+    meta.textContent = 'Distance unavailable — location not shared';
+    modal._map.setView([beach.lat, beach.lng], 13);
+    return;
+  }
+  // User pin
+  if (modal._userMarker) modal._userMarker.remove();
+  modal._userMarker = L.circleMarker([user.lat, user.lng], {
+    radius: 7, color: '#1d4ed8', fillColor: '#3b82f6',
+    fillOpacity: 0.9, weight: 2,
+  }).addTo(modal._map);
+  // Try OSRM public routing; fall back to straight line + haversine.
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${user.lng},${user.lat};${beach.lng},${beach.lat}?overview=full&geometries=geojson`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      const route = data.routes?.[0];
+      if (route && route.geometry?.coordinates) {
+        const miles   = (route.distance / 1609.34).toFixed(1);
+        const minutes = Math.round(route.duration / 60);
+        meta.innerHTML = `<strong>${miles} mi</strong> · <strong>${minutes} min</strong> drive`;
+        if (modal._route) modal._route.remove();
+        const coords = route.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+        modal._route = L.polyline(coords, { color: '#1d4ed8', weight: 4, opacity: 0.75 }).addTo(modal._map);
+        modal._map.fitBounds(modal._route.getBounds(), { padding: [40, 40] });
+        return;
+      }
+    }
+    throw new Error('OSRM no route');
+  } catch (e) {
+    const miles = _haversineMiles(user, { lat: beach.lat, lng: beach.lng });
+    const minutes = _estimateDriveMinutes(user, beach);
+    meta.innerHTML = `<strong>${miles.toFixed(1)} mi</strong> · ~${minutes} min drive (est.)`;
+    if (modal._route) modal._route.remove();
+    modal._route = L.polyline(
+      [[user.lat, user.lng], [beach.lat, beach.lng]],
+      { color: '#1d4ed8', weight: 3, opacity: 0.5, dashArray: '6 6' },
+    ).addTo(modal._map);
+    modal._map.fitBounds(L.latLngBounds([[beach.lat, beach.lng], [user.lat, user.lng]]), { padding: [40, 40] });
+  }
+}
+
+async function _populateDistanceAndDrive(beach) {
+  const carDistEl = document.getElementById('secondline-car-dist');
+  if (!carDistEl || beach.lat == null || beach.lng == null) return;
+  const user = await _getUserLocation();
+  if (!user) {
+    carDistEl.textContent = 'Map';
+    return;
+  }
+  const miles = _haversineMiles(user, { lat: beach.lat, lng: beach.lng });
+  if (!Number.isFinite(miles) || miles <= 0) {
+    carDistEl.textContent = 'Map';
+    return;
+  }
+  const milesLabel = miles >= 10 ? Math.round(miles) : miles.toFixed(1);
+  carDistEl.textContent = `${milesLabel} mi`;
 }
 
 // True ONLY if dogs have no sand/water access anywhere on the beach —
@@ -2503,10 +2794,10 @@ function _packListItems(beach, dogPolicy, amenities, hoursToday) {
   if (waterAllowed) {
     items.push({ icon: '🪣', label: 'Towel', reason: 'Wet dog' });
     if (maxTemp >= 70) {
-      items.push({ icon: '🎾', label: 'Fetch toy', reason: 'Water + warm' });
+      items.push({ icon: '🥎', label: 'Fetch toy', reason: 'Water + warm' });
     }
   } else if (sandAllowed && maxTemp >= 65) {
-    items.push({ icon: '🎾', label: 'Fetch toy', reason: 'Sand play' });
+    items.push({ icon: '🥎', label: 'Fetch toy', reason: 'Sand play' });
   }
 
   // Weather-conditional
@@ -2650,41 +2941,136 @@ function _activityIcons(beach, dogPolicy, amenities, hoursToday) {
   const lowestTide = minVal('tide_height', +Infinity);
   const maxTemp    = maxVal('temp_air',    -Infinity);
   const permits = r => r && r !== 'not_allowed';
+  // Each chip carries the underlying section's rule so the chip can
+  // share the same tint vocabulary as the Amenities tiles.
   if (sand === 'off_leash' || water === 'off_leash') {
-    items.push({ icon: '🐾', tip: 'Off-leash zone today' });
+    items.push({ icon: '🐾', rule: 'off_leash', tip: 'Off-leash zone today' });
   }
   if (permits(sand)) {
-    items.push({ icon: '🎾', tip: sand === 'off_leash' ? 'Fetch on open sand' : 'Leashed fetch on sand' });
+    items.push({ icon: '🥎', rule: sand,
+      tip: sand === 'off_leash' ? 'Fetch on open sand' : 'Leashed fetch on sand' });
   } else if (permits(water)) {
-    items.push({ icon: '🎾', tip: 'Water fetch (sand restricted)' });
+    items.push({ icon: '🥎', rule: water, tip: 'Water fetch (sand restricted)' });
   }
   if (permits(water)) {
-    items.push({ icon: '🌊', tip: maxTemp >= 65 ? `Splash · ${Math.round(maxTemp)}°F` : 'Wade (chilly today)' });
+    items.push({ icon: '🌊', rule: water,
+      tip: maxTemp >= 65 ? `Splash · ${Math.round(maxTemp)}°F` : 'Wade (chilly today)' });
   }
   if (permits(tidePools) && lowestTide !== Infinity && lowestTide < 2) {
-    items.push({ icon: '🪨', tip: `Tide pools · low ${lowestTide.toFixed(1)}ft` });
+    items.push({ icon: '🪨', rule: tidePools, tip: `Tide pools · low ${lowestTide.toFixed(1)}ft` });
   }
   if (permits(trails)) {
     const sandRestricted = sand === 'not_allowed' || !sand;
-    items.push({ icon: '🥾', tip: sandRestricted ? 'Trails open (sand restricted)' : 'Trail walk' });
+    items.push({ icon: '🥾', rule: trails,
+      tip: sandRestricted ? 'Trails open (sand restricted)' : 'Trail walk' });
   }
-  if (permits(board))   items.push({ icon: '🚶', tip: 'Boardwalk' });
-  if (permits(picnic))  items.push({ icon: '🏕️', tip: 'Picnic area' });
+  if (permits(board))   items.push({ icon: '🚶', rule: board,  tip: 'Boardwalk' });
+  if (permits(picnic))  items.push({ icon: '🧺', rule: picnic, tip: 'Picnic area' });
   return items;
 }
 
-function buildActivitiesCard(beach, dogPolicy, amenities, hoursToday) {
-  const items = _activityIcons(beach, dogPolicy, amenities, hoursToday);
-  if (!items.length) return '';
-  const chips = items.map(it => `
-    <div class="activity-chip" data-tip="${escHtml(it.tip)}">
-      <span class="activity-icon">${it.icon}</span>
-    </div>`).join('');
-  return `<section class="card activities-card">
-    <h2>Today</h2>
-    <div class="activity-chips">${chips}</div>
+// Short labels rendered under each icon — tight enough to fit a chip.
+const _AMENITY_SHORT = {
+  has_parking: 'Park', has_restrooms: 'WC', has_showers: 'Shower',
+  has_drinking_water: 'Water', has_picnic_area: 'Picnic',
+  has_fire_pits: 'Fire', has_lifeguards: 'Guard',
+  has_disabled_access: 'ADA',
+};
+const _SECTION_SHORT = {
+  sand: 'Sand', trails: 'Trails', water_swim: 'Water',
+  dunes: 'Dunes', bluff: 'Bluff', boardwalk: 'Boardwalk',
+  campground: 'Camp', playground: 'Play',
+  tide_pools: 'Pools', nesting_zones: 'Nests',
+};
+const _ACTIVITY_SHORT = {
+  '🐾': 'Off-leash', '🥎': 'Fetch', '🌊': 'Splash',
+  '🪨': 'Tide pools', '🥾': 'Trails', '🚶': 'Boardwalk', '🧺': 'Picnic',
+};
+
+// Section / amenity keys that the Activities row already captures —
+// don't double-render them in the Amenities row. Sand and water are
+// intentionally NOT dedup'd: "Sand" in Amenities ≠ "Off-leash" in
+// Activities; "Water" ≠ "Splash".
+const _AMENITY_DEDUP_KEYS     = new Set(['has_picnic_area']);
+const _AMENITY_DEDUP_SECTIONS = new Set(['picnic_area', 'trails']);
+
+// Top-N flat list of amenity + section tiles for mobile, with the
+// most-permissive rule attached and 'unknown' filtered out.
+function _flatTopAmenities(amenities, dogPolicy, limit) {
+  const ruleMap = _ruleMapFromZoneRules(dogPolicy?.zone_rules || {});
+  const out = [];
+  for (const a of _visibleAmenityTiles(amenities)) {
+    if (_AMENITY_DEDUP_KEYS.has(a.key)) continue;
+    const matchingSec = Object.entries(_SECTION_TO_AMENITY)
+      .find(([sec, key]) => key === a.key)?.[0];
+    const rule = matchingSec ? ruleMap[matchingSec] : null;
+    if (rule === 'unknown') continue;
+    out.push({
+      kind: 'amenity', key: a.key, icon: a.icon, rule,
+      short: _AMENITY_SHORT[a.key] || a.label,
+      tip: _amenityTooltip(a, rule),
+      _amen: amenities,
+    });
+  }
+  for (const [secName, rule] of Object.entries(ruleMap)) {
+    if (rule === 'unknown') continue;
+    if (_SECTION_TO_AMENITY[secName]) continue;
+    if (_AMENITY_DEDUP_SECTIONS.has(secName)) continue;
+    const sec = _SECTION_TILE[secName]; if (!sec) continue;
+    out.push({
+      kind: 'section', sectionName: secName, icon: sec.icon, rule,
+      short: _SECTION_SHORT[secName] || sec.label,
+      tip: `${sec.label} · ${({off_leash:'Off-leash',on_leash:'On-leash',not_allowed:'Not allowed'})[rule] || rule}`,
+    });
+  }
+  return out.slice(0, limit);
+}
+
+function _renderComboChip(it) {
+  const ruleClass = it.rule ? ` rule-${it.rule}` : '';
+  // Parking gets the type-aware icon + inline $ overlay.
+  if (it.kind === 'amenity' && it.key === 'has_parking' && it._amen) {
+    const a = it._amen;
+    const type    = a.parking_type || (Array.isArray(a.parking_options) ? a.parking_options[0]?.type : '');
+    const subtype = a.parking_subtype || (Array.isArray(a.parking_options) ? a.parking_options[0]?.subtype : '');
+    const fee     = a.parking_fee != null ? a.parking_fee
+                  : (Array.isArray(a.parking_options) ? a.parking_options[0]?.fee : null);
+    const t = String(type || subtype || '').toLowerCase();
+    const isStreet = /street/.test(t);
+    const icon = isStreet ? '🚗' : '🅿️';
+    const paidIcon = (fee === true || /meter/.test(t)) ? '<span class="amenity-paid">$</span>' : '';
+    return `<div class="combo-chip${ruleClass}" data-tip="${escHtml(it.tip)}">
+      <div class="combo-icon-row"><span class="combo-icon">${icon}</span>${paidIcon}</div>
+      <div class="combo-label">${escHtml(it.short)}</div>
+    </div>`;
+  }
+  return `<div class="combo-chip${ruleClass}" data-tip="${escHtml(it.tip)}">
+    <span class="combo-icon">${it.icon}</span>
+    <div class="combo-label">${escHtml(it.short)}</div>
+  </div>`;
+}
+
+function buildAmenitiesAndActivitiesCard(beach, dogPolicy, amenities, hoursToday) {
+  const amenTiles = _flatTopAmenities(amenities, dogPolicy, 8);
+  const actTiles  = _activityIcons(beach, dogPolicy, amenities, hoursToday);
+  if (!amenTiles.length && !actTiles.length) return '';
+  const amenRow = amenTiles.map(_renderComboChip).join('');
+  const actRow  = actTiles.map(it => {
+    const ruleClass = it.rule ? ` rule-${it.rule}` : '';
+    return `<div class="combo-chip${ruleClass}" data-tip="${escHtml(it.tip)}">
+      <span class="combo-icon">${it.icon}</span>
+      <div class="combo-label">${escHtml(_ACTIVITY_SHORT[it.icon] || it.tip)}</div>
+    </div>`;
+  }).join('');
+  return `<section class="card combo-card">
+    ${amenTiles.length ? `<div class="combo-row-label">Amenities</div><div class="combo-row">${amenRow}</div>` : ''}
+    ${actTiles.length  ? `<div class="combo-row-label">Activities</div><div class="combo-row">${actRow}</div>`  : ''}
   </section>`;
 }
+
+// Legacy aliases — kept so old callers don't break, but render
+// nothing now that the combined card covers both surfaces.
+function buildActivitiesCard() { return ''; }
 
 // Alternatives card — renders when (a) dogs not allowed here, or
 // (b) sand/water prohibited (trails-only). Lists top 3 nearby beaches
@@ -2796,6 +3182,11 @@ function initMap(beach) {
   setTimeout(() => map.invalidateSize(), 1200);
 }
 
+// Kick off the geolocation prompt as soon as the script runs so the
+// permission popup appears immediately on page load, in parallel with
+// the data fetch. Result lands in localStorage; the later call from
+// render() reads from cache (no second prompt).
+_getUserLocation();
 load();
 </script>
 

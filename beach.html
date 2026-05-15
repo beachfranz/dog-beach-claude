@@ -430,6 +430,47 @@
     /* legacy class kept for any inline use; the overview card supersedes it. */
     font-size: 14px; color: var(--text); line-height: 1.55;
   }
+  /* Appeal card — 4 score tiles. Overall stands out (larger, accented);
+   * the three components sit equal next to it. */
+  .appeal-card h2 {
+    font-size: 16px; font-weight: 700; margin: 0 0 10px; color: var(--text);
+  }
+  .appeal-card .appeal-pref {
+    font-size: 12px; font-weight: 500; color: var(--text-muted);
+    letter-spacing: 0.02em;
+  }
+  .appeal-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr;
+    gap: 8px; align-items: stretch;
+  }
+  .appeal-tile {
+    background: rgba(0,0,0,0.03);
+    border-radius: 8px;
+    padding: 8px 6px;
+    text-align: center;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .appeal-tile-overall {
+    background: rgba(34,197,94,0.12);
+    padding: 14px 10px;
+  }
+  .appeal-num {
+    font-size: 24px; font-weight: 700; color: var(--text);
+    line-height: 1; letter-spacing: -0.01em;
+  }
+  .appeal-num-max {
+    font-size: 11px; font-weight: 500; color: var(--text-muted);
+    margin-left: 1px;
+  }
+  .appeal-label {
+    font-size: 9px; font-weight: 600; color: var(--text-muted);
+    margin-top: 4px; letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .appeal-tile-overall .appeal-label {
+    font-size: 11px; margin-top: 6px;
+  }
+
   /* Overview card — beach name title + uniform 14px body text
    * (blurb prose, best-window row, scout blurb) so the card reads
    * as one typographic block. */
@@ -637,20 +678,20 @@ function render(data, beachFid) {
   // Two distinct things — Franz, 2026-05-10.
   // LEFT RAIL (top → bottom):
   //   Amenities (merged with Dog Policy section-tiles — rule color
-  //   tints them in place), Hours, Weather and Tides (one card),
-  //   Advisories.
+  //   tints them in place), Cautions, Hours, Weather and Tides.
   const leftRail = [];
   leftRail.push(buildAmenitiesSection(amenities, dog_policy));
+  leftRail.push(buildCautionsSection(data.today, dog_policy, data.hours_today));
   leftRail.push(buildHoursSection(beach, amenities, dog_policy));
   leftRail.push(buildWeatherSection(beach));
-  leftRail.push(buildCautionsSection(data.today, dog_policy, data.hours_today));
   document.getElementById('left-rail').innerHTML = leftRail.filter(Boolean).join('');
 
   // MAIN (top → bottom):
-  //   Alternatives (if triggered), Photos (only when present), Overview,
-  //   Best Window, Location, Details, Links
+  //   Appeal, Alternatives (if triggered), Photos (only when present),
+  //   Overview, Best Window, Location, Details, Links
   const hasPhotos = Array.isArray(data.photos) && data.photos.length > 0;
   const main = [];
+  main.push(buildAppealCard(beach, dog_policy, amenities, data.hours_today));
   main.push(buildAlternativesSection(dog_policy, data.alternatives));
   if (hasPhotos) main.push('<div class="photo-block-wrap" id="photo-block-mount"></div>');
   main.push(buildOverviewCard(beach, data.description));
@@ -674,8 +715,8 @@ function render(data, beachFid) {
   initMap(beach);
 
   // Fire async loads after DOM is mounted.
-  loadScoutBlurb(beach, data.today, dog_policy);
-  loadWeather(beach);
+  loadScoutBlurb(beach, data.today, dog_policy, data.hours_today, amenities);
+  loadWeather(beach, data.hours_today);
   _wireBestTimeClick();
 }
 
@@ -1233,7 +1274,7 @@ function _renderTidesToday(tides, forecast) {
   mount.classList.remove('weather-loading');
 }
 
-async function loadWeather(beach) {
+async function loadWeather(beach, hoursToday) {
   const weatherMount = document.getElementById('weather-mount');
   const tideMount    = document.getElementById('tide-mount');
   if (!weatherMount || beach.lat == null || beach.lng == null) {
@@ -1248,38 +1289,55 @@ async function loadWeather(beach) {
     + `&daily=temperature_2m_max,temperature_2m_min,weather_code,wind_speed_10m_max,precipitation_sum,uv_index_max`
     + `&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch`
     + `&timezone=${encodeURIComponent(tz)}&forecast_days=1`;
+  // Tides now derive from hours_today.tide_height (already in the
+  // get_beach_info payload; populated by daily-beach-refresh from the
+  // weekly NOAA pull). No browser→NOAA fetch.
+  const tides = tideMount ? _deriveTideCurveFromHours(hoursToday) : null;
   try {
-    const [forecast, tides] = await Promise.all([
-      fetch(url).then(r => r.json()),
-      beach.noaa_station_id ? _fetchTides(beach.noaa_station_id) : Promise.resolve(null),
-    ]);
+    const forecast = await fetch(url).then(r => r.json());
     _renderWeatherToday(forecast);
     if (tideMount) _renderTidesToday(tides, forecast);
   } catch (e) {
     console.warn('weather fetch failed:', e);
     weatherMount.textContent = 'Weather unavailable right now.';
+    // Tides can still render even if Open-Meteo fails.
+    if (tideMount && tides) _renderTidesToday(tides, null);
   }
 }
 
-async function _fetchTides(stationId) {
-  // Fetch BOTH the hourly height curve and the hi/lo event markers
-  // for today (24h). Hourly drives the SVG curve; hilo drives the
-  // text-event row + the marker dots.
-  const today = new Date();
-  const y = today.getFullYear(), m = String(today.getMonth()+1).padStart(2,'0'), d = String(today.getDate()).padStart(2,'0');
-  const base = `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter`
-    + `?station=${encodeURIComponent(stationId)}&product=predictions`
-    + `&begin_date=${y}${m}${d}&range=24&datum=MLLW&units=english&time_zone=lst_ldt&format=json`;
-  try {
-    const [hourly, hilo] = await Promise.all([
-      fetch(`${base}&interval=h`).then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch(`${base}&interval=hilo`).then(r => r.ok ? r.json() : null).catch(() => null),
-    ]);
-    return {
-      hourly: hourly?.predictions ?? null,
-      hilo:   hilo?.predictions   ?? null,
-    };
-  } catch { return null; }
+// Build the {hourly, hilo} shape _renderTidesToday expects, derived
+// from hours_today.tide_height. Local minima/maxima of the 24-point
+// array become hi/lo events. Replaces the previous NOAA fetch.
+function _deriveTideCurveFromHours(hoursToday) {
+  if (!Array.isArray(hoursToday)) return null;
+  const _t = new Date();
+  const _y = _t.getFullYear();
+  const _m = String(_t.getMonth() + 1).padStart(2, '0');
+  const _d = String(_t.getDate()).padStart(2, '0');
+  const datePrefix = `${_y}-${_m}-${_d}`;
+  const hourly = hoursToday
+    .filter(h => h && h.tide_height != null && h.local_hour != null)
+    .sort((a, b) => a.local_hour - b.local_hour)
+    .map(h => ({
+      t: `${datePrefix} ${String(h.local_hour).padStart(2, '0')}:00`,
+      v: String(h.tide_height),
+    }));
+  if (hourly.length < 3) return { hourly, hilo: [] };
+  const hilo = [];
+  for (let i = 1; i < hourly.length - 1; i++) {
+    const prev = parseFloat(hourly[i - 1].v);
+    const cur  = parseFloat(hourly[i].v);
+    const next = parseFloat(hourly[i + 1].v);
+    if (cur > prev && cur > next) {
+      hilo.push({ t: hourly[i].t, v: hourly[i].v, type: 'H' });
+    } else if (cur < prev && cur < next) {
+      hilo.push({ t: hourly[i].t, v: hourly[i].v, type: 'L' });
+    }
+  }
+  // Cap to 4 (typical day = 2 highs + 2 lows). Hourly resolution
+  // means timing precision is to-the-hour, not minutes like NOAA's
+  // native 6-min predictions — acceptable for an at-a-glance display.
+  return { hourly, hilo: hilo.slice(0, 4) };
 }
 
 // Beach overview card. Title = beach display name. Carries the
@@ -1332,7 +1390,7 @@ function _hoursWindowForChart(beach, amenities) {
   return { startH: 5, endH: 22 };
 }
 
-function _renderScoreBars(hoursToday, beach, amenities) {
+function _renderScoreBars(hoursToday, beach, amenities, dogPolicy) {
   if (!Array.isArray(hoursToday) || hoursToday.length === 0) return '';
   const { startH, endH } = _hoursWindowForChart(beach, amenities);
   // One bar per hour in the open window. Null-score hours inside the
@@ -1343,33 +1401,56 @@ function _renderScoreBars(hoursToday, beach, amenities) {
     .sort((a, b) => a.local_hour - b.local_hour);
   if (hours.length === 0) return '';
 
+  // Bars display the per-hour appeal Overall (same 60/20/20 mix as the
+  // page-level Your-Fit card), so the chart answers "how good is THIS
+  // hour for ME?". Availability is user-pref-aware; the rest is the
+  // weather composite hour_score + the static amenity tally.
+  const amenitiesScore = _amenitiesScore(amenities);
+  const overallFor = h => {
+    if (h.hour_score == null) return null;
+    let avail = _hourlyAvailability(h.local_hour, dogPolicy?.zone_rules, USER_PREF);
+    if (avail == null) avail = _availabilityFromFlags(dogPolicy, USER_PREF);
+    return Math.round(0.60 * avail + 0.20 * amenitiesScore + 0.20 * h.hour_score);
+  };
+
+  // Best-window indicator now derives from the SAME from-now window
+  // the row label + Scout blurb use — driven by the new Overall, not
+  // the server-side is_in_best_window flag (which was keyed off the
+  // pre-appeal hour_score and didn't honor user pref).
+  const nowWindow = _bestWindowFromNow(hoursToday, beach, amenities, dogPolicy);
+  const inWindow = h => nowWindow != null
+    && h.local_hour >= nowWindow.start && h.local_hour < nowWindow.end;
+
   const MAX_PX = 22; // bar max height in CSS px
-  const scored = hours.filter(h => h.hour_score != null);
-  const maxV = Math.max(...scored.map(h => h.hour_score), 1);
-  // Three colors only. Conditions-domain amber is burnt (amber-500
-  // nudged ~7% toward red) so it's visually distinct from the amber-400
-  // (yellow-leaning) the Amenities on_leash tile uses. Best-window
-  // hours share the same green hue but solid, for emphasis.
-  const colorFor = h => h.hour_status === 'no_go'   ? 'rgba(239,68,68,0.45)'
-                     : h.hour_status === 'caution' ? 'rgba(247,140,18,0.53)'
-                     : h.is_in_best_window         ? 'rgba(34,197,94,1.0)'
-                     :                               'rgba(34,197,94,0.45)';
+  // Colors keyed off the per-hour overall:
+  //   >= 70 → go green (solid if also in best window)
+  //   >= 40 → burnt-amber caution
+  //   <  40 → no_go red
+  const colorFor = (h, overall) =>
+        overall == null || overall < 40 ? 'rgba(239,68,68,0.45)'
+      : overall < 70                    ? 'rgba(247,140,18,0.53)'
+      : inWindow(h)                     ? 'rgba(34,197,94,1.0)'
+      :                                    'rgba(34,197,94,0.45)';
   const fmtHour = hh => {
     const ap = hh >= 12 ? 'pm' : 'am';
     const h12 = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh;
     return `${h12}${ap}`;
   };
 
-  const barsHtml = hours.map(h => {
-    const noScore = h.hour_score == null;
-    const pct  = noScore ? 1 : Math.max(h.hour_score / maxV, 0.05);
+  const overalls = hours.map(overallFor);
+  const maxV = Math.max(...overalls.filter(v => v != null), 1);
+
+  const barsHtml = hours.map((h, i) => {
+    const overall = overalls[i];
+    const noScore = overall == null;
+    const pct  = noScore ? 1 : Math.max(overall / maxV, 0.05);
     const px   = Math.round(pct * MAX_PX);
-    const fill = noScore ? 'rgba(239,68,68,0.45)' : colorFor(h);
-    const dog  = !noScore && h.is_in_best_window ? '🐶' : '';
-    const valueLabel = noScore ? '' : Math.round(h.hour_score);
+    const fill = colorFor(h, overall);
+    const dog  = !noScore && inWindow(h) && overall >= 70 ? '🐶' : '';
+    const valueLabel = noScore ? '' : overall;
     const title = noScore
       ? `${fmtHour(h.local_hour)} · not allowed`
-      : `${fmtHour(h.local_hour)} · ${Math.round(h.hour_score)} · ${h.hour_status}`;
+      : `${fmtHour(h.local_hour)} · ${overall} (overall) · ${h.hour_status}`;
     return `
       <div class="score-bar-col" title="${title}">
         <div class="score-bar-dog">${dog}</div>
@@ -1389,8 +1470,56 @@ function _renderScoreBars(hoursToday, beach, amenities) {
   </div>`;
 }
 
+// Find the longest contiguous block of "good" hours (per-hour Overall
+// >= threshold) starting from the current local hour forward.
+// User-pref-aware, time-of-day-aware. Returns {start, end} hour ints
+// (end is exclusive), or null if no good window remains today.
+function _bestWindowFromNow(hoursToday, beach, amenities, dogPolicy, threshold = 70) {
+  if (!Array.isArray(hoursToday) || hoursToday.length === 0) return null;
+  const nowH = _currentLocalHour(beach?.timezone);
+  if (nowH == null) return null;
+  const amenitiesScore = _amenitiesScore(amenities);
+  const marked = hoursToday
+    .filter(h => h && h.local_hour != null && h.local_hour >= nowH && h.hour_score != null)
+    .sort((a, b) => a.local_hour - b.local_hour)
+    .map(h => {
+      let avail = _hourlyAvailability(h.local_hour, dogPolicy?.zone_rules, USER_PREF);
+      if (avail == null) avail = _availabilityFromFlags(dogPolicy, USER_PREF);
+      const overall = Math.round(0.60 * avail + 0.20 * amenitiesScore + 0.20 * h.hour_score);
+      return { local_hour: h.local_hour, good: overall >= threshold };
+    });
+  let best = null;
+  let cur = null;
+  const seal = () => {
+    if (cur && (!best || (cur.end - cur.start) > (best.end - best.start))) best = cur;
+    cur = null;
+  };
+  for (const m of marked) {
+    if (m.good) {
+      if (!cur) cur = { start: m.local_hour, end: m.local_hour + 1 };
+      else if (m.local_hour === cur.end) cur.end = m.local_hour + 1;
+      else { seal(); cur = { start: m.local_hour, end: m.local_hour + 1 }; }
+    } else { seal(); }
+  }
+  seal();
+  return best;
+}
+
+function _formatHourRange(startH, endH) {
+  const fmt = hh => {
+    const ap = hh >= 12 ? 'pm' : 'am';
+    const h12 = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh;
+    return `${h12}${ap}`;
+  };
+  return `${fmt(startH)}–${fmt(endH)}`;
+}
+
 function buildBestTimeCard(today, dogPolicy, beachFid, hoursToday, beach, amenities) {
-  const hasWindow = today && today.best_window_label;
+  // Time-aware best window — recomputed from current local hour
+  // forward, using the same per-hour Overall the bar chart uses.
+  const nowWindow = _bestWindowFromNow(hoursToday, beach, amenities, dogPolicy);
+  const windowLabel = nowWindow ? _formatHourRange(nowWindow.start, nowWindow.end) : null;
+  const hasWindow = !!windowLabel;
   const isNoDogs = !!dogPolicy && (
     dogPolicy.dogs_allowed === 'no' ||
     (dogPolicy.has_on_leash === false && dogPolicy.has_off_leash === false)
@@ -1408,12 +1537,12 @@ function buildBestTimeCard(today, dogPolicy, beachFid, hoursToday, beach, amenit
   let headerRow = '';
   if (hasWindow) {
     headerRow = `<div class="besttime-row">
-      <span class="besttime-time"${clickAttr}>${escHtml(today.best_window_label)}</span>
+      <span class="besttime-time"${clickAttr}>${escHtml(windowLabel)}</span>
       <span class="besttime-sep">-</span>
       <span class="besttime-text">Best Times Now</span>
     </div>`;
   }
-  const scoreBars = _renderScoreBars(hoursToday, beach, amenities);
+  const scoreBars = _renderScoreBars(hoursToday, beach, amenities, dogPolicy);
   return `<section class="card besttime-card${clickable ? ' clickable' : ''}" data-fid="${beachFid}">
     ${headerRow}
     <div id="scout-blurb">…</div>
@@ -1555,7 +1684,7 @@ function buildCautionsSection(today, dogPolicy, hoursToday) {
 // Scout blurb — narrative paragraph from beach-chat (Anthropic LLM)
 // describing today's conditions. Short-circuits to canned apologies
 // when dogs aren't allowed / sand prohibited / no good windows.
-async function loadScoutBlurb(beach, today, dogPolicy) {
+async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
   const el = document.getElementById('scout-blurb');
   if (!el) return;
 
@@ -1585,7 +1714,16 @@ async function loadScoutBlurb(beach, today, dogPolicy) {
     el.classList.add('loaded'); return;
   }
 
-  const windowLabel  = today.best_window_label  ?? 'the best window';
+  // Time-aware window: only consider hours from the current local hour
+  // forward, using the same per-hour Overall the bar chart uses. If the
+  // morning best window already passed, Scout should talk about what's
+  // LEFT today, not what was great at 6am.
+  const nowWindow = _bestWindowFromNow(hoursToday, beach, amenities, dogPolicy);
+  if (!nowWindow) {
+    el.textContent = "Today's good windows have already passed at this beach — check back tomorrow morning.";
+    el.classList.add('loaded'); return;
+  }
+  const windowLabel  = _formatHourRange(nowWindow.start, nowWindow.end);
   const windowStatus = today.best_window_status ?? 'go';
   const signals = [
     today.lowest_tide_height != null ? `tide ${parseFloat(today.lowest_tide_height).toFixed(1)}ft` : null,
@@ -1596,12 +1734,18 @@ async function loadScoutBlurb(beach, today, dogPolicy) {
     today.bacteria_risk && today.bacteria_risk !== 'none' ? `bacteria risk: ${today.bacteria_risk}` : null,
   ].filter(Boolean).join(', ');
 
+  const nowH = _currentLocalHour(beach?.timezone);
+  const nowLabel = nowH != null
+    ? (nowH === 0 ? '12am' : nowH > 12 ? `${nowH - 12}pm` : nowH === 12 ? '12pm' : `${nowH}am`)
+    : null;
+
   const question =
-    `Best window: ${windowLabel} (${windowStatus}). Conditions: ${signals}. ` +
+    `Current local time: ${nowLabel || 'now'}. The morning may already be behind us — write about what's LEFT today, not what already passed. ` +
+    `Best window remaining: ${windowLabel} (${windowStatus}). Conditions: ${signals}. ` +
     `Write 1-2 short sentences of flowing prose — no headers, no bullets, no lists, no pack list, no gear recommendations: ` +
-    `Sentence 1: when the best window is and the main reason why, using vivid descriptive language not raw numbers. ` +
+    `Sentence 1: when the remaining best window is and the main reason why, using vivid descriptive language not raw numbers. ` +
     `Sentence 2 (optional, skip if conditions are clean): any cautions or advisories during that window. ` +
-    `STRICT: respect the DOG POLICY ZONE RULES in the system prompt. Never describe activities (fetch, swim, splashing, off-leash play) in sections marked not_allowed.`;
+    `STRICT: respect the DOG POLICY ZONE RULES in the system prompt. Never describe activities (fetch, swim, splashing, off-leash play) in sections marked not_allowed. Never reference times before the current local time.`;
 
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/beach-chat`, {
@@ -1647,6 +1791,168 @@ function _sandOrWaterProhibited(zr) {
     }
   }
   return sawAnyBlockedSection;
+}
+
+// ─── Appeal scoring (v1, client-side) ─────────────────────────────
+// User-pref-aware fit score for the beach. Three components weighted
+// 60/20/20: availability fit (does the beach permit the user's
+// preferred leash mode), amenities (dog-relevant facilities),
+// weather (best hour today). Page-level aggregate uses MAX across
+// daylight hours for hourly components.
+//
+// Pref source priority: ?pref= URL param, then localStorage, else
+// default 'off_leash'. Values: 'off_leash' | 'on_leash' | 'either'.
+
+const USER_PREF = (() => {
+  const valid = new Set(['off_leash', 'on_leash', 'either']);
+  const qp = new URLSearchParams(location.search).get('pref');
+  if (qp && valid.has(qp)) {
+    try { localStorage.setItem('dogbeach.user_pref', qp); } catch {}
+    return qp;
+  }
+  try {
+    const ls = localStorage.getItem('dogbeach.user_pref');
+    if (ls && valid.has(ls)) return ls;
+  } catch {}
+  return 'off_leash';
+})();
+
+const _PREF_LABEL = { off_leash: 'off-leash', on_leash: 'on-leash', either: 'any access' };
+
+// Hour H (0-23) is inside a time_window iff [start, end) covers it.
+// Handles wrap-around (e.g. 22:00–06:00 means evening + early morning).
+function _tw_contains(tw, hour) {
+  if (!tw || !tw.start || !tw.end) return false;
+  const startH = parseInt(String(tw.start).slice(0, 2), 10);
+  const endH   = parseInt(String(tw.end).slice(0, 2), 10);
+  if (Number.isNaN(startH) || Number.isNaN(endH)) return false;
+  if (endH > startH) return hour >= startH && hour < endH;
+  // Wrap-around
+  return hour >= startH || hour < endH;
+}
+
+// Effective rule at hour H for a node (region or section). Returns
+// the matching time_window rule if any, else node.rule. Null if neither.
+function _effectiveRuleAt(node, hour) {
+  if (!node) return null;
+  const tws = Array.isArray(node.time_windows) ? node.time_windows : [];
+  for (const tw of tws) {
+    if (_tw_contains(tw, hour)) return tw.rule || null;
+  }
+  return node.rule || null;
+}
+
+// Per-hour availability score 0-100. Walks every region+section in
+// zone_rules; returns max across them. 100 = at least one zone
+// permits the user's preferred mode at this hour. 50 = a zone permits
+// dogs but not the preferred mode (e.g. wants off_leash, gets
+// on_leash). 0 = no zone permits dogs at this hour.
+function _hourlyAvailability(hour, zoneRules, userPref) {
+  if (!zoneRules) return null;
+  const seasons = Array.isArray(zoneRules.seasons) && zoneRules.seasons.length
+    ? zoneRules.seasons
+    : (Array.isArray(zoneRules.regions) ? [{ regions: zoneRules.regions }] : []);
+  let best = 0;
+  let anyData = false;
+  for (const s of seasons) {
+    const regions = Array.isArray(s.regions) ? s.regions : [];
+    for (const region of regions) {
+      anyData = true;
+      const regionFallback = _effectiveRuleAt(region, hour);
+      const sections = region.sections || {};
+      const sectionKeys = Object.keys(sections);
+      const ruleSet = sectionKeys.length
+        ? sectionKeys.map(k => _effectiveRuleAt(sections[k], hour) || regionFallback)
+        : [regionFallback];
+      for (const rule of ruleSet) {
+        const score = (userPref === 'either')
+          ? (rule && rule !== 'not_allowed' ? 100 : 0)
+          : rule === userPref ? 100
+            : (rule && rule !== 'not_allowed') ? 50
+            : 0;
+        if (score > best) best = score;
+        if (best === 100) return 100;
+      }
+    }
+  }
+  return anyData ? best : null;
+}
+
+// Fallback when zone_rules is absent — use the rolled-up has_on/off_leash flags.
+function _availabilityFromFlags(dogPolicy, userPref) {
+  const on = dogPolicy?.has_on_leash === true;
+  const off = dogPolicy?.has_off_leash === true;
+  if (userPref === 'either') return (on || off) ? 100 : 0;
+  if (userPref === 'off_leash') return off ? 100 : (on ? 50 : 0);
+  if (userPref === 'on_leash')  return on  ? 100 : (off ? 50 : 0);
+  return 0;
+}
+
+// Amenities score 0-100. Drinking water + parking weighted 2×.
+function _amenitiesScore(amenities) {
+  if (!amenities) return 0;
+  const weights = {
+    has_parking: 2, has_drinking_water: 2,
+    has_restrooms: 1, has_showers: 1, has_picnic_area: 1,
+    has_lifeguards: 1, has_disabled_access: 1,
+    has_fire_pits: 0.5, has_food: 0.5,
+  };
+  const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
+  let earned = 0;
+  for (const [key, w] of Object.entries(weights)) {
+    if (amenities[key] === true) earned += w;
+  }
+  return Math.round((earned / totalWeight) * 100);
+}
+
+// Compose the three component scores + overall. Aggregates hourly
+// components (availability, weather) with MAX across daylight hours
+// — see project memory for why max over mean for v1.
+function _appealScores(beach, dogPolicy, amenities, hoursToday) {
+  const pref = USER_PREF;
+  const daylight = (hoursToday || []).filter(h => h && h.hour_score != null);
+  const availabilities = daylight
+    .map(h => _hourlyAvailability(h.local_hour, dogPolicy?.zone_rules, pref))
+    .filter(v => v != null);
+  let availability = availabilities.length ? Math.max(...availabilities) : null;
+  if (availability == null) availability = _availabilityFromFlags(dogPolicy, pref);
+  const amenitiesScore = _amenitiesScore(amenities);
+  const weatherScore = daylight.length
+    ? Math.max(...daylight.map(h => h.hour_score))
+    : 0;
+  const overall = Math.round(0.60 * availability + 0.20 * amenitiesScore + 0.20 * weatherScore);
+  return { availability, amenitiesScore, weatherScore, overall, userPref: pref };
+}
+
+function buildAppealCard(beach, dogPolicy, amenities, hoursToday) {
+  const s = _appealScores(beach, dogPolicy, amenities, hoursToday);
+  const prefLabel = _PREF_LABEL[s.userPref] || s.userPref;
+  // Component tiles show the weighted CONTRIBUTION to Overall (X / max).
+  // Sum across tiles equals Overall — math is transparent.
+  const availContrib = Math.round(0.60 * s.availability);
+  const amenContrib  = Math.round(0.20 * s.amenitiesScore);
+  const wxContrib    = Math.round(0.20 * s.weatherScore);
+  return `<section class="card appeal-card">
+    <h2>Your Fit <span class="appeal-pref">· ${escHtml(prefLabel)}</span></h2>
+    <div class="appeal-grid">
+      <div class="appeal-tile appeal-tile-overall">
+        <div class="appeal-num">${s.overall}<span class="appeal-num-max">/100</span></div>
+        <div class="appeal-label">Overall</div>
+      </div>
+      <div class="appeal-tile">
+        <div class="appeal-num">${availContrib}<span class="appeal-num-max">/60</span></div>
+        <div class="appeal-label">Access</div>
+      </div>
+      <div class="appeal-tile">
+        <div class="appeal-num">${amenContrib}<span class="appeal-num-max">/20</span></div>
+        <div class="appeal-label">Amenities</div>
+      </div>
+      <div class="appeal-tile">
+        <div class="appeal-num">${wxContrib}<span class="appeal-num-max">/20</span></div>
+        <div class="appeal-label">Weather</div>
+      </div>
+    </div>
+  </section>`;
 }
 
 // Alternatives card — renders when (a) dogs not allowed here, or

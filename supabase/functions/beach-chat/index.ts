@@ -199,9 +199,11 @@ Deno.serve(async (req: Request) => {
       const currentLocalHour = parseInt(
         localParts.find(p => p.type === "hour")?.value ?? "0"
       ) % 24;
+      // Hour-granular so the cache hash stays stable within the hour
+      // (minute precision would bust beach_chat_cache every minute).
       const currentTimeLabel = new Intl.DateTimeFormat("en-US", {
         timeZone: beach.timezone as string,
-        hour: "numeric", minute: "2-digit", hour12: true,
+        hour: "numeric", hour12: true,
       }).format(nowUtc);
 
       // Scope: if local_date is provided, fetch only that one day. Otherwise
@@ -236,7 +238,39 @@ Deno.serve(async (req: Request) => {
       systemPrompt = buildSystemPrompt(beach, days ?? [], remainingHours, currentTimeLabel, local_date ?? null, metadata, dogPolicy);
     }
 
+    // ── 60-min cache (only for single-beach context + no chat history) ──
+    // Cross-beach prompts and follow-up conversations skip the cache —
+    // they're either rare or have unique state that wouldn't replay.
+    const isCacheable =
+      arena_group_id != null
+      && (!conversation_history || conversation_history.length === 0);
+    let cacheHash: string | null = null;
+    if (isCacheable) {
+      cacheHash = await sha256Hex(systemPrompt + "␟" + question);
+      const { data: cached } = await supabase
+        .from("beach_chat_cache")
+        .select("answer, generated_at")
+        .eq("arena_group_id", arena_group_id!)
+        .eq("question_hash", cacheHash)
+        .maybeSingle();
+      if (cached?.answer && cached?.generated_at) {
+        const ageMs = Date.now() - new Date(cached.generated_at).getTime();
+        if (ageMs < 60 * 60 * 1000) {
+          return json({ answer: cached.answer, cached: true });
+        }
+      }
+    }
+
     const answer = await callAnthropic(systemPrompt, conversation_history, question);
+
+    if (isCacheable && cacheHash && answer) {
+      // Fire-and-forget upsert (don't block the response on cache write).
+      supabase.from("beach_chat_cache").upsert({
+        arena_group_id, question_hash: cacheHash,
+        answer, generated_at: new Date().toISOString(),
+      }, { onConflict: "arena_group_id,question_hash" }).then();
+    }
+
     return json({ answer });
 
   } catch (err) {
@@ -244,6 +278,12 @@ Deno.serve(async (req: Request) => {
     return json({ error: String(err) }, 500);
   }
 });
+
+async function sha256Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(buf))
+    .map(b => b.toString(16).padStart(2, "0")).join("");
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -482,11 +522,11 @@ ${scopedDate
   : `- If the user asks about a day not in the data, say you only have 7 days ahead`}
 - Keep answers to 2 sentences max, 3 only if a third sentence meaningfully adds context to your answer
 - Lead with a direct answer to the question — no preamble, no restating the question
-- No emojis, no markdown formatting, plain text only
+- No emojis, no markdown formatting, plain text only — EXCEPT: when the question explicitly asks you to bold something (e.g. a time window), wrap it in **double asterisks** so the client can convert it to bold. Only bold what the question asks; never bold anything else.
 - If conditions are bad, say so honestly — don't sugarcoat it
 - Crowd terms: quiet = few people, moderate = getting busy, dog_party = packed with dogs, too_crowded = avoid
 - Never mention numeric scores (hour_score, tide_score, etc.) unless the user explicitly asks about them — use the conditions and statuses to inform your language instead
-- When giving pack advice, lead with the dog's needs (water, towel, fetch ball, sunscreen, booties, leash) — human comfort items are secondary
+- When giving pack advice, lead with the dog's needs (water, towel, fetch ball, sunscreen, booties, leash) — but the kahu (the human handler) is ALSO a body on the beach. When cautions are active (high UV, heat, cold, wind, high tide, bacteria), address kahu safety + comfort alongside the dog's: sunscreen for the kahu when UV's punching, a layer when it's chilly, hydration in heat, "stick to the upper beach, watch for kids and dogs being pushed toward the cliffs" on high tide. The dog comes first; the kahu is a close second.
 - Always assume the user is bringing their dog; frame all advice through that lens
 - LIFEGUARDS ARE SEASONAL — never say "lifeguards on duty" or "lifeguards on staff" (implies year-round staffing, which is false at almost every US beach). Say "seasonal lifeguards" or just "lifeguards". If a specific window is needed, default to "roughly Memorial Day to Labor Day" unless the data above explicitly gives one.
 - DOG POLICY is non-negotiable — never suggest activities that violate the leash rule or "no dogs on sand" rule above. If the policy says leash required, the dog stays leashed; if dogs aren't allowed on sand, point the user to the allowed zone (parking lot / multi-use trail) and make the most of that. Don't argue with the policy or hedge — Scout knows the local rules cold and respects them.`;

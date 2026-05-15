@@ -273,6 +273,7 @@ async function refreshNow(
       uvIndex:       weather.uv_index,
       tideHeight:    tide.height,
       busynessScore: crowdRow.data?.busyness_score ?? null,
+      cloudCover:    weather.cloud_cover ?? null,
       isBeachOpen,
       isProhibited,
     };
@@ -376,6 +377,7 @@ interface CurrentWeather {
   wind_speed_10m:      number;
   weather_code:        number;
   uv_index:            number;
+  cloud_cover:         number;
   precip_chance:       number;
   is_day:              boolean;
 }
@@ -388,7 +390,7 @@ async function fetchCurrentWeather(
   const params = new URLSearchParams({
     latitude:           String(lat),
     longitude:          String(lng),
-    current:            "temperature_2m,apparent_temperature,wind_speed_10m,weather_code,uv_index,is_day",
+    current:            "temperature_2m,apparent_temperature,wind_speed_10m,weather_code,uv_index,cloud_cover,is_day",
     hourly:             "precipitation_probability",
     forecast_days:      "1",
     temperature_unit:   "fahrenheit",
@@ -412,6 +414,7 @@ async function fetchCurrentWeather(
     wind_speed_10m:       cur.wind_speed_10m,
     weather_code:         cur.weather_code,
     uv_index:             cur.uv_index ?? 0,
+    cloud_cover:          cur.cloud_cover ?? 0,
     precip_chance:        precip,
     is_day:               cur.is_day === 1,
   };

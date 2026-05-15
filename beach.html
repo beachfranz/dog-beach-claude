@@ -67,6 +67,21 @@
     font-size: 24px; font-weight: 700; color: var(--text);
     margin: 0 0 6px;
   }
+  /* Your-Fit overall as a colored badge to the left of the name.
+   * 20% smaller than the h1 (24px → 19px) per Franz; colored by
+   * the same go/caution/no_go threshold the bar chart uses. */
+  .fit-badge {
+    display: inline-block;
+    font-size: 19px; font-weight: 700; line-height: 1.1;
+    padding: 1px 9px; border-radius: 999px;
+    color: white;
+    font-variant-numeric: tabular-nums;
+    vertical-align: 0.04em;
+    margin-right: 4px;
+  }
+  .fit-badge-go      { background: #16a34a; }
+  .fit-badge-caution { background: #f59e0b; }
+  .fit-badge-no_go   { background: #dc2626; }
   /* City · state inlined into the h1 — same font/size/weight,
    * lighter color so it reads as supporting info to the name. */
   .beach-region {
@@ -99,10 +114,10 @@
 
   section.card {
     background: var(--card); border: 1px solid var(--border);
-    border-radius: 12px; padding: 16px; margin: 12px 16px;
+    border-radius: 12px; padding: 12px 16px; margin: 8px 16px;
   }
   section.card h2 {
-    font-size: 14px; font-weight: 700; margin: 0 0 10px;
+    font-size: 14px; font-weight: 700; margin: 0 0 8px;
     color: var(--text);
   }
 
@@ -132,10 +147,16 @@
   }
   .hours-grid dt { color: var(--text-muted); font-weight: 500; }
   .hours-grid dd { margin: 0; color: var(--text); }
+  .hours-range { font-size: 14px; font-weight: 600; color: var(--text); margin: 0; }
   .hours-dogs-prohibited { margin: 8px 0 0; font-size: 13px; color: var(--text); }
   .hours-dogs-suggest    { margin: 2px 0 0; font-size: 13px; color: var(--text-muted); }
 
-  /* Amenities */
+  /* Amenities — first card on the LHS, "Amenities" h2 should sit at
+   * the same baseline as the first line of Beach text in the main
+   * column (which has margin-top 28). With tightened card
+   * padding (12) + h2 line-height, this lands ≈ y=28. */
+  .amenities-card { margin-top: 16px; }
+  .amenities-card h2 { margin-bottom: 6px; }
   .amenity-grid {
     display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
   }
@@ -207,7 +228,7 @@
   }
   .score-bars-wrap {
     display: flex; align-items: flex-end; gap: 3px;
-    height: 36px;
+    height: 58px;
   }
   .score-bar-col {
     display: flex; flex-direction: column; align-items: center;
@@ -222,7 +243,16 @@
   .score-bar {
     width: 100%; border-radius: 3px 3px 0 0;
     min-height: 4px; transition: opacity 0.15s;
+    display: flex; flex-direction: column; overflow: hidden;
   }
+  /* Stacked segments — same palette as the Your-Fit bar so the two
+   * surfaces share visual language. Weather on top, then amenities,
+   * then access at the bottom. */
+  .score-bar-seg { width: 100%; flex-shrink: 0; }
+  .score-bar-seg-weather   { background: #f59e0b; }
+  .score-bar-seg-amenities { background: #0ea5e9; }
+  .score-bar-seg-access    { background: #16a34a; }
+  .score-bar-seg-excluded  { background: rgba(239,68,68,0.45); width: 100%; }
   .score-x-axis { display: flex; gap: 3px; padding: 2px 0 0; }
   .score-x-label {
     flex: 1; text-align: center;
@@ -231,24 +261,28 @@
     white-space: nowrap; overflow: hidden;
   }
 
-  /* Best-window card — title + time + status pill, all black text.
-   * Pill backgrounds retain status color for at-a-glance signal.
-   * When hourly detail is available, the title + row become a
-   * clickable affordance (cursor + underline-on-hover) that opens
-   * a modal with the per-hour bar charts. */
-  .besttime-row {
-    display: flex; align-items: center; gap: 10px;
-    font-size: 16px; font-weight: 600; color: var(--text);
+  /* Best-time card — same header shape as the Your-Fit card: title
+   * left, headline right (the time-range). When hourly detail is
+   * available, the headline becomes a clickable affordance that opens
+   * the per-hour modal. */
+  .besttime-card h2 {
+    font-size: 16px; font-weight: 700; margin: 0; color: var(--text);
   }
-  .besttime-time { color: var(--text); }
-  .besttime-card.clickable h2,
-  .besttime-card.clickable .besttime-time {
+  .besttime-header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 12px;
+  }
+  .besttime-headline {
+    font-size: 28px; font-weight: 700; color: var(--text);
+    letter-spacing: -0.02em; line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .besttime-card.clickable .besttime-headline {
     cursor: pointer;
     text-decoration: underline; text-decoration-color: rgba(0,0,0,0.18);
     text-underline-offset: 2px;
   }
-  .besttime-card.clickable h2:hover,
-  .besttime-card.clickable .besttime-time:hover {
+  .besttime-card.clickable .besttime-headline:hover {
     text-decoration-color: var(--text);
   }
 
@@ -277,10 +311,6 @@
     cursor: pointer; font-size: 16px; line-height: 1;
     z-index: 1;
   }
-  /* Best-window header — time (big) - label (smaller, black). Status
-   * signal lives on the score bars below, not in this header line. */
-  .besttime-sep   { color: var(--text); font-weight: 500; }
-  .besttime-text  { font-size: 13px; font-weight: 500; color: var(--text); }
 
   /* Scout blurb — now nested inside the Best Time card. Paragraph
    * narrative; fades in when LLM call returns. */
@@ -430,71 +460,110 @@
     /* legacy class kept for any inline use; the overview card supersedes it. */
     font-size: 14px; color: var(--text); line-height: 1.55;
   }
-  /* Appeal card — 4 score tiles. Overall stands out (larger, accented);
-   * the three components sit equal next to it. */
+  /* Appeal card — stacked horizontal bar of contributions (Access +
+   * Amenities + Weather), summing to Overall. Empty tail = unfilled
+   * potential. Legend below names the segments + raw weighted values. */
   .appeal-card h2 {
-    font-size: 16px; font-weight: 700; margin: 0 0 10px; color: var(--text);
+    font-size: 16px; font-weight: 700; margin: 0; color: var(--text);
   }
   .appeal-card .appeal-pref {
     font-size: 12px; font-weight: 500; color: var(--text-muted);
     letter-spacing: 0.02em;
   }
-  .appeal-grid {
-    display: grid;
-    grid-template-columns: 2fr 1fr 1fr 1fr;
-    gap: 8px; align-items: stretch;
+  .appeal-header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 12px;
   }
-  .appeal-tile {
-    background: rgba(0,0,0,0.03);
-    border-radius: 8px;
-    padding: 8px 6px;
-    text-align: center;
-    display: flex; flex-direction: column; justify-content: center;
+  .appeal-overall { font-variant-numeric: tabular-nums; line-height: 1; }
+  .appeal-overall-num {
+    font-size: 28px; font-weight: 700; color: var(--text);
+    letter-spacing: -0.02em;
   }
-  .appeal-tile-overall {
-    background: rgba(34,197,94,0.12);
-    padding: 14px 10px;
-  }
-  .appeal-num {
-    font-size: 24px; font-weight: 700; color: var(--text);
-    line-height: 1; letter-spacing: -0.01em;
-  }
-  .appeal-num-max {
-    font-size: 11px; font-weight: 500; color: var(--text-muted);
+  .appeal-overall-max {
+    font-size: 13px; font-weight: 500; color: var(--text-muted);
     margin-left: 1px;
   }
-  .appeal-label {
-    font-size: 9px; font-weight: 600; color: var(--text-muted);
-    margin-top: 4px; letter-spacing: 0.08em; text-transform: uppercase;
+  /* Pack list — chip strip showing rule-derived gear to bring.
+   * Hover/long-press a chip for its reason (sunscreen because UV X). */
+  .packlist-card h2 {
+    font-size: 16px; font-weight: 700; margin: 0 0 10px; color: var(--text);
   }
-  .appeal-tile-overall .appeal-label {
-    font-size: 11px; margin-top: 6px;
+  .packlist-chips {
+    display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;
   }
+  .packlist-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 10px; border-radius: 999px;
+    background: rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.06);
+    font-size: 13px; color: var(--text);
+    cursor: help;
+  }
+  .packlist-icon { font-size: 15px; line-height: 1; }
+  .packlist-label { font-weight: 500; }
 
-  /* Overview card — beach name title + uniform 14px body text
-   * (blurb prose, best-window row, scout blurb) so the card reads
-   * as one typographic block. */
-  .overview-card h2 {
-    font-size: 18px; font-weight: 700; margin: 0 0 10px;
-    color: var(--text); letter-spacing: -0.01em;
-  }
+  /* Beach text — bare prose at top of main column, no card chrome.
+   * Same edge padding as cards so it lines up vertically. */
   .overview-blurb {
     font-size: 14px; color: var(--text); line-height: 1.55;
-    margin: 0 0 12px;
+    margin: 28px 16px 16px;
   }
-  /* Scout blurb now lives inside the Best Time card. Black text,
-   * uniform 14px / 1.55 line-height — matches the overview blurb. */
-  .besttime-card #scout-blurb {
+  /* Scout blurb — uniform 14px / 1.55 line-height. */
+  .scout-card #scout-blurb {
     font-size: 14px; line-height: 1.55;
     color: var(--text);
-    margin: 10px 0 0; padding: 0;
+    margin: 0; padding: 0;
     opacity: 1;
   }
+  /* Today's activities — deterministic prose, lives below the Scout
+   * blurb inside the same card. Small top margin separates them. */
+  .activities-prose {
+    font-size: 14px; line-height: 1.55; color: var(--text);
+    margin: 8px 0 0;
+  }
+  /* Scout CTA — "Wanna go? Drive ~XX min. [Send directions →]" */
+  .scout-cta {
+    margin-top: 12px;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 8px;
+    font-size: 14px; color: var(--text);
+  }
+  .scout-cta:empty { display: none; }
+  .scout-cta-text { font-weight: 600; }
+  .scout-cta-btn {
+    background: var(--accent); color: white;
+    padding: 8px 14px; border-radius: 999px;
+    font-size: 13px; font-weight: 600;
+    text-decoration: none; display: inline-block;
+  }
+  .scout-cta-btn:hover { opacity: 0.92; }
+  #scout-blurb strong { font-weight: 700; }
 
   /* Hero photo block — shared component in src/photo-block.css. The
      wrapper just provides page-edge gutter; sizing/layout is owned by
      .photo-block in the shared sheet. */
   .photo-block-wrap { margin: 0 16px 12px; }
+
+  /* Photos + Map row — photos take most of the width, map matches
+   * the photo's vertical size (align-items: stretch). Photo height
+   * is set by photo-block hero max-height (currently 27vh, -20% from
+   * 34vh). Map column is fixed-width (220px), height fills the row. */
+  .photo-map-row {
+    display: flex; gap: 12px; align-items: stretch;
+    margin: 0 16px 12px;
+  }
+  .photo-map-row .pm-photo-col { flex: 1; margin: 0; min-width: 0; }
+  .photo-map-row .pm-map-col {
+    flex: 0 0 220px; display: flex;
+  }
+  .photo-map-row .pm-map-col #map {
+    width: 220px; height: 100%;
+    border-radius: 12px; border: 1px solid var(--border);
+  }
+  @media (max-width: 720px) {
+    .photo-map-row { flex-direction: column; }
+    .photo-map-row .pm-map-col { flex: 0 0 auto; width: 100%; }
+    .photo-map-row .pm-map-col #map { width: 100%; height: 220px; }
+  }
 
   /* Location card — full-width map in main content. */
   .location-card #map {
@@ -645,8 +714,17 @@ function render(data, beachFid) {
   const { beach, dog_policy, amenities } = data;
   document.title = `${beach.display_name} — Dog Beach Scout`;
   // Beach name + inline region (city · state) — same h1, lighter color.
+  // Your-Fit overall renders as a colored badge to the left of the name.
   const nameEl = document.getElementById('beach-name');
-  nameEl.textContent = beach.display_name;
+  nameEl.textContent = '';
+  const fitScores = _appealScores(beach, dog_policy, amenities, data.hours_today);
+  const badge = document.createElement('span');
+  badge.className = `fit-badge fit-badge-${
+    fitScores.overall >= 70 ? 'go' : fitScores.overall >= 40 ? 'caution' : 'no_go'}`;
+  badge.textContent = fitScores.overall;
+  badge.title = `Your Fit · ${_PREF_LABEL[fitScores.userPref] || fitScores.userPref}: ${fitScores.overall}/100`;
+  nameEl.appendChild(badge);
+  nameEl.appendChild(document.createTextNode(' ' + beach.display_name));
   const regionParts = [];
   if (beach.county) regionParts.push(beach.county);
   if (beach.state)  regionParts.push(beach.state);
@@ -657,16 +735,9 @@ function render(data, beachFid) {
     nameEl.appendChild(span);
   }
 
-  // Address with copy button + native maps deep-link.
-  // No address → no row (lat/lng fallback retired).
-  const addrEl = document.getElementById('beach-address');
-  if (beach.address) {
-    const mapsUrl = buildMapsUrl(beach);
-    addrEl.innerHTML = `📍 <a href="${escHtml(mapsUrl)}" target="_blank" rel="noopener">${escHtml(beach.address)}</a>
-      <button class="copy-btn" type="button" data-copy="${escHtml(beach.address)}">Copy</button>`;
-  } else {
-    addrEl.style.display = 'none';
-  }
+  // Pin-address row retired 2026-05-15 — address still appears on the
+  // Location card with its directions button.
+  document.getElementById('beach-address')?.remove();
 
   // Two-column layout (desktop):
   //   LEFT RAIL (30%): at-a-glance compact info — amenities + zone rules.
@@ -691,12 +762,21 @@ function render(data, beachFid) {
   //   Overview, Best Window, Location, Details, Links
   const hasPhotos = Array.isArray(data.photos) && data.photos.length > 0;
   const main = [];
-  main.push(buildAppealCard(beach, dog_policy, amenities, data.hours_today));
-  main.push(buildAlternativesSection(dog_policy, data.alternatives));
-  if (hasPhotos) main.push('<div class="photo-block-wrap" id="photo-block-mount"></div>');
   main.push(buildOverviewCard(beach, data.description));
-  main.push(buildBestTimeCard(data.today, dog_policy, beachFid, data.hours_today, beach, amenities));
-  main.push(buildLocationSection(beach));
+  main.push(buildAlternativesSection(dog_policy, data.alternatives));
+  // Photos + Map share a row: photos take most of the width, map is
+  // square. Either alone takes the full row. Renders only if at least
+  // one is present.
+  const hasMap = beach.lat != null && beach.lng != null;
+  if (hasPhotos || hasMap) {
+    const photoCol = hasPhotos
+      ? '<div class="photo-block-wrap pm-photo-col" id="photo-block-mount"></div>'
+      : '';
+    const mapCol = hasMap ? '<div class="pm-map-col"><div id="map"></div></div>' : '';
+    main.push(`<div class="photo-map-row">${photoCol}${mapCol}</div>`);
+  }
+  main.push(buildScoutCard(data.today, beach, dog_policy, amenities, data.hours_today));
+  main.push(buildPackListCard(beach, dog_policy, amenities, data.hours_today));
   main.push(buildDetailsSection(dog_policy));
   main.push(buildLinksSection(beach, beachFid));
   document.getElementById('main-content').innerHTML = main.filter(Boolean).join('');
@@ -707,7 +787,7 @@ function render(data, beachFid) {
     PhotoBlock.render(
       document.getElementById('photo-block-mount'),
       data.photos,
-      { viewAllHref: `gallery.html?fid=${beachFid}` }
+      {}
     );
   }
 
@@ -747,24 +827,162 @@ function buildLocationSection(beach) {
   </section>`;
 }
 
-function buildHoursSection(beach, amenities, dogPolicy) {
-  const hoursText = amenities?.hours_text;
+// ─── Hours harmonization ────────────────────────────────────────────
+// Pick ONE open/close time per beach from the available sources, in
+// priority order:
+//   1. beach.open_time / close_time (structured, non-default)
+//   2. Parse amenities.hours_text for an "8am-6pm" style range
+//   3. Detect "sunrise/sunset/dawn/dusk" in hours_text and substitute
+//      computed sun times for the beach's lat/lng and today's date
+//   4. Else fall through to the raw prose
+// Output format: "6:00AM - 8:00PM".
+
+function _fmt12(hour24, minute) {
+  const ap = hour24 >= 12 ? 'PM' : 'AM';
+  const h12 = hour24 === 0 ? 12 : hour24 > 12 ? hour24 - 12 : hour24;
+  return `${h12}:${String(minute || 0).padStart(2, '0')}${ap}`;
+}
+
+function _hhmmToFmt(hhmm) {
+  const [h, m] = String(hhmm).split(':').map(n => parseInt(n, 10));
+  if (Number.isNaN(h)) return null;
+  return _fmt12(h % 24, m || 0);
+}
+
+// Sunrise / sunset for a lat/lng on a given date, returned as
+// { sunriseMin, sunsetMin, dawnMin, duskMin } where each is minutes
+// after local midnight. Civil dawn/dusk = sun -6° below horizon
+// (~30 min before sunrise / after sunset). Standard NOAA solar
+// position math, ±2 min accuracy. Honors beach timezone.
+function _sunTimes(lat, lng, dateObj, timezone) {
+  if (lat == null || lng == null) return null;
+  const rad = Math.PI / 180;
+  const start = new Date(dateObj.getFullYear(), 0, 0);
+  const doy = Math.floor((dateObj - start) / 86400000);
+  const B = rad * (360 / 365) * (doy - 81);
+  const eot = 9.87 * Math.sin(2 * B) - 7.53 * Math.cos(B) - 1.5 * Math.sin(B);
+  const decl = 23.45 * rad * Math.sin(rad * (360 / 365) * (doy - 81));
+  const latRad = lat * rad;
+  // Sunrise/sunset (sun at horizon, refraction-corrected ≈ -0.833°)
+  const computeMin = (zenithDeg) => {
+    const cosHa = (Math.cos(zenithDeg * rad) - Math.sin(latRad) * Math.sin(decl))
+                / (Math.cos(latRad) * Math.cos(decl));
+    if (cosHa > 1 || cosHa < -1) return null;
+    return Math.acos(cosHa) * 4 / rad;  // minutes (4 min/degree)
+  };
+  const haRise  = computeMin(90.833);
+  const haCivil = computeMin(96);  // civil twilight
+  if (haRise == null) return null;
+  // Tz offset for the beach (minutes east of UTC). Use Intl trick.
+  const tzMinutes = (() => {
+    try {
+      const local = new Date(dateObj.toLocaleString('en-US', { timeZone: timezone }));
+      const utc   = new Date(dateObj.toLocaleString('en-US', { timeZone: 'UTC' }));
+      return Math.round((local - utc) / 60000);
+    } catch { return -lng * 4; } // fallback: longitude → minutes east of UTC
+  })();
+  // Solar noon (local minutes after midnight)
+  const noonMin = 12 * 60 - eot + tzMinutes + 4 * lng;
+  return {
+    sunriseMin: Math.round(noonMin - haRise),
+    sunsetMin:  Math.round(noonMin + haRise),
+    dawnMin:    haCivil != null ? Math.round(noonMin - haCivil) : null,
+    duskMin:    haCivil != null ? Math.round(noonMin + haCivil) : null,
+  };
+}
+
+function _minutesToFmt(min) {
+  if (min == null || !Number.isFinite(min)) return null;
+  // Wrap into 0-1439 just in case.
+  const wrapped = ((min % 1440) + 1440) % 1440;
+  return _fmt12(Math.floor(wrapped / 60), wrapped % 60);
+}
+
+// Try to derive a single (openLabel, closeLabel) from the available sources.
+function _harmonizedHours(beach, amenities) {
   const open = beach.open_time, close = beach.close_time;
-  // beaches_gold.open_time/close_time is 05:00–22:00 for 1,868 of 1,873
-  // scoreable beaches — a universal default seed, not real beach hours.
-  // Treat that exact pair as "no data" and rely on Posted hours_text
-  // instead. Any non-default pair renders alongside Posted prose; both
-  // surface when both are populated, since the structured window is
-  // useful at-a-glance even if the prose carries the nuance.
   const isDefault = open === '05:00' && close === '22:00';
-  const showStructured = (open || close) && !isDefault;
-  if (!hoursText && !showStructured) return '';
-  const rows = [];
-  if (hoursText) rows.push(`<dt>Posted</dt><dd>${escHtml(hoursText)}</dd>`);
-  if (showStructured) {
-    const range = (open && close) ? `${escHtml(open)} – ${escHtml(close)}`
-                : (open ? `Opens ${escHtml(open)}` : `Closes ${escHtml(close)}`);
-    rows.push(`<dt>Gate hours</dt><dd>${range}</dd>`);
+  if (open && close && !isDefault) {
+    return { openLabel: _hhmmToFmt(open), closeLabel: _hhmmToFmt(close) };
+  }
+  const text = (amenities?.hours_text || '').trim();
+  if (!text) return null;
+
+  // Pattern: explicit HH(:MM)? am/pm – HH(:MM)? am/pm
+  const rangeRe = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*(?:[-–—]|to)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i;
+  const m = text.match(rangeRe);
+  if (m) {
+    const to24 = (h, ap) => {
+      h = parseInt(h, 10);
+      if (/pm/i.test(ap) && h < 12) h += 12;
+      if (/am/i.test(ap) && h === 12) h = 0;
+      return h;
+    };
+    return {
+      openLabel:  _fmt12(to24(m[1], m[3]), parseInt(m[2] || '0', 10)),
+      closeLabel: _fmt12(to24(m[4], m[6]), parseInt(m[5] || '0', 10)),
+    };
+  }
+
+  // Pattern: sunrise/sunset/dawn/dusk substitution. Look up actual
+  // times from the beach lat/lng and today's date.
+  const sun = _sunTimes(beach.lat, beach.lng, new Date(), beach.timezone);
+  if (sun) {
+    const subst = (label) => {
+      if (/sunrise/i.test(label)) return _minutesToFmt(sun.sunriseMin);
+      if (/sunset/i.test(label))  return _minutesToFmt(sun.sunsetMin);
+      if (/dawn/i.test(label))    return _minutesToFmt(sun.dawnMin);
+      if (/dusk/i.test(label))    return _minutesToFmt(sun.duskMin);
+      return null;
+    };
+    // "Xam-sunset" / "sunrise-Ypm" / "dawn-dusk" etc.
+    const sideRe = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:[-–—]|to)\s*(sunset|sunrise|dawn|dusk)/i;
+    const m2 = text.match(sideRe);
+    if (m2) {
+      const to24 = (h, ap) => {
+        h = parseInt(h, 10);
+        if (ap && /pm/i.test(ap) && h < 12) h += 12;
+        if (ap && /am/i.test(ap) && h === 12) h = 0;
+        return h;
+      };
+      return {
+        openLabel:  _fmt12(to24(m2[1], m2[3]), parseInt(m2[2] || '0', 10)),
+        closeLabel: subst(m2[4]),
+      };
+    }
+    const sideRe2 = /(sunset|sunrise|dawn|dusk)\s*(?:[-–—]|to)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i;
+    const m3 = text.match(sideRe2);
+    if (m3) {
+      const to24 = (h, ap) => {
+        h = parseInt(h, 10);
+        if (ap && /pm/i.test(ap) && h < 12) h += 12;
+        if (ap && /am/i.test(ap) && h === 12) h = 0;
+        return h;
+      };
+      return {
+        openLabel:  subst(m3[1]),
+        closeLabel: _fmt12(to24(m3[2], m3[4]), parseInt(m3[3] || '0', 10)),
+      };
+    }
+    const bothRe = /(sunrise|dawn)\s*(?:[-–—]|to)\s*(sunset|dusk)/i;
+    const m4 = text.match(bothRe);
+    if (m4) return { openLabel: subst(m4[1]), closeLabel: subst(m4[2]) };
+  }
+
+  return null;
+}
+
+function buildHoursSection(beach, amenities, dogPolicy) {
+  const harmonized = _harmonizedHours(beach, amenities);
+  const hoursText = amenities?.hours_text;
+  const rangeLabel = harmonized
+    ? `${harmonized.openLabel || '?'} - ${harmonized.closeLabel || '?'}`
+    : (hoursText || null);
+  if (!rangeLabel) {
+    // Still render the dogs-prohibited block on its own if applicable.
+    const prohibStart = dogPolicy?.dogs_prohibited_start;
+    const prohibEnd   = dogPolicy?.dogs_prohibited_end;
+    if (!prohibStart || !prohibEnd) return '';
   }
   const prohibStart = dogPolicy?.dogs_prohibited_start;
   const prohibEnd   = dogPolicy?.dogs_prohibited_end;
@@ -772,9 +990,12 @@ function buildHoursSection(beach, amenities, dogPolicy) {
     ? `<p class="hours-dogs-prohibited"><strong>Dogs not allowed ${escHtml(prohibStart)}–${escHtml(prohibEnd)}</strong></p>`
       + _suggestPostProhibitionTime(prohibStart, prohibEnd, beach.timezone)
     : '';
+  const rangeHtml = rangeLabel
+    ? `<p class="hours-range">${escHtml(rangeLabel)}</p>`
+    : '';
   return `<section class="card">
     <h2>Hours</h2>
-    <dl class="hours-grid">${rows.join('')}</dl>
+    ${rangeHtml}
     ${prohibNote}
   </section>`;
 }
@@ -787,7 +1008,6 @@ const AMENITY_DEFS = [
   { key: 'has_picnic_area',     icon: '🧺',  label: 'Picnic area' },
   { key: 'has_fire_pits',       icon: '🔥',  label: 'Fire pits' },
   { key: 'has_lifeguards',      icon: '🛟',  label: 'Lifeguards' },
-  { key: 'has_food',            icon: '🍔',  label: 'Food / concessions' },
   { key: 'has_disabled_access', icon: '♿',  label: 'ADA access' },
 ];
 
@@ -823,11 +1043,24 @@ function _parkingCostLabel(amenities) {
   return '';
 }
 
-function _renderParkingTile(def, type, subtype, fee, ruleClass) {
+const _RULE_TOOLTIP = {
+  off_leash:   'Dogs off-leash welcome here',
+  on_leash:    'Dogs on-leash here',
+  not_allowed: 'Dogs not allowed in this zone',
+  unknown:     'Rule unclear — verify on-site',
+};
+
+function _amenityTooltip(def, rule) {
+  const ruleNote = rule ? ` · ${_RULE_TOOLTIP[rule] || rule}` : '';
+  return `${def.label}${ruleNote}`;
+}
+
+function _renderParkingTile(def, type, subtype, fee, ruleClass, rule) {
   const typeLabel = PARKING_TYPE_LABEL[type] || PARKING_SUBTYPE_LABEL[subtype] || '';
   const costLabel = fee === true ? 'Paid' : fee === false ? 'Free' : '';
   const sub = [typeLabel, costLabel].filter(Boolean).join(' · ');
-  return `<div class="amenity${ruleClass || ''}">
+  const tip = _amenityTooltip(def, rule) + (sub ? ` · ${sub}` : '');
+  return `<div class="amenity${ruleClass || ''}" title="${escHtml(tip)}">
     <span class="amenity-icon">${def.icon}</span>
     <span class="amenity-text">
       <span class="amenity-label">${def.label}</span>
@@ -844,10 +1077,11 @@ function _renderAmenityTile(def, amenities) {
 // rule: 'off_leash' | 'on_leash' | 'not_allowed' | 'unknown' | null
 function _renderAmenityTileWithRule(def, amenities, rule) {
   const ruleClass = rule ? ` rule-${rule}` : '';
+  const tip = _amenityTooltip(def, rule);
   // Section-only tile (e.g. Sand, Trails) — no amenity boolean,
   // just emoji + label + rule color.
   if (def.sectionName) {
-    return `<div class="amenity${ruleClass}">
+    return `<div class="amenity${ruleClass}" title="${escHtml(tip)}">
       <span class="amenity-icon">${def.icon}</span>
       <span class="amenity-label">${def.label}</span>
     </div>`;
@@ -855,20 +1089,20 @@ function _renderAmenityTileWithRule(def, amenities, rule) {
   if (def.key === 'has_parking') {
     if (Array.isArray(amenities?.parking_options) && amenities.parking_options.length > 0) {
       return amenities.parking_options
-        .map(opt => _renderParkingTile(def, opt.type, opt.subtype, opt.fee, ruleClass))
+        .map(opt => _renderParkingTile(def, opt.type, opt.subtype, opt.fee, ruleClass, rule))
         .join('');
     }
     return _renderParkingTile(def,
       amenities?.parking_type, amenities?.parking_subtype,
       _parkingCostLabel(amenities) === 'Paid' ? true
         : _parkingCostLabel(amenities) === 'Free' ? false : null,
-      ruleClass);
+      ruleClass, rule);
   }
   // Lifeguards always render with the "Seasonal" sublabel — staffing is
   // seasonal at almost every US beach, never year-round (see
   // [[lifeguards-seasonal-not-on-duty]]).
   if (def.key === 'has_lifeguards') {
-    return `<div class="amenity${ruleClass}">
+    return `<div class="amenity${ruleClass}" title="${escHtml(tip + ' · seasonal, typically Memorial Day–Labor Day')}">
       <span class="amenity-icon">${def.icon}</span>
       <span class="amenity-text">
         <span class="amenity-label">${def.label}</span>
@@ -876,7 +1110,7 @@ function _renderAmenityTileWithRule(def, amenities, rule) {
       </span>
     </div>`;
   }
-  return `<div class="amenity${ruleClass}">
+  return `<div class="amenity${ruleClass}" title="${escHtml(tip)}">
     <span class="amenity-icon">${def.icon}</span>
     <span class="amenity-label">${def.label}</span>
   </div>`;
@@ -1016,7 +1250,7 @@ function buildAmenitiesSection(amenities, dogPolicy) {
       return matching ? ruleMap[matching] : null;
     };
     const cells = _renderTileSet(all, amenities, ruleFor);
-    return `<section class="card">
+    return `<section class="card amenities-card">
       <h2>Amenities</h2>
       <div class="amenity-grid">${cells}</div>
     </section>`;
@@ -1067,7 +1301,7 @@ function buildAmenitiesSection(amenities, dogPolicy) {
   }
 
   if (!blocks.length) return '';
-  return `<section class="card">
+  return `<section class="card amenities-card">
     <h2>Amenities</h2>
     ${blocks.join('')}
   </section>`;
@@ -1346,10 +1580,9 @@ function _deriveTideCurveFromHours(hoursToday) {
 function buildOverviewCard(beach, description) {
   const blurb = description?.text;
   if (!blurb) return '';
-  return `<section class="card overview-card">
-    <h2>${escHtml(beach.display_name || beach.name || 'Beach')}</h2>
-    <div class="overview-blurb">${escHtml(blurb)}</div>
-  </section>`;
+  // Beach text — bare prose, no card chrome, no title. Beach name
+  // already appears in the page header next to the Your-Fit badge.
+  return `<p class="overview-blurb">${escHtml(blurb)}</p>`;
 }
 
 // Best-window card — standalone, all black text. Status pill keeps
@@ -1402,60 +1635,58 @@ function _renderScoreBars(hoursToday, beach, amenities, dogPolicy) {
   if (hours.length === 0) return '';
 
   // Bars display the per-hour appeal Overall (same 60/20/20 mix as the
-  // page-level Your-Fit card), so the chart answers "how good is THIS
-  // hour for ME?". Availability is user-pref-aware; the rest is the
-  // weather composite hour_score + the static amenity tally.
+  // page-level Your-Fit card), STACKED into Access / Amenities /
+  // Weather segments — same visual language as the Your-Fit bar.
+  // Tall bar = high overall; structural colors signal category.
   const amenitiesScore = _amenitiesScore(amenities);
-  const overallFor = h => {
+  const contribsFor = h => {
     if (h.hour_score == null) return null;
     let avail = _hourlyAvailability(h.local_hour, dogPolicy?.zone_rules, USER_PREF);
     if (avail == null) avail = _availabilityFromFlags(dogPolicy, USER_PREF);
-    return Math.round(0.60 * avail + 0.20 * amenitiesScore + 0.20 * h.hour_score);
+    const access  = Math.round(0.60 * avail);
+    const amen    = Math.round(0.20 * amenitiesScore);
+    const wx      = Math.round(0.20 * h.hour_score);
+    return { access, amen, wx, overall: access + amen + wx };
   };
 
-  // Best-window indicator now derives from the SAME from-now window
-  // the row label + Scout blurb use — driven by the new Overall, not
-  // the server-side is_in_best_window flag (which was keyed off the
-  // pre-appeal hour_score and didn't honor user pref).
+  // Best-window indicator derives from the SAME from-now window the
+  // row label + Scout blurb use. Used for the 🐶 emphasis on bars
+  // inside the window.
   const nowWindow = _bestWindowFromNow(hoursToday, beach, amenities, dogPolicy);
   const inWindow = h => nowWindow != null
     && h.local_hour >= nowWindow.start && h.local_hour < nowWindow.end;
 
-  const MAX_PX = 22; // bar max height in CSS px
-  // Colors keyed off the per-hour overall:
-  //   >= 70 → go green (solid if also in best window)
-  //   >= 40 → burnt-amber caution
-  //   <  40 → no_go red
-  const colorFor = (h, overall) =>
-        overall == null || overall < 40 ? 'rgba(239,68,68,0.45)'
-      : overall < 70                    ? 'rgba(247,140,18,0.53)'
-      : inWindow(h)                     ? 'rgba(34,197,94,1.0)'
-      :                                    'rgba(34,197,94,0.45)';
+  const MAX_PX = 35; // bar max height in CSS px (was 22; +60%)
   const fmtHour = hh => {
     const ap = hh >= 12 ? 'pm' : 'am';
     const h12 = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh;
     return `${h12}${ap}`;
   };
 
-  const overalls = hours.map(overallFor);
+  const contribs = hours.map(contribsFor);
+  const overalls = contribs.map(c => c?.overall ?? null);
   const maxV = Math.max(...overalls.filter(v => v != null), 1);
+  const pxFor = v => Math.max(Math.round((v / maxV) * MAX_PX), 0);
 
   const barsHtml = hours.map((h, i) => {
-    const overall = overalls[i];
-    const noScore = overall == null;
-    const pct  = noScore ? 1 : Math.max(overall / maxV, 0.05);
-    const px   = Math.round(pct * MAX_PX);
-    const fill = colorFor(h, overall);
-    const dog  = !noScore && inWindow(h) && overall >= 70 ? '🐶' : '';
-    const valueLabel = noScore ? '' : overall;
+    const c = contribs[i];
+    const noScore = c == null;
+    const dog  = !noScore && inWindow(h) ? '🐶' : '';
+    const valueLabel = noScore ? '' : c.overall;
     const title = noScore
       ? `${fmtHour(h.local_hour)} · not allowed`
-      : `${fmtHour(h.local_hour)} · ${overall} (overall) · ${h.hour_status}`;
+      : `${fmtHour(h.local_hour)} · ${c.overall} (access ${c.access} + amen ${c.amen} + wx ${c.wx})`;
+    // Excluded hours render a single full-height red bar (no segments).
+    const innerHtml = noScore
+      ? `<div class="score-bar-seg-excluded" style="height:${MAX_PX}px"></div>`
+      : `<div class="score-bar-seg score-bar-seg-weather"   style="height:${pxFor(c.wx)}px"></div>
+         <div class="score-bar-seg score-bar-seg-amenities" style="height:${pxFor(c.amen)}px"></div>
+         <div class="score-bar-seg score-bar-seg-access"    style="height:${pxFor(c.access)}px"></div>`;
     return `
       <div class="score-bar-col" title="${title}">
         <div class="score-bar-dog">${dog}</div>
         <div class="score-bar-value">${valueLabel}</div>
-        <div class="score-bar" style="height:${px}px; background:${fill};"></div>
+        <div class="score-bar">${innerHtml}</div>
       </div>`;
   }).join('');
 
@@ -1534,19 +1765,31 @@ function buildBestTimeCard(today, dogPolicy, beachFid, hoursToday, beach, amenit
   const clickable = !!(today && today.day_status);
   const clickAttr = clickable ? ' data-open-detail="1"' : '';
 
-  let headerRow = '';
-  if (hasWindow) {
-    headerRow = `<div class="besttime-row">
-      <span class="besttime-time"${clickAttr}>${escHtml(windowLabel)}</span>
-      <span class="besttime-sep">-</span>
-      <span class="besttime-text">Best Times Now</span>
-    </div>`;
-  }
-  const scoreBars = _renderScoreBars(hoursToday, beach, amenities, dogPolicy);
+  // Compact summary header: title left, time-range right. Hourly bars
+  // and Scout blurb moved to their own sibling card below.
+  const headlineText = windowLabel || (isNoDogs ? 'Not allowed' : 'No window');
   return `<section class="card besttime-card${clickable ? ' clickable' : ''}" data-fid="${beachFid}">
-    ${headerRow}
+    <div class="besttime-header">
+      <h2>Best Time</h2>
+      <div class="besttime-headline"${clickAttr}>${escHtml(headlineText)}</div>
+    </div>
+  </section>`;
+}
+
+// Scout blurb card — hourly bar chart retired 2026-05-15 (Franz call,
+// "it pains me"). _renderScoreBars + window-filter helpers stay in
+// the codebase for now in case they come back. Activities prose
+// renders statically below the async Scout blurb — the deterministic
+// "what to do" sentence is the backbone; Scout adds today-flavor.
+function buildScoutCard(today, beach, dogPolicy, amenities, hoursToday) {
+  if (!today) return '';
+  // Single corpus: activities + pack-list now fold INTO Scout's blurb
+  // (LLM weaves them naturally). CTA mount sits below; fills async
+  // once user location is known. Both surfaces collapse if data
+  // is missing rather than blocking.
+  return `<section class="card scout-card">
     <div id="scout-blurb">…</div>
-    ${scoreBars}
+    <div id="scout-cta" class="scout-cta"></div>
   </section>`;
 }
 
@@ -1659,13 +1902,29 @@ function buildCautionsSection(today, dogPolicy, hoursToday) {
     }
   }
 
+  // Per-metric tooltip strings — explain what trips a caution.
+  const CAUTION_TIPS = {
+    Tide:    'Caution when high tide ≥ 5.0 ft — limited beach access',
+    Wind:    'Caution when sustained wind ≥ 15 mph',
+    Rain:    'Caution on high precipitation chance / severe weather codes',
+    Crowd:   'Caution when busyness 61-84 (packed beach)',
+    Temp:    'Caution outside 50-75°F — too cold or too hot',
+    UV:      'Caution when UV index ≥ 8',
+    Sand:    'Caution when sand temperature ≥ 115°F — paw burn risk',
+    Asphalt: 'Caution when asphalt ≥ 115°F — paw burn risk',
+    Bacteria:           "Water-quality risk — avoid letting your dog swim or drink seawater",
+    'Dogs prohibited':  "Dogs aren't allowed at this beach during these hours",
+  };
+
   // Combined list, sorted: highest severity first, then label alphabetical.
   const items = [...dayItems, ...metricItems].sort(
     (a, b) => (STATUS_RANK[b.status] ?? 0) - (STATUS_RANK[a.status] ?? 0)
            || a.label.localeCompare(b.label));
   if (!items.length) return '';
-  const rows = items.map(it => `
-    <li class="advisory-row advisory-${it.status}">
+  const rows = items.map(it => {
+    const tip = CAUTION_TIPS[it.label] || it.label;
+    return `
+    <li class="advisory-row advisory-${it.status}" title="${escHtml(tip)}">
       <span class="advisory-icon">${it.icon}</span>
       <span class="advisory-body">
         <span class="advisory-headline">
@@ -1674,7 +1933,8 @@ function buildCautionsSection(today, dogPolicy, hoursToday) {
         </span>
         ${it.time ? `<span class="advisory-time">${escHtml(it.time)}</span>` : ''}
       </span>
-    </li>`).join('');
+    </li>`;
+  }).join('');
   return `<section class="card cautions-card">
     <h2>Cautions</h2>
     <ul class="advisory-list">${rows}</ul>
@@ -1739,13 +1999,21 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
     ? (nowH === 0 ? '12am' : nowH > 12 ? `${nowH - 12}pm` : nowH === 12 ? '12pm' : `${nowH}am`)
     : null;
 
+  const actPhrases  = _activityPhrases(beach, dogPolicy, amenities, hoursToday);
+  const packPhrases = _packListPhrases(beach, dogPolicy, amenities, hoursToday);
+
   const question =
-    `Current local time: ${nowLabel || 'now'}. The morning may already be behind us — write about what's LEFT today, not what already passed. ` +
-    `Best window remaining: ${windowLabel} (${windowStatus}). Conditions: ${signals}. ` +
-    `Write 1-2 short sentences of flowing prose — no headers, no bullets, no lists, no pack list, no gear recommendations: ` +
-    `Sentence 1: when the remaining best window is and the main reason why, using vivid descriptive language not raw numbers. ` +
-    `Sentence 2 (optional, skip if conditions are clean): any cautions or advisories during that window. ` +
-    `STRICT: respect the DOG POLICY ZONE RULES in the system prompt. Never describe activities (fetch, swim, splashing, off-leash play) in sections marked not_allowed. Never reference times before the current local time.`;
+    `Current local time: ${nowLabel || 'now'}. Best window remaining: ${windowLabel} (${windowStatus}). Conditions: ${signals}. ` +
+    `Activities the zone rules ALLOW today (weave 2-3 of these naturally — DON'T invent, DON'T list all): ${actPhrases.join(' · ')}. ` +
+    `Pack items to mention concretely (weave 2-3 of these into the prose — DON'T invent gear): ${packPhrases.join(' · ')}. ` +
+    `Write ONE flowing conversational paragraph (3-4 sentences). LEAD WITH THE FUN — frame the window as a stoke moment, not a forecast. ` +
+    `BOLD THE TIME WINDOW by wrapping it in **markdown asterisks**, e.g. **${windowLabel}**. Don't bold anything else. ` +
+    `Address active cautions for BOTH the dog AND the kahu with CONCRETE practical guidance. Examples of the framing we want: ` +
+    `high tide → "tide's running high, less sand exposed — stick to the upper beach and watch for kids and dogs getting pushed toward the cliffs/rocks"; ` +
+    `high UV (≥8) → "sun's punching hard — sunscreen for you and a shade break, pup's coat is its sunscreen"; ` +
+    `high wind (≥15mph) → "wind's blowing through, secure hats and treats, your pup will want shelter"; ` +
+    `bacteria → "water quality's iffy — keep your dog out of the surf and don't let them drink seawater". ` +
+    `STRICT: respect the DOG POLICY ZONE RULES in the system prompt. Never describe activities in sections marked not_allowed. Never reference times before the current local time. Use only the activities + pack items provided above — don't invent gear or activities.`;
 
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/beach-chat`, {
@@ -1755,12 +2023,70 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const { answer } = await res.json();
-    el.textContent = answer || '';
+    // Escape HTML first, then convert **markdown bold** to <strong>.
+    // No other markdown is accepted from the model.
+    const safe = escHtml(answer || '');
+    el.innerHTML = safe.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
     el.classList.add('loaded');
   } catch (e) {
     console.warn('scout blurb fetch failed:', e);
     el.textContent = '';
   }
+  _renderScoutCTA(beach);
+}
+
+// ─── Scout CTA ───────────────────────────────────────────────────────
+// "Wanna go? Drive ~XX min. [Send directions →]" — drive estimate from
+// browser geolocation (one-shot, cached in localStorage for a day).
+// Falls back to no-drive-time if user denies or geolocation absent.
+async function _renderScoutCTA(beach) {
+  const ctaEl = document.getElementById('scout-cta');
+  if (!ctaEl || beach.lat == null || beach.lng == null) return;
+  const mapsUrl = buildMapsUrl(beach);
+  const dirsBtn = `<a class="scout-cta-btn" href="${escHtml(mapsUrl)}" target="_blank" rel="noopener">Send directions →</a>`;
+  // Render the button immediately; drive time fills in if available.
+  ctaEl.innerHTML = `<span class="scout-cta-text">Wanna go?</span> ${dirsBtn}`;
+  const user = await _getUserLocation();
+  if (!user) return;
+  const minutes = _estimateDriveMinutes(user, beach);
+  if (!Number.isFinite(minutes) || minutes <= 0) return;
+  ctaEl.innerHTML = `<span class="scout-cta-text">Wanna go? Drive ~${minutes} min.</span> ${dirsBtn}`;
+}
+
+function _haversineMiles(a, b) {
+  const R = 3958.8;
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLng = (b.lng - a.lng) * Math.PI / 180;
+  const lat1 = a.lat * Math.PI / 180;
+  const lat2 = b.lat * Math.PI / 180;
+  const s = Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+function _estimateDriveMinutes(user, beach) {
+  const miles = _haversineMiles(user, { lat: beach.lat, lng: beach.lng });
+  // 1.8 min/mile: mix of freeway + surface streets with mild traffic.
+  return Math.round(miles * 1.8);
+}
+
+async function _getUserLocation() {
+  // Never auto-prompt for browser geolocation on this page. Drive time
+  // is opt-in — only surfaces when location is already known via:
+  //   1. URL param: ?user_lat=…&user_lng=…
+  //   2. localStorage cache from a prior session/other page (find.html
+  //      already prompts when the user explicitly asks for distance sort)
+  const qp = new URLSearchParams(location.search);
+  const ulat = parseFloat(qp.get('user_lat'));
+  const ulng = parseFloat(qp.get('user_lng'));
+  if (Number.isFinite(ulat) && Number.isFinite(ulng)) return { lat: ulat, lng: ulng };
+  try {
+    const raw = localStorage.getItem('dogbeach.user_loc');
+    if (raw) {
+      const cached = JSON.parse(raw);
+      if (cached && Number.isFinite(cached.lat) && Number.isFinite(cached.lng)) return cached;
+    }
+  } catch {}
+  return null;
 }
 
 // True ONLY if dogs have no sand/water access anywhere on the beach —
@@ -1895,7 +2221,7 @@ function _amenitiesScore(amenities) {
     has_parking: 2, has_drinking_water: 2,
     has_restrooms: 1, has_showers: 1, has_picnic_area: 1,
     has_lifeguards: 1, has_disabled_access: 1,
-    has_fire_pits: 0.5, has_food: 0.5,
+    has_fire_pits: 0.5,
   };
   const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
   let earned = 0;
@@ -1927,31 +2253,234 @@ function _appealScores(beach, dogPolicy, amenities, hoursToday) {
 function buildAppealCard(beach, dogPolicy, amenities, hoursToday) {
   const s = _appealScores(beach, dogPolicy, amenities, hoursToday);
   const prefLabel = _PREF_LABEL[s.userPref] || s.userPref;
-  // Component tiles show the weighted CONTRIBUTION to Overall (X / max).
-  // Sum across tiles equals Overall — math is transparent.
-  const availContrib = Math.round(0.60 * s.availability);
-  const amenContrib  = Math.round(0.20 * s.amenitiesScore);
-  const wxContrib    = Math.round(0.20 * s.weatherScore);
   return `<section class="card appeal-card">
-    <h2>Your Fit <span class="appeal-pref">· ${escHtml(prefLabel)}</span></h2>
-    <div class="appeal-grid">
-      <div class="appeal-tile appeal-tile-overall">
-        <div class="appeal-num">${s.overall}<span class="appeal-num-max">/100</span></div>
-        <div class="appeal-label">Overall</div>
-      </div>
-      <div class="appeal-tile">
-        <div class="appeal-num">${availContrib}<span class="appeal-num-max">/60</span></div>
-        <div class="appeal-label">Access</div>
-      </div>
-      <div class="appeal-tile">
-        <div class="appeal-num">${amenContrib}<span class="appeal-num-max">/20</span></div>
-        <div class="appeal-label">Amenities</div>
-      </div>
-      <div class="appeal-tile">
-        <div class="appeal-num">${wxContrib}<span class="appeal-num-max">/20</span></div>
-        <div class="appeal-label">Weather</div>
+    <div class="appeal-header">
+      <h2>Your Fit <span class="appeal-pref">· ${escHtml(prefLabel)}</span></h2>
+      <div class="appeal-overall">
+        <span class="appeal-overall-num">${s.overall}</span><span class="appeal-overall-max">/100</span>
       </div>
     </div>
+  </section>`;
+}
+
+// ─── Pack list (rule-based, no LLM) ──────────────────────────────
+// Replaces the 2026-05-07 pack-list-via-Scout sentence that was
+// dropped because Sonnet hallucinated swim gear on no-dog beaches.
+// Deterministic: each item is a (icon, label, reason) triple
+// gated by zone-rule + condition checks. Universal items always
+// included; conditional items only when the data supports them.
+
+function _zoneSectionPermits(zr, sectionName) {
+  if (!zr) return false;
+  const seasons = Array.isArray(zr.seasons) && zr.seasons.length
+    ? zr.seasons : (Array.isArray(zr.regions) ? [{ regions: zr.regions }] : []);
+  for (const s of seasons) {
+    for (const reg of (s.regions || [])) {
+      const sec = reg?.sections?.[sectionName];
+      if (sec && sec.rule && sec.rule !== 'not_allowed') return true;
+    }
+  }
+  return false;
+}
+
+// Prose-form pack list — composes the same conditional gear list as
+// _packListItems into a single sentence for the Scout card. The chip
+// card retains the structured icons + tooltips for at-a-glance use.
+function _packListPhrases(beach, dogPolicy, amenities, hoursToday) {
+  const phrases = ['water', 'poop bags', 'a leash'];
+  const hrs = Array.isArray(hoursToday) ? hoursToday.filter(h => h && h.hour_score != null) : [];
+  const numericMax = (key) => hrs.reduce((m, h) => {
+    const v = h[key]; return (v != null && v > m) ? v : m;
+  }, -Infinity);
+  const numericMin = (key) => hrs.reduce((m, h) => {
+    const v = h[key]; return (v != null && v < m) ? v : m;
+  }, +Infinity);
+  const waterAllowed = _zoneSectionPermits(dogPolicy?.zone_rules, 'water_swim');
+  const sandAllowed  = _zoneSectionPermits(dogPolicy?.zone_rules, 'sand');
+  const maxTemp = numericMax('temp_air');
+  const minTemp = numericMin('temp_air');
+  if (waterAllowed) {
+    phrases.push('a towel for the wet pup');
+    if (maxTemp >= 70) phrases.push('a fetch toy');
+  } else if (sandAllowed && maxTemp >= 65) {
+    phrases.push('a fetch toy');
+  }
+  const maxUV      = numericMax('uv_index');
+  const maxWind    = numericMax('wind_speed');
+  const maxSand    = numericMax('sand_temp');
+  const maxAsphalt = numericMax('asphalt_temp');
+  if (maxUV >= 6) {
+    phrases.push(`sunscreen (UV peaks at ${maxUV.toFixed(1)})`);
+  }
+  if (maxSand >= 115 && maxAsphalt >= 115) {
+    phrases.push('paw booties — sand and asphalt are both scorching');
+  } else if (maxSand >= 115) {
+    phrases.push('paw booties for the hot sand');
+  } else if (maxAsphalt >= 115) {
+    phrases.push('paw booties for the parking-lot asphalt');
+  }
+  if ((minTemp !== Infinity && minTemp < 55) || maxWind >= 18) {
+    phrases.push(minTemp < 55 ? 'a warm layer for yourself' : 'a windbreaker for yourself');
+  }
+  return phrases;
+}
+
+function _packListItems(beach, dogPolicy, amenities, hoursToday) {
+  const items = [];
+  // Universal
+  items.push({ icon: '💧', label: 'Water',     reason: 'Always' });
+  items.push({ icon: '💩', label: 'Poop bags', reason: 'Always' });
+  items.push({ icon: '🦮', label: 'Leash',     reason: 'Entry zones' });
+
+  const hrs = Array.isArray(hoursToday) ? hoursToday.filter(h => h && h.hour_score != null) : [];
+  const numericMax = (key) => hrs.reduce((m, h) => {
+    const v = h[key]; return (v != null && v > m) ? v : m;
+  }, -Infinity);
+  const numericMin = (key) => hrs.reduce((m, h) => {
+    const v = h[key]; return (v != null && v < m) ? v : m;
+  }, +Infinity);
+
+  // Zone-conditional
+  const waterAllowed = _zoneSectionPermits(dogPolicy?.zone_rules, 'water_swim');
+  const sandAllowed  = _zoneSectionPermits(dogPolicy?.zone_rules, 'sand');
+  const maxTemp      = numericMax('temp_air');
+  const minTemp      = numericMin('temp_air');
+  if (waterAllowed) {
+    items.push({ icon: '🪣', label: 'Towel', reason: 'Wet dog' });
+    if (maxTemp >= 70) {
+      items.push({ icon: '🎾', label: 'Fetch toy', reason: 'Water + warm' });
+    }
+  } else if (sandAllowed && maxTemp >= 65) {
+    items.push({ icon: '🎾', label: 'Fetch toy', reason: 'Sand play' });
+  }
+
+  // Weather-conditional
+  const maxUV       = numericMax('uv_index');
+  const maxWind     = numericMax('wind_speed');
+  const maxSand     = numericMax('sand_temp');
+  const maxAsphalt  = numericMax('asphalt_temp');
+  if (maxUV >= 6) {
+    items.push({ icon: '🧴', label: 'Sunscreen', reason: `UV ${maxUV.toFixed(1)}` });
+  }
+  if (maxSand >= 115 && maxAsphalt >= 115) {
+    items.push({ icon: '🥾', label: 'Paw booties', reason: `Sand ${Math.round(maxSand)}°F · asphalt ${Math.round(maxAsphalt)}°F` });
+  } else if (maxSand >= 115) {
+    items.push({ icon: '🥾', label: 'Paw booties', reason: `Hot sand ${Math.round(maxSand)}°F` });
+  } else if (maxAsphalt >= 115) {
+    items.push({ icon: '🥾', label: 'Paw booties', reason: `Hot asphalt ${Math.round(maxAsphalt)}°F` });
+  }
+  if ((minTemp !== Infinity && minTemp < 55) || maxWind >= 18) {
+    items.push({ icon: '🧥', label: 'Warm layer', reason: minTemp < 55 ? 'Chilly' : 'Windy' });
+  }
+
+  return items;
+}
+
+function buildPackListCard(beach, dogPolicy, amenities, hoursToday) {
+  const items = _packListItems(beach, dogPolicy, amenities, hoursToday);
+  if (!items.length) return '';
+  const chips = items.map(it => `
+    <div class="packlist-chip" title="${escHtml(it.reason)}">
+      <span class="packlist-icon">${it.icon}</span>
+      <span class="packlist-label">${escHtml(it.label)}</span>
+    </div>`).join('');
+  return `<section class="card packlist-card">
+    <h2>Pack List</h2>
+    <div class="packlist-chips">${chips}</div>
+  </section>`;
+}
+
+// ─── Activities (rule-based, no LLM) ─────────────────────────────
+// Deterministic "what to do with your dog" chips. Same shape + CSS as
+// the Pack List card. Each chip gated by zone-rule + condition checks
+// so Sonnet-hallucination patterns (recommending fetch on no-dog
+// beaches) can't reach the consumer surface. Returns empty when
+// zone_rules is null or no qualifying activity exists.
+
+function _sectionBestRule(zr, sectionName) {
+  if (!zr) return null;
+  const RANK = { off_leash: 2, on_leash: 1, not_allowed: 0 };
+  const seasons = Array.isArray(zr.seasons) && zr.seasons.length
+    ? zr.seasons : (Array.isArray(zr.regions) ? [{ regions: zr.regions }] : []);
+  let best = null;
+  for (const s of seasons) {
+    for (const reg of (s.regions || [])) {
+      const sec = reg?.sections?.[sectionName];
+      if (!sec || !sec.rule) continue;
+      const r = sec.rule;
+      if (best == null || (RANK[r] ?? -1) > (RANK[best] ?? -1)) best = r;
+    }
+  }
+  return best;
+}
+
+function _activityPhrases(beach, dogPolicy, amenities, hoursToday) {
+  const phrases = [];
+  const zr = dogPolicy?.zone_rules;
+  if (!zr) return phrases;
+
+  const sand      = _sectionBestRule(zr, 'sand');
+  const water     = _sectionBestRule(zr, 'water_swim');
+  const trails    = _sectionBestRule(zr, 'trails');
+  const tidePools = _sectionBestRule(zr, 'tide_pools');
+  const picnic    = _sectionBestRule(zr, 'picnic_area');
+  const board     = _sectionBestRule(zr, 'boardwalk');
+
+  const hrs = Array.isArray(hoursToday) ? hoursToday.filter(h => h && h.hour_score != null) : [];
+  const lowestTide = hrs.reduce((m, h) => {
+    const v = h.tide_height; return (v != null && v < m) ? v : m;
+  }, +Infinity);
+  const maxTemp = hrs.reduce((m, h) => {
+    const v = h.temp_air; return (v != null && v > m) ? v : m;
+  }, -Infinity);
+  const permits = r => r && r !== 'not_allowed';
+
+  if (sand === 'off_leash' || water === 'off_leash') {
+    phrases.push('let your pup run off-leash');
+  }
+  if (permits(sand)) {
+    phrases.push(sand === 'off_leash'
+      ? 'play fetch on the open sand'
+      : 'play leashed fetch on the sand');
+  } else if (permits(water)) {
+    phrases.push('throw a toy into the surf for a water fetch');
+  }
+  if (permits(water)) {
+    phrases.push(maxTemp >= 65
+      ? `splash in the ${Math.round(maxTemp)}°F water`
+      : 'wade in the chilly water');
+  }
+  if (permits(tidePools) && lowestTide !== Infinity && lowestTide < 2) {
+    phrases.push(`poke around tide pools at low tide (${lowestTide.toFixed(1)} ft)`);
+  }
+  if (permits(trails)) {
+    const sandRestricted = sand === 'not_allowed' || !sand;
+    phrases.push(sandRestricted
+      ? 'walk the trails (sand is restricted today)'
+      : 'walk the trails');
+  }
+  if (permits(board)) {
+    phrases.push('stroll the boardwalk');
+  }
+  if (permits(picnic)) {
+    phrases.push('share a picnic in the designated area');
+  }
+  return phrases;
+}
+
+function _joinProse(phrases) {
+  if (!phrases.length) return '';
+  if (phrases.length === 1) return phrases[0];
+  if (phrases.length === 2) return phrases.join(' and ');
+  return phrases.slice(0, -1).join(', ') + ', and ' + phrases[phrases.length - 1];
+}
+
+function buildActivitiesCard(beach, dogPolicy, amenities, hoursToday) {
+  const phrases = _activityPhrases(beach, dogPolicy, amenities, hoursToday);
+  if (!phrases.length) return '';
+  const sentence = `Today you can ${_joinProse(phrases)}.`;
+  return `<section class="card activities-card">
+    <p class="activities-prose">${escHtml(sentence)}</p>
   </section>`;
 }
 

@@ -596,6 +596,7 @@ function buildRawHours(
       uvIndex:       wh.uv_index,
       tideHeight,
       busynessScore: busyness,
+      cloudCover:    wh.cloud_cover ?? null,
       isBeachOpen,
       isProhibited,
     };

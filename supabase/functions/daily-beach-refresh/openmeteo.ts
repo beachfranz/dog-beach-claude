@@ -42,6 +42,7 @@ export interface OpenMeteoHour {
   weathercode: number;                // WMO code
   windspeed_10m: number;              // mph
   uv_index: number;
+  cloud_cover: number;                // % 0-100 — for surface-temp solar attenuation
   is_day: number;                     // 1 = daylight, 0 = night
 }
 
@@ -68,6 +69,7 @@ export async function fetchWeather(beach: Beach): Promise<OpenMeteoResult> {
       "weathercode",
       "windspeed_10m",
       "uv_index",
+      "cloud_cover",
       "is_day",
     ].join(","),
     daily:            "sunrise,sunset",
@@ -101,6 +103,7 @@ export async function fetchWeather(beach: Beach): Promise<OpenMeteoResult> {
     weathercode:                json.hourly.weathercode[i],
     windspeed_10m:              json.hourly.windspeed_10m[i],
     uv_index:                   json.hourly.uv_index[i],
+    cloud_cover:                json.hourly.cloud_cover[i],
     is_day:                     json.hourly.is_day[i],
   }));
 

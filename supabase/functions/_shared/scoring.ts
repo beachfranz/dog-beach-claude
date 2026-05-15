@@ -152,6 +152,7 @@ export interface RawHourData {
   uvIndex:       number | null;
   tideHeight:    number | null;
   busynessScore: number | null;    // 0-100 from BestTime
+  cloudCover:    number | null;    // 0-100% from Open-Meteo; used for surface-temp solar attenuation
   isBeachOpen:   boolean;
   isProhibited:  boolean;          // true when dogs are banned during this specific hour
 }
@@ -253,29 +254,50 @@ function windIdealSpeed(feelsLike: number | null, cfg: ScoringConfig): number {
 
 // Solar heat addition by UV index (°F above air temp on exposed surface).
 // Based on empirical energy balance research — asphalt absorbs ~92% of solar radiation.
-function solarAdd(uvIndex: number): number {
-  if (uvIndex >= 11) return 65;
-  if (uvIndex >= 9)  return 55;
-  if (uvIndex >= 7)  return 45;
-  if (uvIndex >= 5)  return 30;
-  if (uvIndex >= 3)  return 20;
-  if (uvIndex >= 1)  return 10;
-  return 0;
-}
-
-// Returns estimated sand and asphalt surface temps (°F), or null at night.
+// ─── Surface temperature estimation (research-grounded, 2026-05-15) ──
+//
+// Physics: ΔT_surface = (Solar × (1 - albedo)) / h_convective. We don't
+// have full radiative balance inputs, so use empirical coefficients
+// calibrated against published surface-temperature studies:
+//
+//   - FHWA Long-Term Pavement Performance + Solomon's pavement model:
+//     asphalt ≈ +50°F over air at clear-sky peak (1000 W/m²)
+//   - Burgess (2001) beach foot-burn study + Vanos et al. (2016)
+//     playground surfaces: dry sand peaks +20-35°F over air clear day
+//   - Sand albedo ~30%, asphalt ~10% → sand heating ≈ half of asphalt
+//   - Convective cooling scales with √(wind), not linearly
+//
+// UV index is our proxy for solar irradiance (W/m²). Empirical
+// correlation: irradiance ≈ uv × 100 (so clear UV=10 ≈ 1000 W/m²).
+// Cloud cover attenuates linearly: overcast cuts insolation ~70%.
+//
+// Replaces the prior step-function `solarAdd` + linear-wind cooling,
+// which overshot at moderate air temps (HBDB 67°F air → asphalt 109°F).
+// New formula on the same inputs yields asphalt ~94°F — matches the
+// "67°F day isn't hot-surface weather" intuition.
 function estimateSurfaceTemps(
   airTemp: number | null,
   uvIndex: number | null,
   windSpeed: number | null,
+  cloudCover: number | null,
   isDaylight: boolean,
 ): { sand: number | null; asphalt: number | null } {
   if (!isDaylight || airTemp === null) return { sand: null, asphalt: null };
-  const solar   = solarAdd(uvIndex ?? 0);
-  const cooling = (windSpeed ?? 0) * 0.5;
+  // UV index → solar irradiance proxy (W/m²)
+  const irradiance = Math.max(0, uvIndex ?? 0) * 100;
+  // Cloud attenuation: 0% clouds → 1.0; 100% → 0.30
+  const cloudFactor = cloudCover != null
+    ? 1 - (Math.min(Math.max(cloudCover, 0), 100) / 100) * 0.7
+    : 1;
+  const effectiveSolar = irradiance * cloudFactor;
+  // Heating per unit solar (°F per W/m²) — calibrated to the studies above.
+  const asphaltHeating = effectiveSolar * 0.05;   // 1000 W/m² → +50°F
+  const sandHeating    = effectiveSolar * 0.025;  // 1000 W/m² → +25°F
+  // Convective cooling: √(wind) × 1.2, capped at 8°F (saturates).
+  const windCool = Math.min(Math.sqrt(Math.max(windSpeed ?? 0, 0)) * 1.2, 8);
   return {
-    sand:    round1(airTemp + solar * 0.7 - cooling),  // sand albedo ~30% higher than asphalt
-    asphalt: round1(airTemp + solar - cooling),
+    sand:    round1(airTemp + sandHeating    - windCool),
+    asphalt: round1(airTemp + asphaltHeating - windCool),
   };
 }
 
@@ -380,7 +402,7 @@ function scoreOneHour(raw: RawHourData, cfg: ScoringConfig): ScoredHour {
 
   // ── Surface temp estimation ───────────────────────────────────────────────
   const { sand: sandTemp, asphalt: asphaltTemp } = estimateSurfaceTemps(
-    raw.tempAir, raw.uvIndex, raw.windSpeed, raw.isDaylight,
+    raw.tempAir, raw.uvIndex, raw.windSpeed, raw.cloudCover, raw.isDaylight,
   );
 
   // Use feels-like for temp scoring/status; fall back to air temp if absent

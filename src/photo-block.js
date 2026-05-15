@@ -50,9 +50,12 @@
          <div class="photo-block-counter">${heroIdx + 1} / ${n}</div>`
       : '';
 
-    const viewAllHtml = n > 1
+    // "View all" link renders only when an explicit viewAllHref is
+     // provided. beach.html dropped it 2026-05-15; detail.html can
+     // still opt in by passing the option.
+    const viewAllHtml = (n > 1 && opts.viewAllHref)
       ? `<div class="photo-block-viewall">
-           <a href="${escHtml(opts.viewAllHref || '#')}">View all ${n} photos →</a>
+           <a href="${escHtml(opts.viewAllHref)}">View all ${n} photos →</a>
          </div>`
       : '';
 

@@ -598,9 +598,67 @@
     border-radius: 12px; border: 1px solid var(--border);
   }
   @media (max-width: 720px) {
-    .photo-map-row { flex-direction: column; }
+    .photo-map-row { flex-direction: column; gap: 8px; margin: 0 12px 8px; }
     .photo-map-row .pm-map-col { flex: 0 0 auto; width: 100%; }
-    .photo-map-row .pm-map-col #map { width: 100%; height: 220px; }
+    .photo-map-row .pm-map-col #map { width: 100%; height: 180px; }
+  }
+
+  /* ─── Phone form factor (≤ 600px) ──────────────────────────────────
+   * Brevity-first: tighter padding, smaller type, compacter chips.
+   * Most layout already collapses to a single column at 720px; this
+   * block pulls the remaining slack so the page is thumb-scrollable
+   * without burning real estate on padding. */
+  @media (max-width: 600px) {
+    /* Outer chrome */
+    section.card { padding: 10px 12px; margin: 5px 10px; border-radius: 10px; }
+    section.card h2 { font-size: 13px; margin-bottom: 6px; }
+
+    /* Beach name + badge + region (h1) */
+    .beach-name { font-size: 20px; margin: 0 0 4px; }
+    .fit-badge { font-size: 16px; padding: 1px 8px; margin-right: 3px; }
+    .beach-region { font-size: 13px; margin-left: 0.3em; }
+
+    /* Beach text */
+    .overview-blurb { font-size: 13px; line-height: 1.5; margin: 16px 12px 10px; }
+
+    /* Photo + map */
+    .photo-block-hero img { max-height: 22vh; }
+    .photo-map-row { margin: 0 10px 8px; gap: 6px; }
+    .photo-map-row .pm-map-col #map { height: 160px; }
+
+    /* Amenity tiles */
+    .amenity { padding: 6px 4px; }
+    .amenity-icon { font-size: 18px; }
+    .amenity-label { font-size: 11px; line-height: 1.15; }
+    .amenity-sub   { font-size: 9px; }
+    .amenities-card { margin-top: 8px; }
+
+    /* Cautions rows */
+    .cautions-card ul.advisory-list { gap: 4px; }
+    .advisory-row { padding: 5px 6px; font-size: 11px; }
+    .advisory-icon { font-size: 13px; }
+    .advisory-value, .advisory-time { font-size: 10px; }
+
+    /* Hours card */
+    .hours-range { font-size: 13px; }
+    .hours-dogs-prohibited { font-size: 12px; }
+    .hours-dogs-suggest { font-size: 12px; }
+
+    /* Scout corpus */
+    .scout-card #scout-blurb { font-size: 13px; line-height: 1.5; }
+    .activities-prose { font-size: 13px; line-height: 1.5; margin-top: 6px; }
+
+    /* CTA — keep centered, tighter buttons */
+    .scout-cta { margin-top: 10px; gap: 8px; font-size: 13px; }
+    .scout-cta-btn { padding: 7px 11px; font-size: 12px; }
+
+    /* Pack list chip card */
+    .packlist-chip { padding: 5px 9px; font-size: 12px; }
+    .packlist-icon { font-size: 14px; }
+
+    /* Appeal chip group on h1 — keep the badge proportionate */
+    .left-rail .amenity-grid,
+    #left-rail .amenity-grid { grid-template-columns: repeat(2, 1fr); gap: 4px; }
   }
 
   /* Location card — full-width map in main content. */
@@ -2043,11 +2101,17 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
   const actPhrases  = _activityPhrases(beach, dogPolicy, amenities, hoursToday);
   const packPhrases = _packListPhrases(beach, dogPolicy, amenities, hoursToday);
 
+  // Compact mode on phone form factor — Scout produces 2 short
+  // sentences instead of 3-4 to save vertical real estate.
+  const isCompact = window.matchMedia && window.matchMedia('(max-width: 600px)').matches;
+  const lengthDirective = isCompact
+    ? `Write ONE compact paragraph — 2 SHORT sentences max (mobile screen, brevity matters). LEAD WITH THE FUN — stoke moment, not a forecast. `
+    : `Write ONE flowing conversational paragraph (3-4 sentences). LEAD WITH THE FUN — frame the window as a stoke moment, not a forecast. `;
   const question =
     `Current local time: ${nowLabel || 'now'}. Best window remaining: ${windowLabel} (${windowStatus}). Conditions: ${signals}. ` +
     `Activities the zone rules ALLOW today (weave 2-3 of these naturally — DON'T invent, DON'T list all): ${actPhrases.join(' · ')}. ` +
-    `Pack items to mention concretely (weave 2-3 of these into the prose — DON'T invent gear): ${packPhrases.join(' · ')}. ` +
-    `Write ONE flowing conversational paragraph (3-4 sentences). LEAD WITH THE FUN — frame the window as a stoke moment, not a forecast. ` +
+    `Pack items to mention concretely (weave ${isCompact ? '1-2' : '2-3'} of these into the prose — DON'T invent gear): ${packPhrases.join(' · ')}. ` +
+    lengthDirective +
     `BOLD THE TIME WINDOW by wrapping it in **markdown asterisks**, e.g. **${windowLabel}**. Don't bold anything else. ` +
     `Address active cautions for BOTH the dog AND the kahu with CONCRETE practical guidance. Examples of the framing we want: ` +
     `high tide → "tide's running high, less sand exposed — stick to the upper beach and watch for kids and dogs getting pushed toward the cliffs/rocks"; ` +

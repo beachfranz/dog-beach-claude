@@ -559,7 +559,7 @@ function _suggestPostProhibitionTime(start, end, timezone) {
   const ap = eh >= 12 ? 'pm' : 'am';
   const h12 = eh === 0 ? 12 : eh > 12 ? eh - 12 : eh;
   const label = em ? `${h12}:${String(em).padStart(2,'0')}${ap}` : `${h12}${ap}`;
-  return `<p class="hours-dogs-suggest">Come back after ${label} today.</p>`;
+  return `<p class="hours-dogs-suggest">Come back after ${label} now.</p>`;
 }
 
 async function load() {
@@ -1410,7 +1410,7 @@ function buildBestTimeCard(today, dogPolicy, beachFid, hoursToday, beach, amenit
     headerRow = `<div class="besttime-row">
       <span class="besttime-time"${clickAttr}>${escHtml(today.best_window_label)}</span>
       <span class="besttime-sep">-</span>
-      <span class="besttime-text">Best Times Today</span>
+      <span class="besttime-text">Best Times Now</span>
     </div>`;
   }
   const scoreBars = _renderScoreBars(hoursToday, beach, amenities);

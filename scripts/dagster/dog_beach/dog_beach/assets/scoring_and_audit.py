@@ -17,9 +17,27 @@ import re
 from dagster import (
     asset,
     AssetExecutionContext,
+    Config,
     MaterializeResult,
     MetadataValue,
 )
+
+
+class DailyRefreshConfig(Config):
+    """Run-time overrides for daily_refresh_fire.
+
+    skip_recent_hours: forwarded to daily-beach-refresh; default 24 mirrors
+      run_state_pipeline.py. Pass 0 to bypass the skip-recent gate
+      (ad-hoc re-scores after upstream dogs-policy fixes).
+
+    force_location_ids: if set, use this list instead of querying
+      beaches_gold by partition state. Partition is still required (for
+      run record-keeping) but the actual work is scoped to this list.
+      Use for narrow ad-hoc rescores; leave null for the normal per-state
+      fan-out.
+    """
+    skip_recent_hours: int = 24
+    force_location_ids: list[str] | None = None
 
 from ..partitions import state_partitions
 from ..resources import (
@@ -46,22 +64,27 @@ from .per_fid_enrichment import photos_wikimedia
 )
 def daily_refresh_fire(
     context: AssetExecutionContext,
+    config: DailyRefreshConfig,
     postgres: PostgresPoolerResource,
     supabase_edge: SupabaseEdgeFunctionResource,
 ) -> MaterializeResult:
     state = context.partition_key
 
-    conn = postgres.get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT location_id FROM public.beaches_gold "
-                " WHERE state=%s AND is_active AND scoring_tier IN ('daily','hourly')",
-                (state,),
-            )
-            ids = [r[0] for r in cur.fetchall()]
-    finally:
-        conn.close()
+    if config.force_location_ids:
+        ids = list(config.force_location_ids)
+        context.log.info(f"force_location_ids set ({len(ids)} ids); skipping state query")
+    else:
+        conn = postgres.get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT location_id FROM public.beaches_gold "
+                    " WHERE state=%s AND is_active AND scoring_tier IN ('daily','hourly')",
+                    (state,),
+                )
+                ids = [r[0] for r in cur.fetchall()]
+        finally:
+            conn.close()
 
     if not ids:
         return MaterializeResult(metadata={"state": state, "beaches": 0, "skipped": True})
@@ -80,7 +103,7 @@ def daily_refresh_fire(
                 body={
                     "location_ids": batch,
                     "tide_window_days": 7,
-                    "skip_recent_hours": 24,  # idempotent retries (2026-05-13)
+                    "skip_recent_hours": config.skip_recent_hours,
                 },
                 timeout=600,
             )

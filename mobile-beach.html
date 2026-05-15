@@ -43,25 +43,12 @@
     grid-template-columns: 1fr;  /* mobile default — single column, stacked */
     gap: 0;
   }
-  @media (min-width: 900px) {
-    .body-grid {
-      grid-template-columns: minmax(260px, 30%) 1fr;  /* 30% left rail / 70% main */
-      gap: 16px;
-      padding: 0 16px;
-    }
-    .body-grid > main { padding: 0; }
-    .body-grid > aside#left-rail {
-      position: sticky;
-      top: 96px;  /* below sticky hero */
-      align-self: start;
-      padding-top: 12px;
-      max-height: calc(100vh - 110px);
-      overflow-y: auto;
-    }
-    /* Narrow-column overrides for blocks designed for wider layouts. */
-    #left-rail .amenity-grid { grid-template-columns: repeat(2, 1fr); }
-    #left-rail .zr-sections  { grid-template-columns: 1fr; }
-    #left-rail .zr-card { margin: 8px 0; padding: 10px 12px; }
+  /* Mobile-only file: keep a single column at ALL widths since the
+   * left rail is now the entire page. On wide screens we just cap
+   * width and center, no sidebar. */
+  @media (min-width: 600px) {
+    .body-grid { max-width: 520px; margin: 0 auto; padding: 0 8px; }
+    #main-content { display: none; }
   }
   header.hero {
     padding: 24px 20px 16px; background: var(--card);
@@ -1043,29 +1030,21 @@ function render(data, beachFid) {
   //   Amenities (merged with Dog Policy section-tiles — rule color
   //   tints them in place), Cautions, Hours, Weather and Tides.
   const hasPhotos = Array.isArray(data.photos) && data.photos.length > 0;
+  // Mobile-only file: the LEFT rail is the whole page now. Everything
+  // that used to live in <main> stacks under the LHS content.
   const leftRail = [];
-  // Beach text → photos → amenities. Photos move out of main so they
-  // sit directly below the beach text on mobile (per Franz).
   leftRail.push(buildBeachBlurbCard(data.today));
   if (hasPhotos) leftRail.push('<div class="photo-block-wrap" id="photo-block-mount"></div>');
   leftRail.push(buildAmenitiesAndActivitiesCard(beach, dog_policy, amenities, data.hours_today));
   leftRail.push(buildCautionsSection(data.today, dog_policy, data.hours_today));
-  // Weather/tide moved to the page header (third hero line). No card
-  // in the LHS now — _renderWeatherToday targets #weather-mount which
-  // lives in the hero.
+  leftRail.push(buildAlternativesSection(dog_policy, data.alternatives));
+  leftRail.push(buildNowBlurbCard(data.today));
+  leftRail.push(buildPackListCard(beach, dog_policy, amenities, data.hours_today));
+  leftRail.push(buildDetailsSection(dog_policy));
+  leftRail.push(buildLinksSection(beach, beachFid));
   document.getElementById('left-rail').innerHTML = leftRail.filter(Boolean).join('');
-
-  // MAIN (top → bottom): Alternatives → Now blurb → Pack list → Details.
-  // Photos + Beach blurb moved to the LHS so they sit above amenities.
-  const main = [];
-  main.push(buildAlternativesSection(dog_policy, data.alternatives));
-  // Activities moved to the LEFT rail under Amenities (color-coded
-  // with the same rule vocabulary). NOW blurb takes the spot in main.
-  main.push(buildNowBlurbCard(data.today));
-  main.push(buildPackListCard(beach, dog_policy, amenities, data.hours_today));
-  main.push(buildDetailsSection(dog_policy));
-  main.push(buildLinksSection(beach, beachFid));
-  document.getElementById('main-content').innerHTML = main.filter(Boolean).join('');
+  // Main column is empty on mobile — the whole page lives in the LHS.
+  document.getElementById('main-content').innerHTML = '';
 
   // Shared photo block — 1 hero + 5 thumbs + view-all (src/photo-block.js).
   // Mount AFTER the section HTML has been injected so the target exists.

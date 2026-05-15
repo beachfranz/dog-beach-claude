@@ -51,7 +51,7 @@
     #main-content { display: none; }
   }
   header.hero {
-    padding: 24px 20px 16px; background: var(--card);
+    padding: 12px 20px 10px; background: var(--card);
     border-bottom: 1px solid var(--border);
     position: sticky; top: 0; z-index: 10;
     display: flex; align-items: flex-start; gap: 12px;
@@ -740,7 +740,11 @@
   /* Hero photo block — shared component in src/photo-block.css. The
      wrapper just provides page-edge gutter; sizing/layout is owned by
      .photo-block in the shared sheet. */
-  .photo-block-wrap { margin: 0 16px 12px; }
+  .photo-block-wrap { margin: 0 10px 0; }
+  /* Kill the photo-block-hero's bottom margin so it sits flush with
+   * the next card (Amenities) instead of leaving a 10px gap from the
+   * shared photo-block.css. */
+  #left-rail .photo-block-hero { margin-bottom: 0; }
 
   /* Photos + Map row — photos take most of the width, map matches
    * the photo's vertical size (align-items: stretch). Photo height
@@ -1633,7 +1637,7 @@ function _renderWeatherToday(hoursToday, today, timezone) {
   const tide = row?.tide_height != null ? parseFloat(row.tide_height) : null;
   const parts = [];
   if (code != null) parts.push(`<span class="weather-now-cond" title="${escHtml(wmoLabel(code))}">${wmoIcon(code)}</span>`);
-  if (temp != null) parts.push(`<span>${Math.round(parseFloat(temp))}°</span>`);
+  if (temp != null) parts.push(`<span>🌡️ ${Math.round(parseFloat(temp))}°</span>`);
   if (wind != null) parts.push(`<span>💨 ${Math.round(parseFloat(wind))}mph</span>`);
   if (uv != null)   parts.push(`<span>☀️ ${Math.round(parseFloat(uv))}</span>`);
   if (Number.isFinite(tide)) parts.push(`<span>🌊 ${tide.toFixed(1)}ft</span>`);
@@ -2249,14 +2253,57 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
   }
   const windowLabel  = _formatHourRange(nowWindow.start, nowWindow.end);
   const windowStatus = today.best_window_status ?? 'go';
-  const signals = [
-    today.lowest_tide_height != null ? `tide ${parseFloat(today.lowest_tide_height).toFixed(1)}ft` : null,
-    today.avg_wind  != null ? `wind ${Math.round(today.avg_wind)}mph` : null,
-    today.avg_temp  != null ? `temp ${Math.round(today.avg_temp)}°F` : null,
-    today.avg_uv    != null ? `UV index ${parseFloat(today.avg_uv).toFixed(1)}` : null,
-    today.busyness_category ? `crowds: ${today.busyness_category}` : null,
-    today.bacteria_risk && today.bacteria_risk !== 'none' ? `bacteria risk: ${today.bacteria_risk}` : null,
-  ].filter(Boolean).join(', ');
+
+  // ── Deterministic cautions + descriptive metaphors ───────────────
+  // Scout's prompt receives a STRICT list of what's actually flagged
+  // today, plus an explicit list of conditions that are NOT issues.
+  // Stops the LLM from inventing "hot sand" / "paw burn risk" when
+  // surface temps are cool. UV is conveyed as a prose metaphor (no
+  // raw numeric scores in Scout's output).
+  const hrs = Array.isArray(hoursToday) ? hoursToday.filter(h => h && h.hour_score != null) : [];
+  const maxOf = key => hrs.reduce((m, h) => (h[key] != null && parseFloat(h[key]) > m ? parseFloat(h[key]) : m), -Infinity);
+  const minOf = key => hrs.reduce((m, h) => (h[key] != null && parseFloat(h[key]) < m ? parseFloat(h[key]) : m), +Infinity);
+  const maxSand    = maxOf('sand_temp');
+  const maxAsphalt = maxOf('asphalt_temp');
+  const maxUV      = maxOf('uv_index');
+  const maxWind    = maxOf('wind_speed');
+  const maxTempAir = maxOf('temp_air');
+  const minTempAir = minOf('temp_air');
+  const peakTide   = maxOf('tide_height');
+  const cautionFacts = [];
+  if (peakTide   >= 5)   cautionFacts.push(`HIGH TIDE peaking at ${peakTide.toFixed(1)}ft — less sand exposed`);
+  if (maxWind    >= 15)  cautionFacts.push(`WIND ${Math.round(maxWind)}mph — secure loose items`);
+  if (maxSand    >= 115) cautionFacts.push(`HOT SAND ${Math.round(maxSand)}°F — paw burn risk`);
+  if (maxAsphalt >= 115) cautionFacts.push(`HOT ASPHALT ${Math.round(maxAsphalt)}°F — paw burn risk in parking lot`);
+  if (minTempAir !== Infinity && minTempAir < 55) cautionFacts.push(`COLD: ${Math.round(minTempAir)}°F lows`);
+  if (maxTempAir >= 90)  cautionFacts.push(`HOT AIR ${Math.round(maxTempAir)}°F`);
+  if (maxUV      >= 8)   cautionFacts.push('STRONG UV — sunscreen for the kahu');
+  if (today.bacteria_risk && !['none','low'].includes(today.bacteria_risk))
+    cautionFacts.push(`BACTERIA: ${today.bacteria_risk}`);
+  // Non-issues — explicitly listed so Scout doesn't invent them.
+  const nonIssues = [];
+  if (maxSand < 115)    nonIssues.push(`sand is cool (${Number.isFinite(maxSand) ? Math.round(maxSand) + '°F' : 'cool'}) — DO NOT mention hot sand or paw burn on sand`);
+  if (maxAsphalt < 115) nonIssues.push(`asphalt is fine — DO NOT mention hot asphalt or paw burn on pavement`);
+  if (maxUV < 6)        nonIssues.push('UV is moderate — DO NOT push sunscreen hard');
+  if (maxWind < 15)     nonIssues.push('wind is calm — DO NOT mention wind concerns');
+  if (peakTide < 5)     nonIssues.push('tide is normal — DO NOT mention high tide / cliffs');
+  if (!today.bacteria_risk || ['none','low'].includes(today.bacteria_risk)) nonIssues.push('water quality is fine — DO NOT mention bacteria');
+  // Descriptive metaphors instead of raw scores.
+  const uvMetaphor = maxUV >= 9 ? 'sun is searing'
+                   : maxUV >= 7 ? 'sun is punching hard'
+                   : maxUV >= 5 ? 'strong sun'
+                   : maxUV >= 3 ? 'moderate sun'
+                   : Number.isFinite(maxUV) ? 'gentle sun' : null;
+  const tempMetaphor = maxTempAir >= 90 ? 'a scorcher'
+                     : maxTempAir >= 80 ? 'warm and bright'
+                     : maxTempAir >= 70 ? 'sunny and mild'
+                     : maxTempAir >= 60 ? 'comfortable'
+                     : maxTempAir >= 50 ? 'cool'
+                     : Number.isFinite(maxTempAir) ? 'chilly' : null;
+  const windMetaphor = maxWind >= 20 ? 'wind is howling'
+                     : maxWind >= 15 ? 'wind is blowing through'
+                     : maxWind >= 10 ? 'breezy'
+                     : Number.isFinite(maxWind) ? 'still air' : null;
 
   const nowH = _currentLocalHour(beach?.timezone);
   const nowLabel = nowH != null
@@ -2274,14 +2321,24 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
   // Pack-list intentionally NOT mentioned — the Pack List card below
   // handles that. Scout's prose stays about beach + window only.
   const question =
-    `Current local time: ${nowLabel || 'now'}. Best window remaining: ${windowLabel} (${windowStatus}). Conditions: ${signals}. ` +
-    `Activities the zone rules ALLOW today (weave 1-2 of these into the NOW part — DON'T invent, DON'T list all): ${actPhrases.join(' · ')}. ` +
-    `Write the response in EXACTLY this two-part format on separate lines (the labels are MANDATORY): ` +
-    `\n\nBEACH: <2 short sentences describing the beach and its zones — character, what kind of place it is, what makes it good for dogs. Stick to static beach features, NOT today's weather.>` +
-    `\n\nNOW: <2 short sentences on why the **${windowLabel}** window is a great time today (bold the window in **markdown**). Weave in 1-2 activities and emphasize the FUN the kahu and pup will have. Address active cautions for BOTH the dog AND the kahu with CONCRETE guidance.>` +
-    `\n\nExamples of caution framing: high tide → "stick to the upper beach, watch for kids and dogs being pushed toward the cliffs/rocks"; high UV (≥8) → "sunscreen for you and a shade break, pup's coat is its sunscreen"; high wind (≥15mph) → "secure hats and treats, your pup will want shelter"; bacteria → "keep your dog out of the surf, don't let them drink seawater". ` +
-    `BOLD ONLY the time window. No headers beyond BEACH: / NOW:, no bullets, no pack list, no gear recommendations. ` +
-    `STRICT: respect the DOG POLICY ZONE RULES in the system prompt. Never describe activities in sections marked not_allowed. Never reference times before the current local time. Use only the activities provided above — don't invent.`;
+    `Current local time: ${nowLabel || 'now'}. Best window remaining: ${windowLabel} (${windowStatus}).\n\n` +
+    `ACTIVE CAUTIONS TODAY (address these and ONLY these):\n${cautionFacts.length ? cautionFacts.map(c => '- ' + c).join('\n') : '- (none — conditions are clean)'}\n\n` +
+    `NOT FLAGGED TODAY (you MUST NOT mention these as concerns; they are explicitly NOT issues):\n${nonIssues.length ? nonIssues.map(n => '- ' + n).join('\n') : '- (n/a)'}\n\n` +
+    `DESCRIPTIVE METAPHORS — use these phrasings instead of raw numeric scores anywhere in your prose:\n` +
+    (uvMetaphor   ? `- UV: "${uvMetaphor}"\n`     : '') +
+    (tempMetaphor ? `- Temp: "${tempMetaphor}"\n` : '') +
+    (windMetaphor ? `- Wind: "${windMetaphor}"\n` : '') +
+    `\nActivities the zone rules ALLOW today (weave 1-2 into NOW; do NOT invent, do NOT list all): ${actPhrases.join(' · ')}\n\n` +
+    `Write the response in EXACTLY this two-part format on separate lines:\n\n` +
+    `BEACH: <2 short sentences describing the beach and its zones — character, what kind of place it is, what makes it good for dogs. Static features only. NO weather, NO today.>\n\n` +
+    `NOW: <2 short sentences on why the **${windowLabel}** window is great today (bold the window in **markdown**). Weave in 1-2 activities + emphasize the FUN the kahu and pup will have. Address ONLY the active cautions listed above with CONCRETE guidance for both dog AND kahu. Use the metaphors instead of numbers.>\n\n` +
+    `STRICT RULES:\n` +
+    `- Mention only cautions from the ACTIVE CAUTIONS list above. The "NOT FLAGGED" list is what you must NOT mention.\n` +
+    `- NEVER write raw UV numbers, raw wind mph, or sand-temperature numbers in the prose. Use the metaphors.\n` +
+    `- BOLD only the time window. No headers beyond BEACH:/NOW:, no bullets, no pack list, no gear recommendations.\n` +
+    `- Respect DOG POLICY ZONE RULES; never describe activities in sections marked not_allowed.\n` +
+    `- Never reference times before the current local time.\n` +
+    `- Use ONLY the activities provided — don't invent.`;
 
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/beach-chat`, {
@@ -2801,17 +2858,25 @@ function _packListItems(beach, dogPolicy, amenities, hoursToday) {
   return items;
 }
 
+// Short labels for the pack-list chip strip — same visual language
+// as the amenities + activities combo card on mobile.
+const _PACK_SHORT = {
+  'Water': 'Water', 'Poop bags': 'Bags', 'Leash': 'Leash',
+  'Towel': 'Towel', 'Fetch toy': 'Toy',
+  'Sunscreen': 'SPF', 'Paw booties': 'Booties',
+  'Warm layer': 'Layer',
+};
 function buildPackListCard(beach, dogPolicy, amenities, hoursToday) {
   const items = _packListItems(beach, dogPolicy, amenities, hoursToday);
   if (!items.length) return '';
   const chips = items.map(it => `
-    <div class="packlist-chip" data-tip="${escHtml(it.reason)}">
-      <span class="packlist-icon">${it.icon}</span>
-      <span class="packlist-label">${escHtml(it.label)}</span>
+    <div class="combo-chip" data-tip="${escHtml(it.reason)}">
+      <span class="combo-icon">${it.icon}</span>
+      <div class="combo-label">${escHtml(_PACK_SHORT[it.label] || it.label)}</div>
     </div>`).join('');
-  return `<section class="card packlist-card">
-    <h2>Pack List</h2>
-    <div class="packlist-chips">${chips}</div>
+  return `<section class="card combo-card packlist-card">
+    <div class="combo-row-label">Pack list</div>
+    <div class="combo-row">${chips}</div>
   </section>`;
 }
 
@@ -2951,7 +3016,7 @@ function _activityIcons(beach, dogPolicy, amenities, hoursToday) {
 // Short labels rendered under each icon — tight enough to fit a chip.
 const _AMENITY_SHORT = {
   has_parking: 'Park', has_restrooms: 'WC', has_showers: 'Shower',
-  has_drinking_water: 'Water', has_picnic_area: 'Picnic',
+  has_drinking_water: 'Water', has_picnic_area: 'Tables',
   has_fire_pits: 'Fire', has_lifeguards: 'Guard',
   has_disabled_access: 'ADA',
 };
@@ -2969,9 +3034,33 @@ const _ACTIVITY_SHORT = {
 // Section / amenity keys that the Activities row already captures —
 // don't double-render them in the Amenities row. Sand and water are
 // intentionally NOT dedup'd: "Sand" in Amenities ≠ "Off-leash" in
-// Activities; "Water" ≠ "Splash".
-const _AMENITY_DEDUP_KEYS     = new Set(['has_picnic_area']);
-const _AMENITY_DEDUP_SECTIONS = new Set(['picnic_area', 'trails']);
+// Activities; "Water" ≠ "Splash". "Tables" (has_picnic_area) is
+// non-redundant — kept as an amenity even though Picnic is also an
+// activity (the physical tables are distinct from the act of picnicking).
+const _AMENITY_DEDUP_KEYS     = new Set();
+const _AMENITY_DEDUP_SECTIONS = new Set(['trails']);
+
+// Sort order for amenity + section tiles — most dog-relevant first.
+// Anything not in this map sorts to the end.
+const _AMENITY_PRIORITY = {
+  has_parking:         1,
+  has_drinking_water:  2,
+  has_restrooms:       3,
+  has_showers:         4,
+  has_picnic_area:     5,
+  'section:sand':      6,
+  'section:water_swim':7,
+  'section:tide_pools':8,
+  'section:boardwalk': 9,
+  has_lifeguards:     10,
+  has_disabled_access:11,
+  has_fire_pits:      12,
+  'section:dunes':    13,
+  'section:bluff':    14,
+  'section:campground':15,
+  'section:playground':16,
+  'section:nesting_zones':17,
+};
 
 // Top-N flat list of amenity + section tiles for mobile, with the
 // most-permissive rule attached and 'unknown' filtered out.
@@ -3002,6 +3091,12 @@ function _flatTopAmenities(amenities, dogPolicy, limit) {
       tip: `${sec.label} · ${({off_leash:'Off-leash',on_leash:'On-leash',not_allowed:'Not allowed'})[rule] || rule}`,
     });
   }
+  // Sort by explicit priority, then slice to limit.
+  out.sort((a, b) => {
+    const keyA = a.kind === 'section' ? `section:${a.sectionName}` : a.key;
+    const keyB = b.kind === 'section' ? `section:${b.sectionName}` : b.key;
+    return (_AMENITY_PRIORITY[keyA] ?? 99) - (_AMENITY_PRIORITY[keyB] ?? 99);
+  });
   return out.slice(0, limit);
 }
 

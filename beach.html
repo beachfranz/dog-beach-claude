@@ -25,6 +25,7 @@
     --amber: #f59e0b;
   }
   * { box-sizing: border-box; }
+  html, body { overflow-x: hidden; }
   body {
     margin: 0; font-family: 'DM Sans', system-ui, sans-serif;
     background: var(--bg); color: var(--text); line-height: 1.5;
@@ -546,8 +547,8 @@
   /* Scout CTA — "Wanna go? Drive ~XX min.   [🐾 Let Pack Know] [Get directions →]" */
   .scout-cta {
     margin-top: 12px;
-    display: flex; align-items: center; justify-content: space-between;
-    flex-wrap: wrap; gap: 8px;
+    display: flex; align-items: center; justify-content: center;
+    flex-wrap: wrap; gap: 10px;
     font-size: 14px; color: var(--text);
   }
   .scout-cta:empty { display: none; }

@@ -654,7 +654,7 @@ function render(data, beachFid) {
   main.push(buildAlternativesSection(dog_policy, data.alternatives));
   if (hasPhotos) main.push('<div class="photo-block-wrap" id="photo-block-mount"></div>');
   main.push(buildOverviewCard(beach, data.description));
-  main.push(buildBestTimeCard(data.today, dog_policy, beachFid, data.hours_today));
+  main.push(buildBestTimeCard(data.today, dog_policy, beachFid, data.hours_today, beach, amenities));
   main.push(buildLocationSection(beach));
   main.push(buildDetailsSection(dog_policy));
   main.push(buildLinksSection(beach, beachFid));
@@ -1301,18 +1301,51 @@ function buildOverviewCard(beach, description) {
 // .score-bar-col per hour with the score value above, dog icon for
 // hours in the best window, status-color fill, and x-axis labels
 // every other hour.
-function _renderScoreBars(hoursToday) {
+// Best-fit "from" / "to" hours for the chart x-axis. Priority:
+//   1. Gate hours (beach.open_time/close_time, non-default seed)
+//   2. Posted prose parse (regex out an "8am-6pm" style range from
+//      amenities.hours_text)
+//   3. Standard fallback 05:00–22:00 (matches the universal seed)
+function _parseHoursText(text) {
+  if (!text) return null;
+  const m = String(text).match(
+    /(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*(?:[-–]|to)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
+  if (!m) return null;
+  const to24 = (h, ap) => {
+    h = parseInt(h, 10);
+    if (/pm/i.test(ap) && h < 12) h += 12;
+    if (/am/i.test(ap) && h === 12) h = 0;
+    return h;
+  };
+  return { startH: to24(m[1], m[3]), endH: to24(m[4], m[6]) };
+}
+function _hoursWindowForChart(beach, amenities) {
+  const open  = beach?.open_time;
+  const close = beach?.close_time;
+  const isDefault = open === '05:00' && close === '22:00';
+  if (open && close && !isDefault) {
+    return { startH: parseInt(open.slice(0,2), 10),
+             endH:   parseInt(close.slice(0,2), 10) };
+  }
+  const parsed = _parseHoursText(amenities?.hours_text);
+  if (parsed) return parsed;
+  return { startH: 5, endH: 22 };
+}
+
+function _renderScoreBars(hoursToday, beach, amenities) {
   if (!Array.isArray(hoursToday) || hoursToday.length === 0) return '';
-  // Filter to daylight hours only — show hours that have a real
-  // computed status. Sort by hour ASC.
+  const { startH, endH } = _hoursWindowForChart(beach, amenities);
+  // One bar per hour in the open window. Null-score hours inside the
+  // window (dog-prohibition zones, pre-sunrise, etc.) render as no_go
+  // red so the chart stays continuous instead of leaving gaps.
   const hours = hoursToday
-    .filter(h => h.hour_status && h.hour_score != null)
+    .filter(h => h.local_hour >= startH && h.local_hour <= endH)
     .sort((a, b) => a.local_hour - b.local_hour);
   if (hours.length === 0) return '';
 
   const MAX_PX = 22; // bar max height in CSS px
-  const scores = hours.map(h => h.hour_score);
-  const maxV = Math.max(...scores, 1);
+  const scored = hours.filter(h => h.hour_score != null);
+  const maxV = Math.max(...scored.map(h => h.hour_score), 1);
   // Three colors only. Conditions-domain amber is burnt (amber-500
   // nudged ~7% toward red) so it's visually distinct from the amber-400
   // (yellow-leaning) the Amenities on_leash tile uses. Best-window
@@ -1328,14 +1361,20 @@ function _renderScoreBars(hoursToday) {
   };
 
   const barsHtml = hours.map(h => {
-    const pct = Math.max(h.hour_score / maxV, 0.05);
-    const px  = Math.round(pct * MAX_PX);
-    const dog = h.is_in_best_window ? '🐶' : '';
+    const noScore = h.hour_score == null;
+    const pct  = noScore ? 1 : Math.max(h.hour_score / maxV, 0.05);
+    const px   = Math.round(pct * MAX_PX);
+    const fill = noScore ? 'rgba(239,68,68,0.45)' : colorFor(h);
+    const dog  = !noScore && h.is_in_best_window ? '🐶' : '';
+    const valueLabel = noScore ? '' : Math.round(h.hour_score);
+    const title = noScore
+      ? `${fmtHour(h.local_hour)} · not allowed`
+      : `${fmtHour(h.local_hour)} · ${Math.round(h.hour_score)} · ${h.hour_status}`;
     return `
-      <div class="score-bar-col" title="${fmtHour(h.local_hour)} · ${Math.round(h.hour_score)} · ${h.hour_status}">
+      <div class="score-bar-col" title="${title}">
         <div class="score-bar-dog">${dog}</div>
-        <div class="score-bar-value">${Math.round(h.hour_score)}</div>
-        <div class="score-bar" style="height:${px}px; background:${colorFor(h)};"></div>
+        <div class="score-bar-value">${valueLabel}</div>
+        <div class="score-bar" style="height:${px}px; background:${fill};"></div>
       </div>`;
   }).join('');
 
@@ -1350,7 +1389,7 @@ function _renderScoreBars(hoursToday) {
   </div>`;
 }
 
-function buildBestTimeCard(today, dogPolicy, beachFid, hoursToday) {
+function buildBestTimeCard(today, dogPolicy, beachFid, hoursToday, beach, amenities) {
   const hasWindow = today && today.best_window_label;
   const isNoDogs = !!dogPolicy && (
     dogPolicy.dogs_allowed === 'no' ||
@@ -1374,7 +1413,7 @@ function buildBestTimeCard(today, dogPolicy, beachFid, hoursToday) {
       <span class="besttime-text">Best Times Today</span>
     </div>`;
   }
-  const scoreBars = _renderScoreBars(hoursToday);
+  const scoreBars = _renderScoreBars(hoursToday, beach, amenities);
   return `<section class="card besttime-card${clickable ? ' clickable' : ''}" data-fid="${beachFid}">
     ${headerRow}
     <div id="scout-blurb">…</div>
@@ -1580,24 +1619,34 @@ async function loadScoutBlurb(beach, today, dogPolicy) {
   }
 }
 
-// True if zone_rules says any of sand/water/dunes/tide_pools is
-// 'not_allowed' — the "trails-only beach" pattern.
+// True ONLY if dogs have no sand/water access anywhere on the beach —
+// every region's sand/water_swim/dunes/tide_pools section is not_allowed
+// AND no time_window inside those sections permits dogs. If ANY region
+// or time_window permits dog access to sand/water, this returns false
+// (Franz rule 2026-05-15: any zone with dog access means the beach is
+// not a no-go).
 function _sandOrWaterProhibited(zr) {
   if (!zr || typeof zr !== 'object') return false;
   const seasons = (Array.isArray(zr.seasons) && zr.seasons.length)
     ? zr.seasons
     : (Array.isArray(zr.regions) ? [{ regions: zr.regions }] : []);
   const blocked = ['sand', 'water_swim', 'dunes', 'tide_pools'];
+  let sawAnyBlockedSection = false;
   for (const s of seasons) {
     const regions = Array.isArray(s.regions) ? s.regions : [];
     for (const reg of regions) {
       const sections = reg.sections || {};
       for (const name of blocked) {
-        if (sections[name]?.rule === 'not_allowed') return true;
+        const sec = sections[name];
+        if (!sec) continue;
+        sawAnyBlockedSection = true;
+        if (sec.rule && sec.rule !== 'not_allowed') return false;
+        const tws = Array.isArray(sec.time_windows) ? sec.time_windows : [];
+        if (tws.some(tw => tw.rule && tw.rule !== 'not_allowed')) return false;
       }
     }
   }
-  return false;
+  return sawAnyBlockedSection;
 }
 
 // Alternatives card — renders when (a) dogs not allowed here, or

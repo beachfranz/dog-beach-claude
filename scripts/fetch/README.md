@@ -39,7 +39,7 @@ python scripts/fetch/fetch_url.py "https://ecode360.com/43799422"
 | **eCFR API** (`fetch_ecfr.py`) | Federal CFR sections | ~1s | High — government API, no bot detection |
 | **leginfo** (`fetch_leginfo.py`) | CA state codes (PRC/HSC/FGC/etc.) | 5-8s | High — server-rendered, no bot detection |
 | **ecode360** (`fetch_ecode360.py`) | Municipal codes on ecode360 (HBMC, ~40 CA cities) | 8-15s | High — SPA but cooperative |
-| **Municode** (`fetch_municode.py`) | Municipal codes on library.municode.com (~50% of CA cities) | 15s+ | LOW — bot-protected, often returns "not authorized" |
+| **Municode** (`fetch_municode.py`) | Municipal codes on library.municode.com (~50% of CA cities) | 10-15s | High — works with `.codes-chunks-pg` selector + correct doc slug |
 | **Playwright** (`fetch_html.py`) | Everything else | 5-15s | High for most sites; Cloudflare-Enterprise still blocks |
 
 WebFetch (the AI-tool default) gets 403'd on a long list of sites we need
@@ -77,16 +77,15 @@ playwright install chromium
   PDFs and CFR-edition PDFs from GovInfo) don't render to text cleanly
   through any HTTP fetch. Read the file locally with a PDF tool or get
   the equivalent HTML / API representation.
-- **Municode bot-protection** — `library.municode.com` actively
-  detects Playwright (headed or headless) and returns "The requested
-  content cannot be found or you are not authorized to view it." for
-  any deep-section nodeId. The SPA has no public JSON API to call
-  directly. `fetch_municode.py` confirms the failure and exits 5;
-  workflow then is CPRA request or manual browser-paste into the
-  walkthrough doc's evidence_verbatim. Discovered 2026-05-16 with
-  EBRPD Ordinance 38 + Long Beach Dog Beach Zone designation.
-  ~50% of CA cities are on Municode, so this is a significant
-  coverage gap for Wave 3.
+- **Municode document slug varies per jurisdiction.** Long Beach uses
+  `/codes/municipal_code`, others use `/codes/code_of_ordinances`. The
+  "not authorized" page only fires when the slug is wrong for that
+  jurisdiction (NOT bot detection — my initial conclusion 2026-05-16
+  was wrong). `fetch_municode.py` keeps a per-jurisdiction slug table;
+  pass `--doc <slug>` to override. With the right slug and the
+  `.codes-chunks-pg` selector, full chapter text renders cleanly.
+  The selector returns the chapter (sibling sections), not just one
+  section — use `sed -n` to scope.
 
 ## Useful patterns discovered
 

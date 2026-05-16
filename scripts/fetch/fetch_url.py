@@ -171,11 +171,10 @@ def main() -> int:
             return 0
 
     if is_municode(args.url):
-        # Municode is bot-protected; try and warn on failure.
         try:
             out = fetch_html.fetch(
                 args.url,
-                selector="#content",
+                selector=".codes-chunks-pg",
                 raw_html=args.html,
                 wait_seconds=max(args.wait, 12.0),
                 timeout_ms=60000,
@@ -186,7 +185,8 @@ def main() -> int:
         print(out)
         if "requested content cannot be found" in out:
             print(
-                "[!] Municode bot-protection — try CPRA or browser-paste",
+                "[!] Municode SPA didn't resolve nodeId — wrong doc slug? "
+                "verify URL in browser",
                 file=sys.stderr,
             )
             return 5

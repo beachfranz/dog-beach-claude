@@ -2,7 +2,10 @@
 Auto-routing URL fetcher for the law-as-primary-source-ca initiative.
 
 Routes requests to the right backend based on the URL host:
-- ecfr.gov / federalregister.gov  -> eCFR API (fetch_ecfr or direct API call)
+- ecfr.gov / federalregister.gov   -> eCFR API
+- leginfo.legislature.ca.gov       -> fetch_leginfo (Playwright + selector)
+- ecode360.com                     -> fetch_ecode360 (Playwright + selector)
+- library.municode.com             -> fetch_municode (often fails — see module)
 - Everything else                  -> Headless Chromium (fetch_html)
 
 Usage:
@@ -38,11 +41,48 @@ if hasattr(sys.stdout, "reconfigure"):
 # Local imports — these are sibling modules in scripts/fetch/
 import fetch_html
 import fetch_ecfr
+import fetch_leginfo
+import fetch_ecode360
+import fetch_municode
 
 
 def is_ecfr(url: str) -> bool:
     host = urlparse(url).hostname or ""
     return host.endswith("ecfr.gov")
+
+
+def is_leginfo(url: str) -> bool:
+    host = urlparse(url).hostname or ""
+    return host.endswith("leginfo.legislature.ca.gov")
+
+
+def is_ecode360(url: str) -> bool:
+    host = urlparse(url).hostname or ""
+    return host.endswith("ecode360.com")
+
+
+def is_municode(url: str) -> bool:
+    host = urlparse(url).hostname or ""
+    return "municode.com" in host
+
+
+def parse_leginfo_url(url: str):
+    """Extract (lawCode, sectionNum) from a leginfo URL."""
+    from urllib.parse import parse_qs
+    qs = parse_qs(urlparse(url).query)
+    law = (qs.get("lawCode", [None])[0] or "").upper()
+    section = qs.get("sectionNum", [None])[0]
+    if law and section:
+        return law, section
+    return None
+
+
+def parse_ecode360_url(url: str):
+    """Extract nodeId from an ecode360 URL: /<nodeId> or /<nodeId>#..."""
+    path = urlparse(url).path.strip("/")
+    if path and path.split("/")[0].isdigit():
+        return path.split("/")[0]
+    return None
 
 
 def parse_ecfr_section_url(url: str):
@@ -107,6 +147,50 @@ def main() -> int:
             else:
                 print(fetch_ecfr.xml_to_text(xml_str))
             return 0
+
+    if is_leginfo(args.url):
+        parsed = parse_leginfo_url(args.url)
+        if parsed:
+            law, section = parsed
+            try:
+                print(fetch_leginfo.fetch_section(law, section, wait_seconds=max(args.wait, 3.0)))
+            except Exception as e:
+                print(f"leginfo ERROR: {e}", file=sys.stderr)
+                return 3
+            return 0
+        # Fall through to default Playwright for non-section leginfo paths
+
+    if is_ecode360(args.url):
+        node_id = parse_ecode360_url(args.url)
+        if node_id:
+            try:
+                print(fetch_ecode360.fetch_node(node_id, wait_seconds=max(args.wait, 6.0)))
+            except Exception as e:
+                print(f"ecode360 ERROR: {e}", file=sys.stderr)
+                return 3
+            return 0
+
+    if is_municode(args.url):
+        # Municode is bot-protected; try and warn on failure.
+        try:
+            out = fetch_html.fetch(
+                args.url,
+                selector="#content",
+                raw_html=args.html,
+                wait_seconds=max(args.wait, 12.0),
+                timeout_ms=60000,
+            )
+        except Exception as e:
+            print(f"municode ERROR: {e}", file=sys.stderr)
+            return 3
+        print(out)
+        if "requested content cannot be found" in out:
+            print(
+                "[!] Municode bot-protection — try CPRA or browser-paste",
+                file=sys.stderr,
+            )
+            return 5
+        return 0
 
     # Default: Playwright
     try:

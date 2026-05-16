@@ -735,6 +735,18 @@ function _currentLocalHour(timezone) {
   return h != null ? (parseInt(h, 10) % 24) : null;
 }
 
+// Parse "HH:MM" → minutes-since-midnight. Tolerates "9:00", "09:30".
+// Returns null for empty / malformed input.
+function _hhmmToMinutes(hhmm) {
+  if (!hhmm || typeof hhmm !== 'string') return null;
+  const m = hhmm.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  const mm = parseInt(m[2], 10);
+  if (Number.isNaN(h) || Number.isNaN(mm)) return null;
+  return h * 60 + mm;
+}
+
 function _currentLocalMinutes(timezone) {
   const tz = timezone || 'America/Los_Angeles';
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -848,7 +860,7 @@ function render(data, beachFid) {
   //   tints them in place), Cautions, Hours, Weather and Tides.
   const leftRail = [];
   leftRail.push(buildAmenitiesSection(amenities, dog_policy));
-  leftRail.push(buildCautionsSection(data.today, dog_policy, data.hours_today));
+  leftRail.push(buildCautionsSection(data.today, dog_policy, data.hours_today, beach));
   leftRail.push(buildHoursSection(beach, amenities, dog_policy));
   leftRail.push(buildWeatherSection(beach));
   document.getElementById('left-rail').innerHTML = leftRail.filter(Boolean).join('');
@@ -1939,16 +1951,30 @@ function _wireBestTimeClick() {
 // derived from hours_today. Ports detail.html's status-board logic
 // into a left-rail card with consistent style. Also surfaces day-level
 // signals (bacteria_risk, seasonal dog closure) at the top.
-function buildCautionsSection(today, dogPolicy, hoursToday) {
-  // Day-level signals (already aggregated by daily-refresh)
+function buildCautionsSection(today, dogPolicy, hoursToday, beach) {
+  // Time-aware filter: cautions only matter for the rest of the day.
+  // If a high tide peaked at 7am and it's now 2pm, nobody needs a
+  // warning about it — strip past hours from the metric pass.
+  const nowH   = _currentLocalHour(beach?.timezone);
+  const nowMin = _currentLocalMinutes(beach?.timezone);
+  const remainingHours = (Array.isArray(hoursToday) ? hoursToday : [])
+    .filter(h => nowH == null || h.local_hour == null || h.local_hour >= nowH);
+
+  // Day-level signals (already aggregated by daily-refresh).
+  // Bacteria risk persists across the day — keep regardless of time.
+  // Dogs-prohibited time window drops when the end has already passed.
   const dayItems = [];
   if (today?.bacteria_risk && today.bacteria_risk !== 'none' && today.bacteria_risk !== 'low') {
     dayItems.push({ status: 'caution', icon: '🦠', label: 'Bacteria',
                     value: today.bacteria_risk, time: '' });
   }
   if (dogPolicy?.dogs_prohibited_start && dogPolicy?.dogs_prohibited_end) {
-    dayItems.push({ status: 'no_go', icon: '🚫', label: 'Dogs prohibited',
-                    value: `${dogPolicy.dogs_prohibited_start}–${dogPolicy.dogs_prohibited_end}`, time: '' });
+    const endMin = _hhmmToMinutes(dogPolicy.dogs_prohibited_end);
+    const stillRelevant = nowMin == null || endMin == null || endMin > nowMin;
+    if (stillRelevant) {
+      dayItems.push({ status: 'no_go', icon: '🚫', label: 'Dogs prohibited',
+                      value: `${dogPolicy.dogs_prohibited_start}–${dogPolicy.dogs_prohibited_end}`, time: '' });
+    }
   }
 
   // Per-metric time-block items from hours_today
@@ -1975,10 +2001,11 @@ function buildCautionsSection(today, dogPolicy, hoursToday) {
   };
 
   const metricItems = [];
-  if (Array.isArray(hoursToday) && hoursToday.length) {
+  if (remainingHours.length) {
     for (const m of METRICS) {
       // Cautions card surfaces only caution + no_go (advisory excluded).
-      const flagged = hoursToday.filter(h => h[m.statusKey] === 'caution' || h[m.statusKey] === 'no_go');
+      // Source is `remainingHours` — past-hour cautions are already dropped.
+      const flagged = remainingHours.filter(h => h[m.statusKey] === 'caution' || h[m.statusKey] === 'no_go');
       if (!flagged.length) continue;
       let blocks = getBlocks(flagged);
       if (blocks.length >= 3) {

@@ -2094,8 +2094,11 @@ function _wireBestTimeClick() {
 function _cautionTiles(today, dogPolicy, hoursToday, beach) {
   const items = _cautionItems(today, dogPolicy, hoursToday, beach);
   // Single-word labels for the tiny chip caption.
+  // Caution chip labels — keep terse, but spell out the *direction* of
+  // the concern where the metric name alone is ambiguous (Tide isn't a
+  // hazard; high tide is).
   const SHORT = {
-    'Tide': 'Tide', 'Wind': 'Wind', 'Rain': 'Rain', 'Crowd': 'Crowd',
+    'Tide': 'High tide', 'Wind': 'Wind', 'Rain': 'Rain', 'Crowd': 'Crowd',
     'Temp': 'Temp', 'UV': 'UV', 'Sand': 'Sand', 'Asphalt': 'Asphalt',
     'Bacteria': 'Bact.', 'Dogs prohibited': 'No dogs',
   };

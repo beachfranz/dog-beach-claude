@@ -1,0 +1,49 @@
+/* loader.css — full-screen rotating-message overlay shown during page
+ * load. Solid sand-tone backdrop; the page renders behind it but
+ * stays hidden until Loader.stop() fades it away. */
+
+.loader-overlay {
+  position: fixed;
+  inset: 0;
+  background: #f4e9d4;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 18px;
+  opacity: 1;
+  transition: opacity 280ms ease-out;
+}
+.loader-overlay.fading {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.loader-step {
+  font-family: 'Outfit', system-ui, -apple-system, sans-serif;
+  font-size: 18px;
+  font-weight: 500;
+  color: #5c4a2c;
+  letter-spacing: 0.02em;
+  text-align: center;
+  min-height: 24px;
+  opacity: 1;
+  transition: opacity 140ms ease;
+  padding: 0 24px;
+  display: inline-flex; align-items: center; gap: 8px;
+  justify-content: center;
+}
+.loader-step.swap { opacity: 0; }
+
+.loader-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #c97f3a;
+  animation: loader-pulse 900ms ease-in-out infinite;
+}
+@keyframes loader-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50%      { opacity: 1;    transform: scale(1.1); }
+}

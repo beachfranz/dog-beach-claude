@@ -9,6 +9,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&family=DM+Mono&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="src/photo-block.css">
 <link rel="stylesheet" href="src/zone-rules-block.css">
+<link rel="stylesheet" href="src/loader.css">
+<script src="src/loader.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
   integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
   crossorigin="">
@@ -2225,21 +2227,23 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
     const card = document.querySelector('.scout-beach-card');
     if (card) card.style.display = 'none';
   };
+  // Helper — any short-circuit path also ends the loader.
+  const finishLoader = () => { if (window.Loader) Loader.stop(); };
   if (isNoDogs) {
     if (el) el.textContent = "Sorry bud — dogs aren't allowed here. Check the alternatives below for a nearby spot that welcomes pups.";
-    el?.classList.add('loaded'); hideBeach(); return;
+    el?.classList.add('loaded'); hideBeach(); finishLoader(); return;
   }
   if (isSandWaterProhibited) {
     if (el) el.textContent = "Sorry bud — dogs aren't allowed on the sand or in the water here. Check the alternatives below for a beach where pups can actually hit the surf.";
-    el?.classList.add('loaded'); hideBeach(); return;
+    el?.classList.add('loaded'); hideBeach(); finishLoader(); return;
   }
   if (!today) {
     if (el) el.textContent = '';
-    hideBeach(); return;
+    hideBeach(); finishLoader(); return;
   }
   if (noGoodWindows) {
     if (el) el.textContent = "Today's looking rough at this beach — no go-quality hours. Check the alternatives below if you can travel.";
-    el?.classList.add('loaded'); hideBeach(); return;
+    el?.classList.add('loaded'); hideBeach(); finishLoader(); return;
   }
 
   // Time-aware window: only consider hours from the current local hour
@@ -2249,7 +2253,7 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
   const nowWindow = _bestWindowFromNow(hoursToday, beach, amenities, dogPolicy);
   if (!nowWindow) {
     if (el) el.textContent = "Today's good windows have already passed at this beach — check back tomorrow morning.";
-    el?.classList.add('loaded'); hideBeach(); return;
+    el?.classList.add('loaded'); hideBeach(); finishLoader(); return;
   }
   const windowLabel  = _formatHourRange(nowWindow.start, nowWindow.end);
   const windowStatus = today.best_window_status ?? 'go';
@@ -2371,6 +2375,10 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
     if (nowEl)   nowEl.textContent   = '';
   }
   _renderScoutCTA(beach);
+  // LLM blurb (success or fail) has landed — request the loader to
+  // end. The loader still waits for its first list-pass to complete
+  // before fading out.
+  if (window.Loader) Loader.stop();
 }
 
 // ─── Scout CTA ───────────────────────────────────────────────────────
@@ -3256,11 +3264,19 @@ function initMap(beach) {
   setTimeout(() => map.invalidateSize(), 1200);
 }
 
+// Loader overlay — rotating status line while the page bootstraps.
+// Stop is wired below once load()'s render phase finishes.
+if (window.Loader) Loader.start();
+
 // Kick off the geolocation prompt as soon as the script runs so the
 // permission popup appears immediately on page load, in parallel with
 // the data fetch. Result lands in localStorage; the later call from
 // render() reads from cache (no second prompt).
 _getUserLocation();
+// Loader.stop() fires from loadScoutBlurb (when the LLM blurb lands)
+// rather than here so the overlay stays up until the AI is actually
+// rendered. Errors in load() still resolve the loader via the
+// safety timeout in loader.js.
 load();
 </script>
 

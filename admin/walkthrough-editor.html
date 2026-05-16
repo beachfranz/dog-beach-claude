@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<!--
+  admin/walkthrough-editor.html — editable walkthrough doc for the
+  law-as-primary-source-ca initiative. Entity stack for one beach
+  (default: Huntington Dog Beach), edited in place, persisted to
+  localStorage, exportable as JSON or Markdown.
+
+  Companion to docs/walkthrough_huntington_dog_beach.md. The MD is
+  the snapshot; this is the editable working surface.
+
+  No server. No auth. Self-contained.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Walkthrough Editor — Dog Beach Admin</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:         #f8fafc;
+      --panel:      #ffffff;
+      --border:     #e2e8f0;
+      --border-hov: #cbd5e1;
+      --text:       #0f172a;
+      --text-muted: #475569;
+      --text-dim:   #94a3b8;
+      --accent:     #3b82f6;
+      --accent-hov: #2563eb;
+      --green:      #15803d;
+      --green-bg:   #dcfce7;
+      --red:        #b91c1c;
+      --red-bg:     #fee2e2;
+      --amber:      #b45309;
+      --amber-bg:   #fef3c7;
+      --blue:       #1d4ed8;
+      --blue-bg:    #dbeafe;
+      --dirty-bg:   #fffbeb;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+      padding-bottom: 60px;
+    }
+
+    /* ── Header ────────────────────────────────────────────────────── */
+    header {
+      background: #1e293b;
+      color: #f1f5f9;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    }
+    header h1 { font-size: 16px; font-weight: 600; }
+    header .beach-name { color: #94a3b8; font-weight: 400; font-size: 14px; }
+    header .actions { margin-left: auto; display: flex; gap: 8px; }
+    header button {
+      background: #334155; color: #f1f5f9;
+      border: 1px solid #475569;
+      padding: 6px 12px; border-radius: 6px;
+      font-size: 12px; font-weight: 500;
+      cursor: pointer; font-family: inherit;
+    }
+    header button:hover { background: #475569; }
+    header button.primary { background: var(--accent); border-color: var(--accent); }
+    header button.primary:hover { background: var(--accent-hov); }
+
+    .save-indicator {
+      font-size: 11px; color: #94a3b8;
+      padding: 4px 10px; border-radius: 4px;
+      background: #334155;
+      font-variant-numeric: tabular-nums;
+    }
+    .save-indicator.saved { color: #86efac; }
+
+    /* ── Layout ────────────────────────────────────────────────────── */
+    main {
+      max-width: 1100px;
+      margin: 24px auto;
+      padding: 0 24px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 18px;
+      overflow: hidden;
+    }
+    .card-header {
+      padding: 12px 18px;
+      background: #f1f5f9;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .card-header h2 {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    .card-header .row-count {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-left: auto;
+    }
+    .card-body { padding: 16px 18px; }
+
+    /* ── Field rows ────────────────────────────────────────────────── */
+    .field-row {
+      display: grid;
+      grid-template-columns: 180px 1fr 80px;
+      gap: 10px;
+      padding: 8px 0;
+      align-items: center;
+      border-bottom: 1px dashed #eef2f7;
+    }
+    .field-row:last-child { border-bottom: none; }
+    .field-row label {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    .field-row input,
+    .field-row textarea,
+    .field-row select {
+      font-family: inherit; font-size: 13px;
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--panel);
+      color: var(--text);
+      outline: none;
+      width: 100%;
+    }
+    .field-row textarea { resize: vertical; min-height: 32px; }
+    .field-row input:focus,
+    .field-row textarea:focus,
+    .field-row select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--blue-bg);
+    }
+
+    /* ── Entity sub-cards (agencies, operators, policy sources) ──── */
+    .entity-card {
+      background: #fafbfc;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 12px;
+      position: relative;
+    }
+    .entity-card-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .entity-card-header .entity-tag {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      padding: 2px 6px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+    .entity-card-header .entity-name {
+      flex: 1;
+      font-size: 14px; font-weight: 600;
+    }
+    .entity-card-header .entity-name input {
+      width: 100%;
+      font-size: 14px; font-weight: 600;
+      padding: 4px 8px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      background: transparent;
+      font-family: inherit;
+    }
+    .entity-card-header .entity-name input:hover { border-color: var(--border); background: var(--panel); }
+    .entity-card-header .entity-name input:focus { border-color: var(--accent); background: var(--panel); }
+    .delete-btn {
+      background: transparent;
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .delete-btn:hover { color: var(--red); border-color: var(--red); background: var(--red-bg); }
+
+    /* ── Status pills ──────────────────────────────────────────────── */
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      cursor: pointer;
+      user-select: none;
+      border: 1px solid transparent;
+      font-family: inherit;
+    }
+    .status-pill.verified  { background: var(--green-bg); color: var(--green); border-color: #86efac; }
+    .status-pill.unverified { background: var(--blue-bg);  color: var(--blue);  border-color: #93c5fd; }
+    .status-pill.unknown   { background: var(--amber-bg); color: var(--amber); border-color: #fcd34d; }
+    .status-pill:hover { filter: brightness(0.96); }
+
+    .add-row-btn {
+      width: 100%;
+      padding: 10px;
+      background: transparent;
+      color: var(--accent);
+      border: 1px dashed var(--border-hov);
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      font-family: inherit;
+      margin-top: 6px;
+    }
+    .add-row-btn:hover { background: var(--blue-bg); border-color: var(--accent); }
+
+    /* ── Tables (joins, section rules, gaps) ──────────────────────── */
+    table.join-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+    .join-table th {
+      text-align: left;
+      padding: 8px 10px;
+      background: #f1f5f9;
+      border-bottom: 1px solid var(--border);
+      font-weight: 600;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    .join-table td {
+      padding: 6px 10px;
+      border-bottom: 1px dashed #eef2f7;
+    }
+    .join-table td input,
+    .join-table td select {
+      width: 100%;
+      padding: 4px 8px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      background: transparent;
+      font-family: inherit;
+      font-size: 13px;
+    }
+    .join-table td input:hover,
+    .join-table td select:hover { border-color: var(--border); background: var(--panel); }
+    .join-table td input:focus,
+    .join-table td select:focus { border-color: var(--accent); background: var(--panel); outline: none; box-shadow: 0 0 0 2px var(--blue-bg); }
+    .join-table td .delete-btn { padding: 2px 6px; font-size: 10px; }
+
+    /* ── Gaps checklist ─────────────────────────────────────────────── */
+    .gap-row {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px dashed #eef2f7;
+    }
+    .gap-row:last-child { border-bottom: none; }
+    .gap-row input[type="checkbox"] {
+      width: 16px; height: 16px;
+      margin-top: 3px; cursor: pointer;
+      accent-color: var(--accent);
+    }
+    .gap-row .gap-text {
+      flex: 1;
+      padding: 4px 8px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      font-family: inherit; font-size: 13px;
+      background: transparent;
+      color: var(--text);
+      width: 100%;
+    }
+    .gap-row .gap-text:hover  { border-color: var(--border); background: var(--panel); }
+    .gap-row .gap-text:focus  { border-color: var(--accent); background: var(--panel); outline: none; }
+    .gap-row.done .gap-text { text-decoration: line-through; color: var(--text-dim); }
+
+    /* ── Discoveries (notes blocks) ──────────────────────────────── */
+    .discovery-block { margin-bottom: 14px; }
+    .discovery-block h3 {
+      font-size: 12px; font-weight: 600;
+      letter-spacing: 0.04em; text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .discovery-block textarea {
+      width: 100%; min-height: 60px;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      font-family: inherit; font-size: 13px;
+      resize: vertical;
+    }
+
+    /* ── Help text ─────────────────────────────────────────────────── */
+    .help {
+      font-size: 12px;
+      color: var(--text-dim);
+      padding: 8px 14px;
+      background: #f8fafc;
+      border-bottom: 1px solid var(--border);
+      font-style: italic;
+    }
+
+    @media (max-width: 720px) {
+      .field-row { grid-template-columns: 1fr; gap: 4px; }
+      .field-row label { font-size: 11px; color: var(--text-dim); }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Walkthrough Editor</h1>
+  <span class="beach-name" id="header-beach-name">—</span>
+  <span class="save-indicator" id="save-indicator">unsaved</span>
+  <div class="actions">
+    <button id="btn-export-json">Export JSON</button>
+    <button id="btn-export-md">Copy as Markdown</button>
+    <button id="btn-reset" title="Reset to default HBDB seed">Reset</button>
+  </div>
+</header>
+
+<div class="help">
+  Edits auto-save to your browser. Status pills cycle <span class="status-pill verified">verified</span>
+  → <span class="status-pill unverified">unverified</span>
+  → <span class="status-pill unknown">unknown</span> when clicked.
+  Export to JSON or Markdown anytime.
+</div>
+
+<main id="main"></main>
+
+<script>
+//
+// ── Default seed: Huntington Dog Beach (fid 6212) ─────────────────────
+//
+// Mirrors docs/walkthrough_huntington_dog_beach.md. Replace any field
+// with your own data; localStorage will keep your edits across reloads.
+//
+const DEFAULT_SEED = {
+  beach: {
+    fid: 6212,
+    display_name: 'Huntington Dog Beach',
+    state: 'CA',
+    tier: '1 (off-leash designated)',
+    location: 'Pacific Coast Hwy, between Goldenwest St and Seapoint St, Huntington Beach',
+    length: '~1 mile',
+  },
+  agencies: [
+    {
+      name: 'City of Huntington Beach',
+      type: 'city',
+      hierarchy: 'California > Orange County > Huntington Beach',
+      authority_domains: 'dog_policy, operations, parking, fire, water_safety',
+      web_url: 'https://www.huntingtonbeachca.gov',
+      code_archive_url: 'https://ecode360.com/',
+      pip_layer: 'jurisdictions',
+      pip_filter: "place_name = 'Huntington Beach'",
+      status: 'unverified',
+    },
+    {
+      name: 'California State Lands Commission',
+      type: 'state',
+      hierarchy: 'California',
+      authority_domains: 'tidelands, submerged_lands',
+      web_url: 'https://www.slc.ca.gov',
+      code_archive_url: 'https://leginfo.legislature.ca.gov/faces/codesTOCSelected.xhtml?tocCode=PRC',
+      pip_layer: 'cslc_sovereign_lands',
+      pip_filter: '',
+      status: 'unknown',
+    },
+    {
+      name: 'Orange County Health Care Agency',
+      type: 'county_department',
+      hierarchy: 'California > Orange County',
+      authority_domains: 'water_quality, bacteria_advisories',
+      web_url: 'https://www.ochealthinfo.com',
+      code_archive_url: '',
+      pip_layer: 'counties',
+      pip_filter: "name = 'Orange'",
+      status: 'unverified',
+    },
+  ],
+  operators: [
+    {
+      name: 'Huntington Dog Beach',
+      type: 'nonprofit',
+      web_url: 'https://www.huntingtondogbeach.org',
+      contact_email: '',
+      contact_phone: '',
+      hours: 'continuous public access',
+      agency_id: '',
+      status: 'unverified',
+    },
+    {
+      name: 'Huntington Beach Marine Safety Division',
+      type: 'city_dept',
+      web_url: 'https://www.huntingtonbeachca.gov/Government/Departments/marine_safety/',
+      contact_email: '',
+      contact_phone: '',
+      hours: '',
+      agency_id: 'City of Huntington Beach',
+      status: 'unverified',
+    },
+  ],
+  policy_sources: [
+    {
+      subtype: 'municipal_code',
+      citation: 'Huntington Beach Municipal Code §___ (HBDB off-leash designation)',
+      issuing_agency: 'City of Huntington Beach',
+      scope: 'dog_policy',
+      source_url: '',
+      effective_date: '~1997-1999',
+      last_verified: '',
+      note: 'The carve-out ordinance making the Goldenwest-Seapoint mile off-leash.',
+      status: 'unknown',
+    },
+    {
+      subtype: 'municipal_code',
+      citation: 'Huntington Beach Municipal Code §___ (general leash law)',
+      issuing_agency: 'City of Huntington Beach',
+      scope: 'dog_policy',
+      source_url: 'https://ecode360.com/43799422',
+      effective_date: '',
+      last_verified: '',
+      note: 'General city leash ordinance — captured to show override hierarchy (PS-1 wins on the HBDB sand zone). Section number TBD from breadcrumb.',
+      status: 'unverified',
+    },
+    {
+      subtype: 'mou',
+      citation: 'MOU: City of HB ↔ Huntington Dog Beach',
+      issuing_agency: 'City of Huntington Beach',
+      scope: 'operations',
+      source_url: '',
+      effective_date: '',
+      last_verified: '',
+      note: 'New subtype surfaced by this walkthrough. Operational contract, not a statute.',
+      status: 'unknown',
+    },
+    {
+      subtype: 'state_statute',
+      citation: 'CA Public Resources Code §6001 et seq.',
+      issuing_agency: 'California State Lands Commission',
+      scope: 'tidelands',
+      source_url: 'https://leginfo.legislature.ca.gov/faces/codes_displayexpandedbranch.xhtml?tocCode=PRC&division=6.',
+      effective_date: '',
+      last_verified: '',
+      note: '',
+      status: 'verified',
+    },
+    {
+      subtype: 'state_statute',
+      citation: 'CA Health & Safety Code §115880 et seq. (AB 411)',
+      issuing_agency: 'Orange County Health Care Agency',
+      scope: 'water_quality',
+      source_url: 'https://leginfo.legislature.ca.gov/faces/codes_displayexpandedbranch.xhtml?tocCode=HSC',
+      effective_date: '',
+      last_verified: '',
+      note: 'State statute delegating beach water-quality monitoring to county health departments.',
+      status: 'verified',
+    },
+  ],
+  beach_agency: [
+    { agency_name: 'City of Huntington Beach',       authority_domain: 'dog_policy',     precedence_rank: 1 },
+    { agency_name: 'California State Lands Commission', authority_domain: 'tidelands',   precedence_rank: 1 },
+    { agency_name: 'Orange County Health Care Agency',  authority_domain: 'water_quality', precedence_rank: 1 },
+    { agency_name: 'City of Huntington Beach',       authority_domain: 'operations',     precedence_rank: 1 },
+    { agency_name: 'City of Huntington Beach',       authority_domain: 'parking',        precedence_rank: 1 },
+    { agency_name: 'City of Huntington Beach',       authority_domain: 'water_safety',   precedence_rank: 1 },
+  ],
+  beach_operator: [
+    { operator_name: 'Huntington Dog Beach',                  agreement_type: 'operating_agreement', effective_start: '~1997', effective_end: '' },
+    { operator_name: 'Huntington Beach Marine Safety Division', agreement_type: 'direct_management',  effective_start: '',     effective_end: '' },
+  ],
+  section_rules: [
+    { section: 'sand (within HBDB designated mile)', rule: 'off_leash',  source_policy: 'PS-1', status: 'unverified' },
+    { section: 'water_swim',                          rule: '(verify)',  source_policy: 'PS-1 or PS-3', status: 'unknown' },
+    { section: 'sand (outside designated mile)',     rule: 'on_leash',  source_policy: 'PS-2', status: 'unverified' },
+  ],
+  gaps: [
+    { text: 'Verify exact HBMC section numbers for PS-1 (off-leash designation) and PS-2 (general leash law). Pull from codepublishing.com.', done: false },
+    { text: 'Confirm the 501(c)(3) registered name and current website.', done: false },
+    { text: 'Determine MOU status — city clerk site, FOIA-able, or undocumented?', done: false },
+    { text: 'Section-by-section policy detail (water, dunes, lifeguard towers, etc.).', done: false },
+    { text: 'Effective date of the original off-leash designation (folklore: 1997-1999).', done: false },
+    { text: 'Confirm cslc_sovereign_lands PIP layer status — separate task (see ca-agency-taxonomy PIP audit).', done: false },
+  ],
+  discoveries: {
+    confirmed_working: 'operator.agency_id nullable FK handles both cases cleanly: HDB nonprofit (null), HB Marine Safety (FK to City of HB).\n\nBeach-level beach_agency with authority_domain scales to the 4-5 domains HBDB needs without forcing section granularity.\n\npolicy_source as the broader entity (vs statute) handles the MOU case naturally.',
+    new_facts: 'policy_source.subtype = "mou" — confirmed on real data.\n\nauthority_domain = "water_safety" as a distinct domain (Marine Safety Division has it, separate from dog_policy and water_quality).',
+    quiet_gaps: 'precedence_rank column is justified but unused at HBDB — confirms it\'s worth keeping for Crystal Cove / Coronado overlap cases.\n\nStatute-vs-posted-policy conflict flow still untested. HBDB has none; Dockweiler\'s "regulars off-leash before 9am" is the candidate test.',
+  },
+};
+
+const STORAGE_KEY = 'walkthrough-editor-state-v1';
+const STATUS_CYCLE = ['verified', 'unverified', 'unknown'];
+
+// ── State ─────────────────────────────────────────────────────────────
+let state = loadState();
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return JSON.parse(JSON.stringify(DEFAULT_SEED));
+}
+function saveState() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  flashSaved();
+}
+let saveTimer = null;
+function flashSaved() {
+  const el = document.getElementById('save-indicator');
+  el.textContent = 'saved · ' + new Date().toLocaleTimeString();
+  el.classList.add('saved');
+}
+function markDirty() {
+  const el = document.getElementById('save-indicator');
+  el.textContent = 'saving…';
+  el.classList.remove('saved');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveState, 280);
+}
+
+// ── Rendering ────────────────────────────────────────────────────────
+function render() {
+  document.getElementById('header-beach-name').textContent =
+    state.beach.display_name + ' (fid ' + state.beach.fid + ')';
+  const main = document.getElementById('main');
+  main.innerHTML = '';
+  main.appendChild(renderBeach());
+  main.appendChild(renderAgencies());
+  main.appendChild(renderOperators());
+  main.appendChild(renderPolicySources());
+  main.appendChild(renderJoinTable('beach_agency', state.beach_agency, ['agency_name', 'authority_domain', 'precedence_rank']));
+  main.appendChild(renderJoinTable('beach_operator', state.beach_operator, ['operator_name', 'agreement_type', 'effective_start', 'effective_end']));
+  main.appendChild(renderSectionRules());
+  main.appendChild(renderGaps());
+  main.appendChild(renderDiscoveries());
+}
+
+function makeCard(title, count) {
+  const card = el('section', 'card');
+  const hdr = el('div', 'card-header');
+  hdr.appendChild(el('h2', '', title));
+  if (count != null) {
+    hdr.appendChild(el('span', 'row-count', count + ' row' + (count === 1 ? '' : 's')));
+  }
+  card.appendChild(hdr);
+  const body = el('div', 'card-body');
+  card.appendChild(body);
+  card._body = body;
+  return card;
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+function makeField(labelText, value, onChange, opts = {}) {
+  const row = el('div', 'field-row');
+  row.appendChild(el('label', '', labelText));
+  const input = opts.multiline ? el('textarea') : el('input');
+  if (!opts.multiline) input.type = 'text';
+  input.value = value ?? '';
+  input.addEventListener('input', () => { onChange(input.value); markDirty(); });
+  row.appendChild(input);
+  if (opts.status !== undefined && opts.onStatus) {
+    row.appendChild(makeStatusPill(opts.status, opts.onStatus));
+  } else {
+    row.appendChild(el('span'));
+  }
+  return row;
+}
+
+function makeStatusPill(status, onChange) {
+  const pill = el('button', 'status-pill ' + status);
+  pill.textContent = status;
+  pill.addEventListener('click', () => {
+    const i = STATUS_CYCLE.indexOf(status);
+    status = STATUS_CYCLE[(i + 1) % STATUS_CYCLE.length];
+    pill.className = 'status-pill ' + status;
+    pill.textContent = status;
+    onChange(status);
+    markDirty();
+  });
+  return pill;
+}
+
+// ── Beach identity ───────────────────────────────────────────────────
+function renderBeach() {
+  const card = makeCard('Beach Identity');
+  const b = state.beach;
+  const fields = [
+    ['fid', 'fid'],
+    ['display_name', 'display_name'],
+    ['state', 'state'],
+    ['tier', 'tier'],
+    ['location', 'location'],
+    ['length', 'length'],
+  ];
+  for (const [label, key] of fields) {
+    card._body.appendChild(makeField(label, b[key], v => { b[key] = v; document.getElementById('header-beach-name').textContent = b.display_name + ' (fid ' + b.fid + ')'; }));
+  }
+  return card;
+}
+
+// ── Agencies ─────────────────────────────────────────────────────────
+function renderAgencies() {
+  const card = makeCard('Agencies', state.agencies.length);
+  state.agencies.forEach((a, i) => {
+    card._body.appendChild(makeEntityCard('Agency', a, [
+      ['type', 'type'],
+      ['hierarchy', 'hierarchy'],
+      ['authority_domains', 'authority_domains'],
+      ['web_url', 'web_url'],
+      ['code_archive_url', 'code_archive_url'],
+      ['pip_layer', 'pip_layer'],
+      ['pip_filter', 'pip_filter'],
+    ], () => { state.agencies.splice(i, 1); render(); markDirty(); }));
+  });
+  const addBtn = el('button', 'add-row-btn', '+ Add agency');
+  addBtn.addEventListener('click', () => {
+    state.agencies.push({ name: '', type: '', hierarchy: '', authority_domains: '', web_url: '', code_archive_url: '', pip_layer: '', pip_filter: '', status: 'unknown' });
+    render();
+    markDirty();
+  });
+  card._body.appendChild(addBtn);
+  return card;
+}
+
+// ── Operators ────────────────────────────────────────────────────────
+function renderOperators() {
+  const card = makeCard('Operators', state.operators.length);
+  state.operators.forEach((o, i) => {
+    card._body.appendChild(makeEntityCard('Operator', o, [
+      ['type', 'type'],
+      ['web_url', 'web_url'],
+      ['contact_email', 'contact_email'],
+      ['contact_phone', 'contact_phone'],
+      ['hours', 'hours'],
+      ['agency_id (cross-ref name)', 'agency_id'],
+    ], () => { state.operators.splice(i, 1); render(); markDirty(); }));
+  });
+  const addBtn = el('button', 'add-row-btn', '+ Add operator');
+  addBtn.addEventListener('click', () => {
+    state.operators.push({ name: '', type: '', web_url: '', contact_email: '', contact_phone: '', hours: '', agency_id: '', status: 'unknown' });
+    render();
+    markDirty();
+  });
+  card._body.appendChild(addBtn);
+  return card;
+}
+
+// ── Policy sources ───────────────────────────────────────────────────
+function renderPolicySources() {
+  const card = makeCard('Policy Sources', state.policy_sources.length);
+  state.policy_sources.forEach((p, i) => {
+    card._body.appendChild(makeEntityCard('Policy Source', p, [
+      ['subtype', 'subtype'],
+      ['citation', 'citation', { multiline: true }],
+      ['issuing_agency', 'issuing_agency'],
+      ['scope', 'scope'],
+      ['source_url', 'source_url'],
+      ['effective_date', 'effective_date'],
+      ['last_verified', 'last_verified'],
+      ['note', 'note', { multiline: true }],
+    ], () => { state.policy_sources.splice(i, 1); render(); markDirty(); }, 'citation'));
+  });
+  const addBtn = el('button', 'add-row-btn', '+ Add policy source');
+  addBtn.addEventListener('click', () => {
+    state.policy_sources.push({ subtype: '', citation: '', issuing_agency: '', scope: '', source_url: '', effective_date: '', last_verified: '', note: '', status: 'unknown' });
+    render();
+    markDirty();
+  });
+  card._body.appendChild(addBtn);
+  return card;
+}
+
+// ── Generic entity card builder ──────────────────────────────────────
+function makeEntityCard(tagText, obj, fieldDefs, onDelete, nameKey = 'name') {
+  const card = el('div', 'entity-card');
+  const hdr = el('div', 'entity-card-header');
+  hdr.appendChild(el('span', 'entity-tag', tagText));
+  const nameWrap = el('div', 'entity-name');
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.value = obj[nameKey] ?? '';
+  nameInput.placeholder = nameKey;
+  nameInput.addEventListener('input', () => { obj[nameKey] = nameInput.value; markDirty(); });
+  nameWrap.appendChild(nameInput);
+  hdr.appendChild(nameWrap);
+  hdr.appendChild(makeStatusPill(obj.status || 'unknown', v => { obj.status = v; }));
+  const delBtn = el('button', 'delete-btn', '✕ delete');
+  delBtn.addEventListener('click', onDelete);
+  hdr.appendChild(delBtn);
+  card.appendChild(hdr);
+  for (const def of fieldDefs) {
+    const [label, key, opts = {}] = def;
+    card.appendChild(makeField(label, obj[key], v => { obj[key] = v; }, opts));
+  }
+  return card;
+}
+
+// ── Join tables (beach_agency, beach_operator) ──────────────────────
+function renderJoinTable(title, rows, cols) {
+  const card = makeCard(title, rows.length);
+  const tbl = el('table', 'join-table');
+  const thead = el('thead');
+  const trh = el('tr');
+  for (const c of cols) trh.appendChild(el('th', '', c));
+  trh.appendChild(el('th', '', ''));
+  thead.appendChild(trh);
+  tbl.appendChild(thead);
+  const tbody = el('tbody');
+  rows.forEach((row, i) => {
+    const tr = el('tr');
+    for (const c of cols) {
+      const td = el('td');
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.value = row[c] ?? '';
+      inp.addEventListener('input', () => { row[c] = inp.value; markDirty(); });
+      td.appendChild(inp);
+      tr.appendChild(td);
+    }
+    const tdDel = el('td');
+    const del = el('button', 'delete-btn', '✕');
+    del.addEventListener('click', () => { rows.splice(i, 1); render(); markDirty(); });
+    tdDel.appendChild(del);
+    tr.appendChild(tdDel);
+    tbody.appendChild(tr);
+  });
+  tbl.appendChild(tbody);
+  card._body.appendChild(tbl);
+  const addBtn = el('button', 'add-row-btn', '+ Add row');
+  addBtn.addEventListener('click', () => {
+    const newRow = {};
+    for (const c of cols) newRow[c] = '';
+    rows.push(newRow);
+    render();
+    markDirty();
+  });
+  card._body.appendChild(addBtn);
+  return card;
+}
+
+// ── Section rules ────────────────────────────────────────────────────
+function renderSectionRules() {
+  return renderJoinTable('Section-level Dog Policy', state.section_rules, ['section', 'rule', 'source_policy', 'status']);
+}
+
+// ── Gaps ─────────────────────────────────────────────────────────────
+function renderGaps() {
+  const card = makeCard('Gaps / Verification TODOs', state.gaps.length);
+  state.gaps.forEach((g, i) => {
+    const row = el('div', 'gap-row' + (g.done ? ' done' : ''));
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!g.done;
+    cb.addEventListener('change', () => {
+      g.done = cb.checked;
+      row.classList.toggle('done', cb.checked);
+      markDirty();
+    });
+    row.appendChild(cb);
+    const txt = document.createElement('input');
+    txt.type = 'text';
+    txt.className = 'gap-text';
+    txt.value = g.text;
+    txt.addEventListener('input', () => { g.text = txt.value; markDirty(); });
+    row.appendChild(txt);
+    const del = el('button', 'delete-btn', '✕');
+    del.addEventListener('click', () => { state.gaps.splice(i, 1); render(); markDirty(); });
+    row.appendChild(del);
+    card._body.appendChild(row);
+  });
+  const addBtn = el('button', 'add-row-btn', '+ Add gap');
+  addBtn.addEventListener('click', () => {
+    state.gaps.push({ text: '', done: false });
+    render();
+    markDirty();
+  });
+  card._body.appendChild(addBtn);
+  return card;
+}
+
+// ── Discoveries ─────────────────────────────────────────────────────
+function renderDiscoveries() {
+  const card = makeCard('Model Discoveries');
+  for (const [key, label] of [
+    ['confirmed_working', 'Confirmed working'],
+    ['new_facts',         'New facts for the taxonomy'],
+    ['quiet_gaps',        'Quiet gaps still open'],
+  ]) {
+    const block = el('div', 'discovery-block');
+    block.appendChild(el('h3', '', label));
+    const ta = document.createElement('textarea');
+    ta.value = state.discoveries[key] || '';
+    ta.addEventListener('input', () => { state.discoveries[key] = ta.value; markDirty(); });
+    block.appendChild(ta);
+    card._body.appendChild(block);
+  }
+  return card;
+}
+
+// ── Export to Markdown ───────────────────────────────────────────────
+function exportMarkdown() {
+  const b = state.beach;
+  let md = `# Walkthrough — ${b.display_name} (fid ${b.fid})\n\n`;
+  md += `## 1. Beach Identity\n\n`;
+  for (const k of ['fid', 'display_name', 'state', 'tier', 'location', 'length']) {
+    md += `- **${k}:** ${b[k] ?? ''}\n`;
+  }
+  md += `\n## 2. Agencies (${state.agencies.length})\n\n`;
+  for (const a of state.agencies) {
+    md += `### ${a.name} [${a.status}]\n`;
+    for (const k of ['type','hierarchy','authority_domains','web_url','code_archive_url','pip_layer','pip_filter']) {
+      if (a[k]) md += `- **${k}:** ${a[k]}\n`;
+    }
+    md += `\n`;
+  }
+  md += `## 3. Operators (${state.operators.length})\n\n`;
+  for (const o of state.operators) {
+    md += `### ${o.name} [${o.status}]\n`;
+    for (const k of ['type','web_url','contact_email','contact_phone','hours','agency_id']) {
+      if (o[k]) md += `- **${k}:** ${o[k]}\n`;
+    }
+    md += `\n`;
+  }
+  md += `## 4. Policy Sources (${state.policy_sources.length})\n\n`;
+  for (const p of state.policy_sources) {
+    md += `### ${p.citation} [${p.status}]\n`;
+    for (const k of ['subtype','issuing_agency','scope','source_url','effective_date','last_verified','note']) {
+      if (p[k]) md += `- **${k}:** ${p[k]}\n`;
+    }
+    md += `\n`;
+  }
+  md += `## 5. beach_agency join\n\n| agency | authority_domain | precedence_rank |\n|---|---|---|\n`;
+  for (const r of state.beach_agency) md += `| ${r.agency_name} | ${r.authority_domain} | ${r.precedence_rank} |\n`;
+  md += `\n## 6. beach_operator join\n\n| operator | agreement_type | effective_start | effective_end |\n|---|---|---|---|\n`;
+  for (const r of state.beach_operator) md += `| ${r.operator_name} | ${r.agreement_type} | ${r.effective_start} | ${r.effective_end} |\n`;
+  md += `\n## 7. Section-level rules\n\n| section | rule | source_policy | status |\n|---|---|---|---|\n`;
+  for (const r of state.section_rules) md += `| ${r.section} | ${r.rule} | ${r.source_policy} | ${r.status} |\n`;
+  md += `\n## 8. Gaps / Verification\n\n`;
+  for (const g of state.gaps) md += `- [${g.done ? 'x' : ' '}] ${g.text}\n`;
+  md += `\n## 9. Model Discoveries\n\n`;
+  md += `### Confirmed working\n\n${state.discoveries.confirmed_working || ''}\n\n`;
+  md += `### New facts\n\n${state.discoveries.new_facts || ''}\n\n`;
+  md += `### Quiet gaps\n\n${state.discoveries.quiet_gaps || ''}\n`;
+  return md;
+}
+
+// ── Wire up header buttons ───────────────────────────────────────────
+document.getElementById('btn-export-json').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `walkthrough-${state.beach.fid}.json`;
+  a.click();
+});
+document.getElementById('btn-export-md').addEventListener('click', async () => {
+  const md = exportMarkdown();
+  try {
+    await navigator.clipboard.writeText(md);
+    const btn = document.getElementById('btn-export-md');
+    const orig = btn.textContent;
+    btn.textContent = '✓ Copied';
+    setTimeout(() => { btn.textContent = orig; }, 1400);
+  } catch {
+    // fallback: download
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `walkthrough-${state.beach.fid}.md`;
+    a.click();
+  }
+});
+document.getElementById('btn-reset').addEventListener('click', () => {
+  if (confirm('Reset to default HBDB seed? This wipes your edits.')) {
+    state = JSON.parse(JSON.stringify(DEFAULT_SEED));
+    saveState();
+    render();
+  }
+});
+
+render();
+saveState();
+</script>
+</body>
+</html>

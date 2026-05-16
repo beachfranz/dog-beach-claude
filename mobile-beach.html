@@ -9,8 +9,117 @@
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&family=DM+Mono&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="src/photo-block.css">
 <link rel="stylesheet" href="src/zone-rules-block.css">
-<link rel="stylesheet" href="src/loader.css">
-<script src="src/loader.js"></script>
+<!-- Loader overlay inlined (was src/loader.css + src/loader.js). The
+     Cloudflare Worker that serves dogbea.ch doesn't auto-deploy new
+     static files on push — only Supabase Edge Functions auto-deploy
+     via .github/workflows/deploy.yml. Inlining keeps the loader
+     feature shippable without a manual `wrangler deploy`. -->
+<style>
+  .loader-overlay {
+    position: fixed; inset: 0;
+    background: #f4e9d4;
+    z-index: 100000;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 18px;
+    opacity: 1; transition: opacity 280ms ease-out;
+  }
+  .loader-overlay.fading { opacity: 0; pointer-events: none; }
+  .loader-step {
+    font-family: 'Outfit', system-ui, -apple-system, sans-serif;
+    font-size: 18px; font-weight: 500;
+    color: #5c4a2c; letter-spacing: 0.02em;
+    text-align: center; min-height: 24px;
+    opacity: 1; transition: opacity 140ms ease;
+    padding: 0 24px;
+    display: inline-flex; align-items: center; gap: 8px;
+    justify-content: center;
+  }
+  .loader-step.swap { opacity: 0; }
+  .loader-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #c97f3a;
+    animation: loader-pulse 900ms ease-in-out infinite;
+  }
+  @keyframes loader-pulse {
+    0%, 100% { opacity: 0.35; transform: scale(0.85); }
+    50%      { opacity: 1;    transform: scale(1.1); }
+  }
+</style>
+<script>
+(function (global) {
+  'use strict';
+  var DEFAULT_STEPS = [
+    '🌤️ Pulling weather',
+    '🌊 Reading tides',
+    '💨 Reading wind patterns',
+    '☀️ Computing UV',
+    '⚠️ Checking cautions',
+    '📜 Reading park statutes',
+    '🚧 Verifying closures',
+    '🐾 Mapping dog zones',
+    '👥 Polling crowd data',
+    '🤖 Consulting AI',
+    '🎯 Optimizing your window',
+  ];
+  var DEFAULT_STEP_MS = 700;
+  var SAFETY_MAX_MS   = 25000;
+  var state = null;
+
+  function start(steps, opts) {
+    if (state) return;
+    var list   = Array.isArray(steps) && steps.length ? steps.slice() : DEFAULT_STEPS;
+    var stepMs = (opts && opts.stepMs) || DEFAULT_STEP_MS;
+    var overlay = document.createElement('div');
+    overlay.className = 'loader-overlay';
+    var stepEl = document.createElement('div');
+    stepEl.className = 'loader-step';
+    stepEl.textContent = list[0] + '…';
+    var dot = document.createElement('div');
+    dot.className = 'loader-dot';
+    overlay.appendChild(stepEl);
+    overlay.appendChild(dot);
+    document.body.appendChild(overlay);
+    state = {
+      overlay: overlay, stepEl: stepEl, list: list, idx: 0,
+      stopRequested: false, firstPassComplete: false, startedAt: Date.now(),
+    };
+    state.interval = setInterval(function () {
+      if (!state) return;
+      state.idx = (state.idx + 1) % list.length;
+      if (state.idx === 0) state.firstPassComplete = true;
+      stepEl.classList.add('swap');
+      setTimeout(function () {
+        if (!state) return;
+        state.stepEl.textContent = list[state.idx] + '…';
+        state.stepEl.classList.remove('swap');
+      }, 80);
+      _maybeEnd();
+    }, stepMs);
+    state.safetyTimer = setTimeout(function () {
+      if (state) { state.firstPassComplete = true; state.stopRequested = true; _maybeEnd(); }
+    }, SAFETY_MAX_MS);
+  }
+  function _maybeEnd() {
+    if (!state) return;
+    if (!state.stopRequested) return;
+    if (!state.firstPassComplete) return;
+    clearInterval(state.interval);
+    clearTimeout(state.safetyTimer);
+    state.overlay.classList.add('fading');
+    var s = state;
+    setTimeout(function () {
+      if (s.overlay && s.overlay.parentNode) s.overlay.parentNode.removeChild(s.overlay);
+    }, 320);
+    state = null;
+  }
+  function stop() {
+    if (!state) return;
+    state.stopRequested = true;
+    _maybeEnd();
+  }
+  global.Loader = { start: start, stop: stop };
+})(window);
+</script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
   integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
   crossorigin="">

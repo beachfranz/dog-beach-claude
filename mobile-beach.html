@@ -689,7 +689,7 @@
   .activity-chip.rule-off_leash   { background: rgba(34,197,94,0.45); border-color: rgba(21,128,61,0.42); }
   .activity-chip.rule-on_leash    { background: rgba(251,191,36,0.53); border-color: rgba(180,83,9,0.42); }
   .activity-chip.rule-not_allowed { background: rgba(239,68,68,0.45); border-color: rgba(153,27,27,0.42); }
-  /* Scout CTA — "Wanna go? Drive ~XX min.   [🐾 Let Pack Know] [Get directions →]" */
+  /* Scout CTA — "Wanna go? Drive ~XX min.   [🐾 Let Friends Know] [Get directions →]" */
   .scout-cta {
     margin-top: 12px;
     display: flex; align-items: center; justify-content: center;
@@ -710,11 +710,11 @@
     font-family: inherit;
   }
   .scout-cta-btn:hover { opacity: 0.92; }
-  .scout-cta-btn-pack {
+  .scout-cta-btn-friends {
     background: rgba(34,197,94,0.18); color: var(--text);
     border: 1px solid rgba(34,197,94,0.45);
   }
-  .scout-cta-btn-pack:hover { background: rgba(34,197,94,0.28); opacity: 1; }
+  .scout-cta-btn-friends:hover { background: rgba(34,197,94,0.28); opacity: 1; }
   #scout-blurb strong { font-weight: 700; }
 
   /* Hero photo block — shared component in src/photo-block.css. The
@@ -2402,14 +2402,14 @@ async function _renderScoutCTA(beach) {
   const ctaEl = document.getElementById('scout-cta');
   if (!ctaEl || beach.lat == null || beach.lng == null) return;
   const mapsUrl = buildMapsUrl(beach);
-  const packBtn = `<button class="scout-cta-btn scout-cta-btn-pack" type="button" data-pack-share="1">🐾 Let Pack Know</button>`;
+  const friendsBtn = `<button class="scout-cta-btn scout-cta-btn-friends" type="button" data-friends-share="1">🐾 Let Friends Know</button>`;
   const dirsBtn = `<a class="scout-cta-btn" href="${escHtml(mapsUrl)}" target="_blank" rel="noopener">Get directions →</a>`;
-  const actions = `<div class="scout-cta-actions">${packBtn}${dirsBtn}</div>`;
+  const actions = `<div class="scout-cta-actions">${friendsBtn}${dirsBtn}</div>`;
   // Render immediately; drive time fills in below if location is known.
   const setHtml = (txt) => {
     ctaEl.innerHTML = `<span class="scout-cta-text">${txt}</span>${actions}`;
-    const pack = ctaEl.querySelector('[data-pack-share]');
-    if (pack) pack.addEventListener('click', () => _sharePackPlan(beach));
+    const btn = ctaEl.querySelector('[data-friends-share]');
+    if (btn) btn.addEventListener('click', () => _shareFriendsPlan(beach));
   };
   setHtml('Wanna go?');
   const user = await _getUserLocation();
@@ -2419,10 +2419,9 @@ async function _renderScoutCTA(beach) {
   setHtml(`Wanna go? Drive ~${minutes} min.`);
 }
 
-// "Let Pack Know" — Web Share API on mobile/PWA; clipboard fallback
-// elsewhere. v1 lets the user broadcast the plan to anyone they want;
-// future iteration could wire this into a registered Pack feature.
-async function _sharePackPlan(beach) {
+// "Let Friends Know" — Web Share API on mobile/PWA; clipboard fallback
+// elsewhere. v1 lets the user broadcast the plan to anyone they want.
+async function _shareFriendsPlan(beach) {
   const url = location.href;
   const title = `${beach.display_name || beach.name || 'Beach'} — Dog Beach Scout`;
   const text  = `Heading to ${beach.display_name || beach.name || 'the beach'} today.`;
@@ -2433,11 +2432,11 @@ async function _sharePackPlan(beach) {
   try {
     await navigator.clipboard.writeText(url);
     const ctaEl = document.getElementById('scout-cta');
-    const pack = ctaEl?.querySelector('[data-pack-share]');
-    if (pack) {
-      const orig = pack.textContent;
-      pack.textContent = '🐾 Link copied';
-      setTimeout(() => { pack.textContent = orig; }, 1600);
+    const btn = ctaEl?.querySelector('[data-friends-share]');
+    if (btn) {
+      const orig = btn.textContent;
+      btn.textContent = '🐾 Link copied';
+      setTimeout(() => { btn.textContent = orig; }, 1600);
     }
   } catch {}
 }

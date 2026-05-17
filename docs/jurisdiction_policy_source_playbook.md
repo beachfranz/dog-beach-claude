@@ -109,7 +109,9 @@ SELECT g.fid FROM beaches_gold g WHERE g.cpad_unit_id IN (SELECT unit_id FROM cp
 -- Operator (Conservancy, Tribal): enumerate by name match + coord cluster
 ```
 
-Sub-area carve-outs (Del Mar seasonal, LB §6.16.310 dog-exercise-area carve-out): encode via distinct `section` values in `beach_policy_source` (`'sand'` primary + `'sand_<sub_area>_overlay'` supplements). Document boundary in `status_note`.
+**Sub-area carve-outs** (Del Mar seasonal, LB §6.16.310 dog-exercise-area, Coronado Sand Pebble): encode via `beach_policy_source.region_name` column. ONE bps row per zone; `region_name` is the human-friendly zone label (e.g., 'Sand Pebble Off-Leash Area', 'North Beach (north of 29th Street)'). NULL region_name = default region. Multiple rows with same section but distinct region_name → injector emits multi-region zone_rules.regions[] automatically.
+
+Legacy pattern (`section='sand_<sub_area>_overlay'`) is deprecated; use region_name instead.
 
 ### 6. Decide rule per beach
 
@@ -122,6 +124,8 @@ Sub-area carve-outs (Del Mar seasonal, LB §6.16.310 dog-exercise-area carve-out
 | Time-of-day / seasonal carve-out | base rule + `status_note` documenting the carve-out; sub-area `section` if major |
 
 **Layered authority** (DPR over city; BLM over state; Conservancy + county): write TWO bps rows with distinct `section` values + appropriate `operative_status`. Pattern: primary `'sand'` + supplement `'sand_<authority>_overlay'`.
+
+**Temporal carve-outs** (Del Mar §4.08.020(B)(1) Labor-Day-to-Jun-15 seasonal, Rosie's 6am-8pm posted hours, Pismo plover Mar-Sep): DO NOT cram into status_note prose. Instead, write the bps row with the BASE rule, then run `scripts/extract_temporal_from_policy_source.py --ps-ids <new_id>` as step §9.5 post-apply. The extractor lifts temporal patterns into structured `beach_policy_source_temporal` rows via Sonnet. Trigger cascade picks them up automatically.
 
 **Defer rather than fabricate** (see defer rubric below).
 
@@ -145,11 +149,12 @@ WHERE NOT EXISTS (
 
 INSERT INTO public.beach_policy_source
   (beach_fid, policy_source_id, section, rule, operative_status,
-   evidence_verbatim, evidence_url, status_note)
+   evidence_verbatim, evidence_url, status_note, region_name)
 SELECT v.fid, ps.id, 'sand', '<rule>', 'operative'::operative_status,
        '<per-beach operative quote>',
        ps.source_url,
-       '<edge cases, sub-area carve-outs, walkthrough recommendations>'
+       '<edge cases, sub-area carve-outs, walkthrough recommendations>',
+       NULL  -- or 'Named sub-area' for multi-zone beaches
 FROM (values (<fid1>),(<fid2>),...) AS v(fid)
 CROSS JOIN public.policy_source ps
 WHERE ps.citation LIKE '<canonical prefix>%'
@@ -198,16 +203,46 @@ SELECT count(*) FROM public.agency WHERE name=:name AND type=:type;
 -- (8d) Homogeneity sanity (per batch)
 -- For each new ps row, beaches_linked count should be proportional to the
 -- text's actual coverage. 100% of state via one ps = OR homogeneity bug.
+
+-- (8e) Temporal coverage: ps rows with time/season qualifiers in full_text
+-- should have ≥1 beach_policy_source_temporal row.
+SELECT ps.id, substring(ps.citation, 1, 60)
+FROM public.policy_source ps
+WHERE ps.full_text ~* '(dawn|dusk|am|pm|hours?|labor day|memorial day|seasonal|jun|jul|aug|sep)'
+  AND NOT EXISTS (
+    SELECT 1 FROM public.beach_policy_source_temporal t
+    JOIN public.beach_policy_source bps USING (beach_fid, policy_source_id, section)
+    WHERE bps.policy_source_id = ps.id
+  );
+-- For each row, run: python scripts/extract_temporal_from_policy_source.py --ps-ids <id>
+
+-- (8f) region_name presence for known multi-zone beaches.
+-- Heuristic: beach with both off_leash and on_leash bps rows should usually
+-- have ≥2 distinct region_name values (or NULL + 1 named).
+SELECT bps.beach_fid, g.name,
+       count(DISTINCT bps.region_name) AS n_distinct_regions,
+       bool_or(rule LIKE 'off_leash%') AS any_off_leash,
+       bool_or(rule = 'on_leash') AS any_on_leash
+FROM public.beach_policy_source bps
+JOIN public.beaches_gold g ON g.fid = bps.beach_fid
+GROUP BY bps.beach_fid, g.name
+HAVING bool_or(rule LIKE 'off_leash%') AND bool_or(rule = 'on_leash')
+   AND count(DISTINCT bps.region_name) < 2;
+-- Investigate each; consider adding region_name to disambiguate zones.
 ```
 
 ### 9. Commit, apply, audit, handoff
 
 ```bash
 git add supabase/migrations/<file>.sql && git commit -m "<wave>: <jurisdiction(s)>"
-# psql apply requires explicit user go (classifier blocks otherwise):
+# Apply (requires user go):
 PGPASSWORD='...' PGCLIENTENCODING=UTF8 psql "<pooler_url>" -v ON_ERROR_STOP=1 -f <file>
-# Re-run (8a) post-apply; verify INSERT counts match expected.
-# Update session-handoff pin with file + commit SHA + deferrals + any governance-resolver follow-ups.
+
+# §9.5 — Extract temporal patterns from NEW ps rows
+python scripts/extract_temporal_from_policy_source.py --ps-ids <comma_list_of_new_ids>
+# (Sonnet ~$0.005-0.01 per ps; only ps with temporal text in full_text produce rows.)
+
+# Re-run (8a)/(8b)/(8e)/(8f); verify INSERT counts; update session-handoff pin.
 ```
 
 ---
@@ -250,6 +285,15 @@ Agency lookups use the bare name (`"Goleta"`, type=`city`), not the trailing-com
 **Detect:** quality gate (8c).
 **Reason:** historical schema artifact; bare-name is canonical going forward.
 
+### 5. Trust the trigger cascade
+Inserting a bps row fires `tg_stmt_ins_beach_policy_source` which calls `promote_entity_dogs_to_beach_dog_policy` which updates `beach_dog_policy` flat columns AND fires `tg_after_change_dogs_refire_zone_rules` which rebuilds `zone_rules`. ONE INSERT covers both flat columns AND zone_rules.
+
+**Detect:** if you find yourself manually calling `_promote_zone_rules_for_fid(fid)` or `promote_entity_dogs_to_beach_dog_policy(fid)` after a bps INSERT, stop. The trigger already did it.
+
+**Reason:** consistency. Manual fires bypass the trigger fan-out and risk leaving downstream tables (scoring_tier refresh) stale.
+
+**Exception:** global re-fire migrations that change the function bodies themselves (H3/H4/I3/I4) need explicit two-pass refire per [[two-pass-refire-pattern]].
+
 ---
 
 ## Agent prompt template
@@ -286,7 +330,8 @@ ONE file: supabase/migrations/YYYYMMDD_<context>_<batch>.sql
 - ON CONFLICT DO NOTHING on bps; NOT EXISTS gate on ps.
 - Look up agency_id; don't guess; bare-name canonical.
 - Defer rather than fabricate (defer rubric).
-- Distinct `section` for layered authority / sub-area carve-outs.
+- Distinct `section` for layered authority; `region_name` for multi-zone carve-outs (e.g., off-leash strip inside on-leash beach).
+- Temporal data goes to beach_policy_source_temporal via H2 extractor — write base bps row first, then run extractor as step §9.5.
 
 [Process]
 1. Read first.
@@ -330,6 +375,23 @@ Walks the algorithm end-to-end:
 
 ---
 
+## Worked example (Del Mar Dog Beach — multi-zone + temporal, 2026-05-17)
+
+| Step | What happens |
+|---|---|
+| 1 scope | Del Mar Dog Beach fid 8560, City of Del Mar (id 48), single-zone off-leash strip — but actually has sub-area + temporal carve-outs. PROCEED. |
+| 2 discover | Municode `municipal_code` slug (NOT `code_of_ordinances`). |
+| 3 navigate | Title 4 Ch 4.08 §4.08.020 Dogs and Animals. |
+| 4 fetch | §4.08.020(B)(1): off-leash dawn-8am year-round, AND day-after-Labor-Day through Jun 15. §4.08.020(C): summer prohibition Powerhouse-Park-to-29th-St Jun 15 – Labor Day. |
+| 5 map | fid 8560 (North Beach off-leash strip) + fid 8992 (Main beach with summer prohibition). |
+| 6 rule | 8560: base rule `off_leash_voice_control`, region_name='North Beach (north of 29th Street)'; 8992: base rule `on_leash` (summer carve-out captured by temporal extractor). |
+| 7 migration | One ps row + 2 bps rows with region_name set. |
+| 8 quality | Page-level URL deep-linked to nodeId; no URL reuse. |
+| 9 commit + apply | Migration applies, trigger cascades. |
+| 9.5 temporal | `python scripts/extract_temporal_from_policy_source.py --ps-ids 199` lifts 4 windows (seasonal off-leash, daily dawn-8am, compound, summer prohibition) into beach_policy_source_temporal. Trigger auto-refires the entity promoter; bdp gets dogs_prohibited_start/end populated; zone_rules.sections.sand gets time_windows[]. |
+
+---
+
 ## Related
 
 - [[url-resolution-field-guide]] · [[page-level-over-agency-level]] · [[operator-not-pseudo-agency]] · [[law-as-primary-source-ca]] · [[consensus-source-authority]] · [[handoff-consensus-source-authority]]
@@ -341,4 +403,5 @@ Walks the algorithm end-to-end:
 
 ## Revision log
 
+- **2026-05-17 v3** — Absorbed evening-session producer-side additions: `region_name` column for sub-area carve-outs (replaces deprecated `section='sand_<sub_area>_overlay'` hack); `beach_policy_source_temporal` table + `scripts/extract_temporal_from_policy_source.py` Sonnet extractor wired as new step §9.5; trigger cascade (`tg_stmt_ins_beach_policy_source`) auto-fires entity-promote + zone_rules rebuild on bps INSERT/UPDATE/DELETE; quality gates (8e) temporal coverage + (8f) region_name multi-zone heuristic; tenet 5 "Trust the trigger cascade"; Del Mar worked example demonstrating multi-zone + temporal end-to-end. Authors: Franz + Claude.
 - **2026-05-17 v2** — Restructured for executable shape (algorithm-first, all values inline, tenets at end, agent template as parameterized recipe). v1 was a 15-section reference manual; v2 is what you'd hand a code path or sub-agent. Authors: Franz + Claude.

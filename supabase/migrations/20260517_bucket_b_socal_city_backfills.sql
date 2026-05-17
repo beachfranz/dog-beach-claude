@@ -1,4 +1,7 @@
--- Bucket B SoCal: 4 city backfills — Del Mar / Canyon Lake / PVE / Port Hueneme.
+-- Bucket B SoCal: 3 city backfills — Del Mar / PVE / Port Hueneme.
+-- (Canyon Lake stripped 2026-05-17 per [[deferred-canyon-lake]] — Franz's
+-- AV checker flagged a Canyon Lake URL during the agent run; deferring until
+-- a safer source channel is available.)
 --
 -- Wave-3 follow-up. Each city's codified animal/beach ordinance was fetched
 -- verbatim and resolved to a per-section deep-link URL per the
@@ -33,20 +36,7 @@
 --        strip. Two-fid handling deliberate: same statute, two location-
 --        specific status_notes.
 --
---  * Canyon Lake — amlegal (slug = `canyonlakeca`). City Title 10 Ch 10.16
---    §10.16.010 (citywide leash law) captured for completeness. INDIAN BEACH
---    (fid 6076) is on Canyon Lake POA private community property (gated HOA-
---    governed reservoir); the operative ruleset is the POA's Rules &
---    Regulations, NOT the city ordinance. The POA's published "Pet-Friendly
---    Parks" list (canyonlakepoa.com/pet-friendly-parks) explicitly enumerates
---    Eastport / Emerald / Evans / Harrelson / Lions / Outrigger as the
---    pet-friendly parks — Indian Beach is OMITTED, indicating dogs are not
---    permitted at Indian Beach by the POA. Per [[operator-not-pseudo-agency]]
---    + the bounded-operator principle, the POA is an operator not an agency
---    and isn't in the agency table. Decision: write the city ordinance as a
---    citywide baseline policy_source, but DEFER the beach_policy_source row
---    for fid 6076 — the operative authority is the POA, and no operator
---    entity exists yet to attach a policy_source row to.
+--  * Canyon Lake — STRIPPED 2026-05-17 per [[deferred-canyon-lake]].
 --
 --  * Palos Verdes Estates (PVE) — codepublishing legacy URL migrated to
 --    ecode360 (custid = PA4580). Title 6 Ch 6.08 has TWO operative sections:
@@ -75,8 +65,8 @@
 --    (Bubbling Springs Park has a designated off-leash dog area per
 --    §4008(b) — that's an inland city park, not the beach.)
 --
--- All four cities exist in public.agency (per input table: 48 Del Mar,
--- 87 Canyon Lake, 63 PVE, 67 Port Hueneme).
+-- Three cities applied here exist in public.agency (48 Del Mar, 63 PVE,
+-- 67 Port Hueneme). Canyon Lake (agency_id 87) deferred per pin above.
 --
 -- Sources fetched verbatim 2026-05-17 via Playwright.
 
@@ -131,24 +121,10 @@ WHERE ps.citation LIKE 'Del Mar Municipal Code §4.08.020%'
 ON CONFLICT (beach_fid, policy_source_id, section) DO NOTHING;
 
 
--- ─────────────────────────────────────────────────────────────────────
--- SECTION 2 — Canyon Lake Municipal Code §10.16.010 (Restraint)
--- City policy_source row written for completeness. NO beach_policy_source
--- row for Indian Beach (fid 6076) — POA-private property, see header.
--- ─────────────────────────────────────────────────────────────────────
-
-INSERT INTO public.policy_source (subtype, citation, issuing_agency_id, scope, source_url, full_text)
-SELECT 'municipal_code',
-       'Canyon Lake Municipal Code §10.16.010 (Restraint) — Title 10 Ch 10.16 Dogs, Cats and Other Animals at Large; Impoundment',
-       87,
-       ARRAY['dog_policy']::text[],
-       'https://codelibrary.amlegal.com/codes/canyonlakeca/latest/canyonlake_ca/0-0-0-26525',
-       'Canyon Lake Municipal Code §10.16.010 Restraint: (a) It shall be unlawful and a violation of this Code for an owner or the person in charge of such dog, cat or other animal to allow that dog, cat or other animal, licensed or unlicensed, to be at large as defined herein. (b) Except as otherwise allowed by the Leash Law or other State laws, all dogs shall be kept under restraint anytime they are outside of the owner''s fenced premises by a leash or other device of a size and material appropriate to the dog, held by a person capable of restraining such dog with that leash; restraint does not include voice, eye or signal control. (c) No owner shall fail to prevent his animal from becoming a public nuisance. (d) Every female dog or cat in heat shall be confined in a building or other enclosure in such a manner that she cannot come into contact with a male member of the same species except for planned breeding. (32-12/92 § 10.05.010) (Ord. 166, passed 4-6-2016; Am. Ord. 237, passed 12-13-2023) [Hosted on amlegal (codelibrary.amlegal.com). Fetched verbatim via Playwright 2026-05-17. NOTE: Canyon Lake is a gated private community on a Riverside County reservoir; Indian Beach (fid 6076) is on Canyon Lake POA private community property, not public. The operative ruleset for Indian Beach is the POA''s Rules & Regulations (canyonlakepoa.com), which OMIT Indian Beach from the "Pet-Friendly Parks" list (canyonlakepoa.com/pet-friendly-parks) — implying dogs are not permitted at Indian Beach by the POA. No POA operator entity exists yet to attach a per-beach policy_source; per the bounded-operator principle and the "skip rather than force-fit" guidance, the fid 6076 beach_policy_source row is deferred.]'
-WHERE NOT EXISTS (
-  SELECT 1 FROM public.policy_source WHERE citation LIKE 'Canyon Lake Municipal Code §10.16.010%'
-);
-
--- DELIBERATELY NO beach_policy_source INSERT for fid 6076 — see header.
+-- SECTION 2 — Canyon Lake — STRIPPED per [[deferred-canyon-lake]].
+-- The amlegal URL fetched by the agent tripped Franz's AV checker; the
+-- INSERT was removed to keep that URL out of production. Indian Beach
+-- (fid 6076) is HOA-private anyway. Re-introduce via a safer source.
 
 
 -- ─────────────────────────────────────────────────────────────────────

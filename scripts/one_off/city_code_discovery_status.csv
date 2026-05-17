@@ -1,0 +1,72 @@
+city,beaches,platform,doc_slug,url
+San Diego,32,unknown,,
+Laguna Beach,23,qcode,lagunabeach,https://qcode.us/codes/lagunabeach/
+Malibu,23,qcode,malibu,https://qcode.us/codes/malibu/
+San Francisco,14,amlegal,san_francisco,https://codelibrary.amlegal.com/codes/san_francisco/
+Newport Beach,12,unknown,,
+Santa Cruz,11,unknown,,
+Los Angeles,8,amlegal,los_angeles,https://codelibrary.amlegal.com/codes/los_angeles/
+San Clemente,7,municode,san_clemente/code_of_ordinances,https://library.municode.com/ca/san_clemente/codes/code_of_ordinances
+Santa Barbara,7,qcode,santabarbara,https://qcode.us/codes/santabarbara/
+Half Moon Bay,7,unknown,,
+Long Beach,6,municode,long_beach/municipal_code,https://library.municode.com/ca/long_beach/codes/municipal_code
+Carlsbad,6,qcode,carlsbad,https://qcode.us/codes/carlsbad/
+San Buenaventura (Ventura),6,unknown,,
+Dana Point,6,qcode,danapoint,https://qcode.us/codes/danapoint/
+Pacifica,5,municode,pacifica/code_of_ordinances,https://library.municode.com/ca/pacifica/codes/code_of_ordinances
+Huntington Beach,5,qcode,huntingtonbeach,https://qcode.us/codes/huntingtonbeach/
+Rancho Palos Verdes,5,municode,rancho_palos_verdes/code_of_ordinances,https://library.municode.com/ca/rancho_palos_verdes/codes/code_of_ordinances
+Oxnard,5,amlegal,oxnard,https://codelibrary.amlegal.com/codes/oxnard/
+Coronado,4,unknown,,
+Monterey,4,unknown,,
+Fort Bragg,4,unknown,,
+Alameda,3,municode,alameda/code_of_ordinances,https://library.municode.com/ca/alameda/codes/code_of_ordinances
+Avalon,3,unknown,,
+Capitola,3,unknown,,
+Encinitas,3,qcode,encinitas,https://qcode.us/codes/encinitas/
+Oakland,3,municode,oakland/code_of_ordinances,https://library.municode.com/ca/oakland/codes/code_of_ordinances
+Oceanside,3,municode,oceanside/code_of_ordinances,https://library.municode.com/ca/oceanside/codes/code_of_ordinances
+Santa Monica,3,qcode,santamonica,https://qcode.us/codes/santamonica/
+Sausalito,3,unknown,,
+Solana Beach,3,unknown,,
+Tiburon,3,municode,tiburon/code_of_ordinances,https://library.municode.com/ca/tiburon/codes/code_of_ordinances
+Truckee,3,municode,truckee/municipal_code,https://library.municode.com/ca/truckee/codes/municipal_code
+Pacific Grove,2,unknown,,
+Benicia,2,unknown,,
+Richmond,2,unknown,,
+South Lake Tahoe,2,unknown,,
+Trinidad,2,unknown,,
+Sacramento,2,amlegal,sacramentoca,https://codelibrary.amlegal.com/codes/sacramentoca/
+Morro Bay,2,municode,morro_bay/code_of_ordinances,https://library.municode.com/ca/morro_bay/codes/code_of_ordinances
+Seal Beach,2,qcode,sealbeach,https://qcode.us/codes/sealbeach/
+Burlingame,2,qcode,burlingame,https://qcode.us/codes/burlingame/
+Chula Vista,2,unknown,,
+Redondo Beach,2,qcode,redondobeach,https://qcode.us/codes/redondobeach/
+Goleta,2,qcode,goleta,https://qcode.us/codes/goleta/
+Pleasanton,1,qcode,pleasanton,https://qcode.us/codes/pleasanton/
+Port Hueneme,1,municode,port_hueneme/code_of_ordinances,https://library.municode.com/ca/port_hueneme/codes/code_of_ordinances
+Fremont,1,unknown,,
+Carpinteria,1,municode,carpinteria/code_of_ordinances,https://library.municode.com/ca/carpinteria/codes/code_of_ordinances
+Canyon Lake,1,amlegal,canyonlakeca,https://codelibrary.amlegal.com/codes/canyonlakeca/
+Berkeley,1,unknown,,
+San Mateo,1,unknown,,
+Sand City,1,qcode,sandcity,https://qcode.us/codes/sandcity/
+Albany,1,unknown,,
+Hermosa Beach,1,unknown,,
+Imperial Beach,1,qcode,imperialbeach,https://qcode.us/codes/imperialbeach/
+Irvine,1,municode,irvine/code_of_ordinances,https://library.municode.com/ca/irvine/codes/code_of_ordinances
+Healdsburg,1,unknown,,
+Laguna Niguel,1,municode,laguna_niguel/code_of_ordinances,https://library.municode.com/ca/laguna_niguel/codes/code_of_ordinances
+Lake Elsinore,1,unknown,,
+Reedley,1,amlegal,reedleyca,https://codelibrary.amlegal.com/codes/reedleyca/
+Foster City,1,unknown,,
+Manhattan Beach,1,municode,manhattan_beach/code_of_ordinances,https://library.municode.com/ca/manhattan_beach/codes/code_of_ordinances
+Mission Viejo,1,municode,mission_viejo/code_of_ordinances,https://library.municode.com/ca/mission_viejo/codes/code_of_ordinances
+El Segundo,1,amlegal,elsegundoca,https://codelibrary.amlegal.com/codes/elsegundoca/
+Needles,1,unknown,,
+Del Mar,1,municode,del_mar/municipal_code,https://library.municode.com/ca/del_mar/codes/municipal_code
+Torrance,1,unknown,,
+Daly City,1,municode,daly_city/code_of_ordinances,https://library.municode.com/ca/daly_city/codes/code_of_ordinances
+Claremont,1,qcode,claremont,https://qcode.us/codes/claremont/
+Palos Verdes Estates,1,unknown,,
+Pismo Beach,1,amlegal,pismobeach,https://codelibrary.amlegal.com/codes/pismobeach/

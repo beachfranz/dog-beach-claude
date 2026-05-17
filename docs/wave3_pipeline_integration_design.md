@@ -275,6 +275,74 @@ This builds on (does not duplicate) the consensus_engine_rewrite_design Phases 1
 
 ---
 
+## URL-quality audit — process tenet
+
+**Hard rule (added 2026-05-17):** every `policy_source.source_url` for a place-specific row MUST point to the page-level detail page for that place, not to the agency's general catalog/index page. See [[page-level-over-agency-level]].
+
+**Why this is a tenet, not a guideline:** the consumer surface relies on `source_url` to deep-link from "this beach's rule" back to "the source that authorizes the rule." A catalog URL silently breaks that trust contract — the user sees "California State Parks dog policy" but lands on an alphabetical list and has to scroll for context. Worse, batch migrations can quietly emit dozens of bad URLs in a single script, multiplying the breakage.
+
+### Audit cadence
+
+Run the URL-quality audit at three points:
+
+1. **Pre-commit on any batch migration** that inserts ≥3 place-specific policy_source rows. Before pushing, run the red-flag SQL below; if any row in the new batch shares a URL with another new row in the same batch, fix at write time.
+2. **Weekly during active Wave 3+ work** — re-run the audit across the full table to catch drift from upstream extractor updates.
+3. **Always before applying retroactive fixes** — a previously-good URL may have drifted; refresh against the canonical index page.
+
+### Red-flag SQL (the audit query)
+
+```sql
+-- Same source_url used by ≥2 policy_source rows is suspicious.
+-- A single row using a catalog URL is silent until it's compared.
+SELECT substring(source_url, 1, 90) AS url,
+       count(*) AS rows_sharing,
+       string_agg(DISTINCT substring(a.name, 1, 30), ', ') AS agencies
+  FROM public.policy_source ps
+  LEFT JOIN public.agency a ON a.id = ps.issuing_agency_id
+ WHERE source_url IS NOT NULL
+ GROUP BY source_url
+HAVING count(*) >= 2
+ ORDER BY rows_sharing DESC;
+```
+
+If a URL appears N times for N different places, that's a catalog reuse — fix it.
+
+### Citation-vs-URL mismatch query
+
+```sql
+-- ps rows citing 'Title X' or '§Y' or 'Chapter Z' but URL has no
+-- section anchor / nodeId / page_id.
+SELECT ps.id, a.name AS agency, substring(ps.citation, 1, 60) AS cite, ps.source_url
+  FROM public.policy_source ps
+  LEFT JOIN public.agency a ON a.id = ps.issuing_agency_id
+ WHERE ps.source_url IS NOT NULL
+   AND (ps.citation ~ 'Title |Chapter |Section ' OR ps.citation ILIKE '%code%')
+   AND ps.source_url !~ '(nodeId=|#|section/|cite=|page_id=|chapter|/Code/)'
+   AND ps.source_url !~ E'\\.pdf$'
+ ORDER BY ps.id;
+```
+
+Each result is a candidate for deep-link replacement.
+
+### Canonical-URL resolution patterns
+
+When fixing a batch:
+
+- **CA DPR**: fetch `parks.ca.gov/?page_id=21805` (Complete State Parks Listing) to map every park name → `?page_id=N` in one pass. Used in `20260517_dpr_url_canonicalize.sql`.
+- **NPS units**: each unit has `nps.gov/<4-letter-slug>/` (e.g., `nps.gov/goga/`). Compendia at `learn/management/upload/<year>-<unit>-Compendium-Formatted.pdf`.
+- **Municode**: each chapter has a `?nodeId=TIT<N><ABBR>` anchor (e.g., `TIT17BEHA` for Title 17 Beaches and Harbors). Fetch the county/city root, grep for the chapter title.
+- **ecode360**: each chapter has a numeric ID (e.g., `43799422` for HB Chapter 13.08). Search engine or in-platform navigation surfaces it.
+- **leginfo.legislature.ca.gov**: per-section deep links via `codes_displaySection.xhtml?lawCode=XXX&sectionNum=N.` instead of the `tocCode=XXX` TOC view.
+
+### Historical fixes (audit trail)
+
+| Date | Migration | What | Why |
+|---|---|---|---|
+| 2026-05-17 | `20260517_dpr_url_canonicalize.sql` | Updated 35 CA DPR ps rows from `parks.ca.gov/Dogs` catalog to per-park `?page_id=N` | Wave 2 batch had used catalog URL for every park; Franz caught it. |
+| 2026-05-17 | `20260517_leo_carrillo_correction.sql` | Refined Leo Carrillo source_url + corrected rule (`not_allowed` → `on_leash`) | Bucket E backfill had wrong rule; verbatim text revealed north/south split. |
+
+---
+
 ## Non-goals (out of scope for this design)
 
 - **Refactoring LLM extractors** (Tavily, Sonnet prompts) — they emit what they emit; this design is about consuming their output.

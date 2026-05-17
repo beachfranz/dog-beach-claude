@@ -1,9 +1,103 @@
-# Consensus engine — current state (2026-05-16 discovery)
+# Consensus engine — current state
 
 **Purpose:** Discovery output for the source-authority extension
 ([[consensus-source-authority]] / [[handoff-consensus-source-authority]]).
 Maps the existing data flow + identifies where `source_authority`
 needs to land.
+
+---
+
+## ⭐ Update 2026-05-17 — most of the gap closed; one wire remains
+
+**Headline:** the 2026-05-16 phase 3 + phase 5.1 migrations landed
+the authority-aware injector AND the entity-aware flat-column promoter.
+The 2026-05-16 doc below describes the PRE-extension state. Today's
+re-inspection finds that the engine is wired correctly for source-authority
+EXCEPT for one missing trigger.
+
+### What got built (since 2026-05-16)
+
+| Artifact | Migration | What it does |
+|---|---|---|
+| `_zr_inject_from_policy_sources(jsonb, bigint)` | `20260516_consensus_phase3_*.sql` | DISTINCT ON (section) over `beach_policy_source` joined to `policy_source`, ordered by `policy_source_authority(subtype) ASC`. Builds zone_rules payload with `evidence.{quote, source, citation, source_url, authority_tier}` + `supplementary_sources` array. |
+| `_promote_zone_rules_for_fid` now calls it | `20260516_consensus_phase3_resolver_swap.sql` | Composes 4 injectors in order; entity-aware runs LAST so it wins on conflict. Manual-curator short-circuit at top. |
+| `promote_entity_dogs_to_beach_dog_policy(bigint)` | `20260516_consensus_phase5_1_source_distinct_check.sql` | UPSERTs `beach_dog_policy` flat columns (`dogs_allowed`, `leash_policy`, `off_leash_flag`, `has_on_leash`, `has_off_leash`) from `_canonical_dogs_from_policy_sources(beach_fid)`. Source label `entity_promoted`. Respects manual_curator. |
+
+### The remaining gap — single missing trigger
+
+**No trigger fires on `beach_policy_source` INSERT/UPDATE/DELETE.** New ps + bps rows
+sit until something else triggers `_promote_zone_rules_for_fid` (a beach_dog_policy
+update; a BEP cascade refire). That's why the 3 stale-tier mismatches surfaced
+today (Rat Beach, Port Hueneme, Del Mar Beach) — the codified rule exists in
+the entity layer but never propagates because nothing reacts to the ps INSERT.
+
+### Proof of remaining-gap analysis
+
+Rat Beach (fid 8267) — PVE §6.08.070 ps row exists; bdp shows stale
+`dogs_allowed='yes'`, `leash_policy='on_leash'`, zone_rules sand
+`{"rule":"on_leash","evidence":{"source":"operator_county","inferred":true}}`.
+
+- Manual `_promote_zone_rules_for_fid(8267)` → zone_rules sand instantly
+  becomes `{"rule":"not_allowed", "evidence":{"quote":"PVE Municipal Code §6.08.070...",
+  "source":"municipal_code", "citation":"Palos Verdes Estates Municipal Code §6.08.070...",
+  "source_url":"https://ecode360.com/49086030", "authority_tier":1}}`.
+- Manual `promote_entity_dogs_to_beach_dog_policy(8267)` →
+  `dogs_allowed: yes→no`, `leash_policy: on_leash→no_access`,
+  `has_on_leash: true→false`. (Verified in a BEGIN…ROLLBACK transaction.)
+
+Both functions work correctly; nothing reacts to ps INSERT.
+
+### Minimal wire to land
+
+```sql
+CREATE OR REPLACE FUNCTION public.tg_after_change_beach_policy_source()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE v_fid bigint;
+BEGIN
+  v_fid := COALESCE(NEW.beach_fid, OLD.beach_fid);
+  IF v_fid IS NULL THEN RETURN NULL; END IF;
+  -- Update flat columns from canonical entity view. The UPSERT inside
+  -- promote_entity_dogs_to_beach_dog_policy fires tg_after_change_dogs_refire_zone_rules
+  -- which fires _promote_zone_rules_for_fid which runs the ps injector last.
+  -- So this one call closes the loop for both flat columns AND zone_rules.
+  PERFORM public.promote_entity_dogs_to_beach_dog_policy(v_fid);
+  RETURN NULL;
+END$$;
+
+CREATE TRIGGER tg_after_change_beach_policy_source
+AFTER INSERT OR UPDATE OR DELETE ON public.beach_policy_source
+FOR EACH ROW EXECUTE FUNCTION public.tg_after_change_beach_policy_source();
+```
+
+One trigger function + one trigger = Phases B + C closed end-to-end.
+
+### Phase E (cost gate) — separate, smaller
+
+Independent of Phase B/C. The predicate goes in `action_operator_llm_extract`
+in `scripts/run_state_pipeline.py:872`. Filter targets list to exclude
+beaches with `policy_source_authority(subtype) <= 2` coverage. Est. $5-15/mo
+savings; grows with multi-state expansion.
+
+### Verification plan post-trigger
+
+1. Apply the trigger migration.
+2. Backfill all existing beaches with `beach_policy_source` rows:
+   ```sql
+   SELECT public.promote_entity_dogs_to_beach_dog_policy(beach_fid)
+   FROM (SELECT DISTINCT beach_fid FROM beach_policy_source) t;
+   ```
+3. Confirm the 3 known mismatches (fids 8267, 8598, 8992) flipped.
+4. INSERT a test bps row pointing at an existing ps for a new fid; confirm bdp flat columns + zone_rules update automatically.
+5. Validate against 6 walkthrough beaches (Rosie's 6411, HBDB 6212, Crystal Cove, Fort Funston, Crown Memorial, Dockweiler).
+
+### Updated handoff status
+
+[[handoff-consensus-source-authority]] Tasks 1–4: largely done. Task 1 (this discovery): COMPLETE 2026-05-16 + addendum 2026-05-17. Task 2 (schema): the policy_source / beach_policy_source / policy_source_authority entities + function shipped via 2026-05-16 phase 3. Task 3 (update resolver): shipped via 2026-05-16 phase 3. Task 4 (validate): half-done — need the trigger + the 3 mismatched fids + walkthroughs.
+
+---
+
+## Original 2026-05-16 discovery (preserved for historical context)
+
 
 ---
 

@@ -25,6 +25,14 @@ Cost: ~$0.005-0.01 per ps row via Sonnet 4.5. ~$2.50 to backfill ~250 CA ps rows
 
 from __future__ import annotations
 
+import sys
+# Windows default stdout is cp1252; force UTF-8 so § / ↔ / em-dashes
+# in policy citations don't crash the run.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # Truststore for AV-MITM Windows SSL (same idiom as generate_beach_descriptions.py).
 try:
     import truststore
@@ -35,8 +43,8 @@ except ImportError:
 import argparse
 import json
 import os
-import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -216,8 +224,10 @@ RULES:
 # ─── HTTP helpers ──────────────────────────────────────────────────────
 
 def supa(path: str, *, params: dict | None = None, method: str = "GET",
-         body: dict | list | None = None) -> list:
-    """Lightweight Supabase REST client (PostgREST). Returns parsed JSON."""
+         body: dict | list | None = None, upsert: bool = False) -> list:
+    """Lightweight Supabase REST client (PostgREST). Returns parsed JSON.
+    `upsert=True` treats unique-conflicts as merge-duplicates (PostgREST
+    Prefer: resolution=merge-duplicates) — safe for idempotent re-runs."""
     url = f"{SUPABASE_URL}{path}"
     if params:
         url = url + "?" + urllib.parse.urlencode(params, safe=",.()*")
@@ -227,7 +237,10 @@ def supa(path: str, *, params: dict | None = None, method: str = "GET",
     if body is not None:
         req.add_header("Content-Type", "application/json")
         req.data = json.dumps(body).encode("utf-8")
-        req.add_header("Prefer", "return=representation")
+        prefers = ["return=representation"]
+        if upsert:
+            prefers.append("resolution=merge-duplicates")
+        req.add_header("Prefer", ",".join(prefers))
     with urllib.request.urlopen(req, timeout=60) as r:
         text = r.read().decode("utf-8")
         return json.loads(text) if text else []
@@ -376,8 +389,24 @@ def write_temporal_rows(bps_targets: list[dict], windows: list[dict],
                              "season_label", "notes")})
     if not inserts:
         return 0
-    supa("/rest/v1/beach_policy_source_temporal", method="POST", body=inserts)
-    return len(inserts)
+    # Insert one at a time so a single conflict (unique-index dup or
+    # CHECK violation from a model-output edge case) doesn't kill the
+    # whole batch. Errors get logged + counted; the run continues.
+    n_ok = 0
+    for row in inserts:
+        try:
+            supa("/rest/v1/beach_policy_source_temporal", method="POST", body=row)
+            n_ok += 1
+        except urllib.error.HTTPError as e:
+            body_excerpt = ""
+            try:
+                body_excerpt = e.read().decode("utf-8", errors="replace")[:300]
+            except Exception:
+                pass
+            print(f"      WARN: insert failed for fid={row.get('beach_fid')} "
+                  f"ps={row.get('policy_source_id')} window_kind={row.get('window_kind')} "
+                  f"→ HTTP {e.code}: {body_excerpt}")
+    return n_ok
 
 
 # ─── Per-ps extraction ─────────────────────────────────────────────────

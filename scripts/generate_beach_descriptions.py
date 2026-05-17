@@ -22,6 +22,16 @@ Cost: ~$0.003/beach via Sonnet 4.5. ~$2.40 to backfill ~800 active beaches.
 """
 
 from __future__ import annotations
+
+# Use the OS-native trust store when available so Python's SSL handshake
+# accepts AV-injected MITM root certs on Windows. No-op if truststore is
+# unavailable (Linux/CI/etc. fall back to certifi).
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except ImportError:
+    pass
+
 import argparse
 import hashlib
 import json

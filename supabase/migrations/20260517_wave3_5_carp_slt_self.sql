@@ -29,7 +29,7 @@
 
 -- 1a. CA DPR per-park ps row for Carpinteria SB (page_id=599)
 INSERT INTO public.policy_source (subtype, citation, issuing_agency_id, scope, source_url, full_text)
-SELECT 'park_url',
+SELECT 'agency_administrative_policy',
        'California State Parks dog policy — Carpinteria State Beach (page_id=599)',
        (SELECT id FROM public.agency WHERE name = 'California Department of Parks and Recreation' AND type = 'state_department'),
        ARRAY['dog_policy']::text[],

@@ -872,10 +872,31 @@ def _parse_photos_saved(out: str) -> int:
 def action_operator_llm_extract(state: str) -> int:
     """Invoke extract_operator_dogs_policy.py for state's operator IDs.
     Chunked into groups of 5 ops (~3min/chunk) to bound subprocess timeout
-    and enable graceful recovery on transient failures."""
+    and enable graceful recovery on transient failures.
+
+    Phase E cost gate (2026-05-17, docs/wave3_pipeline_integration_design.md
+    Q4 rec 4b): skip operators whose attributed scoreable beaches are ALL
+    already covered by a tier-1 (statute / municipal_code / federal_regulation
+    / state_regulation / state_statute / special_district_ordinance /
+    tribal_code) or tier-2 (mou / lease_agreement / operating_agreement /
+    concession_lease) beach_policy_source row. When tier-1/2 evidence exists
+    the canonical rule is locked by source authority, so LLM-extracted
+    operator-page nuance can't move it — running Sonnet+Tavily is wasted
+    spend. Operators with any uncovered beach still run; per-operator
+    granularity matches the iteration unit (one operator → N beaches)."""
     ids = _state_operator_ids(state)
     if not ids:
         log(f'    no operators for {state}; skip')
+        return 0
+    pre_count = len(ids)
+    ids = _filter_operators_lacking_tier12_coverage(state, ids)
+    skipped = pre_count - len(ids)
+    if skipped:
+        log(f'    Phase E cost gate: skipping {skipped}/{pre_count} operators '
+            f'whose beaches are fully covered by tier-1/2 policy_source '
+            f'(estimated savings ~${skipped*0.05:.2f})')
+    if not ids:
+        log(f'    all {pre_count} operators fully covered by tier-1/2; nothing to extract')
         return 0
     log(f'    extracting for {len(ids)} operators (smart filter; estimated cost ~${len(ids)*0.05:.0f})')
     return _chunked_subprocess(
@@ -884,6 +905,69 @@ def action_operator_llm_extract(state: str) -> int:
         extra_args=['--skip-recent', '24'],
         parse_fn=_parse_op_extract,
     )
+
+
+def _filter_operators_lacking_tier12_coverage(state: str, ids: list[int]) -> list[int]:
+    """Phase E (2026-05-17) — return the subset of ``ids`` that still have
+    at least one attributed scoreable beach NOT yet covered by a tier-1 or
+    tier-2 policy_source row.
+
+    An operator is kept when there exists any (operator_id, gold_fid) pair
+    in beach_enrichment_provenance — restricted to the state's
+    active+scoring_tier in ('daily','hourly') beaches — for which no
+    beach_policy_source row joins to a policy_source with
+    public.policy_source_authority(subtype) <= 2. If every attributed
+    beach already has tier-1/2 coverage the operator is dropped from the
+    LLM-extract target list.
+
+    Implementation note: we mirror the operator→beach attribution used by
+    public.state_operator_ids_for_scoreable_beaches(state) so the cost
+    gate matches the candidate set produced upstream. Operators with zero
+    attributed scoreable beaches (defensive: should not happen given the
+    upstream helper, but possible during state-bootstrap edge cases) are
+    kept — we'd rather pay for the extraction than silently drop work.
+    """
+    if not ids:
+        return ids
+    # Operators kept = those with >= 1 uncovered beach (LEFT JOIN form).
+    # Plus operators that have NO attributed scoreable beach at all
+    # (defensive fallback — keep them rather than silently drop).
+    sql = (
+        "WITH op_beach AS ( "
+        "  SELECT DISTINCT bep.operator_id, bep.gold_fid "
+        "    FROM public.beach_enrichment_provenance bep "
+        "    JOIN public.beaches_gold g ON g.fid = bep.gold_fid "
+        "   WHERE g.state = %s "
+        "     AND g.is_active "
+        "     AND g.scoring_tier IN ('daily','hourly') "
+        "     AND bep.operator_id = ANY(%s) "
+        "), "
+        "covered AS ( "
+        "  SELECT DISTINCT bps.beach_fid "
+        "    FROM public.beach_policy_source bps "
+        "    JOIN public.policy_source ps ON ps.id = bps.policy_source_id "
+        "   WHERE public.policy_source_authority(ps.subtype) <= 2 "
+        "), "
+        "op_uncovered AS ( "
+        "  SELECT ob.operator_id "
+        "    FROM op_beach ob "
+        "    LEFT JOIN covered c ON c.beach_fid = ob.gold_fid "
+        "   GROUP BY ob.operator_id "
+        "  HAVING bool_or(c.beach_fid IS NULL) "
+        "), "
+        "op_no_attrib AS ( "
+        "  SELECT unnest(%s::bigint[]) AS operator_id "
+        "  EXCEPT "
+        "  SELECT operator_id FROM op_beach "
+        ") "
+        "SELECT operator_id FROM op_uncovered "
+        "UNION "
+        "SELECT operator_id FROM op_no_attrib "
+        "ORDER BY operator_id"
+    )
+    with open_conn() as c, c.cursor() as cur:
+        cur.execute(sql, (state, ids, ids))
+        return [r[0] for r in cur.fetchall()]
 
 
 def action_operator_merge(state: str) -> int:

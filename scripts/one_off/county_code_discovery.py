@@ -29,7 +29,33 @@ STATUS_CSV = os.path.join(os.path.dirname(__file__), "county_code_discovery_stat
 
 # Municode jurisdiction-slug variations to try for each county.
 # Pattern: ca/<county_slug>_county or ca/<county_slug>-county
-MUNICODE_DOC_SLUGS = ["code_of_ordinances", "municipal_code", "code"]
+MUNICODE_DOC_SLUGS = ["code_of_ordinances", "municipal_code", "code", "ordinance_code"]
+
+# amlegal jurisdiction-slug variations to try for each county.
+# Pattern: codelibrary.amlegal.com/codes/<slug>/
+# Precedents (2026-05-16):
+#   - SD County:  `san_diego`           (snake, no suffix)
+#   - SB County:  `sanbernardino`       (concat, no suffix) — Franz pointer
+#   - LA City:    `los_angeles`         (snake)
+#   - Reedley:    `reedleyca`           (concat + `ca`)
+# Try bare-snake first (SD/LA precedent), then concat-no-separator
+# (SB precedent), then suffixed variants.
+AMLEGAL_SLUG_VARIANTS = [
+    "{slug}",          # san_diego  (SD)
+    "{concat}",        # sanbernardino  (SB)
+    "{slug}_county",
+    "{concat}county",
+    "{slug}_ca",
+    "{concat}ca",
+]
+
+# qcode.us slug variations.
+# Pattern: qcode.us/codes/<slug>/
+# Placer precedent (2026-05-16): slug is concatenated (`placercounty`, no
+# separator). Note: some qcode jurisdictions pass-through to amlegal (e.g.
+# Sacramento returns amlegal-style chrome), so we re-use the strict CA-county
+# validity check.
+QCODE_SLUG_VARIANTS = ["{slug}county", "{slug}", "{slug}_county", "{slug}-county"]
 
 
 def get_counties() -> list[tuple[str, int]]:
@@ -86,6 +112,123 @@ def try_municode(county_slug: str) -> tuple[str, str] | None:
             continue
         if text and "Municode Codification Search" not in text and "requested content cannot be found" not in text:
             return (doc_slug, url)
+        time.sleep(0.5)
+    return None
+
+
+# amlegal jurisdictions that are consolidated city-counties — their
+# index page reads as a city (no "X County" string) but the slug is
+# the right one for county-level beach work.
+AMLEGAL_CONSOLIDATED_CITY_COUNTIES = {
+    "San Francisco": "san_francisco",
+}
+
+
+def _is_valid_ca_county_page(text: str, county_name: str) -> bool:
+    """Strict check: amlegal page must be the CA county we asked for.
+
+    Empirical false positives caught during Phase A.2 (2026-05-16):
+      - `humboldt` → Humboldt, IOWA (city) — same name, different state
+      - `sacramentoca` → City of Sacramento, CA (not Sacramento County)
+
+    The robust signal is the exact phrase "{county} County" in inner_text
+    plus a California state indicator. Cities and same-named jurisdictions
+    in other states won't carry the "<name> County" string in their amlegal
+    chrome.
+    """
+    if not text:
+        return False
+    tl = text.lower()
+    if "page not found" in tl:
+        return False
+    if f"{county_name.lower()} county" not in tl:
+        return False
+    if "california" not in tl and ", ca" not in tl:
+        return False
+    return True
+
+
+def try_amlegal(county_name: str, county_slug: str) -> tuple[str, str] | None:
+    """Returns (slug_variant, working_url) or None if not found.
+
+    SD County's slug is bare (`san_diego`, no suffix); discovery missed
+    it in Phase A because only Municode was probed. We try bare-slug
+    first to bias toward that pattern, then `_county` / hyphenated /
+    `_ca` variants.
+
+    SF is whitelisted as a consolidated city-county: its amlegal index
+    reads as a city, so the strict "<name> County" check would reject
+    the correct slug.
+    """
+    if county_name in AMLEGAL_CONSOLIDATED_CITY_COUNTIES:
+        jurisdiction_slug = AMLEGAL_CONSOLIDATED_CITY_COUNTIES[county_name]
+        url = f"https://codelibrary.amlegal.com/codes/{jurisdiction_slug}/"
+        try:
+            text = fetch_html.fetch(url, wait_seconds=4, timeout_ms=30000)
+        except Exception:
+            return None
+        if text and "page not found" not in text.lower() and county_name.lower() in text.lower():
+            return (jurisdiction_slug, url)
+        return None
+
+    concat_slug = county_slug.replace("_", "")  # san_bernardino -> sanbernardino
+    hyphen_slug = county_slug.replace("_", "-")
+    slug_candidates: list[str] = []
+    seen: set[str] = set()
+    for variant in AMLEGAL_SLUG_VARIANTS:
+        cand = variant.format(slug=county_slug, concat=concat_slug)
+        if cand not in seen:
+            slug_candidates.append(cand)
+            seen.add(cand)
+    if hyphen_slug != county_slug:
+        for variant in AMLEGAL_SLUG_VARIANTS:
+            cand = variant.format(slug=hyphen_slug, concat=concat_slug)
+            if cand not in seen:
+                slug_candidates.append(cand)
+                seen.add(cand)
+
+    for jurisdiction_slug in slug_candidates:
+        url = f"https://codelibrary.amlegal.com/codes/{jurisdiction_slug}/"
+        try:
+            text = fetch_html.fetch(url, wait_seconds=4, timeout_ms=30000)
+        except Exception:
+            continue
+        if _is_valid_ca_county_page(text, county_name):
+            return (jurisdiction_slug, url)
+        time.sleep(0.5)
+    return None
+
+
+def try_qcode(county_name: str, county_slug: str) -> tuple[str, str] | None:
+    """Returns (slug_variant, working_url) or None if not found.
+
+    qcode.us is a regional codification platform; some entries are native
+    qcode UI (Placer), others pass through to amlegal (Sacramento). Both
+    forms satisfy the strict CA-county validity check.
+
+    Failure mode: page renders "Could not find <slug>" prominently.
+    """
+    slug_candidates: list[str] = []
+    for variant in QCODE_SLUG_VARIANTS:
+        slug_candidates.append(variant.format(slug=county_slug))
+    hyphen_slug = county_slug.replace("_", "-")
+    if hyphen_slug != county_slug:
+        for variant in QCODE_SLUG_VARIANTS:
+            slug_candidates.append(variant.format(slug=hyphen_slug))
+
+    for jurisdiction_slug in slug_candidates:
+        url = f"https://qcode.us/codes/{jurisdiction_slug}/"
+        try:
+            text = fetch_html.fetch(url, wait_seconds=4, timeout_ms=30000)
+        except Exception:
+            continue
+        if not text:
+            continue
+        if f"could not find {jurisdiction_slug.lower()}" in text.lower():
+            time.sleep(0.5)
+            continue
+        if _is_valid_ca_county_page(text, county_name):
+            return (jurisdiction_slug, url)
         time.sleep(0.5)
     return None
 
@@ -152,11 +295,32 @@ def main() -> int:
             row["animal_chapter_hint"] = chapter or ""
             print(f"municode/{doc_slug}", file=sys.stderr)
         else:
-            row["platform"] = "unknown"
-            row["doc_slug"] = ""
-            row["url"] = ""
-            row["animal_chapter_hint"] = ""
-            print("not on municode", file=sys.stderr)
+            # amlegal fallback (added 2026-05-16 after SD precedent).
+            # SD's bare slug `san_diego` was missed by Municode-only Phase A.
+            am = try_amlegal(name, county_slug)
+            if am:
+                jurisdiction_slug, url = am
+                row["platform"] = "amlegal"
+                row["doc_slug"] = jurisdiction_slug
+                row["url"] = url
+                row["animal_chapter_hint"] = ""
+                print(f"amlegal/{jurisdiction_slug}", file=sys.stderr)
+            else:
+                # qcode.us fallback (added 2026-05-16 after Placer precedent).
+                qc = try_qcode(name, county_slug)
+                if qc:
+                    jurisdiction_slug, url = qc
+                    row["platform"] = "qcode"
+                    row["doc_slug"] = jurisdiction_slug
+                    row["url"] = url
+                    row["animal_chapter_hint"] = ""
+                    print(f"qcode/{jurisdiction_slug}", file=sys.stderr)
+                else:
+                    row["platform"] = "unknown"
+                    row["doc_slug"] = ""
+                    row["url"] = ""
+                    row["animal_chapter_hint"] = ""
+                    print("not on municode/amlegal/qcode", file=sys.stderr)
 
         rows_by_county[name] = row
         # Write after each county so partial progress survives interrupt

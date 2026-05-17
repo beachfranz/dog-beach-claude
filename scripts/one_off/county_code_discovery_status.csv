@@ -1,33 +1,33 @@
 county,beaches,platform,doc_slug,url,animal_chapter_hint
 Los Angeles,89,municode,code_of_ordinances,https://library.municode.com/ca/los_angeles_county/codes/code_of_ordinances,EXPAND TITLE 10 - ANIMALS
-San Diego,69,unknown,,,
+San Diego,69,amlegal,san_diego,https://codelibrary.amlegal.com/codes/san_diego/,
 Orange,63,municode,code_of_ordinances,https://library.municode.com/ca/orange_county/codes/code_of_ordinances,EXPAND TITLE 4 - HEALTH SANITATION AND ANIMAL REGULATIONS
 Marin,58,municode,municipal_code,https://library.municode.com/ca/marin_county/codes/municipal_code,EXPAND TITLE 8 - ANIMALS*
 Sonoma,45,municode,code_of_ordinances,https://library.municode.com/ca/sonoma_county/codes/code_of_ordinances,EXPAND CHAPTER 5 - SONOMA COUNTY ANIMAL REGULATION ORDINANCE
-Santa Cruz,45,unknown,,,
+Santa Cruz,45,animallaw,title-6-animals,https://www.animallaw.info/local/ca-santa-cruz-county-santa-cruz-county-code-title-6-animals,Title 6 Animals (May-2012 mirror)
 Santa Barbara,42,municode,code_of_ordinances,https://library.municode.com/ca/santa_barbara_county/codes/code_of_ordinances,EXPAND CHAPTER 7 - ANIMALS AND FOWL
 San Mateo,38,municode,code_of_ordinances,https://library.municode.com/ca/san_mateo_county/codes/code_of_ordinances,EXPAND TITLE 6 - ANIMALS
 Monterey,38,municode,code_of_ordinances,https://library.municode.com/ca/monterey_county/codes/code_of_ordinances,EXPAND TITLE 8 - ANIMAL CONTROL
-Ventura,35,unknown,,,
+Ventura,35,municode,code_of_ordinances,https://library.municode.com/ca/ventura_county/codes/code_of_ordinances,
 Mendocino,29,municode,code_of_ordinances,https://library.municode.com/ca/mendocino_county/codes/code_of_ordinances,EXPAND TITLE 10 - ANIMALS
-Humboldt,26,unknown,,,
-San Luis Obispo,19,unknown,,,
-San Bernardino,15,unknown,,,
-Placer,15,unknown,,,
-San Francisco,14,unknown,,,
+Humboldt,26,county_codes,541,https://humboldt.county.codes/Code/541,Title V Div. 4 Ch. 1 §541-21 (voice-control)
+San Luis Obispo,19,county_pdf,title-9,https://pub-slocity.escribemeetings.com/filestream.ashx?DocumentId=15218,Title 9 Animals §9.03.005 (live code platform TBD)
+San Bernardino,15,amlegal,sanbernardino,https://codelibrary.amlegal.com/codes/sanbernardino/,§ 32.0108 Control of Animals (Title 3 / Div 2 / Ch 1)
+Placer,15,qcode,placercounty,https://qcode.us/codes/placercounty/,
+San Francisco,14,amlegal,san_francisco,https://codelibrary.amlegal.com/codes/san_francisco/,
 El Dorado,13,municode,code_of_ordinances,https://library.municode.com/ca/el_dorado_county/codes/code_of_ordinances,EXPAND TITLE 6 - ANIMALS
 Alameda,12,municode,code_of_ordinances,https://library.municode.com/ca/alameda_county/codes/code_of_ordinances,EXPAND TITLE 5 - ANIMALS
-Del Norte,11,unknown,,,
+Del Norte,11,county_pdf,title-8-ch-2,https://agendas.dnco.org/450966/450979/450980/452243/RevisedAnimalControlOrdinanceCountyCounselAnimalControl452753.pdf,Title 8 Ch 02 §80 Leash Law (board-agenda PDF image-only)
 Riverside,8,municode,code_of_ordinances,https://library.municode.com/ca/riverside_county/codes/code_of_ordinances,EXPAND TITLE 6 - ANIMALS
-Sacramento,8,unknown,,,
+Sacramento,8,ecode360,44030277,https://ecode360.com/44030277,Title 8 Ch 8.08 §8.08.056 Dogs at Large (8-ft leash)
 Nevada,6,municode,code_of_ordinances,https://library.municode.com/ca/nevada_county/codes/code_of_ordinances,EXPAND TITLE 8. - ANIMAL REGULATION
 Fresno,5,municode,code_of_ordinances,https://library.municode.com/ca/fresno_county/codes/code_of_ordinances,EXPAND TITLE 9 - ANIMALS
-Tuolumne,5,unknown,,,
+Tuolumne,5,county_pdf,chapter-6.04,https://www.tuolumnecounty.ca.gov/DocumentCenter/View/312/Chapter-604---Animal-Control,§ 6.04.280 Control of dogs (6-ft leash)
 Mono,3,municode,code_of_ordinances,https://library.municode.com/ca/mono_county/codes/code_of_ordinances,EXPAND TITLE 9 - ANIMALS
-Lassen,3,unknown,,,
+Lassen,3,qcode,lassencounty,https://qcode.us/codes/lassencounty/,
 Imperial,3,municode,code_of_ordinances,https://library.municode.com/ca/imperial_county/codes/code_of_ordinances,EXPAND TITLE 6 - ANIMALS
 Shasta,3,municode,code,https://library.municode.com/ca/shasta_county/codes/code,EXPAND TITLE 6 - ANIMALS
-Contra Costa,3,unknown,,,
+Contra Costa,3,municode,ordinance_code,https://library.municode.com/ca/contra_costa_county/codes/ordinance_code,§ 416-4.402 Animals at large (Title 4 / Div 416 / Ch 416-4 / Art 416-4.4)
 Plumas,2,municode,code_of_ordinances,https://library.municode.com/ca/plumas_county/codes/code_of_ordinances,
 Calaveras,2,municode,code_of_ordinances,https://library.municode.com/ca/calaveras_county/codes/code_of_ordinances,EXPAND TITLE 6 - ANIMALS
 Yuba,2,municode,code_of_ordinances,https://library.municode.com/ca/yuba_county/codes/code_of_ordinances,
@@ -36,8 +36,8 @@ Solano,2,unknown,,,
 Siskiyou,2,municode,code_of_ordinances,https://library.municode.com/ca/siskiyou_county/codes/code_of_ordinances,
 Madera,2,municode,code_of_ordinances,https://library.municode.com/ca/madera_county/codes/code_of_ordinances,EXPAND TITLE 6 - ANIMALS AND AGRICULTURE
 Butte,1,municode,code_of_ordinances,https://library.municode.com/ca/butte_county/codes/code_of_ordinances,EXPAND CHAPTER 4 - ANIMALS
-Stanislaus,1,unknown,,,
-Merced,1,unknown,,,
+Stanislaus,1,qcode,stanislauscounty,https://qcode.us/codes/stanislauscounty/,
+Merced,1,qcode,mercedcounty,https://qcode.us/codes/mercedcounty/,
 San Joaquin,1,municode,code_of_ordinances,https://library.municode.com/ca/san_joaquin_county/codes/code_of_ordinances,
 Napa,1,municode,code_of_ordinances,https://library.municode.com/ca/napa_county/codes/code_of_ordinances,EXPAND TITLE 6 - ANIMALS
 Glenn,1,unknown,,,

@@ -2306,15 +2306,35 @@ const USER_PREF = (() => {
 
 const _PREF_LABEL = { off_leash: 'off-leash', on_leash: 'on-leash', either: 'any access' };
 
-// Hour H (0-23) is inside a time_window iff [start, end) covers it.
-// Handles wrap-around (e.g. 22:00–06:00 means evening + early morning).
+// Hour H (0-23) is inside a time_window iff [start, end) covers it
+// AND today's date is inside the (optional) effective_from_md/_to_md
+// seasonal envelope. Handles wrap-around (e.g. 22:00–06:00) for the
+// daily axis and (e.g. 11-15..03-15 winter closure) for the seasonal
+// axis. Windows without seasonal envelope apply year-round.
 function _tw_contains(tw, hour) {
   if (!tw || !tw.start || !tw.end) return false;
   const startH = parseInt(String(tw.start).slice(0, 2), 10);
   const endH   = parseInt(String(tw.end).slice(0, 2), 10);
   if (Number.isNaN(startH) || Number.isNaN(endH)) return false;
+  // Seasonal envelope gate (Phase H4 followup fix 2026-05-17): if
+  // effective_from_md / effective_to_md present, today must fall inside
+  // the recurring MM-DD range. Without this the 9-6 Jun-Sep prohibition
+  // applies year-round, false-suppressing dogs Oct-May.
+  const fromMd = tw.effective_from_md;
+  const toMd   = tw.effective_to_md;
+  if (fromMd || toMd) {
+    const now = new Date();
+    const today = String(now.getMonth() + 1).padStart(2, '0') + '-' +
+                  String(now.getDate()).padStart(2, '0');
+    const from = fromMd || '01-01';
+    const to   = toMd   || '12-31';
+    const inEnvelope = (from <= to)
+      ? (today >= from && today <= to)
+      : (today >= from || today <= to);  // wrap-around year boundary
+    if (!inEnvelope) return false;
+  }
   if (endH > startH) return hour >= startH && hour < endH;
-  // Wrap-around
+  // Wrap-around (daily)
   return hour >= startH || hour < endH;
 }
 

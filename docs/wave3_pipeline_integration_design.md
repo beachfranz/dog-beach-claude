@@ -334,6 +334,8 @@ When fixing a batch:
 - **ecode360**: each chapter has a numeric ID (e.g., `43799422` for HB Chapter 13.08). Search engine or in-platform navigation surfaces it.
 - **leginfo.legislature.ca.gov**: per-section deep links via `codes_displaySection.xhtml?lawCode=XXX&sectionNum=N.` instead of the `tocCode=XXX` TOC view.
 
+**Full per-platform field guide:** see `feedback_url_resolution_field_guide` (auto-memory). Covers URL anatomy and fetch quirks for every platform we've encountered (Municode, amlegal, qcode, ecode360, codepublishing, county.codes, parks.ca.gov, NPS, leginfo, Oregon Public Law, WAC), known Cloudflare/Akamai workarounds, PDF handling, and the "mapping page first" strategy that prevents catalog-URL traps like the CA DPR miss. Read this before doing any policy_source URL work.
+
 ### Historical fixes (audit trail)
 
 | Date | Migration | What | Why |

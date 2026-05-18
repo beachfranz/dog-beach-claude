@@ -794,6 +794,91 @@ PLATFORM_BUILDERS = {
 }
 
 
+# ─── #7 PDF text extraction ─────────────────────────────────────────────
+# Many county/city codes are published only as PDFs (Tillamook County OR
+# Ordinance 64, Lincoln County OR Chapter 2 PDF, Lane Code LC07.pdf, etc.).
+# urllib + Playwright return the binary blob; we need actual text. Per
+# [[promote-ad-hoc-tools-to-process]] today's manual workaround (curator
+# downloads PDF + pastes text) is encapsulated here.
+
+try:
+    import pdfplumber  # type: ignore
+    PDFPLUMBER_AVAILABLE = True
+except ImportError:
+    PDFPLUMBER_AVAILABLE = False
+
+
+def _fetch_pdf_text(url: str, timeout: int = 30) -> tuple[str | None, str]:
+    """Download a PDF + extract text via pdfplumber.
+
+    Returns (text, why). text is None on failure; lowercased on success
+    for downstream containment checks (matches _smart_fetch contract).
+
+    Caches by URL to disk under tmp/_pdf_cache/<sha>.pdf so we don't
+    re-download on retries within the same run.
+    """
+    if not PDFPLUMBER_AVAILABLE:
+        return None, "pdfplumber_unavailable"
+
+    import hashlib, io
+    cache_dir = ROOT / "tmp" / "_pdf_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    sha = hashlib.sha256(url.encode("utf-8")).hexdigest()[:24]
+    cache_path = cache_dir / f"{sha}.pdf"
+
+    pdf_bytes: bytes | None = None
+    if cache_path.exists() and cache_path.stat().st_size > 0:
+        pdf_bytes = cache_path.read_bytes()
+    else:
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                               "AppleWebKit/537.36 (KHTML, like Gecko) "
+                               "Chrome/124.0.0.0 Safari/537.36"),
+                "Accept": "application/pdf,*/*",
+            })
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                if r.status != 200:
+                    return None, f"http_{r.status}"
+                pdf_bytes = r.read()
+                cache_path.write_bytes(pdf_bytes)
+        except urllib.error.HTTPError as e:
+            return None, f"http_{e.code}"
+        except Exception as e:
+            return None, f"pdf_download_error:{type(e).__name__}"
+
+    if not pdf_bytes or len(pdf_bytes) < 100:
+        return None, "pdf_empty"
+
+    # Quick sniff — confirm we got a PDF, not an HTML error page
+    if not pdf_bytes[:8].startswith(b"%PDF"):
+        return None, "pdf_signature_missing"
+
+    try:
+        text_parts: list[str] = []
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            # Cap pages (huge ordinance compilations can be hundreds of pages)
+            for page in pdf.pages[:80]:
+                t = page.extract_text() or ""
+                if t:
+                    text_parts.append(t)
+        text = "\n".join(text_parts)
+        return text.lower(), "ok_pdf"
+    except Exception as e:
+        return None, f"pdf_parse_error:{type(e).__name__}"
+
+
+def _is_pdf_url(url: str) -> bool:
+    """Heuristic: URL has .pdf extension or looks like a DocumentCenter PDF
+    endpoint (common pattern on county.gov sites — civicengage CMS)."""
+    lc = url.lower()
+    return (
+        lc.endswith(".pdf")
+        or "/documentcenter/view/" in lc  # civicengage PDF endpoint
+        or "/cms/one.aspx" in lc and ".pdf" in lc
+    )
+
+
 def _smart_fetch(url: str, platform: str | None = None,
                  timeout: int = 15) -> tuple[str | None, str]:
     """Fetch HTML via the right transport for the platform.
@@ -801,6 +886,12 @@ def _smart_fetch(url: str, platform: str | None = None,
     Returns (body_text, why). body_text is None on failure; lowercased on
     success for downstream containment checks.
     """
+    # PDF route — sniff by URL pattern, applied to ALL platforms (county.gov
+    # sites often host code chapters as PDFs regardless of which platform
+    # generated the candidate URL).
+    if _is_pdf_url(url):
+        return _fetch_pdf_text(url, timeout=max(timeout, 30))
+
     cfg = PLATFORM_FETCH_CONFIG.get(platform or "", {"mode": "urllib", "wait_seconds": 0, "selector": None})
 
     if cfg["mode"] == "playwright":
@@ -1123,6 +1214,11 @@ def _fetch_text(url: str, platform: str | None) -> tuple[str | None, str | None]
     (text, raw_html). raw_html is needed to extract sub-chapter anchors
     for drill-down."""
     import re
+    # PDF route — applies to ALL platforms (county.gov-hosted PDFs are common)
+    if _is_pdf_url(url):
+        pdf_text, _ = _fetch_pdf_text(url)
+        return pdf_text, None  # no HTML to return for PDFs (no further drill-down)
+
     selector = PLATFORM_CONTENT_SELECTOR.get(platform or "")
     cfg = PLATFORM_FETCH_CONFIG.get(platform or "", {"mode": "urllib", "wait_seconds": 0})
     is_pw = cfg["mode"] == "playwright"
@@ -2039,26 +2135,36 @@ def codify_from_manual_url(jc: JurisdictionClassification,
     chapter. Full-page gives the LLM enough to find the operative
     section identified by the URL fragment."""
     platform = _detect_platform_from_url(url)
-    # Manual URLs are one-offs; always use Playwright. Handles Cloudflare
-    # protection (municipal.codes, codepublishing-w-Cloudflare) + JS-rendered
-    # platforms (Municode, ecode360) uniformly. Per-platform wait_seconds
-    # if available, else default 8s.
     import re
-    if not PLAYWRIGHT_AVAILABLE:
-        print(f"      [manual] Playwright unavailable")
-        return None
-    cfg = PLATFORM_FETCH_CONFIG.get(platform or "", {"wait_seconds": 8.0})
-    wait_s = cfg.get("wait_seconds", 8.0) or 8.0
-    try:
-        raw_html = playwright_fetch(url, selector=None, raw_html=True,
-                                    wait_seconds=wait_s, timeout_ms=45000)
-        text = re.sub(r"<script[^>]*>.*?</script>", " ", raw_html, flags=re.DOTALL)
-        text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL)
-        text = re.sub(r"<[^>]+>", " ", text)
-        text = re.sub(r"\s+", " ", text).strip()
-    except Exception as e:
-        print(f"      [manual] Playwright fetch failed: {e}")
-        return None
+
+    # PDF route — applies to ANY URL ending in .pdf or matching civicengage
+    # DocumentCenter pattern. Playwright can't render PDFs; use pdfplumber.
+    if _is_pdf_url(url):
+        text, why = _fetch_pdf_text(url, timeout=45)
+        if text is None:
+            print(f"      [manual] PDF fetch failed: {why}")
+            return None
+        platform = platform or "pdf"
+    else:
+        # Manual URLs are one-offs; always use Playwright. Handles Cloudflare
+        # protection (municipal.codes, codepublishing-w-Cloudflare) + JS-rendered
+        # platforms (Municode, ecode360) uniformly. Per-platform wait_seconds
+        # if available, else default 8s.
+        if not PLAYWRIGHT_AVAILABLE:
+            print(f"      [manual] Playwright unavailable")
+            return None
+        cfg = PLATFORM_FETCH_CONFIG.get(platform or "", {"wait_seconds": 8.0})
+        wait_s = cfg.get("wait_seconds", 8.0) or 8.0
+        try:
+            raw_html = playwright_fetch(url, selector=None, raw_html=True,
+                                        wait_seconds=wait_s, timeout_ms=45000)
+            text = re.sub(r"<script[^>]*>.*?</script>", " ", raw_html, flags=re.DOTALL)
+            text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL)
+            text = re.sub(r"<[^>]+>", " ", text)
+            text = re.sub(r"\s+", " ", text).strip()
+        except Exception as e:
+            print(f"      [manual] Playwright fetch failed: {e}")
+            return None
 
     # Detect Cloudflare challenge / thin fetch — trigger web_search retry
     cf_signal = any(s in (text or "")[:2000].lower() for s in [

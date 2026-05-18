@@ -29,6 +29,31 @@ Beach-in handles layered authority naturally. A beach inside city + county + sta
 4. bps materialization                    ──► beach_policy_source rows
 ```
 
+## Cross-cutting layer: per-platform fetch routing
+
+Spec gap surfaced 2026-05-18 mid-build: **fetch-mode varies per platform across every step that touches URLs**, not just Step 4 verbatim fetch. The codify driver hits external code-publisher sites for validity checks (Step 2), TOC navigation (Step 3), AND verbatim fetch (Step 4). All three need the right transport per platform.
+
+| Platform | Mode | Why | Selector |
+|---|---|---|---|
+| Municode | **Playwright** | TOC + content both JS-rendered | `.codes-chunks-pg` for content |
+| ecode360 | **Playwright** | Heavy JS rendering | varies |
+| Cloudflare-fronted (e.g. some codepublishing pages) | **Playwright** | JS challenge | none |
+| codepublishing (standard) | urllib | Static HTML | none |
+| amlegal | urllib | Static-ish; `.section-content` for content | `.section-content` |
+| qcode | urllib | Static enough | none |
+| county.codes | urllib | Mostly static / PDF | none |
+
+**Implementation pattern:**
+- A `PLATFORM_FETCH_CONFIG` dict (in the codify driver) maps each platform to `{mode: playwright|urllib, wait_seconds, selector}`.
+- A `_smart_fetch(url, platform)` router dispatches to the right transport.
+- Both validity checks (Step 2) and TOC fetches (Step 3) call through this router with the platform name passed down.
+- The existing `scripts/fetch/fetch_html.py` (the Playwright fetcher used during CA codification) is the implementation for the Playwright path.
+
+**Why this matters for the architecture, not just implementation:**
+- Codify v1's cost model depends on it. Playwright is ~12s/call; urllib is ~1s. Per-platform routing keeps wall time tractable.
+- Per-platform selectors are first-class metadata, not magic strings buried in fetch code.
+- New platforms (state-specific code publishers as we expand to MI, MA, TX, etc.) just need a `PLATFORM_FETCH_CONFIG` row added — the algorithm doesn't change.
+
 **Codify happens BEFORE PIP.** Codify is the gate that activates a polygon for the resolver. Until a polygon has been codified for a given domain, it's invisible to the resolver and PIP doesn't bother joining against it.
 
 This means:

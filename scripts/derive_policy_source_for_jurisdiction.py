@@ -1056,8 +1056,15 @@ Output: JSON with these fields:
   "deep_link_url":   "<URL of the chapter/section that contains the rule — must be one of the input URLs>",
   "status_note":     null | "<short note — leash length, exception clause, etc. KEEP MINIMAL>",
   "confidence":      0.0..1.0,
-  "notes":           null | "<ambiguity flags, alternate interpretations, etc.>"
+  "notes":           null | "<ambiguity flags, alternate interpretations, etc.>",
+  "suggested_next_chapter": null | {
+      "title":   <integer title number, e.g. 9>,
+      "chapter": null | <numeric chapter sub-number, e.g. 41 for Ch 9.41 — null = whole title>,
+      "reason":  "<why this is likely the operative location>"
+  }
 }
+
+When `rule == "no_rule_found"` and you can identify a specific likely-operative chapter NOT in the input (e.g., "the operative rule is probably in Title 9 Parks/Rec which wasn't drilled"), POPULATE `suggested_next_chapter` so the caller can re-drill. The caller can construct the URL automatically; you just need title + chapter numbers.
 
 CRITICAL DEFAULTS (per CA codification data, validate against text):
 - 75% of jurisdictions land on `on_leash`. Default to it unless the text says otherwise.
@@ -1146,6 +1153,11 @@ class CodifiedRule:
     confidence:     float = 0.0
     decided_by:     str = ""    # 'sonnet-4-5' | 'human-reviewed' | 'no_rule_found'
     notes:          str | None = None
+    # Populated by Step 6 when the LLM identifies a likely-operative chapter
+    # not yet drilled. Triggers Step 6.5 re-drill if confidence < 0.7.
+    suggested_next_title:   int | None = None
+    suggested_next_chapter: int | None = None
+    suggested_next_reason:  str | None = None
 
 
 def _anthropic_rule_call(jurisdiction_blob: dict) -> tuple[dict, int, int, float]:
@@ -1227,6 +1239,7 @@ def step_6_decide_rule(jc: JurisdictionClassification, platform: PlatformDiscove
         print(f"      ERROR: rule-decision LLM call failed: {e}", file=sys.stderr)
         return None
 
+    sng = parsed.get("suggested_next_chapter") or {}
     return CodifiedRule(
         polygon_table=jc.polygon_table or "",
         polygon_key=jc.polygon_key or "",
@@ -1240,7 +1253,79 @@ def step_6_decide_rule(jc: JurisdictionClassification, platform: PlatformDiscove
         confidence=float(parsed.get("confidence", 0.0)),
         decided_by=MODEL,
         notes=parsed.get("notes"),
+        suggested_next_title=sng.get("title"),
+        suggested_next_chapter=sng.get("chapter"),
+        suggested_next_reason=sng.get("reason"),
     )
+
+
+# ─── Step 6.5 — LLM-guided re-drill ────────────────────────────────────
+
+def _construct_codepublishing_url(jc: JurisdictionClassification,
+                                  platform: PlatformDiscovery,
+                                  title: int, chapter: int | None) -> str | None:
+    """Construct a codepublishing URL for a specific title/chapter.
+    Per the platform's directory convention:
+      /<STATE>/<JurisdictionConcat>/html/<JC><N2>/<JC><N2>[<M2>].html
+    """
+    if platform.platform != "codepublishing":
+        return None
+    if not platform.valid_url:
+        return None
+    juris_concat = _slug_no_separator(jc.name)  # preserves case + County suffix
+    title_dir = f"{juris_concat}{title:02d}"
+    if chapter is not None:
+        filename = f"{juris_concat}{title:02d}{chapter:02d}.html"
+    else:
+        filename = f"{juris_concat}{title:02d}.html"
+    base = platform.valid_url.rstrip("/")
+    return f"{base}/html/{title_dir}/{filename}"
+
+
+def step_6_5_llm_guided_redrill(jc: JurisdictionClassification,
+                                platform: PlatformDiscovery,
+                                first_rule: CodifiedRule) -> CodifiedRule | None:
+    """If Step 6 deferred (confidence < 0.7) AND the LLM suggested a specific
+    chapter, re-drill there and re-decide. Returns the new rule (which
+    supersedes the first) or None if no follow-up possible."""
+    if first_rule.confidence >= 0.7:
+        return None
+    if first_rule.suggested_next_title is None:
+        return None
+
+    new_url = _construct_codepublishing_url(
+        jc, platform,
+        first_rule.suggested_next_title,
+        first_rule.suggested_next_chapter,
+    )
+    if not new_url:
+        # Only codepublishing URL construction supported in v1
+        return None
+
+    # Validate the constructed URL is fetchable before re-drilling
+    body, why = _smart_fetch(new_url, platform=platform.platform)
+    if body is None:
+        return None
+
+    # Build a single-candidate ChapterNavigation pointing at the suggested URL
+    title_label = f"Title {first_rule.suggested_next_title}"
+    if first_rule.suggested_next_chapter is not None:
+        title_label += f" Ch {first_rule.suggested_next_title}.{first_rule.suggested_next_chapter:02d}"
+    fake_nav = ChapterNavigation(
+        best_url=new_url, best_text=title_label, best_score=100,
+        candidates=[ChapterCandidate(url=new_url, link_text=title_label,
+                                      score=100, why="llm_suggested")],
+        method="llm_guided",
+        notes=f"LLM suggested: {first_rule.suggested_next_reason}",
+    )
+
+    # Re-run Step 4 with the new starting point + re-decide
+    new_fetch = step_4_fetch_verbatim(jc, platform, fake_nav,
+                                       max_candidates=1, drill=True)
+    if not new_fetch.fetched:
+        return None
+    new_rule = step_6_decide_rule(jc, platform, new_fetch)
+    return new_rule
 
 
 def step_4_fetch_verbatim(jc: JurisdictionClassification,
@@ -1383,6 +1468,25 @@ def process_jurisdiction(name: str, state: str, dry_run: bool = True) -> dict:
             print(f"       status_note: {cr.status_note}")
         if cr.notes:
             print(f"       LLM notes: {cr.notes}")
+
+        # Step 6.5 — LLM-guided re-drill if confidence < 0.7 and LLM suggested
+        if cr.confidence < 0.7 and cr.suggested_next_title is not None:
+            ch_label = f"Title {cr.suggested_next_title}"
+            if cr.suggested_next_chapter is not None:
+                ch_label += f" Ch {cr.suggested_next_title}.{cr.suggested_next_chapter:02d}"
+            print(f"  [6.5] LLM suggested → {ch_label}  ({cr.suggested_next_reason})")
+            cr2 = step_6_5_llm_guided_redrill(jc, plat, cr)
+            if cr2:
+                gate2_ok, gate2_why = is_url_deep_enough(cr2.subtype, cr2.source_url)
+                conf2_marker = "✅" if cr2.confidence >= 0.7 else ("⚠️ review" if cr2.confidence >= 0.4 else "❌ defer")
+                print(f"  [6.5] re-decide → {cr2.rule}  conf={cr2.confidence:.2f} {conf2_marker}")
+                print(f"       subtype={cr2.subtype}  citation={cr2.citation!r}")
+                print(f"       url={cr2.source_url}  url_gate={'✅' if gate2_ok else '❌ '+gate2_why}")
+                if cr2.evidence_quote:
+                    print(f"       evidence: {cr2.evidence_quote[:140]!r}")
+                cr = cr2  # supersede
+            else:
+                print(f"  [6.5] re-drill failed (URL not constructible or fetch error)")
     else:
         print(f"  [6] rule → SKIPPED (no fetched content or no ANTHROPIC_API_KEY)")
 

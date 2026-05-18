@@ -389,12 +389,14 @@ def scope_check(jc: JurisdictionClassification) -> ScopeCheck:
 # Inline config for v1; migrate to DB table if it grows. See
 # docs/codify_pip_resolver_architecture.md.
 STATE_PLATFORM_PRIORITY = {
-    "WA": ["codepublishing", "municode", "amlegal", "county_codes"],
-    "OR": ["municode", "codepublishing", "amlegal"],
+    # Every state must list ALL platforms (omitting any means a city on the
+    # missing platform is silently classified NONE). Order = preference;
+    # priority-ones win first, long-tail ones catch the rest.
+    "WA": ["codepublishing", "municode", "amlegal", "county_codes", "ecode360", "qcode"],
+    "OR": ["municode", "codepublishing", "amlegal", "ecode360", "qcode", "county_codes"],
     "CA": ["municode", "amlegal", "qcode", "ecode360", "codepublishing", "county_codes"],
-    "MI": ["municode", "amlegal", "ecode360", "codepublishing"],
-    "MA": ["ecode360", "amlegal", "municode"],
-    # default for unspecified: try all in CA's order
+    "MI": ["municode", "amlegal", "ecode360", "codepublishing", "qcode", "county_codes"],
+    "MA": ["ecode360", "amlegal", "municode", "codepublishing", "qcode", "county_codes"],
     "_default": ["municode", "amlegal", "qcode", "ecode360", "codepublishing", "county_codes"],
 }
 
@@ -956,18 +958,26 @@ def _fetch_text(url: str, platform: str | None) -> tuple[str | None, str | None]
             raw_html = playwright_fetch(url, selector=None, raw_html=True,
                                         wait_seconds=cfg.get("wait_seconds", 8.0),
                                         timeout_ms=30000)
-            # Extract text via selector if configured, else full-page
-            if selector:
-                try:
-                    text = playwright_fetch(url, selector=selector, raw_html=False,
-                                            wait_seconds=1.0, timeout_ms=15000)
-                except Exception:
-                    text = None
+            # Extract text. AVOID a second Playwright call (slow + hard to
+            # tune wait_seconds for each platform). Instead extract the
+            # selector element from the already-fetched raw_html via regex.
+            if selector and selector.startswith(("#", ".")):
+                attr = "id" if selector.startswith("#") else "class"
+                value = selector[1:]
+                m = re.search(rf'<[^>]+\b{attr}="[^"]*\b{re.escape(value)}\b[^"]*"[^>]*>(.*?)</',
+                              raw_html, re.DOTALL)
+                if m:
+                    text = re.sub(r"<[^>]+>", " ", m.group(1))
+                else:
+                    # selector not found in HTML — fall back to full-page
+                    text = re.sub(r"<script[^>]*>.*?</script>", " ", raw_html, flags=re.DOTALL)
+                    text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL)
+                    text = re.sub(r"<[^>]+>", " ", text)
             else:
                 text = re.sub(r"<script[^>]*>.*?</script>", " ", raw_html, flags=re.DOTALL)
                 text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL)
                 text = re.sub(r"<[^>]+>", " ", text)
-                text = re.sub(r"\s+", " ", text).strip()
+            text = re.sub(r"\s+", " ", text).strip()
             return text, raw_html
         except Exception:
             return None, None
@@ -1191,11 +1201,18 @@ class CodifiedRule:
     suggested_next_reason:  str | None = None
 
 
-def _anthropic_rule_call(jurisdiction_blob: dict) -> tuple[dict, int, int, float]:
-    """Call Sonnet with the rule-decision prompt. Returns (parsed, in_tokens, out_tokens, cost)."""
+def _anthropic_rule_call(jurisdiction_blob: dict, enable_web_search: bool = False) -> tuple[dict, int, int, float]:
+    """Call Sonnet with the rule-decision prompt. Returns (parsed, in_tokens, out_tokens, cost).
+
+    When enable_web_search=True, adds Anthropic's web_search tool so Sonnet
+    can route around Cloudflare-walled URLs / thin fetch content by searching
+    the web for the rule text directly. Adds cost (~$10/1000 searches +
+    token usage), so only enabled when the deterministic fetch produced
+    thin / blocked content. Per [[ca-codify-v1-lessons]] and the 15 CA ps
+    rows already documenting this bypass pattern."""
     body = {
         "model": MODEL,
-        "max_tokens": 3000,
+        "max_tokens": 4000,
         "system": [
             {"type": "text", "text": RULE_DECISION_PROMPT, "cache_control": {"type": "ephemeral"}},
         ],
@@ -1203,6 +1220,12 @@ def _anthropic_rule_call(jurisdiction_blob: dict) -> tuple[dict, int, int, float
             {"role": "user", "content": json.dumps(jurisdiction_blob, ensure_ascii=False)},
         ],
     }
+    if enable_web_search:
+        body["tools"] = [{
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": 4,
+        }]
     req = urllib.request.Request(
         "https://api.anthropic.com/v1/messages",
         data=json.dumps(body).encode("utf-8"), method="POST",
@@ -1210,10 +1233,15 @@ def _anthropic_rule_call(jurisdiction_blob: dict) -> tuple[dict, int, int, float
     req.add_header("x-api-key", ANTHROPIC_KEY)
     req.add_header("anthropic-version", "2023-06-01")
     req.add_header("content-type", "application/json")
-    with urllib.request.urlopen(req, timeout=120) as r:
+    with urllib.request.urlopen(req, timeout=180) as r:
         resp = json.loads(r.read().decode("utf-8"))
-    text = "".join(b.get("text", "") for b in resp.get("content", []))
+    # With web_search enabled, response contains tool_use blocks +
+    # tool_result blocks + final text. We want the LAST text block (the
+    # model's synthesis after tool calls), then extract JSON from it.
+    text_blocks = [b.get("text", "") for b in resp.get("content", []) if b.get("type") == "text"]
+    text = text_blocks[-1] if text_blocks else ""
     stripped = text.strip()
+    # Strip prose preamble (e.g., "Based on my search:\n\n{...}")
     if stripped.startswith("```"):
         parts = stripped.split("```", 2)
         if len(parts) >= 2:
@@ -1221,6 +1249,11 @@ def _anthropic_rule_call(jurisdiction_blob: dict) -> tuple[dict, int, int, float
             if inner.lower().startswith("json"):
                 inner = inner[4:].lstrip()
             stripped = inner.rsplit("```", 1)[0].strip()
+    # Find the first { and last } (JSON envelope) if prose surrounds
+    if not stripped.startswith("{"):
+        i, j = stripped.find("{"), stripped.rfind("}")
+        if i >= 0 and j > i:
+            stripped = stripped[i:j+1]
     parsed = json.loads(stripped)
     usage = resp.get("usage", {})
     in_t  = usage.get("input_tokens", 0)
@@ -1231,9 +1264,15 @@ def _anthropic_rule_call(jurisdiction_blob: dict) -> tuple[dict, int, int, float
 
 
 def step_6_decide_rule(jc: JurisdictionClassification, platform: PlatformDiscovery,
-                       fetched: VerbatimFetch) -> CodifiedRule | None:
+                       fetched: VerbatimFetch,
+                       enable_web_search: bool = False) -> CodifiedRule | None:
     """Read fetched chapter+section text, ask Sonnet to identify the operative
-    rule. Returns one CodifiedRule (or None if no readable input)."""
+    rule. Returns one CodifiedRule (or None if no readable input).
+
+    enable_web_search=True enables Anthropic's web_search tool, letting Sonnet
+    route around Cloudflare-walled URLs by searching for the rule text. Use
+    when the deterministic fetch produced thin content (< 500 chars / matches
+    Cloudflare challenge keywords)."""
     if not fetched.fetched:
         return None
     if not ANTHROPIC_KEY:
@@ -1263,9 +1302,18 @@ def step_6_decide_rule(jc: JurisdictionClassification, platform: PlatformDiscove
         "platform":  platform.platform,
         "chapters":  chapters_blob,
     }
+    if enable_web_search:
+        blob["instructions"] = (
+            "The fetched content looks thin or blocked (Cloudflare challenge / "
+            "JS-rendered SPA / wrong chapter). Use the web_search tool to find "
+            "the actual verbatim rule text for this jurisdiction's dog/leash "
+            "ordinance. Cross-check across 1-3 sources. Return the original URL "
+            "(if provided) as deep_link_url and the web-searched verbatim quote "
+            "as full_text + evidence_quote."
+        )
 
     try:
-        parsed, in_t, out_t, cost = _anthropic_rule_call(blob)
+        parsed, in_t, out_t, cost = _anthropic_rule_call(blob, enable_web_search=enable_web_search)
     except Exception as e:
         print(f"      ERROR: rule-decision LLM call failed: {e}", file=sys.stderr)
         return None
@@ -1393,6 +1441,96 @@ def step_6_7_agency_policy_fallback(jc: JurisdictionClassification,
 
     new_rule = step_6_decide_rule(jc, fake_platform, new_fetch)
     return new_rule
+
+
+# ─── Step 6.8 — URL-inference + web-search fallback ────────────────────
+
+# Common patterns for US city / county / agency homepages. Probed in
+# order; first 200 OK with sane body length is treated as the agency_web_url
+# and handed to Step 6.7's nav-scan + Step 6 LLM eval logic.
+def _infer_city_url_candidates(jc: JurisdictionClassification) -> list[str]:
+    """Generate plausible city/county website URL patterns."""
+    name_lower = jc.name.lower()
+    slug_no_space = _slug_no_separator(jc.name).lower()
+    slug_dashes = name_lower.replace("city of ", "").replace(" county", "").replace(" ", "-")
+    slug_under = name_lower.replace("city of ", "").replace(" county", "").replace(" ", "_")
+    state_lc = jc.state.lower()
+    candidates: list[str] = []
+    if jc.governance_class == "incorporated_city":
+        candidates += [
+            f"https://www.cityof{slug_no_space}.gov",
+            f"https://www.cityof{slug_no_space}.org",
+            f"https://www.cityof{slug_no_space}.com",
+            f"https://cityof{slug_no_space}.gov",
+            f"https://cityof{slug_no_space}.org",
+            f"https://www.{slug_no_space}wa.gov" if state_lc == "wa" else None,
+            f"https://www.{slug_no_space}or.gov" if state_lc == "or" else None,
+            f"https://www.{slug_no_space}.gov",
+            f"https://www.{slug_no_space}.{state_lc}.gov",
+            f"https://www.{slug_no_space}.{state_lc}.us",
+            f"https://{slug_no_space}.{state_lc}.us",
+            f"https://www.ci.{slug_dashes}.{state_lc}.us",
+            f"https://www.ci.{slug_under}.{state_lc}.us",
+        ]
+    elif jc.governance_class == "county":
+        cty = name_lower.replace(" county", "").replace(" ", "")
+        candidates += [
+            f"https://www.co.{cty}.{state_lc}.us",
+            f"https://www.{cty}county{state_lc}.gov",
+            f"https://www.{cty}countygov.com",
+            f"https://www.{cty}county.us",
+            f"https://{cty}county.{state_lc}.gov",
+        ]
+    return [c for c in candidates if c]
+
+
+def step_6_8_url_inference_fallback(jc: JurisdictionClassification,
+                                    sc: ScopeCheck,
+                                    prior_rule: CodifiedRule | None) -> CodifiedRule | None:
+    """Last-resort: when codified-source paths defer AND no agency.web_url,
+    infer the city/county homepage URL from name patterns and hand off to
+    Step 6.7's nav-scan + Step 6 LLM eval logic.
+
+    Per [[codify-step-6-8-web-search-fallback]] design. URL inference is
+    the cheap first half; web_search (via Anthropic tool) is the deeper
+    second half (TODO — not yet built; URL inference covers many cases)."""
+    if prior_rule and prior_rule.confidence >= 0.7:
+        return None
+    if sc.agency_web_url:
+        return None  # Step 6.7 already handled
+
+    candidates = _infer_city_url_candidates(jc)
+    if not candidates:
+        return None
+
+    # Try each candidate; first valid one is treated as the agency URL.
+    # Use Playwright (most city sites are Cloudflare-protected; urllib 403s).
+    found_url: str | None = None
+    tried_log: list[tuple[str, str]] = []
+    for url in candidates[:12]:  # cap to keep wall time bounded
+        body, why = _smart_fetch(url, platform="agency_homepage")
+        tried_log.append((url, why or "fetch_failed"))
+        if body and len(body) > 800:
+            # Sanity check: body should mention the jurisdiction name
+            bare = jc.name.replace("City of ", "").replace(" County", "").lower()
+            if bare in body:
+                found_url = url
+                break
+        time.sleep(0.5)
+
+    if not found_url:
+        return None  # no inferred URL panned out
+
+    # Hand off to Step 6.7 with the inferred URL as agency_web_url
+    fake_sc = ScopeCheck(
+        agency_id=sc.agency_id, agency_name=sc.agency_name,
+        agency_type=sc.agency_type,
+        agency_web_url=found_url,   # ← the inferred URL
+        existing_ps_count=sc.existing_ps_count,
+        existing_ps_ids=sc.existing_ps_ids,
+        decision=sc.decision,
+    )
+    return step_6_7_agency_policy_fallback(jc, fake_sc, prior_rule)
 
 
 def step_6_5_llm_guided_redrill(jc: JurisdictionClassification,
@@ -1636,9 +1774,111 @@ def _make_outcome(name: str, state: str, jc, sc, attempts: list, cr, platform_us
     )
 
 
+# ─── Manual URL override (Franz-curated mode) ─────────────────────────
+
+def _detect_platform_from_url(url: str) -> str | None:
+    """Map a URL host to the platform name (drives selector + fetch mode)."""
+    lc = url.lower()
+    if "library.municode.com" in lc: return "municode"
+    if "codepublishing.com" in lc:   return "codepublishing"
+    if "ecode360.com" in lc:         return "ecode360"
+    if "codelibrary.amlegal.com" in lc or "amlegal.com" in lc: return "amlegal"
+    if "qcode.us" in lc or ".qcode." in lc: return "qcode"
+    if ".municipal.codes" in lc:     return "codepublishing"  # similar shape
+    if "ecfr.gov" in lc or "federalregister.gov" in lc: return None
+    return None  # unknown — _fetch_text defaults to urllib + full-page
+
+
+def codify_from_manual_url(jc: JurisdictionClassification,
+                           sc: ScopeCheck,
+                           url: str) -> CodifiedRule | None:
+    """Bypass Steps 2/3/4 — fetch the given URL directly, pass to Step 6.
+
+    Use case: user (Franz) provides the deep-link URL when our discovery
+    heuristics failed. Common for big cities whose codes live in
+    non-obvious titles (Seattle Title 18 Parks vs Title 6 Animals).
+
+    Uses FULL-PAGE text extraction (no selector) — regex can't balance
+    nested tags, and Municode's .codes-chunks-pg div spans the entire
+    chapter. Full-page gives the LLM enough to find the operative
+    section identified by the URL fragment."""
+    platform = _detect_platform_from_url(url)
+    # Manual URLs are one-offs; always use Playwright. Handles Cloudflare
+    # protection (municipal.codes, codepublishing-w-Cloudflare) + JS-rendered
+    # platforms (Municode, ecode360) uniformly. Per-platform wait_seconds
+    # if available, else default 8s.
+    import re
+    if not PLAYWRIGHT_AVAILABLE:
+        print(f"      [manual] Playwright unavailable")
+        return None
+    cfg = PLATFORM_FETCH_CONFIG.get(platform or "", {"wait_seconds": 8.0})
+    wait_s = cfg.get("wait_seconds", 8.0) or 8.0
+    try:
+        raw_html = playwright_fetch(url, selector=None, raw_html=True,
+                                    wait_seconds=wait_s, timeout_ms=45000)
+        text = re.sub(r"<script[^>]*>.*?</script>", " ", raw_html, flags=re.DOTALL)
+        text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+    except Exception as e:
+        print(f"      [manual] Playwright fetch failed: {e}")
+        return None
+
+    # Detect Cloudflare challenge / thin fetch — trigger web_search retry
+    cf_signal = any(s in (text or "")[:2000].lower() for s in [
+        "performing security verification",
+        "checking your browser",
+        "cloudflare",
+        "just a moment",
+        "ray id",
+    ])
+    thin_or_blocked = (not text) or (len(text) < 500) or cf_signal
+
+    if thin_or_blocked:
+        # Web_search bypass — pass the URL hint + a minimal blob to Sonnet
+        # with web_search enabled. Sonnet routes around the block.
+        print(f"      [manual] fetch thin/blocked ({len(text or '')} chars, cf={cf_signal}) — escalating to web_search")
+        fake_fetch = VerbatimFetch(
+            fetched=[FetchedChapter(
+                url=url,
+                link_text=f"{jc.name} (manual URL — fetch blocked)",
+                text_excerpt=(text or "")[:500] + " [BLOCKED — use web_search]",
+                text_length=len(text or ""),
+                has_dog_terms=False,
+                drilled=[],
+            )],
+            fetch_mode="manual_url_blocked",
+            notes="manual URL fetch was Cloudflare-blocked or thin; escalated to web_search",
+        )
+        fake_platform = PlatformDiscovery(
+            valid_url=url, platform=platform or "manual_url",
+            tried=[], notes="manual URL — fetch blocked",
+        )
+        return step_6_decide_rule(jc, fake_platform, fake_fetch, enable_web_search=True)
+
+    fake_fetch = VerbatimFetch(
+        fetched=[FetchedChapter(
+            url=url,
+            link_text=f"{jc.name} (manual URL)",
+            text_excerpt=text[:5000],
+            text_length=len(text),
+            has_dog_terms=_has_dog_terms(text),
+            drilled=[],
+        )],
+        fetch_mode="manual_url",
+        notes=f"manual URL override; platform={platform or 'unknown'}",
+    )
+    fake_platform = PlatformDiscovery(
+        valid_url=url, platform=platform or "manual_url",
+        tried=[], notes="manual URL override",
+    )
+    return step_6_decide_rule(jc, fake_platform, fake_fetch)
+
+
 def process_jurisdiction(name: str, state: str,
                          emit_sql_to: list | None = None,
-                         discover_only: bool = False) -> JurisdictionOutcome:
+                         discover_only: bool = False,
+                         manual_url: str | None = None) -> JurisdictionOutcome:
     """Run the full pipeline on one jurisdiction. Returns a structured
     outcome. When emit_sql_to is a list, appends generated SQL blocks to it.
 
@@ -1674,6 +1914,48 @@ def process_jurisdiction(name: str, state: str,
           f"name={sc.agency_name!r} type={sc.agency_type})")
     print(f"       existing_ps_count={sc.existing_ps_count}")
     attempts.append("step_1_scope")
+
+    # MANUAL URL OVERRIDE — bypass Steps 2-6.7, fetch the given URL directly
+    if manual_url:
+        attempts.append("manual_url_override")
+        print(f"  [manual] URL override → {manual_url}")
+        cr = codify_from_manual_url(jc, sc, manual_url)
+        if cr:
+            gate_ok, gate_why = is_url_deep_enough(cr.subtype, cr.source_url or manual_url)
+            conf_marker = "✅" if cr.confidence >= 0.7 else ("⚠️ review" if cr.confidence >= 0.4 else "❌ defer")
+            print(f"  [6] rule → {cr.rule}  conf={cr.confidence:.2f} {conf_marker}")
+            print(f"       subtype={cr.subtype}  citation={cr.citation!r}")
+            print(f"       url={cr.source_url}  url_gate={'✅' if gate_ok else '❌ '+gate_why}")
+            if cr.evidence_quote:
+                print(f"       evidence: {cr.evidence_quote[:140]!r}")
+        # Skip Steps 2-6.7 entirely; jump to outcome + SQL emit at function end
+        platform_used = _detect_platform_from_url(manual_url) or "manual_url"
+        sql_emitted = False
+        notes_summary = None
+        if cr is None or cr.rule == "no_rule_found":
+            outcome = OUTCOME_DEFER_STUBBORN
+            notes_summary = "manual URL fetched but LLM found no operative rule"
+        elif cr.confidence >= 0.7:
+            gate_ok, _ = is_url_deep_enough(cr.subtype, cr.source_url or manual_url)
+            if gate_ok:
+                outcome = OUTCOME_SUCCESS_AUTO_COMMIT
+                if emit_sql_to is not None:
+                    sql = emit_migration_sql(jc, sc, cr, platform_used)
+                    emit_sql_to.append(sql)
+                    sql_emitted = True
+                    print(f"  [7] SQL emitted (auto-commit ready)")
+            else:
+                outcome = OUTCOME_SUCCESS_HUMAN_REVIEW
+                notes_summary = "high confidence but URL gate failed"
+        elif cr.confidence >= 0.4:
+            outcome = OUTCOME_SUCCESS_HUMAN_REVIEW
+            notes_summary = "borderline confidence; human review"
+        else:
+            outcome = OUTCOME_DEFER_STUBBORN
+            notes_summary = cr.notes
+        print(f"  → outcome: {outcome}")
+        return _make_outcome(name, state, jc, sc, attempts, cr, platform_used,
+                             outcome=outcome, notes=notes_summary, sql_emitted=sql_emitted)
 
     # Step 2 — Platform discovery
     attempts.append("step_2_platform")
@@ -1784,7 +2066,20 @@ def process_jurisdiction(name: str, state: str,
             else:
                 print(f"  [6.7] agency-policy fallback found nothing valid")
         elif cr.confidence < 0.7 and not sc.agency_web_url:
-            print(f"  [6.7] SKIPPED (no agency.web_url; need Step 6.8 web-search per [[codify-step-6-8-web-search-fallback]])")
+            attempts.append("step_6_8_url_inference")
+            print(f"  [6.8] URL-inference fallback (no agency.web_url) → trying inferred city URLs")
+            cr4 = step_6_8_url_inference_fallback(jc, sc, cr)
+            if cr4:
+                gate4_ok, gate4_why = is_url_deep_enough(cr4.subtype, cr4.source_url)
+                conf4_marker = "✅" if cr4.confidence >= 0.7 else ("⚠️ review" if cr4.confidence >= 0.4 else "❌ defer")
+                print(f"  [6.8] re-decide → {cr4.rule}  conf={cr4.confidence:.2f} {conf4_marker}")
+                print(f"       subtype={cr4.subtype}  citation={cr4.citation!r}")
+                print(f"       url={cr4.source_url}  url_gate={'✅' if gate4_ok else '❌ '+gate4_why}")
+                if cr4.evidence_quote:
+                    print(f"       evidence: {cr4.evidence_quote[:140]!r}")
+                cr = cr4
+            else:
+                print(f"  [6.8] URL-inference found nothing valid")
     else:
         print(f"  [6] rule → SKIPPED (no fetched content or no ANTHROPIC_API_KEY)")
         # If Step 6 didn't even run AND we have an agency.web_url, jump
@@ -1805,6 +2100,22 @@ def process_jurisdiction(name: str, state: str,
                 cr = cr3
             else:
                 print(f"  [6.7] agency-policy fallback found nothing valid")
+        else:
+            # No agency.web_url known — try Step 6.8 URL-inference
+            attempts.append("step_6_8_url_inference")
+            print(f"  [6.8] URL-inference fallback (no agency.web_url) → trying inferred city URLs")
+            cr4 = step_6_8_url_inference_fallback(jc, sc, None)
+            if cr4:
+                gate4_ok, gate4_why = is_url_deep_enough(cr4.subtype, cr4.source_url)
+                conf4_marker = "✅" if cr4.confidence >= 0.7 else ("⚠️ review" if cr4.confidence >= 0.4 else "❌ defer")
+                print(f"  [6.8] re-decide → {cr4.rule}  conf={cr4.confidence:.2f} {conf4_marker}")
+                print(f"       subtype={cr4.subtype}  citation={cr4.citation!r}")
+                print(f"       url={cr4.source_url}  url_gate={'✅' if gate4_ok else '❌ '+gate4_why}")
+                if cr4.evidence_quote:
+                    print(f"       evidence: {cr4.evidence_quote[:140]!r}")
+                cr = cr4
+            else:
+                print(f"  [6.8] URL-inference found nothing valid")
 
     # Determine outcome + emit SQL if confident enough
     platform_used = plat.platform if plat else None
@@ -1921,6 +2232,10 @@ def main() -> int:
     ap.add_argument("--include-no-beach", action="store_true",
                     help="Disable beach pre-filter (default skips jurisdictions "
                          "with NO beaches in their polygon).")
+    ap.add_argument("--manual-url",
+                    help="Single-jurisdiction manual-URL override (with --jurisdiction). "
+                         "Bypasses Steps 2-6.7; fetches the URL directly + runs Step 6 LLM. "
+                         "For batch mode use --from-csv with a source_url column.")
     args = ap.parse_args()
 
     # Build the list of (name, state) tuples to process
@@ -1929,14 +2244,19 @@ def main() -> int:
         if not args.state_of:
             print("ERROR: --jurisdiction requires --state-of", file=sys.stderr)
             return 2
-        queue.append((args.jurisdiction, args.state_of))
+        queue.append((args.jurisdiction, args.state_of, args.manual_url))
     elif args.state:
-        queue = list_state_jurisdictions(args.state, pilot=args.pilot,
-                                          require_beach=not args.include_no_beach)
+        queue = [(n, s, None) for n, s in list_state_jurisdictions(
+                  args.state, pilot=args.pilot,
+                  require_beach=not args.include_no_beach)]
     elif args.from_csv:
         with open(args.from_csv, encoding="utf-8") as f:
             for row in csv.DictReader(f):
-                queue.append((row["jurisdiction"], row["state"]))
+                # Optional source_url column triggers manual-URL override
+                url = (row.get("source_url") or "").strip() or None
+                queue.append((row["jurisdiction"], row["state"], url))
+    # Normalize queue to 3-tuples (name, state, manual_url|None)
+    queue = [(t[0], t[1], t[2] if len(t) > 2 else None) for t in queue]
 
     if not queue:
         print("No jurisdictions to process.", file=sys.stderr)
@@ -1964,10 +2284,11 @@ def main() -> int:
             STATE_PLATFORM_PRIORITY[k] = [args.only_platform]
         print(f"PHASE C: --only-platform={args.only_platform} (overriding priority for all states)")
 
-    for name, state in queue:
+    for name, state, manual_url in queue:
         try:
             o = process_jurisdiction(name, state, emit_sql_to=sql_blocks,
-                                     discover_only=args.discover_only)
+                                     discover_only=args.discover_only,
+                                     manual_url=manual_url)
             outcomes.append(o)
             tally[o.outcome] = tally.get(o.outcome, 0) + 1
         except Exception as e:

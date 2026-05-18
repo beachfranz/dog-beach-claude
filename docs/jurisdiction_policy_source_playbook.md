@@ -341,6 +341,14 @@ ONE file: supabase/migrations/YYYYMMDD_<context>_<batch>.sql
 
 [Output]
 <300 words: per-jurisdiction URL + rule + judgment calls + deferrals + governance-resolver flags + commit SHA.
+
+[CRITICAL — agent dispatch discipline, per [[agent-dispatch-wait-for-background]]]
+- Run any long-running script in FOREGROUND (no `run_in_background=true`, no `&`)
+- WAIT for script to complete (exit code + final output captured) before declaring done
+- Don't say "I'll wait for monitor events" and exit — that orphans the script
+- If script takes 20-30 min, that's expected; stay alive for the duration
+- Report concrete results from the JSONL/SQL output, not just "task dispatched"
+- Two confirmed instances 2026-05-18 of agents exiting after kickoff → orphaned scripts that had to be re-run directly
 ```
 
 **Cross-agent coordination:** mark agent-owned TaskUpdate `owner` slots; brief each agent on what others are doing (prevent fid overlap); never dispatch two agents to the same migration file.

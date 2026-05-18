@@ -156,6 +156,25 @@ parallelizable:
 
 ---
 
+## Agent dispatch discipline (per [[agent-dispatch-wait-for-background]])
+
+CRITICAL — every agent prompt MUST include these constraints:
+
+- Run any long-running script in **FOREGROUND** (no `run_in_background=true`, no `&` in shell command)
+- **WAIT** for script completion (exit code + final output captured) before declaring done
+- Don't say "I'll wait for monitor events" then exit — that orphans the script
+- If the script takes 20-40 min, that's expected — stay alive for the duration
+- Report **concrete results** from the JSONL/SQL output (not "task dispatched")
+
+Two confirmed instances 2026-05-18 of agents exiting after kickoff → orphaned scripts that had to be re-run directly. Don't add a third.
+
+## Web_search bypass (per [[promote-ad-hoc-tools-to-process]])
+
+The codify driver Step 6 LLM call enables Anthropic's `web_search_20250305` tool when the deterministic fetch produces thin content (< 500 chars OR matches Cloudflare-challenge keywords). Sonnet routes around Cloudflare-walled URLs by searching the web for the rule text. Validated 2026-05-18 against vancouver.municipal.codes + bellevue.municipal.codes — both Cloudflare-blocked to all direct fetchers; both auto-committed via web_search bypass at conf 0.88/0.90. See `docs/codify_pip_resolver_architecture.md` web_search layer section.
+
+When dispatching agents that may hit Cloudflare-walled platforms (`*.municipal.codes`, agency homepages), include this in their prompt:
+- "When direct fetch returns Cloudflare challenge / thin content, use Anthropic web_search to find the rule text from alternate sources. Preserve the original URL as `source_url` citation."
+
 ## Dispatchable agent prompts
 
 When the next session opens, two ready-to-fire agent prompts:

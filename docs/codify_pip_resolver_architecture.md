@@ -29,6 +29,18 @@ Beach-in handles layered authority naturally. A beach inside city + county + sta
 4. bps materialization                    ──► beach_policy_source rows
 ```
 
+## Cross-cutting layer: web_search bypass for Cloudflare / SPA / thin fetch
+
+Added 2026-05-18 after Franz pushed on a real spec gap: **the previous codify dispatch was using Anthropic's `web_search` tool as the standard escape valve for fetch failures, and the new pipeline didn't carry that pattern over.** Evidence: 15 existing CA ps rows document "captured via web search" in their `full_text` — 6% of CA codification used this bypass.
+
+When the deterministic fetch returns thin content (< 500 chars OR matches Cloudflare-challenge keywords like "performing security verification" / "ray id" / "just a moment"), the rule-decision LLM call is re-invoked with the `web_search_20250305` Anthropic server-side tool enabled. Sonnet searches the web (Google's indexed snapshots typically bypass Cloudflare's per-request CAPTCHA), finds the verbatim rule text from alternate sources, and returns the same `CodifiedRule` shape. The original deep-link URL is preserved as `source_url` for citation provenance.
+
+**Cost:** ~$10/1000 searches + token usage = ~$0.01-0.03 per jurisdiction.
+
+**Validated 2026-05-18 against** vancouver.municipal.codes/VMC/8.24.110 + bellevue.municipal.codes/BCC/3.43.145 — both Cloudflare-walled to direct fetch (Playwright, urllib, WebFetch all 403); both auto-committed at conf 0.88/0.90 via web_search bypass.
+
+This layer addresses the class of platforms that uses Cloudflare Turnstile (the next-gen CAPTCHA that even headless Chromium can't pass): the `*.municipal.codes` family (General Code), some `*.gov` sites, and various agency homepages. It also handles JS-rendered SPA section-anchors where the regex selector extraction can't navigate to the operative section.
+
 ## Cross-cutting layer: per-platform fetch routing
 
 Spec gap surfaced 2026-05-18 mid-build: **fetch-mode varies per platform across every step that touches URLs**, not just Step 4 verbatim fetch. The codify driver hits external code-publisher sites for validity checks (Step 2), TOC navigation (Step 3), AND verbatim fetch (Step 4). All three need the right transport per platform.

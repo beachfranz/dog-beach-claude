@@ -893,12 +893,117 @@ def step_3_navigate_chapter(jc: JurisdictionClassification,
     )
 
 
-# ─── Step 4 — Fetch verbatim text (STUBBED) ────────────────────────────
+# ─── Step 4 — Fetch verbatim text ──────────────────────────────────────
+
+# Per-platform content selector for the operative text area. None = full page.
+# Per the URL field guide pin + [[municode-fetchable]].
+PLATFORM_CONTENT_SELECTOR = {
+    "municode":       ".codes-chunks-pg",
+    "ecode360":       "#contentArticles",
+    "amlegal":        ".section-content",
+    "codepublishing": None,   # body text is the chapter content
+    "qcode":          None,
+    "county_codes":   None,
+}
+
+
+@dataclass
+class FetchedChapter:
+    """One drilled-into chapter result from Step 4."""
+    url:           str
+    link_text:     str | None
+    text_excerpt:  str        # first ~2000 chars for the LLM rule-decider
+    text_length:   int
+    has_dog_terms: bool       # quick signal: contains dog/leash/animal/pet?
+
+
+@dataclass
+class VerbatimFetch:
+    """Output of Step 4. Returns top-N chapter fetches for Step 6 LLM."""
+    fetched:    list[FetchedChapter]
+    fetch_mode: str       # 'static_html' | 'playwright' | 'mixed' | 'error'
+    notes:      str | None
+
 
 def step_4_fetch_verbatim(jc: JurisdictionClassification,
-                          chapter: ChapterNavigation) -> dict:
-    """STUB. Next: Playwright deep-fetch of the operative section text."""
-    return {"status": "not_implemented", "step": "4_fetch_verbatim"}
+                          platform: PlatformDiscovery,
+                          chapter: ChapterNavigation,
+                          max_candidates: int = 3) -> VerbatimFetch:
+    """For each of Step 3's top candidates, fetch the content and excerpt
+    a snippet for the rule-decider. Returns the top-N for Step 6.
+
+    Per [[ca-codify-v1-lessons]] caveat: Step 3 returns a TOP candidate but
+    Step 4 should iterate over the top-N because the heuristic can be wrong
+    (e.g., Contra Costa picked PUBLIC WORKS over the actual Animals title).
+    Step 6 (LLM) reads all and decides which contains the operative rule.
+    """
+    if not chapter.candidates:
+        return VerbatimFetch([], "error",
+                             f"no chapter candidates from Step 3 (method={chapter.method})")
+
+    selector = PLATFORM_CONTENT_SELECTOR.get(platform.platform or "")
+    cfg = PLATFORM_FETCH_CONFIG.get(platform.platform or "",
+                                    {"mode": "urllib", "wait_seconds": 0})
+    is_pw = cfg["mode"] == "playwright"
+
+    out: list[FetchedChapter] = []
+    for cand in chapter.candidates[:max_candidates]:
+        text: str | None = None
+        if is_pw:
+            if not PLAYWRIGHT_AVAILABLE:
+                continue
+            try:
+                text = playwright_fetch(
+                    cand.url,
+                    selector=selector,
+                    raw_html=False,
+                    wait_seconds=cfg.get("wait_seconds", 8.0),
+                    timeout_ms=30000,
+                )
+            except Exception:
+                text = None
+        else:
+            # urllib path; if a selector is configured, try a simple
+            # regex-based extraction of the named element block. Otherwise
+            # take whole-page text and strip tags.
+            import re
+            body, why = _smart_fetch(cand.url, platform=platform.platform)
+            if body is None:
+                continue
+            if selector and selector.startswith(("#", ".")):
+                # try to extract just the element (rough; fine for v1)
+                attr = "id" if selector.startswith("#") else "class"
+                value = selector[1:]
+                m = re.search(rf'<[^>]+\b{attr}="[^"]*\b{re.escape(value)}\b[^"]*"[^>]*>(.*?)</', body, re.DOTALL)
+                text = re.sub(r"<[^>]+>", " ", m.group(1)) if m else body
+            else:
+                # whole-page strip-tags
+                text = re.sub(r"<script[^>]*>.*?</script>", " ", body, flags=re.DOTALL)
+                text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL)
+                text = re.sub(r"<[^>]+>", " ", text)
+            text = re.sub(r"\s+", " ", text).strip()
+
+        if text is None or len(text) < 100:
+            continue
+        excerpt = text[:2000]
+        has_dog = bool(re.search(r"\b(dog|leash|animal|pet)s?\b", excerpt, re.IGNORECASE))
+        out.append(FetchedChapter(
+            url=cand.url, link_text=cand.link_text,
+            text_excerpt=excerpt, text_length=len(text), has_dog_terms=has_dog,
+        ))
+        if is_pw:
+            time.sleep(1.0)  # pacing for Playwright
+
+    if not out:
+        return VerbatimFetch([], "error",
+                             f"no candidates returned readable content (Playwright={is_pw})")
+
+    return VerbatimFetch(
+        fetched=out,
+        fetch_mode="playwright" if is_pw else "static_html",
+        notes=f"fetched {len(out)} of {min(len(chapter.candidates), max_candidates)} top candidates; "
+              f"{sum(1 for f in out if f.has_dog_terms)} contain dog/leash/animal/pet terms",
+    )
 
 
 # ─── Per-jurisdiction orchestration ────────────────────────────────────
@@ -955,8 +1060,15 @@ def process_jurisdiction(name: str, state: str, dry_run: bool = True) -> dict:
     else:
         print(f"  [3] chapter → NONE  ({chap.method}: {chap.notes})")
 
-    # Step 4 — stubbed
-    text = step_4_fetch_verbatim(jc, chap)
+    # Step 4 — Fetch verbatim text for top-N chapter candidates
+    text = step_4_fetch_verbatim(jc, plat, chap)
+    if text.fetched:
+        print(f"  [4] verbatim → fetched {len(text.fetched)} chapter(s) ({text.fetch_mode}; {text.notes})")
+        for f in text.fetched:
+            marker = "🐕" if f.has_dog_terms else "  "
+            print(f"       {marker} {f.text_length:>6} chars  '{(f.link_text or '')[:40]}'  {f.url}")
+    else:
+        print(f"  [4] verbatim → none ({text.fetch_mode}: {text.notes})")
 
     return {
         "name": name, "state": state,

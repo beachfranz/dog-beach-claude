@@ -2606,6 +2606,210 @@ def list_state_jurisdictions(state: str, pilot: int | None = None,
     return [(r[0], state) for r in rows]
 
 
+# ─── #8 — Rescue-mode orchestration ──────────────────────────────────
+#
+# Reads a prior-run outcomes JSONL, generates per-jurisdiction agent
+# prompts (using the playbook's STUBBORN JURISDICTION URL DISCOVERY
+# template) + a starter CSV for batch URL collection. The curator
+# dispatches one Claude Code agent per prompt (parallel-safe since
+# prompts are independent), collects URLs into the CSV, then re-runs
+# this script with --from-csv to ship.
+#
+# This encapsulates today's manual agent-dispatch workflow (7 OR coastal
+# counties → 7 Explore agents in parallel) into a reproducible artifact.
+
+STUBBORN_RESCUE_PROMPT_TEMPLATE = """\
+# Stubborn jurisdiction URL discovery — {name}, {state}
+
+## Context
+
+Codify v1 pipeline ran on this jurisdiction with outcome `{outcome}` and
+notes: `{notes}`.
+
+Phase A platform discovery already tried: Municode (catalog-checked first),
+codepublishing, amlegal, qcode, ecode360, county.codes.
+Step 6.8 web_search escalation already ran for stubborn defers; for
+human_review outcomes the URL gate failed.
+
+The script can re-run via `--manual-url` or `--from-csv` (with source_url
+column) once a verified chapter-level deep-link URL is found.
+
+## Your task
+
+Use WebSearch + WebFetch to find the operative chapter-level deep-link URL
+for {name}, {state}'s dog/leash/animal-control ordinance.
+
+## Acceptable URL forms
+
+- Deep-linked chapter on a county/city code site (anchors like #ch-6, /Chapter-6/, /Title6/)
+- Page-level deep-link to specific ordinance section
+- Codified deep-link to specific section
+- PDF of a SPECIFIC chapter (e.g., LC07.pdf for Lane Code Chapter 7) — the
+  pipeline now handles PDFs end-to-end via pdfplumber
+
+## NOT acceptable
+
+- Wikipedia, news articles, blog posts, .org summary sites
+- Statewide ORS/RCW/etc pages (state baseline is captured separately)
+- Agency homepage / sheriff's office landing / parks dept landing
+- Top-of-code landing page or "all county code" PDF blob
+- PDFs that just RESTATE state law (e.g., "Oregon-Dog-Laws-PDF") — those
+  aren't this jurisdiction's OWN ordinance
+
+## Verify
+
+Open the URL via WebFetch; confirm body contains: (1) jurisdiction name +
+state, (2) "leash" OR "dog" OR "animal" in operative text, (3) section/
+chapter number visible (e.g., "§6.04", "Chapter 7", "Article 4"). If
+Cloudflare/403, use WebSearch to verify content exists.
+
+## Return
+
+Append exactly ONE line to this file's CSV (`../input.csv`):
+
+  {name},{state},<verified_chapter_url>,<one-sentence-citation>
+
+Or if no acceptable URL found:
+
+  {name},{state},DEFER,<why>
+
+Do NOT dispatch scripts. Do NOT modify files outside `../input.csv`.
+
+## Related pins
+
+- [[script-defers-dispatch-agents]] — this rescue path is the escalation
+- [[page-level-over-agency-level]] — URL discipline tenet
+- [[municode-silent-redirect]] — Municode pre-check already filtered this one
+- `docs/jurisdiction_policy_source_playbook.md` — STUBBORN JURISDICTION URL DISCOVERY variant
+"""
+
+
+def run_rescue_mode(args) -> int:
+    """Subcommand for --rescue mode.
+    Reads outcomes JSONL → emits per-jurisdiction agent prompts + starter CSV."""
+    in_path = Path(args.from_jsonl)
+    if not in_path.exists():
+        print(f"ERROR: --from-jsonl path not found: {in_path}", file=sys.stderr)
+        return 2
+
+    # Parse outcomes
+    eligible_outcomes = {OUTCOME_DEFER_STUBBORN}
+    if args.include_review:
+        eligible_outcomes.add(OUTCOME_SUCCESS_HUMAN_REVIEW)
+
+    eligible: list[dict] = []
+    with open(in_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                o = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if o.get("outcome") in eligible_outcomes:
+                eligible.append(o)
+
+    if not eligible:
+        print(f"No eligible entries in {in_path} (outcomes filter: {sorted(eligible_outcomes)})")
+        return 0
+
+    # Output directory
+    label = args.label or in_path.stem.replace("_outcomes", "")
+    out_dir = Path(args.out_dir) / f"rescue_{label}"
+    prompts_dir = out_dir / "prompts"
+    prompts_dir.mkdir(parents=True, exist_ok=True)
+
+    csv_path = out_dir / "input.csv"
+    readme_path = out_dir / "README.md"
+
+    # CSV starter with source_url column
+    with open(csv_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("jurisdiction,state,source_url,citation\n")
+        for o in eligible:
+            # Quote name if it contains comma
+            n = o["name"]
+            if "," in n:
+                n = f'"{n}"'
+            f.write(f"{n},{o['state']},,\n")
+
+    # Per-jurisdiction prompt files
+    for o in eligible:
+        slug = o["name"].lower().replace(" ", "_").replace(",", "").replace("'", "")
+        prompt_path = prompts_dir / f"{o['state']}_{slug}.md"
+        prompt_path.write_text(
+            STUBBORN_RESCUE_PROMPT_TEMPLATE.format(
+                name=o["name"],
+                state=o["state"],
+                outcome=o["outcome"],
+                notes=(o.get("notes") or "(no notes)")[:300],
+            ),
+            encoding="utf-8",
+        )
+
+    # README with next-step instructions
+    readme = f"""\
+# Rescue queue — {label}
+
+Generated by `scripts/derive_policy_source_for_jurisdiction.py --rescue`
+from `{in_path}` on {__import__("datetime").date.today().isoformat()}.
+
+## Contents
+
+- **prompts/**: one agent prompt per stubborn jurisdiction ({len(eligible)} files)
+- **input.csv**: starter CSV with `jurisdiction, state, source_url, citation`
+  columns; `source_url` blank for agents/curator to fill
+
+## Next steps (per playbook + [[script-defers-dispatch-agents]])
+
+1. **Dispatch one Claude Code Explore agent per prompt** (parallel-safe — each
+   prompt is independent). Each agent uses WebSearch + WebFetch to find the
+   chapter-level deep-link URL and appends a CSV line to `input.csv`.
+2. **Review the filled CSV** for DEFER rows + any URLs that look agency-level
+   (the URL gate will catch most, but spot-check before re-run).
+3. **Re-run the script** in batch mode against the filled CSV:
+
+   ```bash
+   python scripts/derive_policy_source_for_jurisdiction.py \\
+     --from-csv {csv_path} \\
+     --out-dir tmp \\
+     --label {label}_rescue_run
+   ```
+
+4. **Apply the resulting SQL** with explicit per-batch approval (see playbook §9):
+
+   ```bash
+   PGPASSWORD=... PGCLIENTENCODING=UTF8 psql "<pooler_url>" -v ON_ERROR_STOP=1 \\
+     -f tmp/codify_{label}_rescue_run_*.sql
+   ```
+
+   For URL-gate-failed entries (`_REVIEW.sql`), curator must verify each block
+   + change `ROLLBACK` to `COMMIT` before applying.
+
+## Eligible-outcomes filter
+
+This rescue queue included: {sorted(eligible_outcomes)}
+(Use `--include-review` to add `success_human_review` next time.)
+
+## Affected jurisdictions ({len(eligible)})
+
+| Jurisdiction | State | Outcome | Notes |
+|---|---|---|---|
+"""
+    for o in eligible:
+        notes_short = (o.get("notes") or "")[:60].replace("|", " ")
+        readme += f"| {o['name']} | {o['state']} | `{o['outcome']}` | {notes_short} |\n"
+    readme_path.write_text(readme, encoding="utf-8")
+
+    print(f"Rescue queue prepared: {out_dir}")
+    print(f"  Prompts: {len(eligible)} files in {prompts_dir}")
+    print(f"  Starter CSV: {csv_path}")
+    print(f"  README: {readme_path}")
+    print(f"\nNext: dispatch one Claude Code Explore agent per prompt; collect URLs into {csv_path};")
+    print(f"      re-run with --from-csv to ship.")
+    return 0
+
+
 # ─── State-agency rule mode (#6 encapsulation 2026-05-18) ──────────────
 #
 # Generalizes the OPRD OAR 736-010-0030 pattern: a single state-agency rule
@@ -2901,6 +3105,18 @@ def main() -> int:
                         "--states, --pad-mng-type, --subtype, --citation, --rule-url, "
                         "--rule, --evidence-verbatim, --full-text-file, --label. "
                         "Emits supabase/migrations/<date>_<label>.sql; does NOT apply.")
+    g.add_argument("--rescue", action="store_true",
+                   help="Mode: read an outcomes JSONL from a prior pipeline run + "
+                        "emit per-jurisdiction agent prompts + starter CSV for the "
+                        "stubborn-rescue workflow. Requires --from-jsonl. Optional "
+                        "--include-review adds success_human_review entries.")
+
+    # rescue mode arguments
+    rg = ap.add_argument_group("rescue mode arguments")
+    rg.add_argument("--from-jsonl", help="Path to prior-run outcomes JSONL")
+    rg.add_argument("--include-review", action="store_true",
+                    help="Include success_human_review outcomes (URL-gate-failed) "
+                         "in the rescue queue (default: defer_stubborn only)")
 
     # state-agency-rule mode arguments (only used with --state-agency-rule)
     ag = ap.add_argument_group("state-agency-rule mode arguments")
@@ -2958,6 +3174,13 @@ def main() -> int:
                          "try Municode URLs even for jurisdictions known to be absent). "
                          "For debugging.")
     args = ap.parse_args()
+
+    # ── --rescue mode: separate code path, exits early ──
+    if args.rescue:
+        if not args.from_jsonl:
+            print("ERROR: --rescue requires --from-jsonl <path>", file=sys.stderr)
+            return 2
+        return run_rescue_mode(args)
 
     # ── --state-agency-rule mode: separate code path, exits early ──
     if args.state_agency_rule:

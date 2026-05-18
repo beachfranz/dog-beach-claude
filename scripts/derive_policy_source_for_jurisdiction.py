@@ -313,6 +313,7 @@ class ScopeCheck:
     agency_id:         int | None
     agency_name:       str | None
     agency_type:       str | None
+    agency_web_url:    str | None    # for Step 6.7 agency-policy fallback
     existing_ps_count: int
     existing_ps_ids:   list[int]
     decision:          str  # 'create_new' | 'supplement_existing' | 'no_agency'
@@ -338,7 +339,7 @@ def scope_check(jc: JurisdictionClassification) -> ScopeCheck:
     """
     expected_type = GOVERNANCE_TO_AGENCY_TYPE.get(jc.governance_class)
     if not expected_type:
-        return ScopeCheck(None, None, None, 0, [], "no_agency")
+        return ScopeCheck(None, None, None, None, 0, [], "no_agency")
 
     # Try bare-name canonical (per tenet 4 — bare name, not "X, City of")
     agency_name_candidates = [jc.name]
@@ -350,7 +351,7 @@ def scope_check(jc: JurisdictionClassification) -> ScopeCheck:
     agency_row = None
     for cand in agency_name_candidates:
         rows = supa("/rest/v1/agency", params={
-            "select": "id,name,type",
+            "select": "id,name,type,web_url",
             "name":   f"eq.{cand}",
             "type":   f"eq.{expected_type}",
             "limit":  "1",
@@ -360,7 +361,7 @@ def scope_check(jc: JurisdictionClassification) -> ScopeCheck:
             break
 
     if not agency_row:
-        return ScopeCheck(None, None, expected_type, 0, [], "no_agency")
+        return ScopeCheck(None, None, expected_type, None, 0, [], "no_agency")
 
     # Count existing policy_source rows issued by this agency
     ps_rows = supa("/rest/v1/policy_source", params={
@@ -369,23 +370,15 @@ def scope_check(jc: JurisdictionClassification) -> ScopeCheck:
         "limit":  "50",
     })
 
-    if ps_rows:
-        return ScopeCheck(
-            agency_id=agency_row["id"],
-            agency_name=agency_row["name"],
-            agency_type=agency_row["type"],
-            existing_ps_count=len(ps_rows),
-            existing_ps_ids=[r["id"] for r in ps_rows],
-            decision="supplement_existing",
-        )
-
+    decision = "supplement_existing" if ps_rows else "create_new"
     return ScopeCheck(
         agency_id=agency_row["id"],
         agency_name=agency_row["name"],
         agency_type=agency_row["type"],
-        existing_ps_count=0,
-        existing_ps_ids=[],
-        decision="create_new",
+        agency_web_url=agency_row.get("web_url"),
+        existing_ps_count=len(ps_rows),
+        existing_ps_ids=[r["id"] for r in ps_rows] if ps_rows else [],
+        decision=decision,
     )
 
 
@@ -410,12 +403,14 @@ STATE_PLATFORM_PRIORITY = {
 # `selector` is the CSS selector for the meaningful content area (per
 # [[municode-fetchable]] for Municode).
 PLATFORM_FETCH_CONFIG = {
-    "municode":       {"mode": "playwright", "wait_seconds": 12.0, "selector": ".codes-chunks-pg"},
-    "ecode360":       {"mode": "playwright", "wait_seconds": 8.0,  "selector": None},
-    "codepublishing": {"mode": "urllib",     "wait_seconds": 0,    "selector": None},
-    "amlegal":        {"mode": "urllib",     "wait_seconds": 0,    "selector": ".section-content"},
-    "qcode":          {"mode": "urllib",     "wait_seconds": 0,    "selector": None},
-    "county_codes":   {"mode": "urllib",     "wait_seconds": 0,    "selector": None},
+    "municode":         {"mode": "playwright", "wait_seconds": 12.0, "selector": ".codes-chunks-pg"},
+    "ecode360":         {"mode": "playwright", "wait_seconds": 8.0,  "selector": None},
+    "codepublishing":   {"mode": "urllib",     "wait_seconds": 0,    "selector": None},
+    "amlegal":          {"mode": "urllib",     "wait_seconds": 0,    "selector": ".section-content"},
+    "qcode":            {"mode": "urllib",     "wait_seconds": 0,    "selector": None},
+    "county_codes":     {"mode": "urllib",     "wait_seconds": 0,    "selector": None},
+    # Step 6.7 fallback: agency homepages often Cloudflare-blocked
+    "agency_homepage":  {"mode": "playwright", "wait_seconds": 4.0,  "selector": None},
 }
 
 
@@ -1282,6 +1277,87 @@ def _construct_codepublishing_url(jc: JurisdictionClassification,
     return f"{base}/html/{title_dir}/{filename}"
 
 
+# ─── Step 6.7 — agency-policy fallback (uses existing agency.web_url) ──
+
+# Common URL path patterns where city/agency policy pages live.
+AGENCY_POLICY_PATH_HINTS = [
+    "/dogs", "/dogs-on-beach", "/dogs-at-the-beach", "/pets",
+    "/parks/dogs", "/parks/rules", "/parks-rules", "/park-rules",
+    "/beach-rules", "/beaches/rules", "/beach-info",
+    "/animal-control", "/animals",
+]
+
+
+def step_6_7_agency_policy_fallback(jc: JurisdictionClassification,
+                                    sc: ScopeCheck,
+                                    prior_rule: CodifiedRule | None) -> CodifiedRule | None:
+    """When codified-source paths (Steps 2-6.5) defer, try the agency's
+    own web_url. The agency's "Dogs in X" page IS often the operative
+    source per [[ca-codify-v1-lessons]] (39% of CA codify is
+    agency_administrative_policy).
+
+    v1 minimal: requires sc.agency_web_url to be populated in DB. The
+    no-agency-row case (most WA jurisdictions today) is deferred to Step
+    6.8 per [[codify-step-6-8-web-search-fallback]]."""
+    if prior_rule and prior_rule.confidence >= 0.7:
+        return None  # codified path worked
+    if not sc.agency_web_url:
+        return None  # no agency URL — needs Step 6.8
+
+    fake_platform = PlatformDiscovery(
+        valid_url=sc.agency_web_url, platform="agency_homepage",
+        tried=[], notes="agency-policy fallback",
+    )
+
+    # Strategy: fetch the agency homepage, extract its nav links, score
+    # them with the same animal/dog/leash/park heuristic that Step 3
+    # uses, and follow the top 2-3. Path-hint guessing (/dogs, /pets,
+    # etc.) doesn't work for most cities since URL structures vary
+    # (/index.php/?id=42, /Departments/Parks, etc.) — real nav links
+    # are the authoritative source.
+    home_text, home_html = _fetch_text(sc.agency_web_url, platform="agency_homepage")
+    if not home_html:
+        return None
+
+    nav_anchors = _extract_anchor_links(home_html, sc.agency_web_url)
+    # Keep only links that stay within the same domain
+    from urllib.parse import urlparse
+    home_host = urlparse(sc.agency_web_url).netloc
+    same_domain_anchors = [(href, text) for href, text in nav_anchors
+                           if urlparse(href).netloc in ("", home_host)
+                           and href != sc.agency_web_url
+                           and len(text) > 2 and len(text) < 80]
+
+    scored = _score_title_links(same_domain_anchors, jc.governance_class)
+    # Also include the homepage itself as a fallback context for the LLM
+    valid_candidates: list[ChapterCandidate] = [
+        ChapterCandidate(url=sc.agency_web_url,
+                         link_text=sc.agency_name or "(homepage)",
+                         score=20, why="agency_homepage_context"),
+    ]
+    valid_candidates.extend(scored[:3])
+
+    if len(valid_candidates) <= 1:
+        return None  # no dog-relevant nav links found
+
+    fake_nav = ChapterNavigation(
+        best_url=valid_candidates[0].url,
+        best_text=valid_candidates[0].link_text,
+        best_score=valid_candidates[0].score,
+        candidates=valid_candidates,
+        method="agency_policy_fallback",
+        notes=f"reached {len(valid_candidates)} valid path(s) on {sc.agency_web_url}",
+    )
+
+    new_fetch = step_4_fetch_verbatim(jc, fake_platform, fake_nav,
+                                      max_candidates=3, drill=False)
+    if not new_fetch.fetched:
+        return None
+
+    new_rule = step_6_decide_rule(jc, fake_platform, new_fetch)
+    return new_rule
+
+
 def step_6_5_llm_guided_redrill(jc: JurisdictionClassification,
                                 platform: PlatformDiscovery,
                                 first_rule: CodifiedRule) -> CodifiedRule | None:
@@ -1487,8 +1563,43 @@ def process_jurisdiction(name: str, state: str, dry_run: bool = True) -> dict:
                 cr = cr2  # supersede
             else:
                 print(f"  [6.5] re-drill failed (URL not constructible or fetch error)")
+
+        # Step 6.7 — agency-policy fallback (only if Step 6 + 6.5 both deferred)
+        if cr.confidence < 0.7 and sc.agency_web_url:
+            print(f"  [6.7] agency-policy fallback → scanning {sc.agency_web_url}")
+            cr3 = step_6_7_agency_policy_fallback(jc, sc, cr)
+            if cr3:
+                gate3_ok, gate3_why = is_url_deep_enough(cr3.subtype, cr3.source_url)
+                conf3_marker = "✅" if cr3.confidence >= 0.7 else ("⚠️ review" if cr3.confidence >= 0.4 else "❌ defer")
+                print(f"  [6.7] re-decide → {cr3.rule}  conf={cr3.confidence:.2f} {conf3_marker}")
+                print(f"       subtype={cr3.subtype}  citation={cr3.citation!r}")
+                print(f"       url={cr3.source_url}  url_gate={'✅' if gate3_ok else '❌ '+gate3_why}")
+                if cr3.evidence_quote:
+                    print(f"       evidence: {cr3.evidence_quote[:140]!r}")
+                cr = cr3
+            else:
+                print(f"  [6.7] agency-policy fallback found nothing valid")
+        elif cr.confidence < 0.7 and not sc.agency_web_url:
+            print(f"  [6.7] SKIPPED (no agency.web_url; need Step 6.8 web-search per [[codify-step-6-8-web-search-fallback]])")
     else:
         print(f"  [6] rule → SKIPPED (no fetched content or no ANTHROPIC_API_KEY)")
+        # If Step 6 didn't even run AND we have an agency.web_url, jump
+        # straight to the agency-policy fallback. This is the common case
+        # when no platform validated (Step 2 returned NONE FOUND).
+        if sc.agency_web_url:
+            print(f"  [6.7] agency-policy fallback → scanning {sc.agency_web_url}")
+            cr3 = step_6_7_agency_policy_fallback(jc, sc, None)
+            if cr3:
+                gate3_ok, gate3_why = is_url_deep_enough(cr3.subtype, cr3.source_url)
+                conf3_marker = "✅" if cr3.confidence >= 0.7 else ("⚠️ review" if cr3.confidence >= 0.4 else "❌ defer")
+                print(f"  [6.7] re-decide → {cr3.rule}  conf={cr3.confidence:.2f} {conf3_marker}")
+                print(f"       subtype={cr3.subtype}  citation={cr3.citation!r}")
+                print(f"       url={cr3.source_url}  url_gate={'✅' if gate3_ok else '❌ '+gate3_why}")
+                if cr3.evidence_quote:
+                    print(f"       evidence: {cr3.evidence_quote[:140]!r}")
+                cr = cr3
+            else:
+                print(f"  [6.7] agency-policy fallback found nothing valid")
 
     return {
         "name": name, "state": state,

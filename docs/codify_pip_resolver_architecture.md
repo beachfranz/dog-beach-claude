@@ -38,19 +38,33 @@ This means:
 
 ---
 
-## The 7 polygon sources
+## The 8 polygon sources
 
 | # | Source | Layers it provides | Status |
 |---|---|---|---|
 | 1 | **PAD-US** (USGS national) | NPS, USFWS NWRs, USFS, BLM, DoD, state parks, county parks, city parks, tribal reservations, special districts (13 layers via mng_type + mng_name) | **29 states loaded** (incl. CA/WA/OR/MI/MA). Heavy hitter. |
 | 2 | **TIGER** (Census national) | State boundary, county polygon, incorporated city polygon, CDP polygon (3 layers via `jurisdictions.place_type`) | CA loaded; OR/WA/MI/MA need verification. |
-| 3 | **NOAA Marine Sanctuaries** | ~14 sanctuaries nationally (OCNMS, MBNMS, CINMS, etc.) | Not loaded. One-shot ingest from sanctuaries.noaa.gov. |
-| 4 | **USFWS Critical Habitat** | ESA-designated polygons (snowy plover seasonal closures, etc.) | Not loaded. ecos.fws.gov per-species. |
-| 5 | **State DFW / DSL — MPAs** | CDFW MLPA, ORDFW reserves, WDFW reserves | Per-state; not loaded for non-CA. |
-| 6 | **State DNR / Lands — tidelands** | CSLC (CA), WA DNR Aquatic Lands, OR DSL | Per-state; not loaded. |
-| 7 | **Bespoke** (concession / land trust / HOA) | Case-by-case | Not centrally sourced; per-place. |
+| 3 | **OSM dog parks** (`leisure=dog_park`) | Dog-park polygons nationally | **Loaded 2026-05-18: 6,163 polygons US-wide** (CA 858, WA 336, OR 253). `public.osm_dog_parks`. 7 chunks still need retry (UT/AZ/NM/WY, IL/IN/MI, OH/KY, LA/MS/AL, FL, New England). |
+| 4 | **NOAA Marine Sanctuaries** | ~14 sanctuaries nationally (OCNMS, MBNMS, CINMS, etc.) | Not loaded. One-shot ingest from sanctuaries.noaa.gov. |
+| 5 | **USFWS Critical Habitat** | ESA-designated polygons (snowy plover seasonal closures, etc.) | Not loaded. ecos.fws.gov per-species. |
+| 6 | **State DFW / DSL — MPAs** | CDFW MLPA, ORDFW reserves, WDFW reserves | Per-state; not loaded for non-CA. |
+| 7 | **State DNR / Lands — tidelands** | CSLC (CA), WA DNR Aquatic Lands, OR DSL | Per-state; not loaded. |
+| 8 | **Bespoke** (concession / land trust / HOA) | Case-by-case | Not centrally sourced; per-place. |
 
-PAD-US + TIGER carry ~16 of 18 polygon layers. The remaining 5 sources each contribute one layer.
+PAD-US + TIGER + OSM dog parks carry the bulk of national coverage. The remaining 5 sources each contribute one layer.
+
+## Entity classes (vs authority polygons)
+
+Two classes of spatial objects in the system:
+
+| Class | Examples | Role |
+|---|---|---|
+| **Entities** (need attribution) | Beaches, dog parks | PIP'd against authority polygons; each entity gets its own (entity, authority, rule) attribution |
+| **Authority polygons** (carry rules) | Cities, counties, state parks, NWRs, NPS units, special districts | Codify attaches rules; entities PIP into them |
+
+**Beaches and dog parks are parallel entity streams** with independent attribution pipelines. They share authority polygons but don't entangle. Dog-park-inside-beach (4 cases across CA/WA/OR — `~0.2%`) and beach-inside-dog-park (rarer still) are too sparse to bake into v1 architecture. Treat as edge cases handled by region_name if they ever matter.
+
+**Deferred cross-class use case:** beaches with no/poor sand access could surface nearby dog parks as a recommendation overlay ("the beach is cliff-only but there's a dog park 0.4 mi inland"). Captured at [[deferred-beach-dogpark-cross-reference]]. Data is now available; UI is the missing piece.
 
 ---
 

@@ -454,22 +454,27 @@ def _slug_no_separator(name: str, strip_county_suffix: bool = False) -> str:
 
 def _candidates_municode(jc: JurisdictionClassification, state: str) -> list[PlatformCandidate]:
     """Municode: library.municode.com/<state>/<slug>/codes/<doc>
-    Reduced to 2 most-common doc_slugs (per playbook walkthroughs) since
-    Playwright is ~12s/attempt — testing all 4 was too expensive."""
+
+    Per [[ca-codify-v1-lessons]]:
+    - 4 doc_slugs in priority order cover 100% of CA Municode URLs:
+        code_of_ordinances (83%) → municipal_code → ordinance_code → code
+    - Counties ALWAYS use `_county`-suffixed slug (CA: 35/35 = 100%);
+      cities use bare slug. No need to try both.
+
+    Net: 1 slug × 4 docs = 4 candidates. Step 2 returns on first valid
+    hit so most cases terminate after candidate 1 (~12s Playwright)."""
     state_lc = state.lower()
-    doc_slugs = ["code_of_ordinances", "municipal_code"]
-    slug_forms = [_slugify_jurisdiction(jc.name)]
+    doc_slugs = ["code_of_ordinances", "municipal_code", "ordinance_code", "code"]
     if jc.governance_class == "county":
-        with_county = _slugify_jurisdiction(jc.name, strip_county_suffix=False)
-        if with_county not in slug_forms:
-            slug_forms.append(with_county)
+        slug = _slugify_jurisdiction(jc.name, strip_county_suffix=False)
+    else:
+        slug = _slugify_jurisdiction(jc.name)
     return [
         PlatformCandidate(
             platform="municode",
             candidate_url=f"https://library.municode.com/{state_lc}/{slug}/codes/{ds}",
             notes=f"slug={slug} doc={ds}",
         )
-        for slug in slug_forms
         for ds in doc_slugs
     ]
 

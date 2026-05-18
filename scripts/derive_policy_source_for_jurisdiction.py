@@ -1033,6 +1033,216 @@ def _drill_subsections(title_url: str, title_html: str, platform: str | None,
     return out
 
 
+# ─── Step 6 — LLM rule decision ────────────────────────────────────────
+
+# Defaults per [[ca-codify-v1-lessons]]:
+#   rule='on_leash' (75%), subtype='municipal_code' for cities (52%) or
+#   'agency_administrative_policy' for state agencies (39%), section='sand' (98%),
+#   operative_status='operative' (99%), status_note empty (38%) or short (33%).
+# Anything outside defaults requires explicit verbatim justification.
+
+RULE_DECISION_PROMPT = """You are a legal-citation parser specialized in dog/beach rules for U.S. municipal codes. Given verbatim text excerpts from one jurisdiction's chapter/section pages, identify the OPERATIVE dog rule.
+
+Input: JSON with `jurisdiction` (name + state + governance_class), `chapters` (list of fetched chapter+section text excerpts with URLs).
+
+Output: JSON with these fields:
+
+{
+  "rule":            "on_leash" | "not_allowed" | "off_leash_voice_control" | "off_leash" | "no_rule_found",
+  "subtype":         "municipal_code" | "agency_administrative_policy" | "federal_regulation" | "state_statute" | "state_regulation" | "special_district_ordinance" | "tribal_code" | "superintendents_compendium",
+  "citation":        "<Jurisdiction> <Code Type> §<section> (<title>)",
+  "evidence_quote":  "verbatim sentence(s) from one chapter that establishes the rule",
+  "full_text":       "<300-1500 char verbatim quote of the operative section + adjacent context if useful>",
+  "deep_link_url":   "<URL of the chapter/section that contains the rule — must be one of the input URLs>",
+  "status_note":     null | "<short note — leash length, exception clause, etc. KEEP MINIMAL>",
+  "confidence":      0.0..1.0,
+  "notes":           null | "<ambiguity flags, alternate interpretations, etc.>"
+}
+
+CRITICAL DEFAULTS (per CA codification data, validate against text):
+- 75% of jurisdictions land on `on_leash`. Default to it unless the text says otherwise.
+- 38% of rows have NULL status_note. KEEP IT EMPTY unless there's a meaningful detail.
+- 33% have a short leash-detail like "6-foot leash". One brief sentence MAX.
+- If the text doesn't directly establish a beach-specific dog rule, return `rule: "no_rule_found"` and set `confidence` < 0.4.
+
+CITATION FORMAT:
+- "Skagit County Code §7.06.040 (Animal Control)" — canonical form
+- "Long Beach Municipal Code §6.16.090 (Dogs)" — canonical
+- Always: <jurisdiction> + <code type> + §<section> + (<title>) for parenthetical
+
+RULE TEXT PATTERNS:
+- "on a leash no longer than X feet" / "must be on a leash" → `on_leash`
+- "no dogs allowed" / "shall not bring" / "prohibited" → `not_allowed`
+- "off leash under voice control" / "voice control area" → `off_leash_voice_control`
+- "off leash" (no voice-control qualifier) → `off_leash`
+
+WORKED EXAMPLES:
+
+EXAMPLE 1 (Skagit County — Animals title with dangerous-dog focus):
+Input: Title 7 Ch 7.06 text excerpts about dangerous dogs, registration, fines.
+Output: {
+  "rule": "no_rule_found",
+  "subtype": "municipal_code",
+  "citation": "Skagit County Code Title 7 (Animals)",
+  "evidence_quote": "",
+  "full_text": "",
+  "deep_link_url": "<original title URL>",
+  "status_note": "Title 7 covers dangerous dogs, licensing, animal control — no general beach leash provision found in these excerpts. May exist in Parks/Recreation title (Title 9) or county park rules.",
+  "confidence": 0.2,
+  "notes": "Confident there's no general leash rule HERE; defer for deeper drill into Title 9 Parks"
+}
+
+EXAMPLE 2 (Bainbridge Island — Animals title with leash rule):
+Input: Title 6 Ch 6.04 §6.04.010 "Dogs running at large prohibited. It is unlawful for any owner of a dog to suffer or permit such dog to run at large within any park, school grounds, or public place."
+Output: {
+  "rule": "on_leash",
+  "subtype": "municipal_code",
+  "citation": "Bainbridge Island Municipal Code §6.04.010 (Dogs Running at Large)",
+  "evidence_quote": "It is unlawful for any owner of a dog to suffer or permit such dog to run at large within any park, school grounds, or public place.",
+  "full_text": "<full verbatim of §6.04.010>",
+  "deep_link_url": "<the chapter URL from the input>",
+  "status_note": null,
+  "confidence": 0.9,
+  "notes": null
+}
+
+EXAMPLE 3 (no operative rule found):
+Input: Title 12 HEALTH excerpts about food handling, sanitation — no dog mentions.
+Output: {
+  "rule": "no_rule_found",
+  "subtype": "municipal_code",
+  "citation": "<jurisdiction> <code>",
+  "evidence_quote": "",
+  "full_text": "",
+  "deep_link_url": "<original URL>",
+  "status_note": null,
+  "confidence": 0.05,
+  "notes": "Title 12 is HEALTH/SANITATION, no dog rules present — heuristic mistakenly picked this title"
+}
+
+RULES:
+1. The `deep_link_url` MUST be one of the input URLs. Never invent.
+2. `evidence_quote` MUST be a verbatim substring of the input text. Don't paraphrase.
+3. confidence < 0.7 means human review needed; explain in notes.
+4. If unsure between subtypes (e.g., municipal_code vs agency_administrative_policy), prefer the more specific (municipal_code for cities/counties; agency_administrative_policy only for non-codified agency policy pages).
+5. KEEP status_note minimal. If you can't think of a useful one-liner, set null.
+6. Output ONLY the JSON. No prose. No markdown fences.
+"""
+
+
+@dataclass
+class CodifiedRule:
+    """Output of Step 6 LLM rule decision — one tuple per jurisdiction."""
+    polygon_table:  str
+    polygon_key:    str
+    rule:           str
+    subtype:        str
+    citation:       str
+    full_text:      str
+    source_url:     str          # the chosen deep_link_url
+    status_note:    str | None
+    evidence_quote: str
+    domain:         str = "dog_policy"
+    confidence:     float = 0.0
+    decided_by:     str = ""    # 'sonnet-4-5' | 'human-reviewed' | 'no_rule_found'
+    notes:          str | None = None
+
+
+def _anthropic_rule_call(jurisdiction_blob: dict) -> tuple[dict, int, int, float]:
+    """Call Sonnet with the rule-decision prompt. Returns (parsed, in_tokens, out_tokens, cost)."""
+    body = {
+        "model": MODEL,
+        "max_tokens": 3000,
+        "system": [
+            {"type": "text", "text": RULE_DECISION_PROMPT, "cache_control": {"type": "ephemeral"}},
+        ],
+        "messages": [
+            {"role": "user", "content": json.dumps(jurisdiction_blob, ensure_ascii=False)},
+        ],
+    }
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=json.dumps(body).encode("utf-8"), method="POST",
+    )
+    req.add_header("x-api-key", ANTHROPIC_KEY)
+    req.add_header("anthropic-version", "2023-06-01")
+    req.add_header("content-type", "application/json")
+    with urllib.request.urlopen(req, timeout=120) as r:
+        resp = json.loads(r.read().decode("utf-8"))
+    text = "".join(b.get("text", "") for b in resp.get("content", []))
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        parts = stripped.split("```", 2)
+        if len(parts) >= 2:
+            inner = parts[1]
+            if inner.lower().startswith("json"):
+                inner = inner[4:].lstrip()
+            stripped = inner.rsplit("```", 1)[0].strip()
+    parsed = json.loads(stripped)
+    usage = resp.get("usage", {})
+    in_t  = usage.get("input_tokens", 0)
+    out_t = usage.get("output_tokens", 0)
+    cache_r = usage.get("cache_read_input_tokens", 0)
+    cost = (in_t * 3.0 + out_t * 15.0 + cache_r * 0.30) / 1_000_000
+    return parsed, in_t, out_t, cost
+
+
+def step_6_decide_rule(jc: JurisdictionClassification, platform: PlatformDiscovery,
+                       fetched: VerbatimFetch) -> CodifiedRule | None:
+    """Read fetched chapter+section text, ask Sonnet to identify the operative
+    rule. Returns one CodifiedRule (or None if no readable input)."""
+    if not fetched.fetched:
+        return None
+    if not ANTHROPIC_KEY:
+        return None
+
+    # Pack the FetchedChapter + drilled FetchedSection content into a tight blob
+    chapters_blob = []
+    for c in fetched.fetched:
+        ch_entry = {
+            "url":           c.url,
+            "title_excerpt": c.text_excerpt,
+            "has_dog_terms": c.has_dog_terms,
+            "drilled_sections": [
+                {"url": d.url, "link": d.link_text,
+                 "text": d.text_excerpt, "has_dog_terms": d.has_dog_terms}
+                for d in c.drilled
+            ],
+        }
+        chapters_blob.append(ch_entry)
+
+    blob = {
+        "jurisdiction": {
+            "name":             jc.name,
+            "state":            jc.state,
+            "governance_class": jc.governance_class,
+        },
+        "platform":  platform.platform,
+        "chapters":  chapters_blob,
+    }
+
+    try:
+        parsed, in_t, out_t, cost = _anthropic_rule_call(blob)
+    except Exception as e:
+        print(f"      ERROR: rule-decision LLM call failed: {e}", file=sys.stderr)
+        return None
+
+    return CodifiedRule(
+        polygon_table=jc.polygon_table or "",
+        polygon_key=jc.polygon_key or "",
+        rule=parsed.get("rule", "no_rule_found"),
+        subtype=parsed.get("subtype", "municipal_code"),
+        citation=parsed.get("citation", ""),
+        full_text=parsed.get("full_text", ""),
+        source_url=parsed.get("deep_link_url", ""),
+        status_note=parsed.get("status_note"),
+        evidence_quote=parsed.get("evidence_quote", ""),
+        confidence=float(parsed.get("confidence", 0.0)),
+        decided_by=MODEL,
+        notes=parsed.get("notes"),
+    )
+
+
 def step_4_fetch_verbatim(jc: JurisdictionClassification,
                           platform: PlatformDiscovery,
                           chapter: ChapterNavigation,
@@ -1157,6 +1367,24 @@ def process_jurisdiction(name: str, state: str, dry_run: bool = True) -> dict:
                 print(f"         └ {dmark} {d.text_length:>6} chars  '{(d.link_text or '')[:40]}'  {short_url}")
     else:
         print(f"  [4] verbatim → none ({text.fetch_mode}: {text.notes})")
+
+    # Step 6 — LLM rule decision
+    cr = step_6_decide_rule(jc, plat, text)
+    if cr:
+        gate_ok, gate_why = is_url_deep_enough(cr.subtype, cr.source_url)
+        conf_marker = "✅" if cr.confidence >= 0.7 else ("⚠️ review" if cr.confidence >= 0.4 else "❌ defer")
+        gate_marker = "✅" if gate_ok else f"❌ {gate_why}"
+        print(f"  [6] rule → {cr.rule}  conf={cr.confidence:.2f} {conf_marker}")
+        print(f"       subtype={cr.subtype}  citation={cr.citation!r}")
+        print(f"       url={cr.source_url}  url_gate={gate_marker}")
+        if cr.evidence_quote:
+            print(f"       evidence: {cr.evidence_quote[:140]!r}")
+        if cr.status_note:
+            print(f"       status_note: {cr.status_note}")
+        if cr.notes:
+            print(f"       LLM notes: {cr.notes}")
+    else:
+        print(f"  [6] rule → SKIPPED (no fetched content or no ANTHROPIC_API_KEY)")
 
     return {
         "name": name, "state": state,

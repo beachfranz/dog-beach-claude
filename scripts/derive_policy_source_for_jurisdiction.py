@@ -1922,6 +1922,28 @@ def emit_migration_sql(jc: JurisdictionClassification, sc: ScopeCheck,
     return "\n".join(parts) + "\n"
 
 
+# ─── #12 — URL-gate review queue helper ─────────────────────────────────
+# Wraps a successful-but-URL-gate-failed (or borderline-confidence) INSERT
+# block with a curator-review header. The main() emitter writes these to a
+# separate _REVIEW.sql file wrapped in BEGIN/ROLLBACK so accidental apply
+# is safe.
+
+def _wrap_review_sql_block(insert_sql: str, *,
+                            jurisdiction: str, state: str, reason: str) -> str:
+    """Annotate one INSERT block for the curator-review queue. Caller (main())
+    wraps the full set of blocks in a single BEGIN/ROLLBACK transaction."""
+    header = (
+        f"-- ──── REVIEW: {jurisdiction}, {state} ────\n"
+        f"-- Reason: {reason}\n"
+        f"-- Curator action: verify URL deep-link discipline + citation accuracy,\n"
+        f"--   then either (a) approve as-is by changing the file's ROLLBACK to\n"
+        f"--   COMMIT, or (b) replace source_url + re-run with --manual-url to\n"
+        f"--   regenerate a clean auto-commit migration.\n"
+        f"--\n"
+    )
+    return header + insert_sql
+
+
 # ─── Stubborn-tracker / per-jurisdiction outcome ───────────────────────
 
 # Outcome enum for the JSONL log. Per the diminishing-returns analysis:
@@ -2091,6 +2113,7 @@ def codify_from_manual_url(jc: JurisdictionClassification,
 
 def process_jurisdiction(name: str, state: str,
                          emit_sql_to: list | None = None,
+                         emit_sql_review_to: list | None = None,
                          discover_only: bool = False,
                          manual_url: str | None = None,
                          ignore_state_baseline: bool = False,
@@ -2173,7 +2196,7 @@ def process_jurisdiction(name: str, state: str,
             outcome = OUTCOME_DEFER_STUBBORN
             notes_summary = "manual URL fetched but LLM found no operative rule"
         elif cr.confidence >= 0.7:
-            gate_ok, _ = is_url_deep_enough(cr.subtype, cr.source_url or manual_url)
+            gate_ok, gate_why = is_url_deep_enough(cr.subtype, cr.source_url or manual_url)
             if gate_ok:
                 outcome = OUTCOME_SUCCESS_AUTO_COMMIT
                 if emit_sql_to is not None:
@@ -2183,10 +2206,24 @@ def process_jurisdiction(name: str, state: str,
                     print(f"  [7] SQL emitted (auto-commit ready)")
             else:
                 outcome = OUTCOME_SUCCESS_HUMAN_REVIEW
-                notes_summary = "high confidence but URL gate failed"
+                notes_summary = f"high confidence ({cr.confidence:.2f}) but URL gate failed: {gate_why}"
+                if emit_sql_review_to is not None:
+                    sql = _wrap_review_sql_block(
+                        emit_migration_sql(jc, sc, cr, platform_used),
+                        jurisdiction=name, state=state, reason=notes_summary,
+                    )
+                    emit_sql_review_to.append(sql)
+                    print(f"  [7] SQL emitted to REVIEW queue (URL gate failed)")
         elif cr.confidence >= 0.4:
             outcome = OUTCOME_SUCCESS_HUMAN_REVIEW
-            notes_summary = "borderline confidence; human review"
+            notes_summary = f"borderline confidence ({cr.confidence:.2f}); human review"
+            if emit_sql_review_to is not None and cr.subtype:
+                sql = _wrap_review_sql_block(
+                    emit_migration_sql(jc, sc, cr, platform_used),
+                    jurisdiction=name, state=state, reason=notes_summary,
+                )
+                emit_sql_review_to.append(sql)
+                print(f"  [7] SQL emitted to REVIEW queue (borderline confidence)")
         else:
             outcome = OUTCOME_DEFER_STUBBORN
             notes_summary = cr.notes
@@ -2365,7 +2402,14 @@ def process_jurisdiction(name: str, state: str,
         gate_ok, gate_why = is_url_deep_enough(cr.subtype, cr.source_url)
         if not gate_ok:
             outcome = OUTCOME_SUCCESS_HUMAN_REVIEW
-            notes_summary = f"high confidence but URL gate failed: {gate_why}"
+            notes_summary = f"high confidence ({cr.confidence:.2f}) but URL gate failed: {gate_why}"
+            if emit_sql_review_to is not None:
+                sql = _wrap_review_sql_block(
+                    emit_migration_sql(jc, sc, cr, platform_used),
+                    jurisdiction=name, state=state, reason=notes_summary,
+                )
+                emit_sql_review_to.append(sql)
+                print(f"  [7] SQL emitted to REVIEW queue (URL gate failed)")
         else:
             outcome = OUTCOME_SUCCESS_AUTO_COMMIT
             if emit_sql_to is not None:
@@ -2375,7 +2419,14 @@ def process_jurisdiction(name: str, state: str,
                 print(f"  [7] SQL emitted (auto-commit ready)")
     elif cr.confidence >= 0.4:
         outcome = OUTCOME_SUCCESS_HUMAN_REVIEW
-        notes_summary = "borderline confidence; human review queue"
+        notes_summary = f"borderline confidence ({cr.confidence:.2f}); human review queue"
+        if emit_sql_review_to is not None and cr.subtype:
+            sql = _wrap_review_sql_block(
+                emit_migration_sql(jc, sc, cr, platform_used),
+                jurisdiction=name, state=state, reason=notes_summary,
+            )
+            emit_sql_review_to.append(sql)
+            print(f"  [7] SQL emitted to REVIEW queue (borderline confidence)")
     else:
         outcome = OUTCOME_DEFER_STUBBORN
         notes_summary = cr.notes or "all paths returned low confidence"
@@ -2851,6 +2902,7 @@ def main() -> int:
 
     outcomes: list[JurisdictionOutcome] = []
     sql_blocks: list[str] = []
+    sql_review_blocks: list[str] = []   # #12: human_review queue (URL gate fails + borderline conf)
     tally: dict[str, int] = {}
 
     # Municode pre-check toggle (must mutate before any process_jurisdiction call)
@@ -2869,6 +2921,7 @@ def main() -> int:
     for name, state, manual_url in queue:
         try:
             o = process_jurisdiction(name, state, emit_sql_to=sql_blocks,
+                                     emit_sql_review_to=sql_review_blocks,
                                      discover_only=args.discover_only,
                                      manual_url=manual_url,
                                      ignore_state_baseline=args.ignore_state_baseline,
@@ -2901,6 +2954,32 @@ def main() -> int:
                 f.write("\n")
             f.write("COMMIT;\n")
         print(f"\nSQL written: {sql_path}  ({len(sql_blocks)} block(s))")
+
+    # #12: write REVIEW SQL (URL-gate-failed + borderline-confidence cases)
+    # Wrapped in BEGIN/ROLLBACK so accidental apply is safe — curator changes
+    # to COMMIT after verifying each entry.
+    if sql_review_blocks:
+        review_path = out_dir / f"codify_{label}_{ts}_REVIEW.sql"
+        with open(review_path, "w", encoding="utf-8") as f:
+            f.write(f"-- ───────────────────────────────────────────────────────────────\n")
+            f.write(f"-- CURATOR REVIEW REQUIRED — Codify v1 emit — label={label} ts={ts}\n")
+            f.write(f"-- ───────────────────────────────────────────────────────────────\n")
+            f.write(f"-- {len(sql_review_blocks)} jurisdiction(s) reached conf >= 0.4 but did NOT meet\n")
+            f.write(f"-- auto-commit criteria (URL gate failed OR borderline confidence).\n")
+            f.write(f"--\n")
+            f.write(f"-- This file is wrapped in BEGIN/ROLLBACK so accidental apply is\n")
+            f.write(f"-- safe. After verifying each entry, change ROLLBACK to COMMIT and\n")
+            f.write(f"-- apply via psql.\n")
+            f.write(f"--\n")
+            f.write(f"-- Alternative: replace source_url with a deep-link + re-run with\n")
+            f.write(f"-- --manual-url to regenerate a clean auto-commit migration.\n")
+            f.write(f"--\n")
+            f.write("BEGIN;\n\n")
+            for block in sql_review_blocks:
+                f.write(block)
+                f.write("\n")
+            f.write("ROLLBACK;  -- ← change to COMMIT after curator review\n")
+        print(f"REVIEW SQL written: {review_path}  ({len(sql_review_blocks)} block(s); BEGIN/ROLLBACK wrapped)")
 
     # Write JSONL outcomes (always, for stubborn-tracker)
     with open(jsonl_path, "w", encoding="utf-8") as f:

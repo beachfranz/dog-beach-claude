@@ -109,6 +109,26 @@ SELECT g.fid FROM beaches_gold g WHERE g.cpad_unit_id IN (SELECT unit_id FROM cp
 -- Operator (Conservancy, Tribal): enumerate by name match + coord cluster
 ```
 
+**Encapsulated path for state/federal-agency rules** (added 2026-05-18 per [[never-solve-same-problem-twice]] after OAR 736-010-0030 hand-SQL pattern):
+
+```bash
+python scripts/derive_policy_source_for_jurisdiction.py --state-agency-rule \
+  --agency-name "Oregon Parks and Recreation Department" --agency-type state_department \
+  --states OR \
+  --pad-mng-type STAT --pad-mng-name SPR  \   # or --pad-unit-name-ilike '%state park%'
+  --subtype state_regulation \
+  --citation "OAR 736-010-0030 (Domestic Animals)" \
+  --rule-url "https://secure.sos.state.or.us/oard/viewSingleRule.action?ruleVrsnRsn=322966" \
+  --rule on_leash --section sand \
+  --evidence-verbatim "OAR 736-010-0030(2): keep it under physical control on a leash..." \
+  --full-text-file tmp/oar_736_010_0030.txt \
+  --label or_codify_oprd_oar_736_010_0030
+```
+
+What it does: looks up agency_id → spatial-joins `beach_relevant_pad_us` × `beaches_gold` with your `--pad-mng-type/--pad-mng-name/--pad-des-tp/--pad-unit-name-ilike` filter → emits `supabase/migrations/<date>_<label>.sql` with idempotent ps + bps inserts. Does NOT apply (per §9 explicit-go discipline).
+
+Use ONE invocation per (rule, PAD-US-filter) cohort. Multiple invocations against the same `source_url` are safely idempotent — the policy_source insert is gated by `WHERE NOT EXISTS` on source_url; bps inserts are gated by `ON CONFLICT (beach_fid, policy_source_id, section)`.
+
 **Sub-area carve-outs** (Del Mar seasonal, LB §6.16.310 dog-exercise-area, Coronado Sand Pebble): encode via `beach_policy_source.region_name` column. ONE bps row per zone; `region_name` is the human-friendly zone label (e.g., 'Sand Pebble Off-Leash Area', 'North Beach (north of 29th Street)'). NULL region_name = default region. Multiple rows with same section but distinct region_name → injector emits multi-region zone_rules.regions[] automatically.
 
 Legacy pattern (`section='sand_<sub_area>_overlay'`) is deprecated; use region_name instead.

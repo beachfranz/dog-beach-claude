@@ -382,6 +382,113 @@ def scope_check(jc: JurisdictionClassification) -> ScopeCheck:
     )
 
 
+# ─── Step 1.5 — State-baseline coverage check ───────────────────────────
+#
+# Added 2026-05-18 per #10 encapsulation: in state-baseline-dominant regimes
+# (e.g., OR via OAR Ocean Shore Rules + ORS §609), the state-level policy_source
+# rows already cover most or all city/county beaches. Codifying per-city/per-
+# county in those regimes wastes Phase A → Step 6.8 cycles with low marginal
+# value. Marginal value IS still real (city-specific overrides like off-leash
+# designations), but should be opt-in rather than default.
+#
+# Mechanism: query beaches in the jurisdiction's polygon → count how many
+# already have consensus_confidence ≥ baseline-conf AND have ≥1 state-issued
+# ps row in their beach_policy_source links → if ratio ≥ threshold, defer.
+#
+# Override: --ignore-state-baseline disables the check entirely.
+
+@dataclass
+class StateBaselineCoverage:
+    n_beaches_total:   int
+    n_beaches_covered: int   # have ≥1 state-issued ps at conf ≥ baseline_conf
+    coverage_pct:      float # 0.0 to 1.0
+    state_ps_ids:      list[int]  # which state ps rows cover these beaches
+    skip_decision:     bool
+    reason:            str
+
+
+def step_1_5_state_baseline_coverage(
+    jc: JurisdictionClassification,
+    threshold: float = 0.9,
+    baseline_conf: float = 0.7,
+) -> StateBaselineCoverage:
+    """Check if state-level ps rows already cover beaches in this jurisdiction.
+
+    Returns (skip_decision=True, reason) when:
+      - jurisdiction polygon intersects ≥1 beach (else N/A)
+      - ≥ threshold fraction of those beaches have:
+          * consensus_confidence ≥ baseline_conf in beach_dog_policy, AND
+          * ≥1 beach_policy_source link to a ps row whose issuing_agency.type
+            is in ('state','state_department') OR subtype is state-class
+
+    Skip == True signals "state baseline covers this; per-jurisdiction codify
+    is low marginal value." Override with --ignore-state-baseline.
+
+    Idempotent — no writes; safe to call any time.
+    """
+    if jc.polygon_table is None or jc.polygon_key is None:
+        return StateBaselineCoverage(0, 0, 0.0, [], False,
+                                     "no polygon — cannot evaluate baseline coverage")
+
+    conn = _connect_pg()
+    try:
+        with conn, conn.cursor() as cur:
+            # All active beaches whose geom intersects the jurisdiction polygon
+            cur.execute(
+                f"""
+                SELECT b.fid, COALESCE(bdp.consensus_confidence, 0) AS conf,
+                       COALESCE(
+                         (SELECT array_agg(DISTINCT ps.id)
+                          FROM public.beach_policy_source bps
+                          JOIN public.policy_source ps ON ps.id = bps.policy_source_id
+                          LEFT JOIN public.agency a ON a.id = ps.issuing_agency_id
+                          WHERE bps.beach_fid = b.fid
+                            AND (a.type IN ('state','state_department')
+                                 OR ps.subtype IN ('state_regulation','state_statute','federal_regulation'))),
+                         '{{}}'::bigint[]
+                       ) AS state_ps_ids
+                FROM public.beaches_gold b
+                LEFT JOIN public.beach_dog_policy bdp ON bdp.arena_group_id = b.fid
+                JOIN public.{jc.polygon_table} p ON ST_Intersects(b.geom, p.geom)
+                WHERE b.is_active
+                  AND b.state = %s
+                  AND p.{'id' if jc.polygon_table != 'counties' else 'geoid'} = %s
+                """,
+                (jc.state, jc.polygon_key),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    n_total = len(rows)
+    if n_total == 0:
+        return StateBaselineCoverage(0, 0, 0.0, [], False,
+                                     "no beaches in polygon — pre-filter should have caught this")
+
+    covered_ps_ids: set[int] = set()
+    n_covered = 0
+    for _fid, conf, ps_ids in rows:
+        if conf >= baseline_conf and ps_ids and len(ps_ids) > 0:
+            n_covered += 1
+            for psid in ps_ids:
+                covered_ps_ids.add(psid)
+
+    pct = n_covered / n_total if n_total else 0.0
+    skip = pct >= threshold
+    reason = (
+        f"state baseline covers {n_covered}/{n_total} beaches "
+        f"({pct:.0%}) at conf ≥ {baseline_conf:.0%} (threshold {threshold:.0%})"
+    )
+    return StateBaselineCoverage(
+        n_beaches_total=n_total,
+        n_beaches_covered=n_covered,
+        coverage_pct=pct,
+        state_ps_ids=sorted(covered_ps_ids),
+        skip_decision=skip,
+        reason=reason,
+    )
+
+
 # ─── Step 2 — Platform discovery ───────────────────────────────────────
 
 # Per-state platform priority. WA = codepublishing dominant (per the WA
@@ -1758,6 +1865,7 @@ OUTCOME_DEFER_TRIBAL           = "defer_tribal"
 OUTCOME_DEFER_FEDERAL_BRANCH   = "defer_federal_branch"
 OUTCOME_DEFER_CDP_COVERED      = "defer_cdp_covered_by_parent"
 OUTCOME_DEFER_UNKNOWN_CLASS    = "defer_unknown_class"
+OUTCOME_DEFER_STATE_BASELINE   = "defer_state_baseline_covers"  # state-level ps already covers all beaches
 OUTCOME_ERROR                  = "error"
 
 
@@ -1915,12 +2023,18 @@ def codify_from_manual_url(jc: JurisdictionClassification,
 def process_jurisdiction(name: str, state: str,
                          emit_sql_to: list | None = None,
                          discover_only: bool = False,
-                         manual_url: str | None = None) -> JurisdictionOutcome:
+                         manual_url: str | None = None,
+                         ignore_state_baseline: bool = False,
+                         state_baseline_threshold: float = 0.9) -> JurisdictionOutcome:
     """Run the full pipeline on one jurisdiction. Returns a structured
     outcome. When emit_sql_to is a list, appends generated SQL blocks to it.
 
     discover_only=True early-exits after Step 2 (platform discovery only) —
-    useful for two-phase per-platform agent partitioning."""
+    useful for two-phase per-platform agent partitioning.
+
+    ignore_state_baseline=True disables the §1.5 state-baseline coverage check;
+    use when the curator wants to force codify in a state-baseline-dominant
+    regime (e.g., looking for sub-region overrides)."""
     print(f"\n=== {name} ({state}) ===")
     attempts: list[str] = []
 
@@ -1951,6 +2065,23 @@ def process_jurisdiction(name: str, state: str,
           f"name={sc.agency_name!r} type={sc.agency_type})")
     print(f"       existing_ps_count={sc.existing_ps_count}")
     attempts.append("step_1_scope")
+
+    # Step 1.5 — State-baseline coverage check
+    # Skip if state-level ps rows already cover ≥ threshold of this jurisdiction's
+    # beaches at conf ≥ 0.7. Manual URL override bypasses this (curator intent).
+    if not manual_url and not ignore_state_baseline:
+        baseline = step_1_5_state_baseline_coverage(jc, threshold=state_baseline_threshold)
+        attempts.append("step_1_5_state_baseline")
+        if baseline.n_beaches_total > 0:
+            print(f"  [1.5] state-baseline → {baseline.reason}")
+            if baseline.skip_decision:
+                ps_ids_repr = ",".join(str(i) for i in baseline.state_ps_ids[:5])
+                print(f"  → outcome: defer_state_baseline_covers  "
+                      f"(state_ps_ids=[{ps_ids_repr}{'...' if len(baseline.state_ps_ids)>5 else ''}])")
+                return _make_outcome(name, state, jc, sc, attempts, None, None,
+                                     outcome=OUTCOME_DEFER_STATE_BASELINE,
+                                     notes=baseline.reason + " — use --ignore-state-baseline to force codify",
+                                     sql_emitted=False)
 
     # MANUAL URL OVERRIDE — bypass Steps 2-6.7, fetch the given URL directly
     if manual_url:
@@ -2587,6 +2718,15 @@ def main() -> int:
                     help="Single-jurisdiction manual-URL override (with --jurisdiction). "
                          "Bypasses Steps 2-6.7; fetches the URL directly + runs Step 6 LLM. "
                          "For batch mode use --from-csv with a source_url column.")
+    ap.add_argument("--ignore-state-baseline", action="store_true",
+                    help="Disable Step 1.5 state-baseline coverage check. By default, "
+                         "if state-level ps rows already cover ≥ threshold fraction of "
+                         "this jurisdiction's beaches at conf ≥ 0.7, codify defers "
+                         "with defer_state_baseline_covers outcome. Set this flag to "
+                         "force codify anyway (e.g., hunting for sub-region overrides).")
+    ap.add_argument("--state-baseline-threshold", type=float, default=0.9,
+                    help="Step 1.5 coverage threshold (default 0.9 = 90 percent of "
+                         "jurisdiction beaches must already be state-covered to defer).")
     args = ap.parse_args()
 
     # ── --state-agency-rule mode: separate code path, exits early ──
@@ -2651,7 +2791,9 @@ def main() -> int:
         try:
             o = process_jurisdiction(name, state, emit_sql_to=sql_blocks,
                                      discover_only=args.discover_only,
-                                     manual_url=manual_url)
+                                     manual_url=manual_url,
+                                     ignore_state_baseline=args.ignore_state_baseline,
+                                     state_baseline_threshold=args.state_baseline_threshold)
             outcomes.append(o)
             tally[o.outcome] = tally.get(o.outcome, 0) + 1
         except Exception as e:

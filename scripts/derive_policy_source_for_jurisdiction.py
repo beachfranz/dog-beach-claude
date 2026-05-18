@@ -1461,38 +1461,180 @@ def step_4_fetch_verbatim(jc: JurisdictionClassification,
     )
 
 
+# ─── Step 7 — Migration emit ───────────────────────────────────────────
+
+# Per playbook §7 template. Emits ps INSERT (with NOT EXISTS guard +
+# canonical citation prefix). When agency row is missing, ALSO emit an
+# agency INSERT per tenet 4 (bare-name canonical). No bps INSERT — that's
+# the resolver's job in the new architecture (per
+# docs/codify_pip_resolver_architecture.md).
+def emit_migration_sql(jc: JurisdictionClassification, sc: ScopeCheck,
+                       cr: CodifiedRule, platform_used: str | None) -> str:
+    """Generate the SQL INSERT block for one codified rule.
+
+    Caller is responsible for confidence-gating (only call for conf >= 0.7).
+    Quality-gate the URL via is_url_deep_enough() before calling.
+    """
+    import datetime
+    today = datetime.date.today().isoformat()
+
+    # SQL-escape single quotes by doubling them
+    def esc(s: str | None) -> str:
+        if s is None:
+            return "NULL"
+        return "'" + s.replace("'", "''") + "'"
+
+    # Canonical citation prefix for NOT EXISTS guard — first 30 chars
+    citation_prefix = cr.citation[:30].replace("'", "''")
+
+    # Verbatim quote with attribution footer (per playbook §7)
+    full_text_with_footer = cr.full_text
+    if platform_used:
+        full_text_with_footer += f"\n\n[Hosted on {platform_used}. Fetched via codify v1 {today}.]"
+
+    # Agency type for lookup (per scope_check)
+    agency_type = sc.agency_type or GOVERNANCE_TO_AGENCY_TYPE.get(jc.governance_class, "city")
+    agency_name = sc.agency_name or jc.name
+
+    parts = []
+    parts.append(
+        f"-- {jc.name} ({jc.state}) — {cr.subtype}\n"
+        f"-- confidence={cr.confidence:.2f}, rule={cr.rule}\n"
+        f"-- citation: {cr.citation}\n"
+    )
+
+    # Agency INSERT (only if no existing agency row)
+    if sc.decision == "no_agency":
+        parts.append(
+            f"INSERT INTO public.agency (name, type)\n"
+            f"SELECT {esc(agency_name)}, {esc(agency_type)}\n"
+            f"WHERE NOT EXISTS (\n"
+            f"  SELECT 1 FROM public.agency\n"
+            f"   WHERE name = {esc(agency_name)} AND type = {esc(agency_type)}\n"
+            f");\n"
+        )
+
+    # policy_source INSERT
+    parts.append(
+        f"INSERT INTO public.policy_source\n"
+        f"  (subtype, citation, issuing_agency_id, scope, source_url, full_text)\n"
+        f"SELECT {esc(cr.subtype)},\n"
+        f"       {esc(cr.citation)},\n"
+        f"       (SELECT id FROM public.agency\n"
+        f"         WHERE name = {esc(agency_name)} AND type = {esc(agency_type)}),\n"
+        f"       ARRAY['dog_policy']::text[],\n"
+        f"       {esc(cr.source_url)},\n"
+        f"       {esc(full_text_with_footer)}\n"
+        f"WHERE NOT EXISTS (\n"
+        f"  SELECT 1 FROM public.policy_source\n"
+        f"   WHERE citation LIKE {esc(citation_prefix + '%')}\n"
+        f");\n"
+    )
+    return "\n".join(parts) + "\n"
+
+
+# ─── Stubborn-tracker / per-jurisdiction outcome ───────────────────────
+
+# Outcome enum for the JSONL log. Per the diminishing-returns analysis:
+# ~88% should land in success_auto_commit; the rest are deferred for one
+# of these reasons.
+OUTCOME_SUCCESS_AUTO_COMMIT    = "success_auto_commit"     # conf >= 0.7
+OUTCOME_SUCCESS_HUMAN_REVIEW   = "success_human_review"    # 0.4 <= conf < 0.7
+OUTCOME_DEFER_STUBBORN         = "defer_stubborn"          # tried all paths, < 0.4
+OUTCOME_DEFER_TRIBAL           = "defer_tribal"
+OUTCOME_DEFER_FEDERAL_BRANCH   = "defer_federal_branch"
+OUTCOME_DEFER_CDP_COVERED      = "defer_cdp_covered_by_parent"
+OUTCOME_DEFER_UNKNOWN_CLASS    = "defer_unknown_class"
+OUTCOME_ERROR                  = "error"
+
+
+@dataclass
+class JurisdictionOutcome:
+    """Persisted per-jurisdiction record. Written to JSONL log for the
+    stubborn re-pass workflow + dashboarding."""
+    name:            str
+    state:           str
+    outcome:         str
+    governance_class: str | None
+    polygon_table:    str | None
+    polygon_key:      str | None
+    agency_id:        int | None
+    decision:         str | None       # create_new | supplement_existing | no_agency
+    attempts:         list[str]        # ['step_2', 'step_3', 'step_4', 'step_6', 'step_6_5', 'step_6_7']
+    platform_chosen:  str | None
+    rule:             str | None
+    subtype:          str | None
+    citation:         str | None
+    source_url:       str | None
+    confidence:       float | None
+    notes:            str | None
+    sql_emitted:      bool
+    timestamp_iso:    str
+
+
 # ─── Per-jurisdiction orchestration ────────────────────────────────────
 
-def process_jurisdiction(name: str, state: str, dry_run: bool = True) -> dict:
-    """Run Steps 0/0.5/1 on one jurisdiction. Returns a report dict."""
+def _make_outcome(name: str, state: str, jc, sc, attempts: list, cr, platform_used,
+                  outcome: str, notes: str | None, sql_emitted: bool) -> JurisdictionOutcome:
+    """Build a JurisdictionOutcome record from the per-step state."""
+    import datetime
+    return JurisdictionOutcome(
+        name=name, state=state, outcome=outcome,
+        governance_class=jc.governance_class if jc else None,
+        polygon_table=jc.polygon_table if jc else None,
+        polygon_key=jc.polygon_key if jc else None,
+        agency_id=sc.agency_id if sc else None,
+        decision=sc.decision if sc else None,
+        attempts=attempts,
+        platform_chosen=platform_used,
+        rule=cr.rule if cr else None,
+        subtype=cr.subtype if cr else None,
+        citation=cr.citation if cr else None,
+        source_url=cr.source_url if cr else None,
+        confidence=cr.confidence if cr else None,
+        notes=notes,
+        sql_emitted=sql_emitted,
+        timestamp_iso=datetime.datetime.now().isoformat(timespec="seconds"),
+    )
+
+
+def process_jurisdiction(name: str, state: str,
+                         emit_sql_to: list | None = None) -> JurisdictionOutcome:
+    """Run the full pipeline on one jurisdiction. Returns a structured
+    outcome. When emit_sql_to is a list, appends generated SQL blocks to it."""
     print(f"\n=== {name} ({state}) ===")
+    attempts: list[str] = []
 
     # Step 0 — Classify
     jc = classify_jurisdiction(name, state)
     print(f"  [0] classify → {jc.governance_class}  (polygon_table={jc.polygon_table} polygon_key={jc.polygon_key})")
     if jc.classify_notes:
         print(f"       notes: {jc.classify_notes}")
+    attempts.append("step_0_classify")
 
     # Step 0.5 — Triage
     td = triage(jc)
     print(f"  [0.5] triage → {td.action}  ({td.reason})")
+    attempts.append("step_0_5_triage")
     if td.action != "proceed":
-        return {
-            "name": name, "state": state,
-            "classification": asdict(jc),
-            "triage": asdict(td),
-            "scope_check": None,
-            "steps_2_4": None,
-            "final": td.action,
+        outcome_map = {
+            "skip_covered_by_parent": OUTCOME_DEFER_CDP_COVERED,
+            "defer":                  OUTCOME_DEFER_TRIBAL if jc.governance_class == "tribal" else OUTCOME_DEFER_UNKNOWN_CLASS,
+            "branch_federal":         OUTCOME_DEFER_FEDERAL_BRANCH,
         }
+        return _make_outcome(name, state, jc, None, attempts, None, None,
+                             outcome=outcome_map.get(td.action, OUTCOME_DEFER_UNKNOWN_CLASS),
+                             notes=td.reason, sql_emitted=False)
 
     # Step 1 — Scope check
     sc = scope_check(jc)
     print(f"  [1] scope → {sc.decision}  (agency_id={sc.agency_id} "
           f"name={sc.agency_name!r} type={sc.agency_type})")
     print(f"       existing_ps_count={sc.existing_ps_count}")
+    attempts.append("step_1_scope")
 
     # Step 2 — Platform discovery
+    attempts.append("step_2_platform")
     plat = step_2_discover_platform(jc, sc)
     if plat.valid_url:
         print(f"  [2] platform → {plat.platform}  {plat.valid_url}")
@@ -1505,6 +1647,7 @@ def process_jurisdiction(name: str, state: str, dry_run: bool = True) -> dict:
             print(f"       … and {len(plat.tried)-6} more")
 
     # Step 3 — Navigate to operative chapter
+    attempts.append("step_3_chapter")
     chap = step_3_navigate_chapter(jc, plat)
     if chap.best_url:
         print(f"  [3] chapter → {chap.best_text!r}  (score={chap.best_score} {chap.notes})")
@@ -1516,6 +1659,7 @@ def process_jurisdiction(name: str, state: str, dry_run: bool = True) -> dict:
         print(f"  [3] chapter → NONE  ({chap.method}: {chap.notes})")
 
     # Step 4 — Fetch verbatim text for top-N chapter candidates (+ drill)
+    attempts.append("step_4_verbatim")
     text = step_4_fetch_verbatim(jc, plat, chap)
     if text.fetched:
         print(f"  [4] verbatim → {text.notes} ({text.fetch_mode})")
@@ -1530,6 +1674,7 @@ def process_jurisdiction(name: str, state: str, dry_run: bool = True) -> dict:
         print(f"  [4] verbatim → none ({text.fetch_mode}: {text.notes})")
 
     # Step 6 — LLM rule decision
+    attempts.append("step_6_llm_decide")
     cr = step_6_decide_rule(jc, plat, text)
     if cr:
         gate_ok, gate_why = is_url_deep_enough(cr.subtype, cr.source_url)
@@ -1547,6 +1692,7 @@ def process_jurisdiction(name: str, state: str, dry_run: bool = True) -> dict:
 
         # Step 6.5 — LLM-guided re-drill if confidence < 0.7 and LLM suggested
         if cr.confidence < 0.7 and cr.suggested_next_title is not None:
+            attempts.append("step_6_5_redrill")
             ch_label = f"Title {cr.suggested_next_title}"
             if cr.suggested_next_chapter is not None:
                 ch_label += f" Ch {cr.suggested_next_title}.{cr.suggested_next_chapter:02d}"
@@ -1566,6 +1712,7 @@ def process_jurisdiction(name: str, state: str, dry_run: bool = True) -> dict:
 
         # Step 6.7 — agency-policy fallback (only if Step 6 + 6.5 both deferred)
         if cr.confidence < 0.7 and sc.agency_web_url:
+            attempts.append("step_6_7_agency_policy")
             print(f"  [6.7] agency-policy fallback → scanning {sc.agency_web_url}")
             cr3 = step_6_7_agency_policy_fallback(jc, sc, cr)
             if cr3:
@@ -1587,6 +1734,7 @@ def process_jurisdiction(name: str, state: str, dry_run: bool = True) -> dict:
         # straight to the agency-policy fallback. This is the common case
         # when no platform validated (Step 2 returned NONE FOUND).
         if sc.agency_web_url:
+            attempts.append("step_6_7_agency_policy")
             print(f"  [6.7] agency-policy fallback → scanning {sc.agency_web_url}")
             cr3 = step_6_7_agency_policy_fallback(jc, sc, None)
             if cr3:
@@ -1601,16 +1749,35 @@ def process_jurisdiction(name: str, state: str, dry_run: bool = True) -> dict:
             else:
                 print(f"  [6.7] agency-policy fallback found nothing valid")
 
-    return {
-        "name": name, "state": state,
-        "classification": asdict(jc),
-        "triage": asdict(td),
-        "scope_check": asdict(sc),
-        "platform": asdict(plat),
-        "navigate": asdict(chap),
-        "fetch": text,
-        "final": "step_3_complete; 4 stubbed",
-    }
+    # Determine outcome + emit SQL if confident enough
+    platform_used = plat.platform if plat else None
+    sql_emitted = False
+    notes_summary = None
+    if cr is None or cr.rule == "no_rule_found":
+        outcome = OUTCOME_DEFER_STUBBORN
+        notes_summary = (cr.notes if cr else None) or "no rule decided after all attempts"
+    elif cr.confidence >= 0.7:
+        gate_ok, gate_why = is_url_deep_enough(cr.subtype, cr.source_url)
+        if not gate_ok:
+            outcome = OUTCOME_SUCCESS_HUMAN_REVIEW
+            notes_summary = f"high confidence but URL gate failed: {gate_why}"
+        else:
+            outcome = OUTCOME_SUCCESS_AUTO_COMMIT
+            if emit_sql_to is not None:
+                sql = emit_migration_sql(jc, sc, cr, platform_used)
+                emit_sql_to.append(sql)
+                sql_emitted = True
+                print(f"  [7] SQL emitted (auto-commit ready)")
+    elif cr.confidence >= 0.4:
+        outcome = OUTCOME_SUCCESS_HUMAN_REVIEW
+        notes_summary = "borderline confidence; human review queue"
+    else:
+        outcome = OUTCOME_DEFER_STUBBORN
+        notes_summary = cr.notes or "all paths returned low confidence"
+
+    print(f"  → outcome: {outcome}")
+    return _make_outcome(name, state, jc, sc, attempts, cr, platform_used,
+                         outcome=outcome, notes=notes_summary, sql_emitted=sql_emitted)
 
 
 # ─── Main ──────────────────────────────────────────────────────────────
@@ -1640,8 +1807,8 @@ def main() -> int:
     ap.add_argument("--state-of", dest="state_of",
                     help="State (with --jurisdiction). e.g. WA")
     ap.add_argument("--pilot", type=int, help="Cap to first N jurisdictions (with --state)")
-    ap.add_argument("--dry-run", action="store_true", default=True,
-                    help="Don't write to DB (default true while Steps 2-4 are stubbed)")
+    ap.add_argument("--out-dir", default="tmp", help="Output directory for SQL + JSONL log")
+    ap.add_argument("--label", help="Optional label for output filenames (e.g. 'wa_pilot_5')")
     args = ap.parse_args()
 
     # Build the list of (name, state) tuples to process
@@ -1663,26 +1830,67 @@ def main() -> int:
         return 0
 
     print(f"Queue: {len(queue)} jurisdiction(s)")
-    reports = []
-    tally = {"proceed": 0, "skip_covered_by_parent": 0, "defer": 0,
-             "branch_federal": 0, "create_new": 0, "supplement_existing": 0,
-             "no_agency": 0}
+
+    # Output paths
+    import datetime
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    label = args.label or (args.state.lower() if args.state else "single")
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    sql_path   = out_dir / f"codify_{label}_{ts}.sql"
+    jsonl_path = out_dir / f"codify_{label}_{ts}_outcomes.jsonl"
+
+    outcomes: list[JurisdictionOutcome] = []
+    sql_blocks: list[str] = []
+    tally: dict[str, int] = {}
+
     for name, state in queue:
         try:
-            r = process_jurisdiction(name, state, dry_run=args.dry_run)
-            reports.append(r)
-            tally[r["triage"]["action"]] = tally.get(r["triage"]["action"], 0) + 1
-            if r.get("scope_check"):
-                tally[r["scope_check"]["decision"]] = tally.get(r["scope_check"]["decision"], 0) + 1
+            o = process_jurisdiction(name, state, emit_sql_to=sql_blocks)
+            outcomes.append(o)
+            tally[o.outcome] = tally.get(o.outcome, 0) + 1
         except Exception as e:
-            print(f"  ERROR on {name}: {e}")
-            reports.append({"name": name, "state": state, "error": str(e)})
-        time.sleep(0.15)  # gentle pacing
+            print(f"  ERROR on {name}: {e}", file=sys.stderr)
+            err_o = JurisdictionOutcome(
+                name=name, state=state, outcome=OUTCOME_ERROR,
+                governance_class=None, polygon_table=None, polygon_key=None,
+                agency_id=None, decision=None, attempts=[],
+                platform_chosen=None, rule=None, subtype=None, citation=None,
+                source_url=None, confidence=None, notes=str(e),
+                sql_emitted=False,
+                timestamp_iso=datetime.datetime.now().isoformat(timespec="seconds"),
+            )
+            outcomes.append(err_o)
+            tally[OUTCOME_ERROR] = tally.get(OUTCOME_ERROR, 0) + 1
+        time.sleep(0.15)
 
-    print("\n=== TOTALS ===")
-    for k, v in tally.items():
-        print(f"  {k:<28} {v}")
-    print(f"  total processed:             {len(reports)}")
+    # Write SQL (only the high-confidence rows that emitted)
+    if sql_blocks:
+        with open(sql_path, "w", encoding="utf-8") as f:
+            f.write(f"-- Codify v1 emit — label={label} ts={ts}\n")
+            f.write(f"-- {len(sql_blocks)} jurisdiction(s) auto-committed; review before applying.\n")
+            f.write("BEGIN;\n\n")
+            for block in sql_blocks:
+                f.write(block)
+                f.write("\n")
+            f.write("COMMIT;\n")
+        print(f"\nSQL written: {sql_path}  ({len(sql_blocks)} block(s))")
+
+    # Write JSONL outcomes (always, for stubborn-tracker)
+    with open(jsonl_path, "w", encoding="utf-8") as f:
+        for o in outcomes:
+            f.write(json.dumps(asdict(o), ensure_ascii=False) + "\n")
+    print(f"Outcomes log: {jsonl_path}  ({len(outcomes)} record(s))")
+
+    print("\n=== OUTCOMES ===")
+    for k in sorted(tally.keys()):
+        print(f"  {k:<32} {tally[k]}")
+    print(f"  total processed:                 {len(outcomes)}")
+    # Surface the stubborn count prominently for re-pass workflow
+    stubborn_n = tally.get(OUTCOME_DEFER_STUBBORN, 0)
+    if stubborn_n:
+        print(f"\n  STUBBORN: {stubborn_n} jurisdiction(s) need Step 6.8 re-pass "
+              f"(see [[codify-step-6-8-web-search-fallback]])")
     return 0
 
 

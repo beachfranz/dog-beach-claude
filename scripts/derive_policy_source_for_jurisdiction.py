@@ -1487,24 +1487,23 @@ def _infer_city_url_candidates(jc: JurisdictionClassification) -> list[str]:
 def step_6_8_url_inference_fallback(jc: JurisdictionClassification,
                                     sc: ScopeCheck,
                                     prior_rule: CodifiedRule | None) -> CodifiedRule | None:
-    """Last-resort: when codified-source paths defer AND no agency.web_url,
-    infer the city/county homepage URL from name patterns and hand off to
-    Step 6.7's nav-scan + Step 6 LLM eval logic.
+    """Last-resort: when codified-source paths defer AND no agency.web_url:
+    (a) infer the city/county homepage URL from name patterns and hand to
+        Step 6.7's nav-scan; if that produces nothing, then
+    (b) escalate to Sonnet + web_search tool (deep half).
 
-    Per [[codify-step-6-8-web-search-fallback]] design. URL inference is
-    the cheap first half; web_search (via Anthropic tool) is the deeper
-    second half (TODO — not yet built; URL inference covers many cases)."""
+    Per [[codify-step-6-8-web-search-fallback]] design + [[promote-ad-hoc-tools-to-process]]
+    web_search promotion. URL inference is the cheap first half (works for
+    cities with a discoverable .gov homepage); web_search is the deeper
+    second half (works when no platform was found AND no homepage inferred,
+    or homepage exists but has no nav-discoverable code link)."""
     if prior_rule and prior_rule.confidence >= 0.7:
         return None
     if sc.agency_web_url:
         return None  # Step 6.7 already handled
 
+    # ── Half 1: URL inference + Step 6.7 nav-scan ─────────────────────
     candidates = _infer_city_url_candidates(jc)
-    if not candidates:
-        return None
-
-    # Try each candidate; first valid one is treated as the agency URL.
-    # Use Playwright (most city sites are Cloudflare-protected; urllib 403s).
     found_url: str | None = None
     tried_log: list[tuple[str, str]] = []
     for url in candidates[:12]:  # cap to keep wall time bounded
@@ -1518,19 +1517,57 @@ def step_6_8_url_inference_fallback(jc: JurisdictionClassification,
                 break
         time.sleep(0.5)
 
-    if not found_url:
-        return None  # no inferred URL panned out
+    if found_url:
+        # Hand off to Step 6.7 with the inferred URL as agency_web_url
+        fake_sc = ScopeCheck(
+            agency_id=sc.agency_id, agency_name=sc.agency_name,
+            agency_type=sc.agency_type,
+            agency_web_url=found_url,   # ← the inferred URL
+            existing_ps_count=sc.existing_ps_count,
+            existing_ps_ids=sc.existing_ps_ids,
+            decision=sc.decision,
+        )
+        result = step_6_7_agency_policy_fallback(jc, fake_sc, prior_rule)
+        if result and result.confidence >= 0.7:
+            return result
+        # else fall through to web_search half
 
-    # Hand off to Step 6.7 with the inferred URL as agency_web_url
-    fake_sc = ScopeCheck(
-        agency_id=sc.agency_id, agency_name=sc.agency_name,
-        agency_type=sc.agency_type,
-        agency_web_url=found_url,   # ← the inferred URL
-        existing_ps_count=sc.existing_ps_count,
-        existing_ps_ids=sc.existing_ps_ids,
-        decision=sc.decision,
+    # ── Half 2: Sonnet + web_search escalation ────────────────────────
+    # Same pattern as codify_from_manual_url's Cloudflare-thin branch.
+    # Sonnet routes around platform-discovery gaps + Cloudflare walls
+    # via web_search_20250305 tool. Promoted from ad-hoc to first-class
+    # per [[promote-ad-hoc-tools-to-process]] 2026-05-18.
+    print(f"  [6.8] URL-inference exhausted → escalating to web_search")
+    blob_hint = (
+        f"No municipal code platform found for {jc.name}, {jc.state} via standard "
+        f"discovery (Municode, ecode360, codepublishing, amlegal, qcode, "
+        f"municipal.codes). URL-inference tried {len(candidates)} city-homepage "
+        f"patterns without success. Use web_search to locate the operative "
+        f"dog/leash/animal-control ordinance for this jurisdiction. "
+        f"Examples of where to look: a municipal code platform we may have missed, "
+        f"the city's own code page, county code if city defers to county, state "
+        f"code if no local ordinance exists. Return the deep-link URL + verbatim "
+        f"section text + confidence."
     )
-    return step_6_7_agency_policy_fallback(jc, fake_sc, prior_rule)
+    fake_fetch = VerbatimFetch(
+        fetched=[FetchedChapter(
+            url=f"https://example.invalid/{jc.state}/{jc.name.replace(' ', '_')}",
+            link_text=f"{jc.name} (no platform — use web_search)",
+            text_excerpt=blob_hint,
+            text_length=len(blob_hint),
+            has_dog_terms=True,
+            drilled=[],
+        )],
+        fetch_mode="step_6_8_web_search",
+        notes="Step 6.8 web_search escalation; no platform discovered, no inferred homepage panned out",
+    )
+    fake_platform = PlatformDiscovery(
+        valid_url="",
+        platform="web_search_fallback",
+        tried=[],
+        notes=f"Step 6.8 — {len(candidates)} URL-inference candidates tried, none valid",
+    )
+    return step_6_decide_rule(jc, fake_platform, fake_fetch, enable_web_search=True)
 
 
 def step_6_5_llm_guided_redrill(jc: JurisdictionClassification,

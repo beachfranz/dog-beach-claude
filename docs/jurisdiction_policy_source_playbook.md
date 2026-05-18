@@ -355,6 +355,51 @@ ONE file: supabase/migrations/YYYYMMDD_<context>_<batch>.sql
 
 ---
 
+## Agent prompt template — STUBBORN JURISDICTION URL DISCOVERY
+
+For jurisdictions where Phase A discovery returns `platform=NONE` AND Step 6.8 web_search returns landing/agency pages that fail the URL gate (per [[page-level-over-agency-level]]). Use this WHEN the v1 script has already tried and deferred. Pattern proven on OR coastal counties 2026-05-18.
+
+```
+[Goal] Find the operative chapter-level deep-link URL for <Jurisdiction>, <State> dog/leash/animal-control ordinance.
+
+[Context]
+- Script run already attempted: outcome=defer_stubborn OR success_human_review (URL gate failed)
+- Known: jurisdiction is NOT on Municode/ecode360/codepublishing/amlegal/qcode/county.codes (Phase A returned NONE for all 6)
+- Web_search Step 6.8 returned a landing/PDF/agency-page URL, not a chapter deep-link
+- The script can re-run via --manual-url with a verified chapter URL
+
+[Find]
+- Use WebSearch + WebFetch to locate the jurisdiction's CHAPTER-LEVEL deep-link URL for animal control / dogs / leash law
+- "Chapter-level" means: URL contains a chapter / section / division anchor (e.g., #ch-6, §6.04, /Chapter-6/, /Title6/Chapter04/)
+- NOT acceptable: agency homepage, parks dept landing, animal services landing, top-of-code landing, PDF blob of "all laws"
+- Acceptable: deep-linked chapter on county code site, page-level deep-link on county.gov, codified deep-link to specific section
+
+[Avoid]
+- Wikipedia, news articles, blog posts, .org summary sites
+- Statewide statute pages when looking for COUNTY/CITY code (state baseline is already captured separately)
+- PDF copies of state law hosted by counties (e.g., "Oregon-Dog-Laws-PDF") — those are restatements, not the county's own code
+
+[Output]
+EXACTLY one CSV-formattable line:
+  <jurisdiction>,<state>,<verified_chapter_url>,<one-sentence-citation>
+
+Or if nothing valid found:
+  <jurisdiction>,<state>,DEFER,<why>
+
+[Verify]
+- Open the URL via WebFetch; confirm body contains: (1) jurisdiction name + state, (2) "leash" OR "dog" OR "animal" in operative text, (3) section/chapter number visible
+- If WebFetch returns a Cloudflare wall or 403, USE web_search instead to verify content exists
+
+[Critical]
+- Return the SINGLE best URL, not a list
+- DEFER is a valid answer; don't fabricate
+- Do NOT dispatch scripts; do NOT apply migrations; just return the URL line
+```
+
+This pattern is the **agent-side analog of CA's original per-county discovery** (which Franz/agents did before the v1 script existed). The v1 script's Step 6.8 web_search handles the easy cases; this agent prompt handles the residual where deep-link is needed but auto-discovery couldn't find it.
+
+---
+
 ## Where the algorithm runs
 
 Three options; pick after the Python driver stabilizes:

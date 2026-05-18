@@ -403,7 +403,10 @@ STATE_PLATFORM_PRIORITY = {
 # `selector` is the CSS selector for the meaningful content area (per
 # [[municode-fetchable]] for Municode).
 PLATFORM_FETCH_CONFIG = {
-    "municode":         {"mode": "playwright", "wait_seconds": 12.0, "selector": ".codes-chunks-pg"},
+    # Bumped Municode wait from 12→20s per the WA Phase C reliability issues
+    # (Bingen + Black Diamond Title 6 found in TOC but content returned empty
+    # — likely the chunks-pg selector hadn't fully rendered).
+    "municode":         {"mode": "playwright", "wait_seconds": 20.0, "selector": ".codes-chunks-pg"},
     "ecode360":         {"mode": "playwright", "wait_seconds": 8.0,  "selector": None},
     "codepublishing":   {"mode": "urllib",     "wait_seconds": 0,    "selector": None},
     "amlegal":          {"mode": "urllib",     "wait_seconds": 0,    "selector": ".section-content"},
@@ -733,24 +736,30 @@ def step_2_discover_platform(jc: JurisdictionClassification, sc: ScopeCheck) -> 
 TITLE_HEURISTICS = {
     "incorporated_city": [
         # (score, regex pattern, description)
+        # Bumped parks/beaches from 50→85 per CA Municode pattern audit:
+        # LA Title 17 (PARKS BEACHES), OC Title 2 (Public Facilities),
+        # Manhattan Beach Title 12 (Beaches Parks Rec) all host the
+        # operative dog rule in non-Animals titles. The Animals/Parks
+        # distinction was an oversimplification.
         (95, r"\b(animal|dog|pet|leash)s?\b",            "subject-animal"),
+        (85, r"\b(park|beach|recreation)s?\b",           "subject-parks-beaches"),
         (80, r"\b(public peace|nuisance|misdemeanor)\b", "subject-peace"),
+        (75, r"\b(public facilit(y|ies))\b",             "subject-public-facilities"),
         (70, r"\b(health|sanitation)\b",                 "subject-health"),
         (60, r"\b(streets?|traffic|parking|public way)\b", "subject-streets"),
-        (50, r"\b(park|recreation|beach)s?\b",           "fallback-parks"),
     ],
     "county": [
-        # County codes tend to organize by DEPARTMENT — parks-title FIRST,
-        # animals-title second per the WA codify audit deltas finding.
-        (95, r"\b(park|recreation|beach)s?\b",           "department-parks"),
-        (90, r"\b(animal|dog|pet|leash)s?\b",            "subject-animal"),
-        (75, r"\b(public works?|public property)\b",     "department-pubworks"),
-        (70, r"\b(health|sanitation|welfare)\b",         "department-health"),
-        (60, r"\b(licensing|control)\b",                 "department-licensing"),
+        # County codes can host the rule in either Animals or Parks/Beaches
+        # titles — keep both at high score; LLM picks the operative one.
+        (95, r"\b(animal|dog|pet|leash)s?\b",            "subject-animal"),
+        (90, r"\b(park|beach|recreation)s?\b",           "subject-parks-beaches"),
+        (75, r"\b(public works?|public property|public facilit(y|ies))\b", "subject-public"),
+        (70, r"\b(health|sanitation|welfare)\b",         "subject-health"),
+        (60, r"\b(licensing|control)\b",                 "subject-licensing"),
     ],
     "special_district": [
         (95, r"\b(animal|dog|pet|leash)s?\b",            "subject-animal"),
-        (85, r"\b(park|recreation|beach)s?\b",           "department-parks"),
+        (85, r"\b(park|beach|recreation)s?\b",           "subject-parks-beaches"),
         (70, r"\b(rule|regulation|ordinance)s?\b",       "generic-rules"),
     ],
 }
@@ -1050,6 +1059,7 @@ Output: JSON with these fields:
   "full_text":       "<300-1500 char verbatim quote of the operative section + adjacent context if useful>",
   "deep_link_url":   "<URL of the chapter/section that contains the rule — must be one of the input URLs>",
   "status_note":     null | "<short note — leash length, exception clause, etc. KEEP MINIMAL>",
+  "penalty_summary": null | "<1-2 sentence summary of the enforcement clause for violating WHATEVER rule the section establishes. Applies to both presence violations ('no dogs at all' / 'dogs prohibited') AND leash violations ('off-leash where leash required'). Classification (infraction|misdemeanor|civil) + fine amount(s) if specified. Examples: 'Infraction; fine up to $250 for first offense.' (leash violation); 'Misdemeanor punishable by up to $500 or 30 days.' (no-dogs violation); 'Civil penalty $100.' (either). Null when source text doesn't mention enforcement.>",
   "confidence":      0.0..1.0,
   "notes":           null | "<ambiguity flags, alternate interpretations, etc.>",
   "suggested_next_chapter": null | {
@@ -1065,7 +1075,29 @@ CRITICAL DEFAULTS (per CA codification data, validate against text):
 - 75% of jurisdictions land on `on_leash`. Default to it unless the text says otherwise.
 - 38% of rows have NULL status_note. KEEP IT EMPTY unless there's a meaningful detail.
 - 33% have a short leash-detail like "6-foot leash". One brief sentence MAX.
-- If the text doesn't directly establish a beach-specific dog rule, return `rule: "no_rule_found"` and set `confidence` < 0.4.
+
+INFERRING BEACH-APPLICABILITY FROM CITYWIDE RULES (LOAD-BEARING):
+A city/county's GENERAL leash or at-large rule applies to its beaches by default.
+You should NOT require the text to say "beach" explicitly to find a rule. If the
+text establishes "no dog shall run at large in any park, school ground, or public
+place" OR "dogs shall be on a leash within the city" OR similar territorial scope,
+that IS the operative beach rule.
+
+Confidence calibration:
+- 0.95+ when the text explicitly mentions beaches/the specific beach
+- 0.80-0.90 when the text is a citywide leash/at-large rule (inferred beach applies)
+- 0.40-0.70 when the rule is ambiguous or arguably scoped to a non-beach area
+- < 0.40 when there is genuinely no rule and no citywide leash provision in the text
+
+Return `rule: "no_rule_found"` ONLY when:
+(a) the text has NO citywide leash/at-large/animal-control rule that could be inferred
+(b) AND the text has NO beach-specific dog rule
+Not when "the text doesn't mention beaches" alone — that's normal.
+
+EXCEPTIONS that override the city default (handle these as explicit text says):
+- Federal land within the city (NPS, USFWS NWR) → that overlay's rule wins
+- State park within the city (CA DPR, WSPRC) → state-park rule wins
+- Sub-area carve-out (Del Mar off-leash strip) → see Phase I sub-area handling
 
 CITATION FORMAT:
 - "Skagit County Code §7.06.040 (Animal Control)" — canonical form
@@ -1094,8 +1126,9 @@ Output: {
   "notes": "Confident there's no general leash rule HERE; defer for deeper drill into Title 9 Parks"
 }
 
-EXAMPLE 2 (Bainbridge Island — Animals title with leash rule):
+EXAMPLE 2 (Bainbridge Island — citywide leash rule, INFER beach applies):
 Input: Title 6 Ch 6.04 §6.04.010 "Dogs running at large prohibited. It is unlawful for any owner of a dog to suffer or permit such dog to run at large within any park, school grounds, or public place."
+NOTE: doesn't mention beach explicitly, but "any public place" + territorial scope = beaches included by default.
 Output: {
   "rule": "on_leash",
   "subtype": "municipal_code",
@@ -1104,8 +1137,8 @@ Output: {
   "full_text": "<full verbatim of §6.04.010>",
   "deep_link_url": "<the chapter URL from the input>",
   "status_note": null,
-  "confidence": 0.9,
-  "notes": null
+  "confidence": 0.85,
+  "notes": "Inferred beach-applicability from citywide leash rule; text doesn't mention beach explicitly but scope is territorial"
 }
 
 EXAMPLE 3 (no operative rule found):
@@ -1148,6 +1181,9 @@ class CodifiedRule:
     confidence:     float = 0.0
     decided_by:     str = ""    # 'sonnet-4-5' | 'human-reviewed' | 'no_rule_found'
     notes:          str | None = None
+    # Penalty summary (added 2026-05-18) — enforcement clause for violating
+    # the rule (whatever the rule is: presence OR leash). 1-2 sentence summary.
+    penalty_summary: str | None = None
     # Populated by Step 6 when the LLM identifies a likely-operative chapter
     # not yet drilled. Triggers Step 6.5 re-drill if confidence < 0.7.
     suggested_next_title:   int | None = None
@@ -1248,6 +1284,7 @@ def step_6_decide_rule(jc: JurisdictionClassification, platform: PlatformDiscove
         confidence=float(parsed.get("confidence", 0.0)),
         decided_by=MODEL,
         notes=parsed.get("notes"),
+        penalty_summary=parsed.get("penalty_summary"),
         suggested_next_title=sng.get("title"),
         suggested_next_chapter=sng.get("chapter"),
         suggested_next_reason=sng.get("reason"),
@@ -1517,14 +1554,15 @@ def emit_migration_sql(jc: JurisdictionClassification, sc: ScopeCheck,
     # policy_source INSERT
     parts.append(
         f"INSERT INTO public.policy_source\n"
-        f"  (subtype, citation, issuing_agency_id, scope, source_url, full_text)\n"
+        f"  (subtype, citation, issuing_agency_id, scope, source_url, full_text, penalty_summary)\n"
         f"SELECT {esc(cr.subtype)},\n"
         f"       {esc(cr.citation)},\n"
         f"       (SELECT id FROM public.agency\n"
         f"         WHERE name = {esc(agency_name)} AND type = {esc(agency_type)}),\n"
         f"       ARRAY['dog_policy']::text[],\n"
         f"       {esc(cr.source_url)},\n"
-        f"       {esc(full_text_with_footer)}\n"
+        f"       {esc(full_text_with_footer)},\n"
+        f"       {esc(cr.penalty_summary)}\n"
         f"WHERE NOT EXISTS (\n"
         f"  SELECT 1 FROM public.policy_source\n"
         f"   WHERE citation LIKE {esc(citation_prefix + '%')}\n"
@@ -1599,9 +1637,13 @@ def _make_outcome(name: str, state: str, jc, sc, attempts: list, cr, platform_us
 
 
 def process_jurisdiction(name: str, state: str,
-                         emit_sql_to: list | None = None) -> JurisdictionOutcome:
+                         emit_sql_to: list | None = None,
+                         discover_only: bool = False) -> JurisdictionOutcome:
     """Run the full pipeline on one jurisdiction. Returns a structured
-    outcome. When emit_sql_to is a list, appends generated SQL blocks to it."""
+    outcome. When emit_sql_to is a list, appends generated SQL blocks to it.
+
+    discover_only=True early-exits after Step 2 (platform discovery only) —
+    useful for two-phase per-platform agent partitioning."""
     print(f"\n=== {name} ({state}) ===")
     attempts: list[str] = []
 
@@ -1636,6 +1678,21 @@ def process_jurisdiction(name: str, state: str,
     # Step 2 — Platform discovery
     attempts.append("step_2_platform")
     plat = step_2_discover_platform(jc, sc)
+
+    # Phase A early exit — discovery-only mode for two-phase per-platform
+    # partitioning workflow. Caller (Phase B partitioner) consumes the JSONL
+    # outcomes' platform_chosen field to dispatch per-platform workers.
+    if discover_only:
+        platform_used = plat.platform if plat else None
+        if platform_used:
+            outcome = "discover_only_platform_found"
+            notes = f"platform={platform_used} url={plat.valid_url}"
+        else:
+            outcome = "discover_only_no_platform"
+            notes = f"no validity hit after {len(plat.tried)} attempt(s); needs Step 6.7/6.8"
+        print(f"  → discover_only: {outcome}")
+        return _make_outcome(name, state, jc, sc, attempts, None, platform_used,
+                             outcome=outcome, notes=notes, sql_emitted=False)
     if plat.valid_url:
         print(f"  [2] platform → {plat.platform}  {plat.valid_url}")
         print(f"       ({len(plat.tried)} attempts; first valid wins)")
@@ -1782,20 +1839,66 @@ def process_jurisdiction(name: str, state: str,
 
 # ─── Main ──────────────────────────────────────────────────────────────
 
-def list_state_jurisdictions(state: str, pilot: int | None = None) -> list[tuple[str, str]]:
-    """List jurisdictions for a state from public.jurisdictions, ordered by
-    name. Filters to incorporated places (place_type LIKE 'C%') + counties."""
-    params: dict = {
-        "select": "name,namelsad,place_type",
-        "state":  f"eq.{state}",
-        "order":  "name.asc",
-    }
+def list_state_jurisdictions(state: str, pilot: int | None = None,
+                              offset: int = 0,
+                              require_beach: bool = True) -> list[tuple[str, str]]:
+    """List incorporated places in a state with AT LEAST ONE beach in
+    their polygon — per Franz 2026-05-18. Don't waste codify cycles on
+    jurisdictions with no beaches; codified rules aren't user-surfaced
+    for non-beach contexts in the product.
+
+    NOTE: dog parks are intentionally EXCLUDED from this filter (Franz
+    2026-05-18: dog parks are definitionally dog-allowed + off-leash;
+    codified leash rules don't add user-facing value for dog-park-only
+    cities. Operator-posted dog-park-specific rules are a different
+    layer, not codify's concern).
+
+    Set require_beach=False to skip the pre-filter (returns all
+    incorporated places; useful for upstream-authority codify e.g. when
+    a city's code governs coastal county beaches via MOU).
+
+    Uses psycopg2 directly because PostgREST can't easily do the spatial
+    EXISTS sub-query.
+    """
+    import psycopg2
+    pooler = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
+    pp = urllib.parse.urlparse(pooler)
+    conn = psycopg2.connect(
+        host=pp.hostname, port=pp.port or 5432, user=pp.username,
+        password=os.environ["SUPABASE_DB_PASSWORD"],
+        dbname=(pp.path or "/postgres").lstrip("/"), sslmode="require",
+    )
+    sql = """
+        SELECT j.name
+        FROM public.jurisdictions j
+        WHERE j.state = %s
+          AND j.place_type LIKE 'C%%'
+    """
+    params: list = [state]
+    if require_beach:
+        sql += """
+          AND EXISTS (
+            SELECT 1 FROM public.beaches_gold g
+            WHERE g.state = %s AND g.is_active
+              AND ST_Intersects(g.geom, j.geom)
+          )
+        """
+        params.append(state)
+    sql += " ORDER BY j.name"
     if pilot:
-        params["limit"] = str(pilot)
-    rows = supa("/rest/v1/jurisdictions", params=params)
-    return [(r["name"], state) for r in rows
-            if (r.get("place_type") or "").upper().startswith("C")
-            or "county" in (r.get("name") or "").lower()]
+        sql += " LIMIT %s"
+        params.append(pilot)
+    if offset:
+        sql += " OFFSET %s"
+        params.append(offset)
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, tuple(params))
+                rows = cur.fetchall()
+    finally:
+        conn.close()
+    return [(r[0], state) for r in rows]
 
 
 def main() -> int:
@@ -1809,6 +1912,15 @@ def main() -> int:
     ap.add_argument("--pilot", type=int, help="Cap to first N jurisdictions (with --state)")
     ap.add_argument("--out-dir", default="tmp", help="Output directory for SQL + JSONL log")
     ap.add_argument("--label", help="Optional label for output filenames (e.g. 'wa_pilot_5')")
+    ap.add_argument("--discover-only", action="store_true",
+                    help="Phase A: run Steps 0-2 only; output platform_chosen per jurisdiction "
+                         "for downstream per-platform partitioning. No LLM cost.")
+    ap.add_argument("--only-platform", choices=list(PLATFORM_BUILDERS.keys()),
+                    help="Phase C: restrict Step 2 to ONE platform (override "
+                         "STATE_PLATFORM_PRIORITY). For per-platform parallel workers.")
+    ap.add_argument("--include-no-beach", action="store_true",
+                    help="Disable beach pre-filter (default skips jurisdictions "
+                         "with NO beaches in their polygon).")
     args = ap.parse_args()
 
     # Build the list of (name, state) tuples to process
@@ -1819,7 +1931,8 @@ def main() -> int:
             return 2
         queue.append((args.jurisdiction, args.state_of))
     elif args.state:
-        queue = list_state_jurisdictions(args.state, pilot=args.pilot)
+        queue = list_state_jurisdictions(args.state, pilot=args.pilot,
+                                          require_beach=not args.include_no_beach)
     elif args.from_csv:
         with open(args.from_csv, encoding="utf-8") as f:
             for row in csv.DictReader(f):
@@ -1844,9 +1957,17 @@ def main() -> int:
     sql_blocks: list[str] = []
     tally: dict[str, int] = {}
 
+    # Phase C: override STATE_PLATFORM_PRIORITY for per-platform workers
+    if args.only_platform:
+        # Mutate the in-memory priority dict so step_2 only tries one platform
+        for k in list(STATE_PLATFORM_PRIORITY.keys()):
+            STATE_PLATFORM_PRIORITY[k] = [args.only_platform]
+        print(f"PHASE C: --only-platform={args.only_platform} (overriding priority for all states)")
+
     for name, state in queue:
         try:
-            o = process_jurisdiction(name, state, emit_sql_to=sql_blocks)
+            o = process_jurisdiction(name, state, emit_sql_to=sql_blocks,
+                                     discover_only=args.discover_only)
             outcomes.append(o)
             tally[o.outcome] = tally.get(o.outcome, 0) + 1
         except Exception as e:

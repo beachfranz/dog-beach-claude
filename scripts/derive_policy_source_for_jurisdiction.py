@@ -559,6 +559,54 @@ def _slug_no_separator(name: str, strip_county_suffix: bool = False) -> str:
     return "".join(c for c in base if c.isalnum())
 
 
+# In-process cache for Municode state catalog. Keyed by state. Per
+# [[municode-silent-redirect]]: probe the state landing once, parse rendered
+# jurisdiction names, skip all per-jurisdiction probes for cities/counties
+# not in the catalog. Saves 4× wasted Playwright calls per non-Municode
+# jurisdiction. Fail-open: empty set on fetch failure = don't block discovery.
+_MUNICODE_CATALOG_CACHE: dict[str, set[str]] = {}
+_MUNICODE_PRECHECK_DISABLED: bool = False  # toggled by --no-municode-precheck
+
+
+def municode_state_catalog(state: str) -> set[str]:
+    """Return set of jurisdiction names known to be in Municode's catalog
+    for `state` (lowercased state code). Cached in-process. Fail-open."""
+    state_lc = state.lower()
+    if state_lc in _MUNICODE_CATALOG_CACHE:
+        return _MUNICODE_CATALOG_CACHE[state_lc]
+    catalog: set[str] = set()
+    if not PLAYWRIGHT_AVAILABLE:
+        _MUNICODE_CATALOG_CACHE[state_lc] = catalog
+        return catalog
+    try:
+        text = playwright_fetch(
+            f"https://library.municode.com/{state_lc}",
+            selector=None, raw_html=False, wait_seconds=15.0, timeout_ms=30000,
+        ) or ""
+        # Rendered listing contains jurisdiction names, sometimes line-separated,
+        # sometimes with "County" suffix. Extract anything that looks like a
+        # municipal/county name. Permissive regex — false positives are harmless
+        # (they just mean we attempt a probe that will fail validation).
+        import re as _re
+        for m in _re.finditer(r"([A-Z][a-zA-Z'\-\.]+(?:\s+[A-Z][a-zA-Z'\-\.]+){0,4})\s+County", text):
+            catalog.add(m.group(1).strip() + " County")
+            catalog.add(m.group(1).strip())  # bare-name variant
+        # Also lines that look like standalone city names (each on own line
+        # or comma-separated). Conservative: only words starting with uppercase
+        # not already added as county-prefix.
+        for line in text.splitlines():
+            line = line.strip()
+            if 2 <= len(line) <= 40 and line[0].isupper() and not line.endswith(":"):
+                # Strip trailing whitespace/punctuation
+                line = line.rstrip(",;.")
+                if line and " " not in line[:1]:
+                    catalog.add(line)
+    except Exception as e:
+        print(f"  [municode-precheck] catalog fetch failed for {state_lc}: {type(e).__name__}")
+    _MUNICODE_CATALOG_CACHE[state_lc] = catalog
+    return catalog
+
+
 def _candidates_municode(jc: JurisdictionClassification, state: str) -> list[PlatformCandidate]:
     """Municode: library.municode.com/<state>/<slug>/codes/<doc>
 
@@ -568,8 +616,29 @@ def _candidates_municode(jc: JurisdictionClassification, state: str) -> list[Pla
     - Counties ALWAYS use `_county`-suffixed slug (CA: 35/35 = 100%);
       cities use bare slug. No need to try both.
 
+    Per [[municode-silent-redirect]]: pre-check the state catalog
+    (library.municode.com/<state>) so we don't burn 4× Playwright calls
+    on jurisdictions not in Municode's catalog at all.
+
     Net: 1 slug × 4 docs = 4 candidates. Step 2 returns on first valid
     hit so most cases terminate after candidate 1 (~12s Playwright)."""
+
+    # Pre-check: skip if jurisdiction not in Municode's state catalog.
+    # Disabled when --no-municode-precheck or catalog fetch failed (fail-open).
+    if not _MUNICODE_PRECHECK_DISABLED:
+        catalog = municode_state_catalog(state)
+        if catalog:  # non-empty = we have a catalog to check against
+            bare_name = jc.name.replace("City of ", "").strip()
+            name_with_county = bare_name if bare_name.endswith(" County") else (bare_name + " County" if jc.governance_class == "county" else None)
+            in_catalog = (
+                bare_name in catalog
+                or jc.name in catalog
+                or (name_with_county and name_with_county in catalog)
+            )
+            if not in_catalog:
+                print(f"  [2] municode catalog skip — {jc.name!r} not in library.municode.com/{state.lower()} listing")
+                return []
+
     state_lc = state.lower()
     doc_slugs = ["code_of_ordinances", "municipal_code", "ordinance_code", "code"]
     if jc.governance_class == "county":
@@ -2727,6 +2796,10 @@ def main() -> int:
     ap.add_argument("--state-baseline-threshold", type=float, default=0.9,
                     help="Step 1.5 coverage threshold (default 0.9 = 90 percent of "
                          "jurisdiction beaches must already be state-covered to defer).")
+    ap.add_argument("--no-municode-precheck", action="store_true",
+                    help="Disable Municode state-catalog pre-check (Step 2 will always "
+                         "try Municode URLs even for jurisdictions known to be absent). "
+                         "For debugging.")
     args = ap.parse_args()
 
     # ── --state-agency-rule mode: separate code path, exits early ──
@@ -2779,6 +2852,12 @@ def main() -> int:
     outcomes: list[JurisdictionOutcome] = []
     sql_blocks: list[str] = []
     tally: dict[str, int] = {}
+
+    # Municode pre-check toggle (must mutate before any process_jurisdiction call)
+    if args.no_municode_precheck:
+        global _MUNICODE_PRECHECK_DISABLED
+        _MUNICODE_PRECHECK_DISABLED = True
+        print("MUNICODE pre-check DISABLED (--no-municode-precheck)")
 
     # Phase C: override STATE_PLATFORM_PRIORITY for per-platform workers
     if args.only_platform:

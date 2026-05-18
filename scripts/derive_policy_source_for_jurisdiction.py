@@ -378,20 +378,247 @@ def scope_check(jc: JurisdictionClassification) -> ScopeCheck:
     )
 
 
-# ─── Steps 2-4 — Discovery + fetch (STUBBED) ──────────────────────────
+# ─── Step 2 — Platform discovery ───────────────────────────────────────
 
-def step_2_discover_platform(jc: JurisdictionClassification, sc: ScopeCheck) -> dict:
-    """STUB. Next session: per-state platform priority + per-class title heuristic."""
-    return {"status": "not_implemented", "step": "2_discover_platform"}
+# Per-state platform priority. WA = codepublishing dominant (per the WA
+# codify audit); CA = Municode dominant; OR = Municode-then-codepublishing.
+# Inline config for v1; migrate to DB table if it grows. See
+# docs/codify_pip_resolver_architecture.md.
+STATE_PLATFORM_PRIORITY = {
+    "WA": ["codepublishing", "municode", "amlegal", "county_codes"],
+    "OR": ["municode", "codepublishing", "amlegal"],
+    "CA": ["municode", "amlegal", "qcode", "ecode360", "codepublishing", "county_codes"],
+    "MI": ["municode", "amlegal", "ecode360", "codepublishing"],
+    "MA": ["ecode360", "amlegal", "municode"],
+    # default for unspecified: try all in CA's order
+    "_default": ["municode", "amlegal", "qcode", "ecode360", "codepublishing", "county_codes"],
+}
 
 
-def step_3_navigate_chapter(jc: JurisdictionClassification, platform: dict) -> dict:
-    """STUB. Next session: TOC scrape with regex; LLM fallback for unusual TOCs."""
+@dataclass
+class PlatformCandidate:
+    platform:      str          # 'municode' | 'codepublishing' | etc.
+    candidate_url: str
+    notes:         str | None = None
+
+
+@dataclass
+class PlatformDiscovery:
+    valid_url:    str | None
+    platform:     str | None
+    tried:        list[dict]    # [{candidate_url, status, why}]
+    notes:        str | None
+
+
+def _slugify_jurisdiction(name: str, strip_county_suffix: bool = True) -> str:
+    """Bare slug — lowercase, spaces → underscores, no City of prefix.
+    Set strip_county_suffix=False to keep " County" (some platforms need it)."""
+    base = name.replace("City of ", "")
+    if strip_county_suffix:
+        base = base.replace(" County", "")
+    return base.lower().replace(" ", "_").replace(".", "").replace("'", "")
+
+
+def _slug_no_separator(name: str, strip_county_suffix: bool = False) -> str:
+    """codepublishing-style — concatenated, no spaces/underscores, preserves case.
+    Default keeps County suffix (codepublishing uses 'SkagitCounty')."""
+    base = name.replace("City of ", "")
+    if strip_county_suffix:
+        base = base.replace(" County", "")
+    return "".join(c for c in base if c.isalnum())
+
+
+def _candidates_municode(jc: JurisdictionClassification, state: str) -> list[PlatformCandidate]:
+    """Municode: library.municode.com/<state>/<slug>/codes/<doc>
+    Per [[url-resolution-field-guide]] there are 4 common doc slugs. For
+    counties, try both bare and with-county-suffix slug forms."""
+    state_lc = state.lower()
+    doc_slugs = ["code_of_ordinances", "municipal_code", "code", "codes_chunks"]
+    slug_forms = [_slugify_jurisdiction(jc.name)]
+    if jc.governance_class == "county":
+        with_county = _slugify_jurisdiction(jc.name, strip_county_suffix=False)
+        if with_county not in slug_forms:
+            slug_forms.append(with_county)
+    return [
+        PlatformCandidate(
+            platform="municode",
+            candidate_url=f"https://library.municode.com/{state_lc}/{slug}/codes/{ds}",
+            notes=f"slug={slug} doc={ds}",
+        )
+        for slug in slug_forms
+        for ds in doc_slugs
+    ]
+
+
+def _candidates_codepublishing(jc: JurisdictionClassification, state: str) -> list[PlatformCandidate]:
+    """codepublishing: www.codepublishing.com/<STATE>/<JurisdictionConcat>/
+    Counties keep 'County' suffix ('SkagitCounty'); cities don't."""
+    state_uc = state.upper()
+    concat = _slug_no_separator(jc.name)
+    return [
+        PlatformCandidate(
+            platform="codepublishing",
+            candidate_url=f"https://www.codepublishing.com/{state_uc}/{concat}/",
+            notes=f"concat={concat}",
+        ),
+    ]
+
+
+def _candidates_amlegal(jc: JurisdictionClassification, state: str) -> list[PlatformCandidate]:
+    """amlegal: codelibrary.amlegal.com/codes/<slug>/latest/<slug>_<state>/"""
+    state_lc = state.lower()
+    bare = _slugify_jurisdiction(jc.name)
+    return [
+        PlatformCandidate(
+            platform="amlegal",
+            candidate_url=f"https://codelibrary.amlegal.com/codes/{bare}/latest/{bare}_{state_lc}/",
+            notes=f"slug={bare}",
+        ),
+    ]
+
+
+def _candidates_qcode(jc: JurisdictionClassification, state: str) -> list[PlatformCandidate]:
+    """qcode: qcode.us/codes/<slug>/"""
+    bare = _slugify_jurisdiction(jc.name).replace("_", "-")
+    return [
+        PlatformCandidate(
+            platform="qcode",
+            candidate_url=f"https://qcode.us/codes/{bare}/",
+            notes=f"slug={bare}",
+        ),
+    ]
+
+
+def _candidates_ecode360(jc: JurisdictionClassification, state: str) -> list[PlatformCandidate]:
+    """ecode360: ecode360.com/<ABBR> — ABBR is a 5-char code; not derivable
+    formulaically. v1 returns a guess based on the first 5 letters of the name;
+    real lookups need the per-jurisdiction abbr stored or discovered separately."""
+    bare = _slugify_jurisdiction(jc.name).replace("_", "")
+    abbr_guess = bare[:5].upper()
+    return [
+        PlatformCandidate(
+            platform="ecode360",
+            candidate_url=f"https://ecode360.com/{abbr_guess}",
+            notes=f"abbr_guess={abbr_guess} (formulaic; may need real lookup)",
+        ),
+    ]
+
+
+def _candidates_county_codes(jc: JurisdictionClassification, state: str) -> list[PlatformCandidate]:
+    """county.codes: www.county.codes/codes/<state>-<county>/"""
+    if jc.governance_class != "county":
+        return []
+    state_lc = state.lower()
+    bare = _slugify_jurisdiction(jc.name).replace("_county", "")
+    return [
+        PlatformCandidate(
+            platform="county_codes",
+            candidate_url=f"https://www.county.codes/codes/{state_lc}-{bare}/",
+            notes=f"county-slug={bare}",
+        ),
+    ]
+
+
+PLATFORM_BUILDERS = {
+    "municode":       _candidates_municode,
+    "codepublishing": _candidates_codepublishing,
+    "amlegal":        _candidates_amlegal,
+    "qcode":          _candidates_qcode,
+    "ecode360":       _candidates_ecode360,
+    "county_codes":   _candidates_county_codes,
+}
+
+
+def _validity_check(url: str, jc: JurisdictionClassification, state: str,
+                    timeout: int = 15) -> tuple[bool, str]:
+    """Per playbook §2 validity gauntlet:
+       1. HTTP 200 + non-empty body
+       2. Body contains jurisdiction NAME (case-insensitive)
+       3. Body contains state indicator
+       4. For counties: body contains "<County Name> County"
+    """
+    try:
+        # Browser-realistic headers — some platforms (codepublishing, Cloudflare-
+        # fronted sites) 403 on non-browser UA strings.
+        req = urllib.request.Request(url, headers={
+            "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                           "AppleWebKit/537.36 (KHTML, like Gecko) "
+                           "Chrome/124.0.0.0 Safari/537.36"),
+            "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
+                       "image/avif,image/webp,*/*;q=0.8"),
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "identity",  # avoid gzip — we read raw text
+        })
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            if r.status != 200:
+                return False, f"http_{r.status}"
+            body = r.read().decode("utf-8", errors="replace").lower()
+    except urllib.error.HTTPError as e:
+        return False, f"http_{e.code}"
+    except Exception as e:
+        return False, f"fetch_error:{type(e).__name__}"
+
+    if not body or len(body) < 500:
+        return False, "body_too_short"
+    bare_name = jc.name.replace("City of ", "").replace(" County", "").lower()
+    if bare_name not in body:
+        return False, f"name_not_in_body({bare_name!r})"
+    # State indicator: 2-letter state or full state name in lower form
+    state_names = {
+        "WA": "washington", "OR": "oregon", "CA": "california", "MI": "michigan",
+        "MA": "massachusetts", "AK": "alaska", "TX": "texas", "FL": "florida",
+        "NY": "new york",
+    }
+    state_full = state_names.get(state.upper(), state.lower())
+    if state_full not in body and f", {state.lower()}" not in body:
+        return False, f"state_not_in_body({state_full!r})"
+    if jc.governance_class == "county":
+        county_name = jc.name.replace(" County", "").lower()
+        if f"{county_name} county" not in body:
+            return False, f"county_suffix_not_in_body({county_name!r})"
+    return True, "ok"
+
+
+def step_2_discover_platform(jc: JurisdictionClassification, sc: ScopeCheck) -> PlatformDiscovery:
+    """Try platforms in per-state priority order; return first valid."""
+    if jc.governance_class in ("tribal", "federal", "cdp", "unknown"):
+        return PlatformDiscovery(None, None, [],
+                                 f"skip platform discovery for governance_class={jc.governance_class}")
+
+    priority = STATE_PLATFORM_PRIORITY.get(jc.state, STATE_PLATFORM_PRIORITY["_default"])
+    tried: list[dict] = []
+
+    for platform in priority:
+        builder = PLATFORM_BUILDERS.get(platform)
+        if not builder:
+            continue
+        candidates = builder(jc, jc.state)
+        for c in candidates:
+            ok, why = _validity_check(c.candidate_url, jc, jc.state)
+            tried.append({"candidate_url": c.candidate_url, "platform": platform,
+                          "valid": ok, "why": why, "notes": c.notes})
+            if ok:
+                return PlatformDiscovery(
+                    valid_url=c.candidate_url, platform=platform, tried=tried,
+                    notes=f"valid on {platform} after {len(tried)} attempts",
+                )
+            time.sleep(0.3)  # gentle pacing between probes
+
+    return PlatformDiscovery(
+        valid_url=None, platform=None, tried=tried,
+        notes=f"no valid platform after {len(tried)} attempts",
+    )
+
+
+# ─── Steps 3-4 — Navigate + fetch (STUBBED) ───────────────────────────
+
+def step_3_navigate_chapter(jc: JurisdictionClassification, platform: PlatformDiscovery) -> dict:
+    """STUB. Next: TOC scrape per platform; per-governance-class title heuristic."""
     return {"status": "not_implemented", "step": "3_navigate_chapter"}
 
 
 def step_4_fetch_verbatim(jc: JurisdictionClassification, chapter: dict) -> dict:
-    """STUB. Next session: Playwright with per-platform selectors."""
+    """STUB. Next: Playwright with per-platform selectors."""
     return {"status": "not_implemented", "step": "4_fetch_verbatim"}
 
 
@@ -426,19 +653,31 @@ def process_jurisdiction(name: str, state: str, dry_run: bool = True) -> dict:
           f"name={sc.agency_name!r} type={sc.agency_type})")
     print(f"       existing_ps_count={sc.existing_ps_count}")
 
-    # Steps 2-4 — stubbed
+    # Step 2 — Platform discovery
     plat = step_2_discover_platform(jc, sc)
+    if plat.valid_url:
+        print(f"  [2] platform → {plat.platform}  {plat.valid_url}")
+        print(f"       ({len(plat.tried)} attempts; first valid wins)")
+    else:
+        print(f"  [2] platform → NONE FOUND  ({len(plat.tried)} attempts)")
+        for t in plat.tried[:6]:
+            print(f"       - {t['platform']:<15} {t['candidate_url']}  → {t['why']}")
+        if len(plat.tried) > 6:
+            print(f"       … and {len(plat.tried)-6} more")
+
+    # Steps 3-4 — stubbed
     chap = step_3_navigate_chapter(jc, plat)
     text = step_4_fetch_verbatim(jc, chap)
-    print(f"  [2-4] STUBBED (next session)")
 
     return {
         "name": name, "state": state,
         "classification": asdict(jc),
         "triage": asdict(td),
         "scope_check": asdict(sc),
-        "steps_2_4": {"discover": plat, "navigate": chap, "fetch": text},
-        "final": "ready_for_steps_2_4_next_session",
+        "platform": asdict(plat),
+        "navigate": chap,
+        "fetch": text,
+        "final": "step_2_complete; 3-4 stubbed",
     }
 
 

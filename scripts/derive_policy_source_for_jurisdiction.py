@@ -610,15 +610,163 @@ def step_2_discover_platform(jc: JurisdictionClassification, sc: ScopeCheck) -> 
     )
 
 
-# ─── Steps 3-4 — Navigate + fetch (STUBBED) ───────────────────────────
+# ─── Step 3 — Navigate to operative chapter ────────────────────────────
 
-def step_3_navigate_chapter(jc: JurisdictionClassification, platform: PlatformDiscovery) -> dict:
-    """STUB. Next: TOC scrape per platform; per-governance-class title heuristic."""
-    return {"status": "not_implemented", "step": "3_navigate_chapter"}
+# Per-governance-class title heuristic. Score ranges 0-100 (higher = more
+# likely the chapter we want). Per [[codify-v1-governance-aware-design]]
+# Step 2: cities organize codes by SUBJECT, counties by DEPARTMENT.
+TITLE_HEURISTICS = {
+    "incorporated_city": [
+        # (score, regex pattern, description)
+        (95, r"\b(animal|dog|pet|leash)s?\b",            "subject-animal"),
+        (80, r"\b(public peace|nuisance|misdemeanor)\b", "subject-peace"),
+        (70, r"\b(health|sanitation)\b",                 "subject-health"),
+        (60, r"\b(streets?|traffic|parking|public way)\b", "subject-streets"),
+        (50, r"\b(park|recreation|beach)s?\b",           "fallback-parks"),
+    ],
+    "county": [
+        # County codes tend to organize by DEPARTMENT — parks-title FIRST,
+        # animals-title second per the WA codify audit deltas finding.
+        (95, r"\b(park|recreation|beach)s?\b",           "department-parks"),
+        (90, r"\b(animal|dog|pet|leash)s?\b",            "subject-animal"),
+        (75, r"\b(public works?|public property)\b",     "department-pubworks"),
+        (70, r"\b(health|sanitation|welfare)\b",         "department-health"),
+        (60, r"\b(licensing|control)\b",                 "department-licensing"),
+    ],
+    "special_district": [
+        (95, r"\b(animal|dog|pet|leash)s?\b",            "subject-animal"),
+        (85, r"\b(park|recreation|beach)s?\b",           "department-parks"),
+        (70, r"\b(rule|regulation|ordinance)s?\b",       "generic-rules"),
+    ],
+}
 
 
-def step_4_fetch_verbatim(jc: JurisdictionClassification, chapter: dict) -> dict:
-    """STUB. Next: Playwright with per-platform selectors."""
+@dataclass
+class ChapterCandidate:
+    url:        str
+    link_text:  str
+    score:      int
+    why:        str   # which heuristic matched
+
+
+@dataclass
+class ChapterNavigation:
+    best_url:    str | None
+    best_text:   str | None
+    best_score:  int
+    candidates:  list[ChapterCandidate]
+    method:      str         # 'static_html' | 'playwright_needed' | 'llm_fallback' | 'error'
+    notes:       str | None
+
+
+def _fetch_html(url: str, timeout: int = 20) -> str | None:
+    """Static-HTML fetch. Returns body string or None on failure."""
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                           "AppleWebKit/537.36 (KHTML, like Gecko) "
+                           "Chrome/124.0.0.0 Safari/537.36"),
+            "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "identity",
+        })
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read().decode("utf-8", errors="replace")
+    except Exception:
+        return None
+
+
+def _extract_anchor_links(html: str, base_url: str) -> list[tuple[str, str]]:
+    """Pull (href, text) tuples from anchors in the HTML. Resolves relative
+    URLs against base_url. Uses regex to avoid the bs4 dependency for now;
+    sufficient for codepublishing/qcode/amlegal TOC pages."""
+    import re
+    out: list[tuple[str, str]] = []
+    # <a href="...">text</a> — non-greedy text, ignore nested HTML
+    for m in re.finditer(r'<a\s+[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+                         html, re.IGNORECASE | re.DOTALL):
+        href = m.group(1).strip()
+        text = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+        text = re.sub(r"\s+", " ", text)
+        if not text or len(text) > 200:
+            continue
+        # Resolve relative URLs
+        if href.startswith("/"):
+            from urllib.parse import urlparse
+            p = urlparse(base_url)
+            href = f"{p.scheme}://{p.netloc}{href}"
+        elif not href.startswith(("http://", "https://")):
+            # relative to base
+            if base_url.endswith("/"):
+                href = base_url + href
+            else:
+                href = base_url.rsplit("/", 1)[0] + "/" + href
+        out.append((href, text))
+    return out
+
+
+def _score_title_links(links: list[tuple[str, str]],
+                       governance_class: str) -> list[ChapterCandidate]:
+    """Apply per-governance-class heuristic; return scored candidates."""
+    import re
+    heuristics = TITLE_HEURISTICS.get(governance_class, TITLE_HEURISTICS["incorporated_city"])
+    scored: dict[str, ChapterCandidate] = {}
+    for href, text in links:
+        low = text.lower()
+        for score, pattern, why in heuristics:
+            if re.search(pattern, low):
+                # Keep the highest-scoring candidate per URL
+                existing = scored.get(href)
+                if existing is None or score > existing.score:
+                    scored[href] = ChapterCandidate(
+                        url=href, link_text=text, score=score, why=why)
+                break  # first matching heuristic wins for this link
+    return sorted(scored.values(), key=lambda c: c.score, reverse=True)
+
+
+def step_3_navigate_chapter(jc: JurisdictionClassification,
+                            platform: PlatformDiscovery) -> ChapterNavigation:
+    """TOC scrape + per-governance-class title heuristic. LLM fallback stubbed."""
+    if not platform.valid_url:
+        return ChapterNavigation(None, None, 0, [], "error",
+                                 "no valid platform from Step 2")
+
+    # Municode renders TOC via JS — static fetch won't see the title list.
+    # Flag for Playwright (deferred).
+    if platform.platform == "municode":
+        return ChapterNavigation(None, None, 0, [], "playwright_needed",
+                                 "Municode TOC renders via JS — needs Playwright")
+
+    html = _fetch_html(platform.valid_url)
+    if not html or len(html) < 500:
+        return ChapterNavigation(None, None, 0, [], "error",
+                                 f"fetch failed or body too short for {platform.valid_url}")
+
+    links = _extract_anchor_links(html, platform.valid_url)
+    if not links:
+        return ChapterNavigation(None, None, 0, [], "error",
+                                 f"no anchor links found in {platform.valid_url}")
+
+    candidates = _score_title_links(links, jc.governance_class)
+    if not candidates:
+        return ChapterNavigation(None, None, 0, [], "llm_fallback",
+                                 f"no title heuristic match in {len(links)} links "
+                                 "(would invoke LLM fallback)")
+
+    top = candidates[0]
+    return ChapterNavigation(
+        best_url=top.url, best_text=top.link_text, best_score=top.score,
+        candidates=candidates[:5],   # cap to top 5 for diagnostics
+        method="static_html",
+        notes=f"matched '{top.why}' in {len(links)} TOC links",
+    )
+
+
+# ─── Step 4 — Fetch verbatim text (STUBBED) ────────────────────────────
+
+def step_4_fetch_verbatim(jc: JurisdictionClassification,
+                          chapter: ChapterNavigation) -> dict:
+    """STUB. Next: Playwright deep-fetch of the operative section text."""
     return {"status": "not_implemented", "step": "4_fetch_verbatim"}
 
 
@@ -665,8 +813,18 @@ def process_jurisdiction(name: str, state: str, dry_run: bool = True) -> dict:
         if len(plat.tried) > 6:
             print(f"       … and {len(plat.tried)-6} more")
 
-    # Steps 3-4 — stubbed
+    # Step 3 — Navigate to operative chapter
     chap = step_3_navigate_chapter(jc, plat)
+    if chap.best_url:
+        print(f"  [3] chapter → {chap.best_text!r}  (score={chap.best_score} {chap.notes})")
+        print(f"       url={chap.best_url}")
+        if len(chap.candidates) > 1:
+            for c in chap.candidates[1:4]:
+                print(f"       alt: '{c.link_text}' score={c.score} why={c.why}")
+    else:
+        print(f"  [3] chapter → NONE  ({chap.method}: {chap.notes})")
+
+    # Step 4 — stubbed
     text = step_4_fetch_verbatim(jc, chap)
 
     return {
@@ -675,9 +833,9 @@ def process_jurisdiction(name: str, state: str, dry_run: bool = True) -> dict:
         "triage": asdict(td),
         "scope_check": asdict(sc),
         "platform": asdict(plat),
-        "navigate": chap,
+        "navigate": asdict(chap),
         "fetch": text,
-        "final": "step_2_complete; 3-4 stubbed",
+        "final": "step_3_complete; 4 stubbed",
     }
 
 

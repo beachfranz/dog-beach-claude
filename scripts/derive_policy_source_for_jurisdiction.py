@@ -908,13 +908,24 @@ PLATFORM_CONTENT_SELECTOR = {
 
 
 @dataclass
-class FetchedChapter:
-    """One drilled-into chapter result from Step 4."""
+class FetchedSection:
+    """One drilled-into section (a sub-chapter discovered inside a title)."""
     url:           str
     link_text:     str | None
-    text_excerpt:  str        # first ~2000 chars for the LLM rule-decider
+    text_excerpt:  str        # first ~3000 chars
     text_length:   int
-    has_dog_terms: bool       # quick signal: contains dog/leash/animal/pet?
+    has_dog_terms: bool
+
+
+@dataclass
+class FetchedChapter:
+    """One top-level chapter result from Step 4 + drilled sub-sections."""
+    url:           str
+    link_text:     str | None
+    text_excerpt:  str        # first ~2000 chars of the title page
+    text_length:   int
+    has_dog_terms: bool       # quick signal in title content
+    drilled:       list[FetchedSection]  # sub-chapters drilled into
 
 
 @dataclass
@@ -925,84 +936,157 @@ class VerbatimFetch:
     notes:      str | None
 
 
+def _fetch_text(url: str, platform: str | None) -> tuple[str | None, str | None]:
+    """Fetch + extract readable text via per-platform selector. Returns
+    (text, raw_html). raw_html is needed to extract sub-chapter anchors
+    for drill-down."""
+    import re
+    selector = PLATFORM_CONTENT_SELECTOR.get(platform or "")
+    cfg = PLATFORM_FETCH_CONFIG.get(platform or "", {"mode": "urllib", "wait_seconds": 0})
+    is_pw = cfg["mode"] == "playwright"
+
+    if is_pw:
+        if not PLAYWRIGHT_AVAILABLE:
+            return None, None
+        try:
+            raw_html = playwright_fetch(url, selector=None, raw_html=True,
+                                        wait_seconds=cfg.get("wait_seconds", 8.0),
+                                        timeout_ms=30000)
+            # Extract text via selector if configured, else full-page
+            if selector:
+                try:
+                    text = playwright_fetch(url, selector=selector, raw_html=False,
+                                            wait_seconds=1.0, timeout_ms=15000)
+                except Exception:
+                    text = None
+            else:
+                text = re.sub(r"<script[^>]*>.*?</script>", " ", raw_html, flags=re.DOTALL)
+                text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL)
+                text = re.sub(r"<[^>]+>", " ", text)
+                text = re.sub(r"\s+", " ", text).strip()
+            return text, raw_html
+        except Exception:
+            return None, None
+    # urllib path
+    body, _ = _smart_fetch(url, platform=platform)
+    if body is None:
+        return None, None
+    raw_html = body  # _smart_fetch lower-cased it but anchors still parseable
+    if selector and selector.startswith(("#", ".")):
+        attr = "id" if selector.startswith("#") else "class"
+        value = selector[1:]
+        m = re.search(rf'<[^>]+\b{attr}="[^"]*\b{re.escape(value)}\b[^"]*"[^>]*>(.*?)</',
+                      body, re.DOTALL)
+        text = re.sub(r"<[^>]+>", " ", m.group(1)) if m else body
+    else:
+        text = re.sub(r"<script[^>]*>.*?</script>", " ", body, flags=re.DOTALL)
+        text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL)
+        text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text, raw_html
+
+
+def _has_dog_terms(text: str) -> bool:
+    import re
+    return bool(re.search(r"\b(dog|leash|animal|pet)s?\b", text or "", re.IGNORECASE))
+
+
+def _drill_subsections(title_url: str, title_html: str, platform: str | None,
+                       jc: JurisdictionClassification,
+                       max_subs: int = 3) -> list[FetchedSection]:
+    """Given a fetched title page, find sub-chapter anchor links, score them
+    with the same heuristic, fetch the top-N sub-pages."""
+    if not title_html:
+        return []
+    anchors = _extract_anchor_links(title_html, title_url)
+    # Filter to anchors that look like SUB-pages (not same-page, not external)
+    same_dir = title_url.rsplit("/", 1)[0]
+    sub_anchors = [(href, text) for href, text in anchors
+                   if href != title_url
+                   and href.startswith(same_dir)
+                   and len(text) > 3]
+    scored = _score_title_links(sub_anchors, jc.governance_class)
+    if not scored:
+        return []
+
+    cfg = PLATFORM_FETCH_CONFIG.get(platform or "", {"mode": "urllib"})
+    is_pw = cfg["mode"] == "playwright"
+
+    out: list[FetchedSection] = []
+    seen_urls = set()
+    for sc in scored[:max_subs * 2]:  # over-sample then de-dupe
+        if sc.url in seen_urls:
+            continue
+        seen_urls.add(sc.url)
+        text, _raw = _fetch_text(sc.url, platform=platform)
+        if not text or len(text) < 200:
+            continue
+        out.append(FetchedSection(
+            url=sc.url, link_text=sc.link_text,
+            text_excerpt=text[:3000], text_length=len(text),
+            has_dog_terms=_has_dog_terms(text),
+        ))
+        if is_pw:
+            time.sleep(1.0)
+        if len(out) >= max_subs:
+            break
+    return out
+
+
 def step_4_fetch_verbatim(jc: JurisdictionClassification,
                           platform: PlatformDiscovery,
                           chapter: ChapterNavigation,
-                          max_candidates: int = 3) -> VerbatimFetch:
-    """For each of Step 3's top candidates, fetch the content and excerpt
-    a snippet for the rule-decider. Returns the top-N for Step 6.
+                          max_candidates: int = 3,
+                          drill: bool = True) -> VerbatimFetch:
+    """For each of Step 3's top candidates: fetch the title page, then drill
+    into chapter sub-links when title content is dog-relevant. Returns
+    aggregated chapter + drilled-section text for Step 6.
 
-    Per [[ca-codify-v1-lessons]] caveat: Step 3 returns a TOP candidate but
-    Step 4 should iterate over the top-N because the heuristic can be wrong
-    (e.g., Contra Costa picked PUBLIC WORKS over the actual Animals title).
-    Step 6 (LLM) reads all and decides which contains the operative rule.
-    """
+    Per [[ca-codify-v1-lessons]] caveat: Step 3's top pick can be wrong;
+    Step 6 LLM reads all and decides which contains the operative rule.
+
+    Drilling adds the title→chapter→section navigation for codepublishing /
+    Municode where titles are TOC pages and the actual rule text lives in
+    chapter sub-pages."""
     if not chapter.candidates:
         return VerbatimFetch([], "error",
                              f"no chapter candidates from Step 3 (method={chapter.method})")
 
-    selector = PLATFORM_CONTENT_SELECTOR.get(platform.platform or "")
-    cfg = PLATFORM_FETCH_CONFIG.get(platform.platform or "",
-                                    {"mode": "urllib", "wait_seconds": 0})
+    cfg = PLATFORM_FETCH_CONFIG.get(platform.platform or "", {"mode": "urllib"})
     is_pw = cfg["mode"] == "playwright"
 
     out: list[FetchedChapter] = []
     for cand in chapter.candidates[:max_candidates]:
-        text: str | None = None
-        if is_pw:
-            if not PLAYWRIGHT_AVAILABLE:
-                continue
-            try:
-                text = playwright_fetch(
-                    cand.url,
-                    selector=selector,
-                    raw_html=False,
-                    wait_seconds=cfg.get("wait_seconds", 8.0),
-                    timeout_ms=30000,
-                )
-            except Exception:
-                text = None
-        else:
-            # urllib path; if a selector is configured, try a simple
-            # regex-based extraction of the named element block. Otherwise
-            # take whole-page text and strip tags.
-            import re
-            body, why = _smart_fetch(cand.url, platform=platform.platform)
-            if body is None:
-                continue
-            if selector and selector.startswith(("#", ".")):
-                # try to extract just the element (rough; fine for v1)
-                attr = "id" if selector.startswith("#") else "class"
-                value = selector[1:]
-                m = re.search(rf'<[^>]+\b{attr}="[^"]*\b{re.escape(value)}\b[^"]*"[^>]*>(.*?)</', body, re.DOTALL)
-                text = re.sub(r"<[^>]+>", " ", m.group(1)) if m else body
-            else:
-                # whole-page strip-tags
-                text = re.sub(r"<script[^>]*>.*?</script>", " ", body, flags=re.DOTALL)
-                text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL)
-                text = re.sub(r"<[^>]+>", " ", text)
-            text = re.sub(r"\s+", " ", text).strip()
-
-        if text is None or len(text) < 100:
+        text, raw_html = _fetch_text(cand.url, platform=platform.platform)
+        if not text or len(text) < 100:
             continue
-        excerpt = text[:2000]
-        has_dog = bool(re.search(r"\b(dog|leash|animal|pet)s?\b", excerpt, re.IGNORECASE))
+        has_dog = _has_dog_terms(text)
+
+        # Drill into sub-chapters when title is dog-relevant (saves cost on
+        # the wrong candidates)
+        drilled: list[FetchedSection] = []
+        if drill and has_dog and raw_html:
+            drilled = _drill_subsections(cand.url, raw_html, platform.platform,
+                                         jc, max_subs=3)
+
         out.append(FetchedChapter(
             url=cand.url, link_text=cand.link_text,
-            text_excerpt=excerpt, text_length=len(text), has_dog_terms=has_dog,
+            text_excerpt=text[:2000], text_length=len(text),
+            has_dog_terms=has_dog, drilled=drilled,
         ))
         if is_pw:
-            time.sleep(1.0)  # pacing for Playwright
+            time.sleep(1.0)
 
     if not out:
         return VerbatimFetch([], "error",
                              f"no candidates returned readable content (Playwright={is_pw})")
 
+    n_drilled = sum(len(c.drilled) for c in out)
     return VerbatimFetch(
         fetched=out,
         fetch_mode="playwright" if is_pw else "static_html",
-        notes=f"fetched {len(out)} of {min(len(chapter.candidates), max_candidates)} top candidates; "
-              f"{sum(1 for f in out if f.has_dog_terms)} contain dog/leash/animal/pet terms",
+        notes=f"fetched {len(out)} chapter(s) + drilled {n_drilled} sub-section(s); "
+              f"{sum(1 for c in out if c.has_dog_terms)} chapter(s) dog-relevant",
     )
 
 
@@ -1060,13 +1144,17 @@ def process_jurisdiction(name: str, state: str, dry_run: bool = True) -> dict:
     else:
         print(f"  [3] chapter → NONE  ({chap.method}: {chap.notes})")
 
-    # Step 4 — Fetch verbatim text for top-N chapter candidates
+    # Step 4 — Fetch verbatim text for top-N chapter candidates (+ drill)
     text = step_4_fetch_verbatim(jc, plat, chap)
     if text.fetched:
-        print(f"  [4] verbatim → fetched {len(text.fetched)} chapter(s) ({text.fetch_mode}; {text.notes})")
+        print(f"  [4] verbatim → {text.notes} ({text.fetch_mode})")
         for f in text.fetched:
             marker = "🐕" if f.has_dog_terms else "  "
-            print(f"       {marker} {f.text_length:>6} chars  '{(f.link_text or '')[:40]}'  {f.url}")
+            print(f"       {marker} title {f.text_length:>6} chars  '{(f.link_text or '')[:40]}'")
+            for d in f.drilled:
+                dmark = "🐕" if d.has_dog_terms else "  "
+                short_url = d.url.rsplit("/", 1)[-1]
+                print(f"         └ {dmark} {d.text_length:>6} chars  '{(d.link_text or '')[:40]}'  {short_url}")
     else:
         print(f"  [4] verbatim → none ({text.fetch_mode}: {text.notes})")
 

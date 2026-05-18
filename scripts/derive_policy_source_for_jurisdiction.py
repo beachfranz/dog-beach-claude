@@ -548,6 +548,66 @@ def _candidates_county_codes(jc: JurisdictionClassification, state: str) -> list
     ]
 
 
+# ─── Quality gate: subtype-aware URL depth check ──────────────────────
+
+# Per [[ca-root-url-discipline-violation]] decision 2026-05-18:
+# - municipal_code / federal_regulation / state_statute / state_regulation /
+#   tribal_code / special_district_ordinance / superintendents_compendium /
+#   mou / lease_agreement / operating_agreement / concession_lease /
+#   agency_administrative_policy*: must deep-link to a section/chapter
+# - operator_posted_policy: page-level acceptable (the page IS the source)
+# - agency_administrative_policy: page-level acceptable IF the page IS the
+#   operative source (city's "Dogs in X" page, NPS pets page, etc.) —
+#   judgment call; flag for review rather than fail hard
+DEEPLINK_REQUIRED_SUBTYPES = {
+    "municipal_code", "federal_regulation", "state_statute", "state_regulation",
+    "tribal_code", "special_district_ordinance", "superintendents_compendium",
+    "mou", "lease_agreement", "operating_agreement", "concession_lease",
+}
+
+DEEPLINK_MARKERS = [
+    r"nodeId=", r"\?topic=", r"sectionNum=", r"page_id=", r"secid=", r"cite=",
+    r"#[A-Za-z0-9]",
+    r"/section-[0-9]+",
+    r"ecode360\.com/[0-9]+",
+    r"municipal\.codes/[A-Za-z]+/",
+    r"amlegal.*/0-0-0-[0-9]+",
+    r"elaws\.us.*_sec",
+    r"federalregister\.gov/documents/[0-9]{4}/",
+    r"public\.law/(rules|statutes)/",
+    r"county\.codes/Code/",
+    r"\.html$",   # codepublishing chapter HTML pages are deep enough
+    r"\.pdf",     # PDFs are acceptable; #page= anchor a plus
+]
+
+
+def is_url_deep_enough(subtype: str | None, source_url: str | None) -> tuple[bool, str]:
+    """Subtype-aware URL depth check for Step 8 quality gates.
+
+    Returns (ok, why). ok=False means the migration should fail at quality gate.
+    """
+    import re
+    if source_url is None or source_url.strip() == "":
+        return False, "source_url is null/empty"
+    if subtype is None:
+        return False, "subtype is null"
+    if subtype in {"operator_posted_policy", "agency_administrative_policy"}:
+        # Page-level is acceptable for these subtypes (the page IS the source).
+        # Still warn if there's no path at all.
+        from urllib.parse import urlparse
+        path = urlparse(source_url).path
+        if path in ("", "/"):
+            return False, f"{subtype} URL has no path (bare domain)"
+        return True, "ok (page-level acceptable for this subtype)"
+    if subtype in DEEPLINK_REQUIRED_SUBTYPES:
+        for marker in DEEPLINK_MARKERS:
+            if re.search(marker, source_url):
+                return True, f"ok (matched deep-link marker {marker!r})"
+        return False, f"{subtype} requires section/chapter deep link; no marker matched"
+    # Unknown subtype: lean strict
+    return False, f"unknown subtype {subtype!r}; check manually"
+
+
 PLATFORM_BUILDERS = {
     "municode":       _candidates_municode,
     "codepublishing": _candidates_codepublishing,

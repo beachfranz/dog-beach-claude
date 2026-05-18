@@ -68,6 +68,17 @@ SERVICE_KEY  = os.environ["SUPABASE_SERVICE_KEY"]
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 MODEL = "claude-sonnet-4-5-20250929"
 
+# Wire in the existing Playwright fetcher (scripts/fetch/fetch_html.py)
+# for JS-rendered platforms. Lazy import so the script still runs if
+# Playwright isn't installed (urllib fallback only).
+sys.path.insert(0, str(ROOT / "scripts" / "fetch"))
+try:
+    from fetch_html import fetch as playwright_fetch  # type: ignore
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    playwright_fetch = None  # type: ignore
+    PLAYWRIGHT_AVAILABLE = False
+
 # ─── HTTP helpers ──────────────────────────────────────────────────────
 
 def supa(path: str, *, params: dict | None = None, method: str = "GET",
@@ -394,6 +405,19 @@ STATE_PLATFORM_PRIORITY = {
     "_default": ["municode", "amlegal", "qcode", "ecode360", "codepublishing", "county_codes"],
 }
 
+# Per-platform fetch config. JS-rendered platforms route through Playwright
+# (via scripts/fetch/fetch_html.py). Static-HTML platforms use urllib.
+# `selector` is the CSS selector for the meaningful content area (per
+# [[municode-fetchable]] for Municode).
+PLATFORM_FETCH_CONFIG = {
+    "municode":       {"mode": "playwright", "wait_seconds": 12.0, "selector": ".codes-chunks-pg"},
+    "ecode360":       {"mode": "playwright", "wait_seconds": 8.0,  "selector": None},
+    "codepublishing": {"mode": "urllib",     "wait_seconds": 0,    "selector": None},
+    "amlegal":        {"mode": "urllib",     "wait_seconds": 0,    "selector": ".section-content"},
+    "qcode":          {"mode": "urllib",     "wait_seconds": 0,    "selector": None},
+    "county_codes":   {"mode": "urllib",     "wait_seconds": 0,    "selector": None},
+}
+
 
 @dataclass
 class PlatformCandidate:
@@ -430,10 +454,10 @@ def _slug_no_separator(name: str, strip_county_suffix: bool = False) -> str:
 
 def _candidates_municode(jc: JurisdictionClassification, state: str) -> list[PlatformCandidate]:
     """Municode: library.municode.com/<state>/<slug>/codes/<doc>
-    Per [[url-resolution-field-guide]] there are 4 common doc slugs. For
-    counties, try both bare and with-county-suffix slug forms."""
+    Reduced to 2 most-common doc_slugs (per playbook walkthroughs) since
+    Playwright is ~12s/attempt — testing all 4 was too expensive."""
     state_lc = state.lower()
-    doc_slugs = ["code_of_ordinances", "municipal_code", "code", "codes_chunks"]
+    doc_slugs = ["code_of_ordinances", "municipal_code"]
     slug_forms = [_slugify_jurisdiction(jc.name)]
     if jc.governance_class == "county":
         with_county = _slugify_jurisdiction(jc.name, strip_county_suffix=False)
@@ -529,17 +553,32 @@ PLATFORM_BUILDERS = {
 }
 
 
-def _validity_check(url: str, jc: JurisdictionClassification, state: str,
-                    timeout: int = 15) -> tuple[bool, str]:
-    """Per playbook §2 validity gauntlet:
-       1. HTTP 200 + non-empty body
-       2. Body contains jurisdiction NAME (case-insensitive)
-       3. Body contains state indicator
-       4. For counties: body contains "<County Name> County"
+def _smart_fetch(url: str, platform: str | None = None,
+                 timeout: int = 15) -> tuple[str | None, str]:
+    """Fetch HTML via the right transport for the platform.
+
+    Returns (body_text, why). body_text is None on failure; lowercased on
+    success for downstream containment checks.
     """
+    cfg = PLATFORM_FETCH_CONFIG.get(platform or "", {"mode": "urllib", "wait_seconds": 0, "selector": None})
+
+    if cfg["mode"] == "playwright":
+        if not PLAYWRIGHT_AVAILABLE:
+            return None, "playwright_unavailable"
+        try:
+            text = playwright_fetch(
+                url,
+                selector=None,             # full-page text for validity/TOC
+                raw_html=False,
+                wait_seconds=cfg.get("wait_seconds", 8.0),
+                timeout_ms=30000,
+            )
+            return (text or "").lower(), "ok_playwright"
+        except Exception as e:
+            return None, f"playwright_error:{type(e).__name__}"
+
+    # urllib path (default)
     try:
-        # Browser-realistic headers — some platforms (codepublishing, Cloudflare-
-        # fronted sites) 403 on non-browser UA strings.
         req = urllib.request.Request(url, headers={
             "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                            "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -547,23 +586,37 @@ def _validity_check(url: str, jc: JurisdictionClassification, state: str,
             "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
                        "image/avif,image/webp,*/*;q=0.8"),
             "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "identity",  # avoid gzip — we read raw text
+            "Accept-Encoding": "identity",
         })
         with urllib.request.urlopen(req, timeout=timeout) as r:
             if r.status != 200:
-                return False, f"http_{r.status}"
-            body = r.read().decode("utf-8", errors="replace").lower()
+                return None, f"http_{r.status}"
+            body = r.read().decode("utf-8", errors="replace")
+            return body.lower(), "ok_urllib"
     except urllib.error.HTTPError as e:
-        return False, f"http_{e.code}"
+        return None, f"http_{e.code}"
     except Exception as e:
-        return False, f"fetch_error:{type(e).__name__}"
+        return None, f"fetch_error:{type(e).__name__}"
 
-    if not body or len(body) < 500:
-        return False, "body_too_short"
+
+def _validity_check(url: str, jc: JurisdictionClassification, state: str,
+                    platform: str | None = None,
+                    timeout: int = 15) -> tuple[bool, str]:
+    """Per playbook §2 validity gauntlet:
+       1. Fetch success (urllib or Playwright per-platform)
+       2. Body length sane
+       3. Body contains jurisdiction NAME (case-insensitive)
+       4. Body contains state indicator
+       5. For counties: body contains "<County Name> County"
+    """
+    body, why = _smart_fetch(url, platform=platform, timeout=timeout)
+    if body is None:
+        return False, why
+    if len(body) < 300:
+        return False, f"body_too_short({len(body)})"
     bare_name = jc.name.replace("City of ", "").replace(" County", "").lower()
     if bare_name not in body:
         return False, f"name_not_in_body({bare_name!r})"
-    # State indicator: 2-letter state or full state name in lower form
     state_names = {
         "WA": "washington", "OR": "oregon", "CA": "california", "MI": "michigan",
         "MA": "massachusetts", "AK": "alaska", "TX": "texas", "FL": "florida",
@@ -594,7 +647,7 @@ def step_2_discover_platform(jc: JurisdictionClassification, sc: ScopeCheck) -> 
             continue
         candidates = builder(jc, jc.state)
         for c in candidates:
-            ok, why = _validity_check(c.candidate_url, jc, jc.state)
+            ok, why = _validity_check(c.candidate_url, jc, jc.state, platform=platform)
             tried.append({"candidate_url": c.candidate_url, "platform": platform,
                           "valid": ok, "why": why, "notes": c.notes})
             if ok:
@@ -602,7 +655,9 @@ def step_2_discover_platform(jc: JurisdictionClassification, sc: ScopeCheck) -> 
                     valid_url=c.candidate_url, platform=platform, tried=tried,
                     notes=f"valid on {platform} after {len(tried)} attempts",
                 )
-            time.sleep(0.3)  # gentle pacing between probes
+            # Pacing: more between Playwright calls (browser startup); less for urllib
+            mode = PLATFORM_FETCH_CONFIG.get(platform, {}).get("mode", "urllib")
+            time.sleep(1.0 if mode == "playwright" else 0.3)
 
     return PlatformDiscovery(
         valid_url=None, platform=None, tried=tried,
@@ -659,8 +714,25 @@ class ChapterNavigation:
     notes:       str | None
 
 
-def _fetch_html(url: str, timeout: int = 20) -> str | None:
-    """Static-HTML fetch. Returns body string or None on failure."""
+def _fetch_html_for_toc(url: str, platform: str | None = None,
+                        timeout: int = 20) -> str | None:
+    """Fetch the TOC page for chapter navigation. Routes to Playwright for
+    JS-rendered platforms; returns raw HTML (mixed-case, untouched) so the
+    anchor parser can extract original href + text."""
+    cfg = PLATFORM_FETCH_CONFIG.get(platform or "", {"mode": "urllib", "wait_seconds": 0})
+    if cfg["mode"] == "playwright":
+        if not PLAYWRIGHT_AVAILABLE:
+            return None
+        try:
+            # raw_html=True so we get the rendered HTML with href attributes intact
+            return playwright_fetch(
+                url, selector=None, raw_html=True,
+                wait_seconds=cfg.get("wait_seconds", 8.0),
+                timeout_ms=30000,
+            )
+        except Exception:
+            return None
+    # urllib path
     try:
         req = urllib.request.Request(url, headers={
             "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -731,13 +803,7 @@ def step_3_navigate_chapter(jc: JurisdictionClassification,
         return ChapterNavigation(None, None, 0, [], "error",
                                  "no valid platform from Step 2")
 
-    # Municode renders TOC via JS — static fetch won't see the title list.
-    # Flag for Playwright (deferred).
-    if platform.platform == "municode":
-        return ChapterNavigation(None, None, 0, [], "playwright_needed",
-                                 "Municode TOC renders via JS — needs Playwright")
-
-    html = _fetch_html(platform.valid_url)
+    html = _fetch_html_for_toc(platform.valid_url, platform=platform.platform)
     if not html or len(html) < 500:
         return ChapterNavigation(None, None, 0, [], "error",
                                  f"fetch failed or body too short for {platform.valid_url}")

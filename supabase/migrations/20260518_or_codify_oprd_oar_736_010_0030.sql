@@ -99,15 +99,13 @@ ON CONFLICT (beach_fid, policy_source_id, section) DO NOTHING;
 
 COMMIT;
 
--- ─── 3. Cascade refire (run separately or via migration runner) ────────
--- Pass 1 — promote_entity_dogs_to_beach_dog_policy (returns no-op record;
--- access_rule isn't populated for OR/WA per data audit — that's structural)
--- Pass 2 — _promote_zone_rules_for_fid (the actual zone_rules writer)
+-- Cascade: NO manual refire needed. Per playbook tenet #5 ("Trust the
+-- trigger cascade"), the bps INSERT above auto-fires:
+--   tg_stmt_ins_beach_policy_source → promote_entity_dogs_to_beach_dog_policy
+--   → tg_after_change_dogs_refire_zone_rules → _promote_zone_rules_for_fid
+-- which writes flat columns AND zone_rules in one fan-out. Verified post-apply:
+-- all 5 beaches have consensus_confidence=1.0 with OAR §736-010-0030 as
+-- primary citation in zone_rules.
 --
--- Apply post-migration:
---   SELECT public.promote_entity_dogs_to_beach_dog_policy(fid)
---   FROM (VALUES (15239890::bigint),(10204916::bigint),(8315821::bigint),
---                (9738::bigint),(13465021::bigint)) v(fid);
---   SELECT public._promote_zone_rules_for_fid(fid)
---   FROM (VALUES (15239890::bigint),(10204916::bigint),(8315821::bigint),
---                (9738::bigint),(13465021::bigint)) v(fid);
+-- [[two-pass-refire-pattern]] applies ONLY to migrations that change the
+-- function bodies themselves; this migration is a data-only insert.

@@ -178,6 +178,7 @@ def classify_park(park: dict) -> dict:
 
 def _build(park, classification, attribution, confidence, reason, **extras):
     return {
+        "fid": park.get("fid"),
         "osm_dog_park_id": park["id"],
         "name": park.get("name"),
         "state": park.get("state_code"),
@@ -191,31 +192,47 @@ def _build(park, classification, attribution, confidence, reason, **extras):
 
 def main():
     ap = argparse.ArgumentParser(description="Pass A — dog park operator attribution")
-    ap.add_argument("--states", default="CA,OR,WA", help="MVP+ default")
+    ap.add_argument("--states", default="CA,OR,WA",
+                    help="MVP+ default; pass 'ALL' for the full US set")
+    ap.add_argument("--write-to-gold", action="store_true",
+                    help="UPDATE dog_parks_gold.inferred_operator_id + attribution_method "
+                         "+ attribution_confidence in addition to JSONL/MD")
     args = ap.parse_args()
 
-    states = [s.strip().upper() for s in args.states.split(",") if s.strip()]
-    state_fp_map = {"CA": "06", "OR": "41", "WA": "53"}
-    state_fps = [state_fp_map[s] for s in states if s in state_fp_map]
+    if args.states.upper() == "ALL":
+        states = None
+    else:
+        states = [s.strip().upper() for s in args.states.split(",") if s.strip()]
 
     conn = _connect_pg()
     try:
         with conn, conn.cursor() as cur:
-            # Pull every MVP+ dog park + its spatial county + spatial city polygon
-            cur.execute("""
+            # Pull every dog park + spatial county + spatial city polygon.
+            # Reads from dog_parks_gold (curated) so we can write back via fid.
+            sql = """
                 SELECT
-                    dp.id, dp.name, dp.operator, dp.operator_type, dp.tags,
-                    CASE c.state_fp WHEN '06' THEN 'CA' WHEN '41' THEN 'OR' WHEN '53' THEN 'WA' END AS state_code,
-                    c.name AS county_name,
-                    j.name AS jurisdiction_name
-                FROM public.osm_dog_parks dp
-                JOIN public.counties c ON ST_Intersects(dp.geom, c.geom)
+                    g.fid                            AS fid,
+                    g.osm_id                         AS id,
+                    g.name,
+                    g.tags->>'operator'              AS operator,
+                    COALESCE(g.tags->>'operator:type', g.tags->>'operator_type') AS operator_type,
+                    g.tags,
+                    g.state                          AS state_code,
+                    c.name                           AS county_name,
+                    j.name                           AS jurisdiction_name
+                FROM public.dog_parks_gold g
+                LEFT JOIN public.counties c    ON ST_Intersects(g.geom, c.geom)
                 LEFT JOIN public.jurisdictions j
                   ON j.place_type LIKE 'C%%'
-                  AND ST_Intersects(dp.geom, j.geom)
-                WHERE c.state_fp = ANY(%s)
-                ORDER BY dp.id
-            """, (state_fps,))
+                  AND ST_Intersects(g.geom, j.geom)
+                WHERE g.is_active = true
+            """
+            params: tuple = ()
+            if states:
+                sql += " AND g.state = ANY(%s)"
+                params = (states,)
+            sql += " ORDER BY g.fid"
+            cur.execute(sql, params)
             cols = [c[0] for c in cur.description]
             parks = [dict(zip(cols, r)) for r in cur.fetchall()]
     finally:
@@ -227,7 +244,8 @@ def main():
         if p["id"] not in seen:
             seen[p["id"]] = p
     parks = list(seen.values())
-    print(f"Total MVP+ dog parks: {len(parks)}")
+    scope_label = "ALL US" if states is None else ",".join(states)
+    print(f"Total dog parks ({scope_label}): {len(parks)}")
 
     classifications = [classify_park(p) for p in parks]
 
@@ -265,7 +283,7 @@ def main():
         f"# Dog Park Operator Attribution — Pass A",
         f"",
         f"Generated 2026-05-18 by `scripts/dog_park_operator_attribution.py`.",
-        f"States: {','.join(states)}",
+        f"States: {scope_label}",
         f"Total MVP+ dog parks: {len(parks)}",
         f"Distinct inferred operators: {len(distinct_ops)}",
         f"",
@@ -313,7 +331,57 @@ def main():
     md_path.write_text("\n".join(md), encoding="utf-8")
     print(f"Markdown: {md_path}")
 
+    if args.write_to_gold:
+        _write_to_gold(classifications)
+
     return 0
+
+
+def _write_to_gold(classifications):
+    """UPDATE dog_parks_gold.inferred_operator_id + attribution_method +
+    attribution_confidence for every classified park.
+
+    Operator name → id resolution is best-effort against public.operator
+    (singular). Most inferred names ("City of X Parks & Recreation") won't
+    match yet — that's fine; inferred_operator_id stays NULL but
+    attribution_method + attribution_confidence still get recorded.
+    """
+    if not classifications:
+        return
+    conn = _connect_pg()
+    try:
+        with conn, conn.cursor() as cur:
+            # Build lowercase name → id lookup for public.operator (singular).
+            cur.execute("SELECT id, lower(name) FROM public.operator")
+            op_lookup = {name: oid for oid, name in cur.fetchall()}
+
+            updates = 0
+            with_op_id = 0
+            for c in classifications:
+                if c.get("fid") is None:
+                    continue
+                inferred_name = c.get("inferred_operator_name")
+                op_id = op_lookup.get((inferred_name or "").lower()) if inferred_name else None
+                if op_id is not None:
+                    with_op_id += 1
+                cur.execute(
+                    """
+                    UPDATE public.dog_parks_gold
+                       SET inferred_operator_id   = %s,
+                           attribution_method     = %s,
+                           attribution_confidence = %s
+                     WHERE fid = %s
+                    """,
+                    (op_id, c["classification"], c["confidence"], c["fid"]),
+                )
+                updates += 1
+        conn.commit()
+        print(f"\n=== WRITE-TO-GOLD ===")
+        print(f"  dog_parks_gold rows updated: {updates}")
+        print(f"  resolved to existing operator.id: {with_op_id}")
+        print(f"  attribution_method/_confidence only (no FK match): {updates - with_op_id}")
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

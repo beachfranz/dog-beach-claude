@@ -24,10 +24,14 @@ Environment:
   No API key needed (Commons is open). Sets a polite User-Agent.
 """
 from __future__ import annotations
+import sys
+sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+import truststore                          # Win Python 3.14 OS-cert store
+truststore.inject_into_ssl()
+
 import argparse
 import json
 import os
-import sys
 import time
 import urllib.parse
 import urllib.request

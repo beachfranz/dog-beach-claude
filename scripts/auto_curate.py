@@ -106,6 +106,7 @@ def main():
     ap.add_argument("--n",        type=int, default=6, help="Photos per beach (default 6)")
     ap.add_argument("--state",    help="Limit to one state (e.g., WA)")
     ap.add_argument("--fid",      type=int, help="Single beach FID")
+    ap.add_argument("--fids",     help="Comma-separated list of beach FIDs (e.g., gap-beach scope)")
     ap.add_argument("--dry-run",  action="store_true",
                     help="Plan + report counts; no writes")
     ap.add_argument("--reset",    action="store_true",
@@ -120,6 +121,8 @@ def main():
             # Build target set
             if args.fid:
                 fids = [args.fid]
+            elif args.fids:
+                fids = [int(x) for x in args.fids.split(",") if x.strip()]
             else:
                 sql = """
                   SELECT b.fid FROM public.beaches_gold b

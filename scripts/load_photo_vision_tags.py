@@ -25,11 +25,15 @@ Idempotency: skips any photo where source_meta.vision.model == current
 model id. Re-running after a partial chunk is safe.
 """
 from __future__ import annotations
+import sys
+sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+import truststore                          # Win Python 3.14 OS-cert store
+truststore.inject_into_ssl()
+
 import argparse
 import base64
 import json
 import os
-import sys
 import threading
 import time
 import urllib.parse

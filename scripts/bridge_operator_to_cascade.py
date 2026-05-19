@@ -116,16 +116,29 @@ class BridgeOutcome:
 
 def fetch_bridgable(conn, confidence_threshold: float,
                     only_operator_ids: list[int] | None = None) -> list[dict]:
-    """Return rows of (operator, best-extraction, beach-link-count)."""
+    """Return rows of (operator, best-extraction, beach-link-count).
+
+    CORRECTED 2026-05-18: operator_dogs_policy.operator_id FK → public.operators
+    (plural, 9,275 rows) NOT public.operator (singular, 153 rows). Previous
+    version coincidentally cross-joined; this version uses the correct table
+    and also probes for matching singular-operator rows by canonical_name (the
+    bridge match candidate).
+    """
     sql = """
         SELECT
-            o.id AS operator_id, o.name AS operator_name, o.type AS operator_type,
-            o.agency_id, o.web_url, o.rules_url,
+            o.id AS operator_id, o.canonical_name AS operator_name,
+            o.level AS operator_type, o.state_code, o.website, o.subtype,
             odp.source_url, odp.default_rule, odp.leash_required, odp.summary,
             odp.pass_a_quotes, odp.time_windows, odp.seasonal_closures,
             odp.spatial_zones, odp.pass_c_quotes, odp.pass_c_confidence,
-            (SELECT COUNT(*) FROM public.beach_operator bo WHERE bo.operator_id = o.id) AS n_beach_links
-        FROM public.operator o
+            -- Bridge match: does a singular-operator row exist with same name?
+            (SELECT op2.id FROM public.operator op2
+             WHERE LOWER(op2.name) = LOWER(o.canonical_name)
+             LIMIT 1) AS singular_op_id,
+            (SELECT COUNT(*) FROM public.beach_operator bo
+             JOIN public.operator op2 ON op2.id = bo.operator_id
+             WHERE LOWER(op2.name) = LOWER(o.canonical_name)) AS n_beach_links
+        FROM public.operators o
         JOIN public.operator_dogs_policy odp ON odp.operator_id = o.id
         WHERE odp.pass_c_confidence >= %s
     """
@@ -284,19 +297,35 @@ def main() -> int:
         sql_blocks: list[str] = []
 
         for row in candidates:
-            op_id = row["operator_id"]
+            op_id = row["operator_id"]              # plural-operator id (extraction-side)
+            singular_op_id = row.get("singular_op_id")
             op_name = row["operator_name"]
             op_type = row["operator_type"]
             n_links = row["n_beach_links"]
 
-            # Filter: skip if no beach links (Phase 2 backfill required)
+            # Filter: bridge requires a matching singular-operator row (per the
+            # two-table architecture clarified 2026-05-18). For plural-only ops,
+            # defer to Phase 1d (create singular row first; PSHDB pattern) or
+            # Phase 2 (beach_operator backfill).
+            if singular_op_id is None:
+                outcomes.append(BridgeOutcome(
+                    op_id, op_name, op_type, "defer_no_singular_match",
+                    0, None, None, row["pass_c_confidence"], row["source_url"],
+                    "no singular-operator row matches this plural operator by canonical_name; needs Phase 1d curator-create"))
+                print(f"  defer  pluralop={op_id:<5} {op_name:<55} (no singular-operator match by name)")
+                continue
+
+            # Filter: skip if singular operator exists but has no beach links
             if n_links == 0:
                 outcomes.append(BridgeOutcome(
                     op_id, op_name, op_type, "defer_no_beach_links",
                     0, None, None, row["pass_c_confidence"], row["source_url"],
-                    "operator has no beach_operator links; needs Phase 2 backfill"))
-                print(f"  defer  op={op_id:<4} {op_name:<55} (no beach_operator links)")
+                    f"singular_op_id={singular_op_id} has no beach_operator links; needs Phase 2 backfill"))
+                print(f"  defer  pluralop={op_id:<5} {op_name:<55} (singular={singular_op_id}, no beach_operator links)")
                 continue
+
+            # Use singular_op_id as the FK target for emit
+            row["operator_id"] = singular_op_id  # rebind for emit_operator_block
 
             # Map rule
             rule = map_rule(row["default_rule"], row["leash_required"])

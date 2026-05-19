@@ -1,4 +1,10 @@
-"""Operate Phase 1c — per-operator audit of the 418 stranded extractions.
+"""Operate Phase 1c — per-operator audit of the 418 extractions.
+
+CORRECTED 2026-05-18 evening: prior version JOINed operator_dogs_policy
+against public.operator (singular, 153 rows) but the actual FK target is
+public.operators (plural, 9,275 rows). The previous "15 corrupt" finding
+was all false positives from coincidental ID collisions across unrelated
+tables. This version uses the correct FK.
 
 Classifies each operator_dogs_policy row into:
   - corrupt           — extraction source_url's domain doesn't match the
@@ -131,23 +137,32 @@ def audit(conf_threshold: float):
     conn = _connect_pg()
     try:
         with conn, conn.cursor() as cur:
+            # operator_dogs_policy.operator_id → public.operators (plural)
+            # ALSO probe public.operator (singular) by canonical_name for bridge-match potential
             cur.execute("""
                 SELECT
-                    o.id AS operator_id, o.name AS operator_name,
-                    o.type AS operator_type, o.agency_id, o.delegated_authority_via,
+                    o.id AS operator_id, o.canonical_name AS operator_name,
+                    o.level AS operator_type, o.state_code, o.usbeach_count AS beach_count,
                     odp.source_url, odp.default_rule, odp.leash_required,
                     odp.pass_a_confidence, odp.pass_c_confidence,
                     odp.summary,
+                    -- Bridge-match: does a singular-operator row exist with matching name?
+                    (SELECT op2.id FROM public.operator op2
+                     WHERE LOWER(op2.name) = LOWER(o.canonical_name)
+                     LIMIT 1) AS singular_op_match_id,
                     (SELECT COUNT(*) FROM public.beach_operator bo
-                     WHERE bo.operator_id = o.id) AS n_beach_links,
+                     JOIN public.operator op2 ON op2.id = bo.operator_id
+                     WHERE LOWER(op2.name) = LOWER(o.canonical_name)) AS n_beach_links,
                     (SELECT COUNT(*) FROM public.policy_source ps
-                     WHERE ps.issuing_operator_id = o.id
+                     JOIN public.operator op2 ON op2.id = ps.issuing_operator_id
+                     WHERE LOWER(op2.name) = LOWER(o.canonical_name)
                        AND ps.subtype = 'operator_posted_policy') AS n_op_ps_rows,
                     (SELECT array_agg(ps.id::text || ': ' || COALESCE(ps.source_url,'<no url>'))
                      FROM public.policy_source ps
-                     WHERE ps.issuing_operator_id = o.id
+                     JOIN public.operator op2 ON op2.id = ps.issuing_operator_id
+                     WHERE LOWER(op2.name) = LOWER(o.canonical_name)
                        AND ps.subtype = 'operator_posted_policy') AS existing_op_ps
-                FROM public.operator o
+                FROM public.operators o
                 JOIN public.operator_dogs_policy odp ON odp.operator_id = o.id
                 WHERE odp.pass_c_confidence IS NOT NULL
                 ORDER BY odp.pass_c_confidence DESC, o.id
@@ -155,7 +170,7 @@ def audit(conf_threshold: float):
             cols = [c[0] for c in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
 
-            # Also: include operators that have ps rows but NO extraction (sanity check)
+            # Singular operators with ps rows but no matching plural-extraction by name
             cur.execute("""
                 SELECT o.id, o.name, o.type
                 FROM public.operator o
@@ -164,8 +179,9 @@ def audit(conf_threshold: float):
                     WHERE ps.issuing_operator_id = o.id
                       AND ps.subtype = 'operator_posted_policy'
                 ) AND NOT EXISTS (
-                    SELECT 1 FROM public.operator_dogs_policy odp
-                    WHERE odp.operator_id = o.id
+                    SELECT 1 FROM public.operators op2
+                    JOIN public.operator_dogs_policy odp ON odp.operator_id = op2.id
+                    WHERE LOWER(op2.canonical_name) = LOWER(o.name)
                 )
             """)
             no_extr_w_ps = [dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()]
@@ -200,13 +216,15 @@ def audit(conf_threshold: float):
                 cls, reason = "net_new", f"no existing op ps; conf={conf:.2f}"
 
         classifications.append({
-            "operator_id": op_id,
+            "operator_id_plural": op_id,
             "operator_name": op_name,
             "operator_type": r["operator_type"],
+            "state_code": r["state_code"],
             "source_url": source_url,
             "default_rule": r["default_rule"],
             "leash_required": r["leash_required"],
             "pass_c_confidence": conf,
+            "singular_op_match_id": r.get("singular_op_match_id"),
             "n_beach_links": r["n_beach_links"],
             "n_op_ps_rows": r["n_op_ps_rows"] or 0,
             "classification": cls,
@@ -276,7 +294,7 @@ def main():
         for ex in examples[:30]:  # cap at 30 per class
             url_short = (ex["source_url"] or "")[:60]
             md_lines.append(
-                f"| {ex['operator_id']} | {ex['operator_name'][:35]} | "
+                f"| {ex['operator_id_plural']} | {ex['operator_name'][:35]} | "
                 f"{ex['default_rule']} | {ex['pass_c_confidence']:.2f} | "
                 f"{ex['n_beach_links']} | `{url_short}` | {ex['reason'][:80]} |"
             )

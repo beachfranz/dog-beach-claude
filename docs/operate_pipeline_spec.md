@@ -1,8 +1,28 @@
-# Operate Pipeline — Spec v2
+# Operate Pipeline — Spec v3
 
-**Status:** REWRITTEN 2026-05-18 evening after today's audit + Franz's framing question.
-**Supersedes:** v1.x drafts. v1's "418 stranded gold mine" + "operate-as-parallel-to-codify" framing oversold the scope.
+**Status:** REWRITTEN 2026-05-18 late evening after discovering the two-table architecture.
+**Supersedes:** v2 (which oversold codify-overlap based on cross-table ID collisions) + v1 ("418 stranded gold mine" framing). The actual gap is bigger than v2 thought and structurally different.
 **Companion:** [`jurisdiction_policy_source_playbook.md`](jurisdiction_policy_source_playbook.md).
+
+## v3 headline finding (the one that matters)
+
+**There are TWO operator tables and they DO NOT share an ID space:**
+- `public.operators` (plural, **9,275 rows**) — broad US-wide catalog the EXTRACTOR uses. `operator_dogs_policy.operator_id` + `operator_policy_extractions.operator_id` FK → here.
+- `public.operator` (singular, **153 rows**) — curated subset wired into cascade. `beach_operator.operator_id` + `policy_source.issuing_operator_id` FK → here.
+
+V2 audit JOINed via `operator_id` against the singular table — coincidental cross-table ID collisions produced false-positive corruption findings. The corrected audit (operators-plural) reveals:
+
+| Classification | v2 (wrong join) | v3 (correct join) |
+|---|---:|---:|
+| Operators with extraction at conf≥0.7 | 22 | **274** |
+| net_new (legitimate, no existing ps row) | 0 | **104** |
+| corrupt (URL/name mismatch) | 15 (68%) | **60 (~22%)** |
+| low_conf | 6 | 109 |
+| duplicative_clean | 0 | 1 |
+
+**Real Operate gap:** 104 net-new extractions worth bridging + 9,122 plural operators without extraction worth probing if they manage beaches. The v2 "76% codify-duplicate" finding was about the curated 153, not the extraction-side 9,275 — irrelevant to the real gap.
+
+**Bridge today produces zero output** even after the table fix: of 165 conf≥0.7 candidates, 68 have a matching singular-operator row but no beach_operator link (Phase 2 needed); 97 have no singular row at all (Phase 1d: curator-create singular row, like today's TCLT pattern).
 
 ---
 

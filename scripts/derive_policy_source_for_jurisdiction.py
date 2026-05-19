@@ -2882,7 +2882,7 @@ def lookup_agency_id(name: str, agency_type: str) -> int | None:
 
 def query_pad_us_managed_beaches(
     states: list[str],
-    pad_mng_type: str,
+    pad_mng_type: str | None = None,
     pad_mng_name: str | None = None,
     pad_des_tp: str | None = None,
     pad_unit_name_ilike: str | None = None,
@@ -2893,27 +2893,47 @@ def query_pad_us_managed_beaches(
     intersects with active beaches in the given states. Returns deduplicated
     [(fid, name)] list ordered by name.
 
+    When NO PAD-US filter is provided (mng_type/mng_name/des_tp/unit_name all
+    None), returns ALL active beaches in the listed states. Use for regulatory
+    regimes that don't correspond to a discrete polygon — e.g., OR Ocean Shore
+    State Recreation Area governed by OAR 736-021-0070, which applies across
+    the entire OR coastal beach inventory.
+
     Per playbook step 5 federal/state pattern; today's OAR work used this
     spatial join as hand-SQL → now encapsulated as a reusable function.
     """
-    sql = """
-        SELECT DISTINCT b.fid, b.name
-        FROM public.beach_relevant_pad_us pad
-        JOIN public.beaches_gold b ON ST_Intersects(b.geom, pad.geom)
-        WHERE b.state = ANY(%s) AND b.is_active
-          AND pad.mng_type = %s
-    """
-    params: list = [list(states), pad_mng_type]
-    if pad_mng_name:
-        sql += " AND pad.mng_name = %s"
-        params.append(pad_mng_name)
-    if pad_des_tp:
-        sql += " AND pad.des_tp = %s"
-        params.append(pad_des_tp)
-    if pad_unit_name_ilike:
-        sql += " AND pad.unit_name ILIKE %s"
-        params.append(pad_unit_name_ilike)
-    sql += " ORDER BY b.name"
+    has_pad_filter = any([pad_mng_type, pad_mng_name, pad_des_tp, pad_unit_name_ilike])
+
+    if not has_pad_filter:
+        # No-PAD-filter mode: all active beaches in the listed states
+        sql = """
+            SELECT b.fid, b.name
+            FROM public.beaches_gold b
+            WHERE b.state = ANY(%s) AND b.is_active
+            ORDER BY b.name
+        """
+        params: list = [list(states)]
+    else:
+        sql = """
+            SELECT DISTINCT b.fid, b.name
+            FROM public.beach_relevant_pad_us pad
+            JOIN public.beaches_gold b ON ST_Intersects(b.geom, pad.geom)
+            WHERE b.state = ANY(%s) AND b.is_active
+        """
+        params = [list(states)]
+        if pad_mng_type:
+            sql += " AND pad.mng_type = %s"
+            params.append(pad_mng_type)
+        if pad_mng_name:
+            sql += " AND pad.mng_name = %s"
+            params.append(pad_mng_name)
+        if pad_des_tp:
+            sql += " AND pad.des_tp = %s"
+            params.append(pad_des_tp)
+        if pad_unit_name_ilike:
+            sql += " AND pad.unit_name ILIKE %s"
+            params.append(pad_unit_name_ilike)
+        sql += " ORDER BY b.name"
 
     conn = _connect_pg()
     try:
@@ -3057,14 +3077,16 @@ def run_state_agency_rule(args) -> int:
         pad_des_tp=args.pad_des_tp,
         pad_unit_name_ilike=args.pad_unit_name_ilike,
     )
-    pad_filter_parts = [f"mng_type={args.pad_mng_type}"]
+    pad_filter_parts: list[str] = []
+    if args.pad_mng_type:
+        pad_filter_parts.append(f"mng_type={args.pad_mng_type}")
     if args.pad_mng_name:
         pad_filter_parts.append(f"mng_name={args.pad_mng_name}")
     if args.pad_des_tp:
         pad_filter_parts.append(f"des_tp={args.pad_des_tp}")
     if args.pad_unit_name_ilike:
         pad_filter_parts.append(f"unit_name~{args.pad_unit_name_ilike!r}")
-    pad_filter_repr = " ".join(pad_filter_parts)
+    pad_filter_repr = " ".join(pad_filter_parts) if pad_filter_parts else "(none — all active beaches in listed states)"
 
     print(f"PAD-US filter: {pad_filter_repr}")
     print(f"Affected beaches: {len(beaches)}")
@@ -3219,7 +3241,8 @@ def main() -> int:
 
     # ── --state-agency-rule mode: separate code path, exits early ──
     if args.state_agency_rule:
-        required = ("agency_name", "states", "pad_mng_type", "subtype",
+        # pad_mng_type now OPTIONAL — see query_pad_us_managed_beaches no-filter mode
+        required = ("agency_name", "states", "subtype",
                     "citation", "rule_url", "rule", "evidence_verbatim",
                     "full_text_file", "label")
         missing = [k for k in required if not getattr(args, k)]

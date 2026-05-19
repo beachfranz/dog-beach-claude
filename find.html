@@ -517,25 +517,13 @@
 
   <div class="search-controls">
     <div class="sort-row">
-      <span class="sort-label">Sort by</span>
-      <select class="sort-select" id="sort-select" onchange="onSortChange(this.value)">
-        <option value="conditions">Best Conditions</option>
-        <option value="distance" id="opt-distance" disabled>Closest First</option>
-        <option value="blend"    id="opt-blend"    disabled>Best Nearby (50/50)</option>
-      </select>
-      <span class="sort-label">Leash</span>
+      <span class="sort-label">Find</span>
       <select class="sort-select compact" id="leash-select" onchange="onLeashFilterChange(this.value)">
         <option value="any">Any</option>
         <option value="off_leash">Off-leash</option>
         <option value="mixed">Mixed</option>
         <option value="on_leash">Required</option>
       </select>
-      <span class="sort-label">Show</span>
-      <select class="sort-select compact" id="catalog-select" onchange="onCatalogModeChange(this.value)">
-        <option value="scored">Scored only</option>
-        <option value="all">Full catalog</option>
-      </select>
-      <span class="sort-label">Find</span>
       <select class="sort-select compact" id="dest-select" onchange="onDestinationChange(this.value)">
         <option value="beach">Beaches</option>
         <option value="dog_park">Dog parks</option>
@@ -547,6 +535,12 @@
         <option value="25">25 mi</option>
         <option value="50">50 mi</option>
         <option value="any">Any</option>
+      </select>
+      <span class="sort-label">Sort by</span>
+      <select class="sort-select" id="sort-select" onchange="onSortChange(this.value)">
+        <option value="blend"    id="opt-blend"    selected>Best Nearby</option>
+        <option value="conditions">Best Conditions</option>
+        <option value="distance" id="opt-distance" disabled>Closest First</option>
       </select>
     </div>
     <div class="loc-row" id="loc-row">
@@ -591,15 +585,11 @@
   let nowBeaches  = null; // [{ beach, day }] — cached after first NOW fetch
   let userLat     = null;
   let userLng     = null;
-  let currentSort = 'conditions';
+  // 'blend' (Best Nearby) is the default sort. Falls back gracefully
+  // when location isn't known (blendScore treats distance=null as 0.5
+  // → monotonic in score, so it ranks like 'conditions' pre-location).
+  let currentSort = 'blend';
   let leashFilter = 'any';
-  // 'scored' → only beaches with scoring data (default; today's 14)
-  // 'all'    → full beaches_gold catalog (763 active rows; most no_data)
-  const CATALOG_KEY = 'find.catalogMode';
-  let catalogMode = (() => {
-    try { return localStorage.getItem(CATALOG_KEY) || 'scored'; }
-    catch { return 'scored'; }
-  })();
 
   // Destination: 'beach' (default) | 'dog_park'. URL ?dest= takes
   // precedence; falls back to localStorage; else 'beach'.
@@ -929,9 +919,7 @@
   }
 
   async function loadBeachesForDate(date) {
-    // Cache key includes catalogMode so toggling Scored/All re-fetches
-    // instead of returning the prior result.
-    const cacheKey = `${date}::${catalogMode}`;
+    const cacheKey = date;
     if (beachCache[cacheKey]) return beachCache[cacheKey];
     const params = new URLSearchParams({ date });
     if (userLat !== null && userLng !== null) {
@@ -939,9 +927,8 @@
       params.set('lng',   String(userLng));
       params.set('limit', String(NEAREST_LIMIT));
     }
-    // Explicit param both ways — Edge Function default is now scored=false
-    // (full catalog), so 'scored' mode must opt in.
-    params.set('scored', catalogMode === 'all' ? 'false' : 'true');
+    // Edge Function default is scored=false (full catalog); opt in here.
+    params.set('scored', 'true');
     const res  = await fetch(
       `${SUPABASE_URL}/functions/v1/get-beaches-find?${params}`,
       { headers: { 'Authorization': `Bearer ${ANON_KEY}` } }
@@ -1366,9 +1353,11 @@
   }
 
   // ── Enable distance sort options ───────────────────────────────────
+  // Only 'opt-distance' (Closest First) needs location to be meaningful.
+  // 'opt-blend' (Best Nearby) is enabled by default and degrades
+  // gracefully to score-only when distance is unknown.
   function enableDistanceSorts() {
     document.getElementById('opt-distance').disabled = false;
-    document.getElementById('opt-blend').disabled    = false;
   }
 
   function onSortChange(val) {
@@ -1379,13 +1368,6 @@
   function onLeashFilterChange(val) {
     leashFilter = val;
     nowBeaches  = null; // reset NOW cache so filter applies
-    sortAndRender();
-  }
-
-  function onCatalogModeChange(val) {
-    catalogMode = val;
-    try { localStorage.setItem(CATALOG_KEY, val); } catch { /* storage may be blocked */ }
-    nowBeaches = null;     // reset so the wider/narrower set takes effect
     sortAndRender();
   }
 
@@ -1590,9 +1572,6 @@
   }
 
   // ── Boot ───────────────────────────────────────────────────────────
-  // Sync the catalog-mode dropdown to whatever was persisted last visit
-  const _catalogSelect = document.getElementById('catalog-select');
-  if (_catalogSelect) _catalogSelect.value = catalogMode;
   requestGeolocation();
   // Pre-fetch today so TDY pill is instant; warms beach list for NOW mode
   const _todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });

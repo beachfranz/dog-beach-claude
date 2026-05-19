@@ -78,8 +78,8 @@ The "418 stranded" framing in the v1 draft was TOO SIMPLE. The actual picture:
 |---|---:|---|---|
 | `well_bridged` (has FK + has beaches) | **1** | ps_287 PSHDB (today's curator-fix) | Properly attributed + driving consensus |
 | `bridged_but_no_op_fk` (has beaches but issuing_operator_id NULL) | **3** | ps_20 PSHDB-original, ps_22 LB Rosie's, ps_233 Trinidad Coastal Land Trust | Real operator policies driving consensus, just lacking FK metadata |
-| `op_fk_but_no_beaches` | 0 | — | — |
-| `orphaned` (extraction-infrastructure leftovers, not real policies) | **8** | ps_21 EBRPD Crown (real, no beaches), ps_26/28/33/34/35/38/42 — labeled "Park URL Extractor", "Operator Dogs Policy v1", "Section Research Extractor", "Operator Policy Exceptions v1", "Research (curator)", "Beach Policy V2 Dogs" | Meta/placeholder rows from extraction infrastructure setup; NOT real operator policies. Should be CLEANED UP. |
+| `real_but_no_bps` (real policy w/ no beach link yet) | **1** | ps_21 EBRPD Crown Beach (ebparks.org) | Real EBRPD operator policy; needs beach_operator backfill OR curator bridge to Crown Memorial SB |
+| **BEP source-class anchors — LOAD-BEARING, DO NOT TOUCH** | **7** | ps_26 Park URL Extractor, ps_28 Operator Dogs Policy v1, ps_33 Beach Policy V2 Dogs, ps_34 Operator City Extractor, ps_35 Section Research Extractor v1, ps_38 Research (curator), ps_42 Operator Policy Exceptions v1 | Per `supabase/migrations/20260516_consensus_phase4_backfill_bep.sql`: these are anchor rows tagging ~12,033 BEP (beach_field_consensus) dog-policy rows with `policy_source_id` FK so source-class tier logic flows through the consensus engine. Tier ranking depends on these. DO NOT DELETE. (Original draft of this spec misclassified them as "cleanup candidates"; Franz caught it 2026-05-18.) |
 
 **REAL operator-pipeline coverage today: 4 beaches** (Dog Beach fid 6212, 2 Rosie's Dog Beach fids, 1 Houda Point/Camel Rock fid via Trinidad Coastal Land Trust).
 
@@ -331,10 +331,12 @@ Outputs:
 1. ✓ Bridge script built (`scripts/bridge_operator_to_cascade.py`)
 2. ✓ PSHDB curator-fixed migration applied (ps_id=287) → fid 6212 Dog Beach properly attributed; consensus already correct via pre-existing ps_id=20
 3. ⚠ Mechanical bridge of 418 extractions is NOT the right next move — the audit revealed many extractions are corrupt + many operators already have ps rows. Phase 1 EVOLVES INTO:
-   - 1a. **Cleanup** the 8 orphaned "Extractor"/"v1" ps rows (DELETE or label as deprecated)
-   - 1b. **Backfill `issuing_operator_id`** on the 3 real-but-FK-missing ps rows (ps_20, ps_22, ps_233)
+   - 1a. **Backfill `issuing_operator_id`** on the 3 real-but-FK-missing ps rows (ps_20 PSHDB, ps_22 LB Rosie's, ps_233 Trinidad Coastal Land Trust). Mechanical UPDATE migration; small.
+   - 1b. **Bridge ps_21 (EBRPD Crown Beach) to Crown Memorial SB** via beach_operator + bps insert (curator-fixed, similar pattern to today's PSHDB).
    - 1c. **Per-operator audit** of the 418 extractions: which are corrupt? which duplicate existing ps? which represent net-new operator coverage?
    - 1d. **Targeted curator-fixed bridges** like today's PSHDB pattern for net-new operators that have extractable policy
+
+NOTE: the 7 BEP source-class anchor ps rows (ps_26/28/33/34/35/38/42) are LOAD-BEARING for the consensus engine's tier logic per the Phase 4 backfill migration. DO NOT DELETE. The v1 draft of this spec incorrectly classified them as cleanup candidates; Franz caught it 2026-05-18.
 
 **Phase 2 — beach_operator backfill (5-10 hours):**
 1. The 3-row `beach_operator` table remains the bottleneck for scaling Operate
@@ -442,7 +444,8 @@ This single row demonstrates the bridge pattern that needs to scale to 418 rows.
 REVISED 2026-05-18 evening after the audit:
 
 - All **REAL** operator_posted_policy ps rows have `issuing_operator_id` FK populated (today: 1 of 4; target 4 of 4)
-- 8 orphaned "Extractor/v1/Research" ps rows cleaned up (deleted or labeled deprecated)
+- ps_21 EBRPD Crown Beach bridged to Crown Memorial SB (curator pattern from PSHDB)
+- (Do NOT touch the 7 BEP source-class anchor rows — they're load-bearing for ~12,033 BEP rows' consensus tier logic.)
 - Per-operator audit of 418 extractions complete: classify clean / corrupt / duplicative
 - Net-new operator coverage from curator-fixed bridges (target: 20-30 operators, primarily NPS Compendium-style + named-beach operators that today have ZERO ps rows)
 - ≥ 90% of MVP+ state (CA/OR/WA) beaches have either a codify ps OR an operate ps (Phase 2)

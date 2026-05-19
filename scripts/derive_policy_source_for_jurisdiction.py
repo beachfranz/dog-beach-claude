@@ -3511,6 +3511,8 @@ def main() -> int:
             if o.outcome == OUTCOME_SUCCESS_AUTO_COMMIT and o.source_url
         })
         url_list_quoted = ",\n    ".join(f"'{u}'" for u in committed_urls)
+        # Build a python URL list for embedding into the post_apply script
+        py_url_list = ",\n        ".join(repr(u) for u in committed_urls)
         post_apply = f"""#!/usr/bin/env bash
 # Codify v1 post-apply — auto-generated alongside {sql_path.name}
 # Per playbook §9.5 ([[two-pass-refire-pattern]] does NOT apply for bps INSERTs;
@@ -3522,26 +3524,36 @@ def main() -> int:
 #   bash {post_apply_path.name}
 #
 # Prereqs: ANTHROPIC_API_KEY + SUPABASE_DB_PASSWORD in scripts/pipeline/.env
+# (python-dotenv loads them — no bash env-source step needed, which is
+# brittle when env values contain |, &, (), etc.)
 # Cost: ~$0.005-0.01 per ps row via Sonnet 4.5
 set -euo pipefail
 
-cd "$(dirname "$0")/../.."   # cwd → repo root regardless of where script invoked
-set -a; source scripts/pipeline/.env; set +a
-POOLER=$(cat supabase/.temp/pooler-url)
+cd "$(dirname "$0")/.."   # script lives in tmp/; .. → repo root
 
-# Resolve new ps_ids by source_url match (must be post-apply — ps_ids
-# are assigned by Postgres at INSERT time, not at codify-v1-emit time)
-NEW_PS_IDS=$(PGCLIENTENCODING=UTF8 PGPASSWORD="$SUPABASE_DB_PASSWORD" psql "$POOLER" -A -t -c "
-  SELECT string_agg(id::text, ',')
-  FROM public.policy_source
-  WHERE source_url IN (
-    {url_list_quoted}
-  )
+# Resolve new ps_ids via python (uses python-dotenv to load env cleanly)
+NEW_PS_IDS=$(python -c "
+import sys, os, urllib.parse
+from pathlib import Path
+from dotenv import load_dotenv
+import psycopg2
+load_dotenv(Path('scripts/pipeline/.env'))
+pooler = Path('supabase/.temp/pooler-url').read_text().strip()
+pp = urllib.parse.urlparse(pooler)
+conn = psycopg2.connect(host=pp.hostname, port=pp.port or 5432, user=pp.username,
+                       password=os.environ['SUPABASE_DB_PASSWORD'],
+                       dbname=(pp.path or '/postgres').lstrip('/'), sslmode='require')
+urls = [
+        {py_url_list}
+]
+with conn, conn.cursor() as cur:
+    cur.execute('SELECT id FROM public.policy_source WHERE source_url = ANY(%s)', (urls,))
+    print(','.join(str(r[0]) for r in cur.fetchall()))
 ")
 
 if [ -z "$NEW_PS_IDS" ]; then
   echo "No ps rows found matching the {len(committed_urls)} source_urls from this run."
-  echo "Did you apply {sql_path.name} yet? If not: PGCLIENTENCODING=UTF8 psql \\"$POOLER\\" -v ON_ERROR_STOP=1 -f {sql_path.name}"
+  echo "Did you apply {sql_path.name} yet? If not, apply it first via psql."
   exit 1
 fi
 

@@ -950,6 +950,7 @@ function render(data, beachFid) {
   loadScoutBlurb(beach, data.today, dog_policy, data.hours_today, amenities);
   loadWeather(beach, data.hours_today);
   loadDogParkSuggestion(beach, beachFid, dog_policy, data.hours_today);
+  loadWaterConditionAdvisories(beachFid);
   _wireBestTimeClick();
 }
 
@@ -1997,119 +1998,19 @@ function _wireBestTimeClick() {
 // into a left-rail card with consistent style. Also surfaces day-level
 // signals (bacteria_risk, seasonal dog closure) at the top.
 function buildCautionsSection(today, dogPolicy, hoursToday, beach) {
-  // Time-aware filter: cautions only matter for the rest of the day.
-  // If a high tide peaked at 7am and it's now 2pm, nobody needs a
-  // warning about it — strip past hours from the metric pass.
-  const nowH   = _currentLocalHour(beach?.timezone);
-  const nowMin = _currentLocalMinutes(beach?.timezone);
-  const remainingHours = (Array.isArray(hoursToday) ? hoursToday : [])
-    .filter(h => nowH == null || h.local_hour == null || h.local_hour >= nowH);
-
-  // Day-level signals (already aggregated by daily-refresh).
-  // Bacteria risk persists across the day — keep regardless of time.
-  // Dogs-prohibited time window drops when the end has already passed.
-  const dayItems = [];
-  if (today?.bacteria_risk && today.bacteria_risk !== 'none' && today.bacteria_risk !== 'low') {
-    dayItems.push({ status: 'caution', icon: '🦠', label: 'Bacteria',
-                    value: today.bacteria_risk, time: '' });
-  }
-  if (dogPolicy?.dogs_prohibited_start && dogPolicy?.dogs_prohibited_end) {
-    const endMin = _hhmmToMinutes(dogPolicy.dogs_prohibited_end);
-    const stillRelevant = nowMin == null || endMin == null || endMin > nowMin;
-    if (stillRelevant) {
-      dayItems.push({ status: 'no_go', icon: '🚫', label: 'Dogs prohibited',
-                      value: `${dogPolicy.dogs_prohibited_start}–${dogPolicy.dogs_prohibited_end}`, time: '' });
-    }
-  }
-
-  // Per-metric time-block items from hours_today
-  const METRICS = [
-    { icon: '🌊',  label: 'Tide',    statusKey: 'tide_status',    valueKey: 'tide_height',    fmt: v => v != null ? `${v.toFixed(1)} ft` : '—' },
-    { icon: '💨',  label: 'Wind',    statusKey: 'wind_status',    valueKey: 'wind_speed',     fmt: v => v != null ? `${Math.round(v)} mph` : '—' },
-    { icon: '🌧️', label: 'Rain',    statusKey: 'rain_status',    valueKey: 'precip_chance',  fmt: v => v != null ? `${Math.round(v)}%` : '—' },
-    { icon: '👥',  label: 'Crowd',   statusKey: 'crowd_status',   valueKey: 'busyness_score', fmt: v => v != null ? `${Math.round(v)}/100` : '—' },
-    { icon: '🌡',  label: 'Temp',    statusKey: 'temp_status',    valueKey: 'temp_air',       fmt: v => v != null ? `${Math.round(v)}°F` : '—' },
-    { icon: '☀️',  label: 'UV',      statusKey: 'uv_status',      valueKey: 'uv_index',       fmt: v => v != null ? `UV ${v.toFixed(1)}` : '—' },
-    { icon: '🏖️', label: 'Sand',    statusKey: 'sand_status',    valueKey: 'sand_temp',      fmt: v => v != null ? `${Math.round(v)}°F` : '—' },
-    { icon: '🚶',  label: 'Asphalt', statusKey: 'asphalt_status', valueKey: 'asphalt_temp',   fmt: v => v != null ? `${Math.round(v)}°F` : '—' },
-  ];
-  const STATUS_RANK = { no_go: 3, caution: 2, advisory: 1 };
-  const fmtH = h => h === 0 ? '12am' : h === 12 ? '12pm' : (h < 12 ? `${h}am` : `${h-12}pm`);
-  const getBlocks = flagged => {
-    if (!flagged.length) return [];
-    const blocks = [[flagged[0]]];
-    for (let i = 1; i < flagged.length; i++) {
-      if (flagged[i].local_hour === flagged[i-1].local_hour + 1) blocks[blocks.length-1].push(flagged[i]);
-      else blocks.push([flagged[i]]);
-    }
-    return blocks;
-  };
-
-  const metricItems = [];
-  if (remainingHours.length) {
-    for (const m of METRICS) {
-      // Cautions card surfaces only caution + no_go (advisory excluded).
-      // Source is `remainingHours` — past-hour cautions are already dropped.
-      const flagged = remainingHours.filter(h => h[m.statusKey] === 'caution' || h[m.statusKey] === 'no_go');
-      if (!flagged.length) continue;
-      let blocks = getBlocks(flagged);
-      if (blocks.length >= 3) {
-        blocks = blocks.slice().sort((a,b) => b.length - a.length).slice(0, 2)
-                       .sort((a,b) => a[0].local_hour - b[0].local_hour);
-      }
-      const allHours = blocks.flat();
-      const worst = allHours.reduce((w, h) => {
-        const s = h[m.statusKey];
-        return (STATUS_RANK[s] ?? 0) > (STATUS_RANK[w] ?? 0) ? s : w;
-      }, 'caution');
-      const vals = allHours.map(h => h[m.valueKey]).filter(v => v != null);
-      const worstVal = vals.length
-        ? (m.label === 'Temp' ? vals.reduce((a, b) => Math.abs(b - 72) > Math.abs(a - 72) ? b : a, vals[0])
-                              : Math.max(...vals))
-        : null;
-      const times = blocks.map(b => `${fmtH(b[0].local_hour)}–${fmtH(b[b.length-1].local_hour + 1)}`).join(', ');
-      metricItems.push({ status: worst, icon: m.icon, label: m.label,
-                         value: m.fmt(worstVal), time: times });
-    }
-  }
-
-  // Per-metric tooltip strings — explain what trips a caution.
-  const CAUTION_TIPS = {
-    Tide:    'Caution when high tide ≥ 5.0 ft — limited beach access',
-    Wind:    'Caution when sustained wind ≥ 15 mph',
-    Rain:    'Caution on high precipitation chance / severe weather codes',
-    Crowd:   'Caution when busyness 61-84 (packed beach)',
-    Temp:    'Caution outside 50-75°F — too cold or too hot',
-    UV:      'Caution when UV index ≥ 8',
-    Sand:    'Caution when sand temperature ≥ 115°F — paw burn risk',
-    Asphalt: 'Caution when asphalt ≥ 115°F — paw burn risk',
-    Bacteria:           "Water-quality risk — avoid letting your dog swim or drink seawater",
-    'Dogs prohibited':  "Dogs aren't allowed at this beach during these hours",
-  };
-
-  // Combined list, sorted: highest severity first, then label alphabetical.
-  const items = [...dayItems, ...metricItems].sort(
-    (a, b) => (STATUS_RANK[b.status] ?? 0) - (STATUS_RANK[a.status] ?? 0)
-           || a.label.localeCompare(b.label));
-  if (!items.length) return '';
-  const rows = items.map(it => {
-    const tip = CAUTION_TIPS[it.label] || it.label;
-    return `
-    <li class="advisory-row advisory-${it.status}" data-tip="${escHtml(tip)}">
-      <span class="advisory-icon">${it.icon}</span>
-      <span class="advisory-body">
-        <span class="advisory-headline">
-          <span class="advisory-label">${escHtml(it.label)}</span>
-          <span class="advisory-value">${escHtml(it.value)}</span>
-        </span>
-        ${it.time ? `<span class="advisory-time">${escHtml(it.time)}</span>` : ''}
-      </span>
-    </li>`;
-  }).join('');
-  return `<section class="card cautions-card">
-    <h2>Cautions</h2>
-    <ul class="advisory-list">${rows}</ul>
-  </section>`;
+  // Unified per Franz 2026-05-19: all cautions now come from the
+  // beach_advisory table via loadWaterConditionAdvisories() (async).
+  // This function just emits an empty mount; loadWaterConditionAdvisories
+  // populates / hides it based on RPC response.
+  //
+  // Removed ~110 lines of inline metric-status computation that used to
+  // live here — same logic now in scripts/compute_weather_advisories.py
+  // + scripts/compute_marine_advisories.py + scripts/poll_nws_alerts.py.
+  // Single source of truth → beach_advisory table; one query renders.
+  //
+  // Args kept for caller back-compat but unused here.
+  void today; void dogPolicy; void hoursToday; void beach;
+  return `<section class="card cautions-card" style="display:none"></section>`;
 }
 
 // Scout blurb — narrative paragraph from beach-chat (Anthropic LLM)
@@ -2767,6 +2668,71 @@ function buildLinksSection(beach, beachFid) {
   if (!rows.length) return '';
   return `<section class="card"><h2>More info</h2>${rows.join('')}</section>`;
 }
+
+// ── Water-condition advisories (NWS + marine + deterministic) ───────
+// Per docs/water_conditions_advisory_spec.md + Franz 2026-05-19 unified
+// beach_advisory store. Fetches active+upcoming advisories from RPC and
+// appends to the existing Cautions card. Uses same severity/UI weight
+// pattern as the existing buildCautionsSection.
+
+async function loadWaterConditionAdvisories(beachFid) {
+  const card = document.querySelector('.cautions-card');
+  if (!card) return;
+  let items = [];
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_beach_advisories`, {
+      method:  'POST',
+      headers: {
+        apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_fid: parseInt(beachFid, 10), p_horizon_hours: 24 }),
+    });
+    if (!r.ok) return;
+    items = await r.json();
+  } catch { return; }
+  if (!Array.isArray(items) || items.length === 0) {
+    // No active advisories → hide the (empty) mount card cleanly
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+
+  // Severity → UI status mapping (matches existing buildCautionsSection)
+  const sevToStatus = {
+    extreme: 'no_go',   severe: 'no_go',
+    moderate: 'caution', minor: 'advisory',
+  };
+
+  // Build rows in same shape as buildCautionsSection's metricItems
+  const rows = items.map(a => {
+    const status = sevToStatus[a.severity] || 'caution';
+    const tip = a.dog_impact_text || a.label || '';
+    const icon = a.icon || '⚠️';
+    const value = a.value || a.event_type || '';
+    return `
+      <li class="advisory-row advisory-${status}" data-tip="${escHtml(tip)}">
+        <span class="advisory-icon">${icon}</span>
+        <span class="advisory-body">
+          <span class="advisory-headline">
+            <span class="advisory-label">${escHtml(a.label || a.event_type || 'Advisory')}</span>
+            <span class="advisory-value">${escHtml(value)}</span>
+          </span>
+          ${a.dog_impact_text ? `<span class="advisory-time">${escHtml(a.dog_impact_text)}</span>` : ''}
+        </span>
+      </li>`;
+  }).join('');
+
+  // If the Cautions card already exists, append to its list.
+  // If it doesn't (no existing cautions triggered), create the card.
+  let list = card.querySelector('.advisory-list');
+  if (!list) {
+    card.innerHTML = `<h2>Cautions</h2><ul class="advisory-list">${rows}</ul>`;
+  } else {
+    list.insertAdjacentHTML('beforeend', rows);
+  }
+}
+
 
 // ── Dog Park suggestion (Phase d — 2026-05-19) ──────────────────────
 // Additive ("Extend the day") OR reframed ("Better fit right now") based

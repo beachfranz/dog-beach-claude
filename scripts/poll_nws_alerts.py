@@ -91,31 +91,42 @@ def upsert_alert(conn, beach_fid: int, alert: dict) -> None:
     # NWS sometimes uses 'expires' or 'ends'; prefer ends (final) over expires
     valid_to = p.get("ends") or p.get("expires")
     valid_from = p.get("effective") or p.get("onset") or p.get("sent")
-    if not (alert_id and valid_from and valid_to):
+    event_type = p.get("event")
+    if not (alert_id and valid_from and valid_to and event_type):
         return
+
+    # Map NWS severity (Minor/Moderate/Severe/Extreme/Unknown) → our enum
+    nws_sev = (p.get("severity") or "").lower()
+    severity = nws_sev if nws_sev in ("minor", "moderate", "severe", "extreme") else "moderate"
+
+    advisory_key = f"nws:{alert_id}"
+    # NWS-specific payload preserved in raw_data
+    raw = {
+        "certainty":   p.get("certainty"),
+        "urgency":     p.get("urgency"),
+        "headline":    p.get("headline"),
+        "description": p.get("description"),
+        "instruction": p.get("instruction"),
+        "sender":      p.get("sender"),
+        "areaDesc":    p.get("areaDesc"),
+    }
     with conn.cursor() as cur:
         cur.execute("""
-            INSERT INTO public.beach_active_alert (
-              beach_fid, alert_id, nws_event_type, severity, certainty, urgency,
-              headline, description, instruction,
-              valid_from, valid_to, source, fetched_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'nws', now())
-            ON CONFLICT (beach_fid, alert_id) DO UPDATE SET
-              nws_event_type = EXCLUDED.nws_event_type,
-              severity       = EXCLUDED.severity,
-              certainty      = EXCLUDED.certainty,
-              urgency        = EXCLUDED.urgency,
-              headline       = EXCLUDED.headline,
-              description    = EXCLUDED.description,
-              instruction    = EXCLUDED.instruction,
-              valid_from     = EXCLUDED.valid_from,
-              valid_to       = EXCLUDED.valid_to,
-              fetched_at     = now();
+            INSERT INTO public.beach_advisory (
+              beach_fid, advisory_key, source, event_type, severity,
+              valid_from, valid_to, label, icon, raw_data, fetched_at
+            ) VALUES (%s, %s, 'nws', %s, %s, %s, %s, %s, '⚠️', %s, now())
+            ON CONFLICT (beach_fid, advisory_key) DO UPDATE SET
+              event_type = EXCLUDED.event_type,
+              severity   = EXCLUDED.severity,
+              valid_from = EXCLUDED.valid_from,
+              valid_to   = EXCLUDED.valid_to,
+              label      = EXCLUDED.label,
+              raw_data   = EXCLUDED.raw_data,
+              fetched_at = now();
         """, (
-            beach_fid, alert_id, p.get("event"),
-            p.get("severity"), p.get("certainty"), p.get("urgency"),
-            p.get("headline"), p.get("description"), p.get("instruction"),
-            valid_from, valid_to,
+            beach_fid, advisory_key, event_type, severity,
+            valid_from, valid_to, event_type, json.dumps(raw),
         ))
 
 

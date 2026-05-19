@@ -119,10 +119,13 @@ def main() -> int:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         where = "" if args.rebuild else "AND translation_source IS NULL"
         cur.execute(f"""
-            SELECT beach_fid, alert_id, nws_event_type, severity,
-                   headline, description, instruction
-              FROM public.beach_active_alert
-             WHERE valid_to > now()
+            SELECT beach_fid, advisory_key, event_type AS nws_event_type, severity,
+                   raw_data->>'headline'    AS headline,
+                   raw_data->>'description' AS description,
+                   raw_data->>'instruction' AS instruction
+              FROM public.beach_advisory
+             WHERE source = 'nws'
+               AND valid_to > now()
                {where}
         """)
         rows = cur.fetchall()
@@ -188,13 +191,13 @@ def main() -> int:
             if args.dry_run:
                 continue
             upd.execute("""
-                UPDATE public.beach_active_alert
+                UPDATE public.beach_advisory
                    SET dog_impact_class       = %(dog_impact_class)s,
                        dog_impact_text        = %(dog_impact_text)s,
                        translation_source     = %(translation_source)s,
                        translation_confidence = %(translation_confidence)s
-                 WHERE beach_fid = %(beach_fid)s AND alert_id = %(alert_id)s
-            """, {**decision, "beach_fid": r["beach_fid"], "alert_id": r["alert_id"]})
+                 WHERE beach_fid = %(beach_fid)s AND advisory_key = %(advisory_key)s
+            """, {**decision, "beach_fid": r["beach_fid"], "advisory_key": r["advisory_key"]})
 
         if not args.dry_run:
             conn.commit()

@@ -79,6 +79,7 @@ begin
     select * from _cand where has_dog order by rank asc limit p_target
   loop
     v_result := v_result || jsonb_build_array(jsonb_build_object(
+      'id',          v_pick.id,
       'source',      v_pick.source,
       'image_url',   v_pick.image_url,
       'thumb_url',   v_pick.thumb_url,
@@ -152,6 +153,7 @@ begin
      limit v_slots_left
   loop
     v_result := v_result || jsonb_build_array(jsonb_build_object(
+      'id',          v_pick.id,
       'source',      v_pick.source,
       'image_url',   v_pick.image_url,
       'thumb_url',   v_pick.thumb_url,

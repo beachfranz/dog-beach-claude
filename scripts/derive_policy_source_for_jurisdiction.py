@@ -3319,6 +3319,63 @@ def main() -> int:
             f.write("COMMIT;\n")
         print(f"\nSQL written: {sql_path}  ({len(sql_blocks)} block(s))")
 
+        # #2: post-apply companion — runs the temporal extractor on the new ps
+        # rows after the curator applies the migration. Per playbook §9.5:
+        # "Extract temporal patterns from NEW ps rows" — was orphaned step
+        # because the auto-emitter didn't surface the ps_ids.
+        post_apply_path = out_dir / f"codify_{label}_{ts}_post_apply.sh"
+        # Collect distinct source_urls from outcomes for the SQL-based ps_id lookup
+        committed_urls = sorted({
+            o.source_url for o in outcomes
+            if o.outcome == OUTCOME_SUCCESS_AUTO_COMMIT and o.source_url
+        })
+        url_list_quoted = ",\n    ".join(f"'{u}'" for u in committed_urls)
+        post_apply = f"""#!/usr/bin/env bash
+# Codify v1 post-apply — auto-generated alongside {sql_path.name}
+# Per playbook §9.5 ([[two-pass-refire-pattern]] does NOT apply for bps INSERTs;
+# the trigger cascade is automatic — but the temporal extractor IS NOT.).
+#
+# Usage: after applying the migration, run this script to extract temporal
+# patterns (seasonal carve-outs, daily windows) from the newly-committed ps rows.
+#
+#   bash {post_apply_path.name}
+#
+# Prereqs: ANTHROPIC_API_KEY + SUPABASE_DB_PASSWORD in scripts/pipeline/.env
+# Cost: ~$0.005-0.01 per ps row via Sonnet 4.5
+set -euo pipefail
+
+cd "$(dirname "$0")/../.."   # cwd → repo root regardless of where script invoked
+set -a; source scripts/pipeline/.env; set +a
+POOLER=$(cat supabase/.temp/pooler-url)
+
+# Resolve new ps_ids by source_url match (must be post-apply — ps_ids
+# are assigned by Postgres at INSERT time, not at codify-v1-emit time)
+NEW_PS_IDS=$(PGCLIENTENCODING=UTF8 PGPASSWORD="$SUPABASE_DB_PASSWORD" psql "$POOLER" -A -t -c "
+  SELECT string_agg(id::text, ',')
+  FROM public.policy_source
+  WHERE source_url IN (
+    {url_list_quoted}
+  )
+")
+
+if [ -z "$NEW_PS_IDS" ]; then
+  echo "No ps rows found matching the {len(committed_urls)} source_urls from this run."
+  echo "Did you apply {sql_path.name} yet? If not: PGCLIENTENCODING=UTF8 psql \\"$POOLER\\" -v ON_ERROR_STOP=1 -f {sql_path.name}"
+  exit 1
+fi
+
+echo "Running temporal extractor on ps_ids: $NEW_PS_IDS"
+python scripts/extract_temporal_from_policy_source.py --ps-ids "$NEW_PS_IDS"
+"""
+        post_apply_path.write_text(post_apply, encoding="utf-8")
+        # chmod +x where supported (no-op on Windows)
+        try:
+            import stat as _stat
+            post_apply_path.chmod(post_apply_path.stat().st_mode | _stat.S_IEXEC | _stat.S_IXGRP | _stat.S_IXOTH)
+        except Exception:
+            pass
+        print(f"Post-apply script: {post_apply_path}  (extracts temporal patterns from new ps rows)")
+
     # #12: write REVIEW SQL (URL-gate-failed + borderline-confidence cases)
     # Wrapped in BEGIN/ROLLBACK so accidental apply is safe — curator changes
     # to COMMIT after verifying each entry.

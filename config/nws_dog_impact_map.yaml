@@ -1,0 +1,221 @@
+# NWS event_type → dog-impact translation (water-conditions Phase 2)
+# Per docs/water_conditions_advisory_spec.md.
+#
+# Edits are safety-critical → PR-review the YAML (not DB-managed).
+#
+# dog_impact_class enum:
+#   skip_swim       — keep dog out of water (rip current, high surf, etc.)
+#   paws_warning    — heat / hot surfaces (sand + asphalt burn)
+#   no_dogs_today   — beach effectively unusable (heavy flood, tsunami, closure)
+#   blowing_sand    — high wind makes sand a hazard for small dogs / eyes
+#   visibility      — fog / low-vis safety
+#   air_quality     — wildfire smoke / PM2.5; bad breathing
+#   fire_risk       — red flag / fire weather; possible park closures
+#   evacuate        — tsunami / extreme storm surge
+#   cold_paws       — extreme cold; ice / snow
+#   review_required — wildcard event types needing per-instance review
+#
+# severity enum (display weight):
+#   minor | moderate | severe | extreme
+
+# ─── Water hazards ─────────────────────────────────────────────────────
+
+- event_type: Rip Current Statement
+  dog_impact_class: skip_swim
+  severity: moderate
+  text: "Rip currents in effect. Keep your dog out of the water through {valid_to_local}."
+
+- event_type: High Surf Advisory
+  dog_impact_class: skip_swim
+  severity: moderate
+  text: "Large surf expected. Skip the swim and stay back from the wave line."
+
+- event_type: High Surf Warning
+  dog_impact_class: skip_swim
+  severity: severe
+  text: "Dangerous surf — keep your dog well back from the water and watch for sneaker waves."
+
+- event_type: Beach Hazards Statement
+  dog_impact_class: review_required
+  severity: moderate
+  text: null
+
+- event_type: Coastal Flood Advisory
+  dog_impact_class: skip_swim
+  severity: moderate
+  text: "Minor coastal flooding possible. Some beach access may be limited."
+
+- event_type: Coastal Flood Watch
+  dog_impact_class: skip_swim
+  severity: moderate
+  text: "Coastal flooding may develop. Beach access could become unusable later today."
+
+- event_type: Coastal Flood Warning
+  dog_impact_class: no_dogs_today
+  severity: severe
+  text: "Coastal flooding in effect. Skip this beach today — access is unsafe."
+
+# ─── Heat ──────────────────────────────────────────────────────────────
+
+- event_type: Heat Advisory
+  dog_impact_class: paws_warning
+  severity: moderate
+  text: "Heat advisory. Sand will burn paws — go at dawn or dusk and bring water."
+
+- event_type: Excessive Heat Warning
+  dog_impact_class: paws_warning
+  severity: severe
+  text: "Excessive heat. Don't bring your dog mid-day — paw burns are likely. Dawn or dusk only."
+
+- event_type: Excessive Heat Watch
+  dog_impact_class: paws_warning
+  severity: moderate
+  text: "Excessive heat possible in the coming days. Plan dawn or dusk visits."
+
+# ─── Wind ──────────────────────────────────────────────────────────────
+
+- event_type: Wind Advisory
+  dog_impact_class: blowing_sand
+  severity: minor
+  text: "Strong wind expected. Blowing sand will sting — small dogs may struggle."
+
+- event_type: High Wind Watch
+  dog_impact_class: blowing_sand
+  severity: moderate
+  text: "High winds possible. Small dogs may struggle; blowing sand is a real hazard."
+
+- event_type: High Wind Warning
+  dog_impact_class: blowing_sand
+  severity: severe
+  text: "Dangerous wind. Skip the beach with small dogs; large dogs use a leash."
+
+- event_type: Gale Warning
+  dog_impact_class: blowing_sand
+  severity: severe
+  text: "Gale-force winds offshore — coastal gusts likely. Small dogs should stay home."
+
+- event_type: Storm Warning
+  dog_impact_class: no_dogs_today
+  severity: severe
+  text: "Storm conditions in effect. Skip the beach today."
+
+# ─── Visibility / fog ──────────────────────────────────────────────────
+
+- event_type: Dense Fog Advisory
+  dog_impact_class: visibility
+  severity: minor
+  text: "Dense fog. Keep your dog on a leash — visibility makes it hard to spot hazards."
+
+- event_type: Freezing Fog Advisory
+  dog_impact_class: visibility
+  severity: minor
+  text: "Freezing fog — slick surfaces plus low visibility. Leash up and tread carefully."
+
+# ─── Cold ──────────────────────────────────────────────────────────────
+
+- event_type: Wind Chill Advisory
+  dog_impact_class: cold_paws
+  severity: minor
+  text: "Wind chill is biting. Limit time; smaller / short-coat dogs may need a jacket."
+
+- event_type: Wind Chill Warning
+  dog_impact_class: cold_paws
+  severity: severe
+  text: "Dangerous wind chill. Skip the beach today, or stay under 10 minutes with a jacket."
+
+- event_type: Freeze Warning
+  dog_impact_class: cold_paws
+  severity: moderate
+  text: "Freeze conditions. Watch paws on icy surfaces; short visits only."
+
+- event_type: Winter Weather Advisory
+  dog_impact_class: cold_paws
+  severity: moderate
+  text: "Winter weather expected — ice / snow may make the beach hazardous."
+
+# ─── Tsunami (rare but critical) ───────────────────────────────────────
+
+- event_type: Tsunami Advisory
+  dog_impact_class: skip_swim
+  severity: severe
+  text: "Tsunami advisory — strong currents, dangerous waves. Stay off the beach today."
+
+- event_type: Tsunami Watch
+  dog_impact_class: skip_swim
+  severity: severe
+  text: "Tsunami watch — conditions may become dangerous. Monitor for updates and avoid the beach."
+
+- event_type: Tsunami Warning
+  dog_impact_class: evacuate
+  severity: extreme
+  text: "TSUNAMI WARNING — evacuate immediately. Move to high ground; the beach is not safe."
+
+# ─── Fire ──────────────────────────────────────────────────────────────
+
+- event_type: Red Flag Warning
+  dog_impact_class: fire_risk
+  severity: severe
+  text: "Red flag fire weather. Forested-coast access may close suddenly; have a backup plan."
+
+- event_type: Fire Weather Watch
+  dog_impact_class: fire_risk
+  severity: moderate
+  text: "Fire weather possible. Monitor for sudden closures if visiting forested-coast beaches."
+
+# ─── Air quality ───────────────────────────────────────────────────────
+
+- event_type: Air Quality Alert
+  dog_impact_class: air_quality
+  severity: moderate
+  text: "Air quality alert — wildfire smoke or other pollutants. Limit time outside, especially for dogs with breathing issues."
+
+# ─── Severe weather ────────────────────────────────────────────────────
+
+- event_type: Severe Thunderstorm Warning
+  dog_impact_class: no_dogs_today
+  severity: severe
+  text: "Severe thunderstorm — lightning hazard on the open beach. Stay home."
+
+- event_type: Severe Thunderstorm Watch
+  dog_impact_class: review_required
+  severity: moderate
+  text: "Severe thunderstorms possible. Watch the radar before heading out."
+
+- event_type: Tornado Warning
+  dog_impact_class: evacuate
+  severity: extreme
+  text: "TORNADO WARNING — shelter immediately."
+
+- event_type: Tornado Watch
+  dog_impact_class: review_required
+  severity: severe
+  text: "Tornadoes possible. Avoid open exposed areas."
+
+# ─── Marine ────────────────────────────────────────────────────────────
+
+- event_type: Special Marine Warning
+  dog_impact_class: skip_swim
+  severity: severe
+  text: "Hazardous marine conditions — strong squalls or waterspouts. Skip the swim."
+
+- event_type: Small Craft Advisory
+  dog_impact_class: skip_swim
+  severity: minor
+  text: "Choppy seas. Larger waves and currents — keep your dog out of the water."
+
+# ─── Wildcards (LLM auto-translate per instance) ───────────────────────
+
+- event_type: Special Weather Statement
+  dog_impact_class: review_required
+  severity: review_required
+  text: null
+
+- event_type: Marine Weather Statement
+  dog_impact_class: review_required
+  severity: review_required
+  text: null
+
+- event_type: Hazardous Weather Outlook
+  dog_impact_class: review_required
+  severity: minor
+  text: null

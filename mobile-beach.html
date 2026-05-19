@@ -578,6 +578,44 @@
   .alt-meta { font-size: 11px; color: var(--text-muted); }
   .alt-row-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 
+  /* Dog-park suggestion card — additive ("Extend the day") OR reframed
+     ("Better fit right now"). Phase d — 2026-05-19. */
+  .dog-park-card-additive {
+    border-left: 3px solid #15803d;
+    background: #f0fdf4;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .dog-park-card-additive:hover { background: #ecfccb; }
+  .dog-park-card-reframed {
+    border-left: 4px solid #b45309;
+    background: #fffbeb;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .dog-park-card-reframed:hover { background: #fef3c7; }
+  .dp-card-heading {
+    font-size: 14px; font-weight: 700; color: var(--text);
+    margin-bottom: 2px;
+  }
+  .dp-card-reason {
+    font-size: 13px; color: var(--text-muted); margin-bottom: 8px;
+  }
+  .dp-card-llm {
+    font-size: 13px; color: var(--text); line-height: 1.5; margin: 6px 0;
+  }
+  .dp-card-llm:empty { display: none; }
+  .dp-card-body { margin-top: 8px; }
+  .dp-name { font-weight: 600; font-size: 14px; color: var(--text); }
+  .dp-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .dp-verified-badge {
+    display: inline-block;
+    background: #d1fae5; color: #15803d;
+    font-size: 11px; font-weight: 600;
+    padding: 2px 7px; border-radius: 4px;
+    margin-top: 6px;
+  }
+
   /* Zone-rules styles now in src/zone-rules-block.css (shared block) */
 
   /* Links block */
@@ -1030,6 +1068,8 @@ function render(data, beachFid) {
   // tight and the visual language uniform.
   leftRail.push(buildAmenitiesAndActivitiesCard(beach, dog_policy, amenities, data.hours_today, data.today));
   leftRail.push(buildAlternativesSection(dog_policy, data.alternatives));
+  // DP suggestion mount — async-filled by loadDogParkSuggestion below.
+  leftRail.push(`<section class="card dog-park-card-mount" id="dog-park-mount" style="display:none"></section>`);
   leftRail.push(buildNowBlurbCard(data.today));
   leftRail.push(buildPackListCard(beach, dog_policy, amenities, data.hours_today));
   leftRail.push(buildDetailsSection(dog_policy));
@@ -1054,6 +1094,7 @@ function render(data, beachFid) {
   // Fire async loads after DOM is mounted.
   loadScoutBlurb(beach, data.today, dog_policy, data.hours_today, amenities);
   loadWeather(beach, data.hours_today, data.today);
+  loadDogParkSuggestion(beach, beachFid, dog_policy, data.hours_today);
   _wireBestTimeClick();
 }
 
@@ -3267,6 +3308,145 @@ function buildLinksSection(beach, beachFid) {
   const rows = [];
   if (!rows.length) return '';
   return `<section class="card"><h2>More info</h2>${rows.join('')}</section>`;
+}
+
+// ── Dog Park suggestion (Phase d — 2026-05-19) ──────────────────────
+// Mirror of beach.html implementation. Additive ("Extend the day") OR
+// reframed ("Better fit right now") based on trigger tier.
+
+async function loadDogParkSuggestion(beach, beachFid, dogPolicy, hoursToday) {
+  const mount = document.getElementById('dog-park-mount');
+  if (!mount) return;
+
+  let dp = null;
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_nearest_dog_park_for_beach`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_beach_fid: parseInt(beachFid, 10) }),
+    });
+    if (!r.ok) { mount.remove(); return; }
+    const rows = await r.json();
+    dp = rows?.[0];
+  } catch { mount.remove(); return; }
+
+  if (!dp) { mount.remove(); return; }
+
+  const trigger = _detectDpTriggerTier(dogPolicy, hoursToday);
+  mount.style.display = '';
+  mount.outerHTML = buildDogParkCard(dp, trigger, beach);
+
+  loadDpLlmCopy(beach, beachFid, dp, trigger);
+}
+
+function _detectDpTriggerTier(dogPolicy, hoursToday) {
+  if (!dogPolicy) return 'none';
+  if (dogPolicy.dogs_allowed === 'no' ||
+      (dogPolicy.has_on_leash === false && dogPolicy.has_off_leash === false)) {
+    return 'no_dogs';
+  }
+  if (dogPolicy.dogs_prohibited_start && dogPolicy.dogs_prohibited_end) {
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const nowHm = `${hh}:${mm}`;
+    const s = dogPolicy.dogs_prohibited_start;
+    const e = dogPolicy.dogs_prohibited_end;
+    if (s <= e ? (nowHm >= s && nowHm < e)
+               : (nowHm >= s || nowHm < e)) return 'prohibited_now';
+  }
+  return 'none';
+}
+
+function buildDogParkCard(dp, trigger, beach) {
+  const isReframed = trigger !== 'none';
+  const verified = dp.source === 'operator_posted';
+  const distLabel = dp.distance_miles != null
+    ? `${dp.distance_miles.toFixed(1)} mi away` : '';
+  const hours = dp.hours_text
+              || (dp.hours_open_time && dp.hours_close_time
+                  ? `${dp.hours_open_time}–${dp.hours_close_time}` : '');
+  const leashMap = {
+    off_leash:               'off-leash',
+    off_leash_voice_control: 'off-leash (voice control)',
+    on_leash:                'on-leash',
+  };
+  const leash = leashMap[dp.leash_policy] || dp.leash_policy || '';
+
+  const operatorLine = verified && dp.operator_short
+    ? `<div class="dp-verified-badge">✓ Verified by ${escHtml(dp.operator_short)}</div>` : '';
+
+  const reasonMap = {
+    no_dogs:        'Dogs aren\'t allowed at this beach.',
+    closed:         'This beach is closed.',
+    prohibited_now: 'Dogs aren\'t allowed here right now.',
+  };
+  const reasonLine = reasonMap[trigger]
+    ? `<div class="dp-card-reason">${escHtml(reasonMap[trigger])}</div>` : '';
+
+  const cardClass = isReframed ? 'dog-park-card-reframed' : 'dog-park-card-additive';
+  const heading = isReframed ? '🐕 Better fit right now' : '🐕 Extend the day';
+
+  const mapsUrl = (dp.dp_lat != null && dp.dp_lon != null)
+    ? `https://maps.apple.com/?daddr=${dp.dp_lat},${dp.dp_lon}`
+    : null;
+
+  const metaBits = [leash, hours, distLabel].filter(Boolean).join(' · ');
+  const clickAttr = mapsUrl ? ` onclick="window.open('${mapsUrl}','_blank','noopener')"` : '';
+
+  return `<section class="card ${cardClass}"${clickAttr}>
+    <div class="dp-card-heading">${heading}</div>
+    ${reasonLine}
+    <div class="dp-card-llm" id="dp-card-llm">…</div>
+    <div class="dp-card-body">
+      <div class="dp-name">${escHtml(dp.dp_name)}</div>
+      <div class="dp-meta">${escHtml(metaBits)}</div>
+      ${operatorLine}
+    </div>
+  </section>`;
+}
+
+async function loadDpLlmCopy(beach, beachFid, dp, trigger) {
+  const llmEl = document.getElementById('dp-card-llm');
+  if (!llmEl) return;
+  const cacheKey = `dp-llm-${beachFid}-${dp.dp_fid}-${trigger}`;
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) { llmEl.textContent = cached; return; }
+  } catch {}
+
+  const dist = dp.distance_miles != null ? dp.distance_miles.toFixed(1) : '?';
+  const hours = dp.hours_text || '';
+  let question;
+  if (trigger === 'none') {
+    question = `User is at the ${beach.display_name} detail page. Nearby dog park: ${dp.dp_name} (${dist} mi away${hours ? ', ' + hours : ''}). In ONE short conversational sentence, suggest extending their visit by hitting the dog park as a complement to the beach. Friendly tone. Don't restate the dog park name. Don't start with "Consider".`;
+  } else if (trigger === 'no_dogs') {
+    question = `User wants to visit ${beach.display_name} but dogs aren't allowed there. Nearby dog park: ${dp.dp_name} (${dist} mi away${hours ? ', ' + hours : ''}). In ONE short conversational sentence, redirect them to the dog park as the right move today. Don't restate the dog park name; do mention the distance.`;
+  } else if (trigger === 'closed') {
+    question = `${beach.display_name} is closed today. Nearby dog park: ${dp.dp_name} (${dist} mi away${hours ? ', ' + hours : ''}). In ONE short sentence, suggest the dog park instead. Don't restate the dog park name.`;
+  } else if (trigger === 'prohibited_now') {
+    question = `User is looking at ${beach.display_name} right now but dogs aren't allowed here at this hour. Nearby dog park: ${dp.dp_name} (${dist} mi away${hours ? ', open ' + hours : ''}). In ONE short sentence, redirect them now and mention they could return to the beach later. Don't restate the dog park name.`;
+  }
+
+  try {
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/beach-chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ANON_KEY}` },
+      body: JSON.stringify({ arena_group_id: parseInt(beachFid, 10), question, conversation_history: [] }),
+    });
+    if (!r.ok) { llmEl.textContent = ''; return; }
+    const data = await r.json();
+    const text = (data.answer || '').trim();
+    if (text) {
+      llmEl.textContent = text;
+      try { localStorage.setItem(cacheKey, text); } catch {}
+    } else {
+      llmEl.textContent = '';
+    }
+  } catch { llmEl.textContent = ''; }
 }
 
 

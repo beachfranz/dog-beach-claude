@@ -535,6 +535,11 @@
         <option value="scored">Scored only</option>
         <option value="all">Full catalog</option>
       </select>
+      <span class="sort-label">Find</span>
+      <select class="sort-select compact" id="dest-select" onchange="onDestinationChange(this.value)">
+        <option value="beach">Beaches</option>
+        <option value="dog_park">Dog parks</option>
+      </select>
     </div>
     <div class="loc-row" id="loc-row">
       <span class="location-label" id="location-label">📍 Detecting location…</span>
@@ -587,6 +592,18 @@
     try { return localStorage.getItem(CATALOG_KEY) || 'scored'; }
     catch { return 'scored'; }
   })();
+
+  // Destination: 'beach' (default) | 'dog_park'. URL ?dest= takes
+  // precedence; falls back to localStorage; else 'beach'.
+  const DEST_KEY = 'find.destination';
+  let destination = (() => {
+    try {
+      const urlDest = new URLSearchParams(window.location.search).get('dest');
+      if (urlDest === 'beach' || urlDest === 'dog_park') return urlDest;
+      return localStorage.getItem(DEST_KEY) || 'beach';
+    } catch { return 'beach'; }
+  })();
+  let dogParkCache = null; // [{...DP row}, ...] — fetched on first DP render
 
   // Server-bounded nearest-N set. Client filters/sorts within this set.
   // GIST index on beaches.location makes the server query O(log N) at
@@ -736,6 +753,149 @@
   // Passes lat/lng+limit when the user has a resolved location, so the
   // server returns only the nearest NEAREST_LIMIT beaches (GIST-indexed
   // KNN). Without coords, returns the full active set for score sorting.
+  // ── Dog parks (Phase c — 2026-05-19) ──────────────────────────────
+  async function loadDogParks() {
+    if (dogParkCache) return dogParkCache;
+    const params = new URLSearchParams();
+    if (userLat !== null && userLng !== null) {
+      params.set('p_lat',   String(userLat));
+      params.set('p_lng',   String(userLng));
+    }
+    params.set('p_limit', String(NEAREST_LIMIT));
+    const res  = await fetch(
+      `${SUPABASE_URL}/rest/v1/rpc/nearest_dog_parks?${params}`,
+      {
+        method:  'POST',
+        headers: {
+          'apikey':        ANON_KEY,
+          'Authorization': `Bearer ${ANON_KEY}`,
+          'Content-Type':  'application/json',
+        },
+        body: JSON.stringify({
+          p_lat:   userLat,
+          p_lng:   userLng,
+          p_limit: NEAREST_LIMIT,
+          p_state: null,
+        }),
+      }
+    );
+    const rows = await res.json();
+    if (Array.isArray(rows)) dogParkCache = rows;
+    return rows ?? [];
+  }
+
+  function buildDogParkCard(dp, rank) {
+    const safeName = (dp.name || 'Unnamed dog park').replace(/'/g, "\\'");
+    const verified = dp.source === 'operator_posted';
+    const leashLabel = ({
+      off_leash:               '🐕 Off-leash',
+      off_leash_voice_control: '🗣️ Off-leash (voice control)',
+      on_leash:                '🦮 On-leash',
+      mixed:                   '↔️ Mixed',
+    })[dp.leash_policy] || dp.leash_policy || '—';
+
+    const hours = dp.hours_text
+                || (dp.hours_open_time && dp.hours_close_time
+                    ? `${dp.hours_open_time}–${dp.hours_close_time}`
+                    : 'hours unknown');
+
+    const distChip = dp.distance_miles != null
+      ? `<div class="window-sub status-none dist-link" onclick="event.stopPropagation();openDirections(${dp.lat},${dp.lon},'${safeName}',${dp.distance_miles})">🚗 ${dp.distance_miles.toFixed(1)} mi</div>`
+      : '';
+
+    const operatorLine = verified && dp.operator_short
+      ? `<div class="window-sub status-go">Verified: ${dp.operator_short}</div>`
+      : !verified
+      ? `<div class="window-sub status-none" style="opacity:0.6">Default — not operator-verified</div>`
+      : '';
+
+    const chips = [];
+    if (dp.has_fence)          chips.push('<span class="chip chip-go">🚧 Fenced</span>');
+    if (dp.has_drinking_water) chips.push('<span class="chip chip-go">💧 Water</span>');
+    if (dp.surface)            chips.push(`<span class="chip">${dp.surface}</span>`);
+    const chipsHtml = chips.length
+      ? `<div class="chips">${chips.join('<span class="chip-sep">·</span>')}</div>`
+      : '';
+
+    const status = verified ? 'go' : 'advisory';
+
+    return `
+      <div class="day-card status-${status}" onclick="window.location.href='detail.html?dog_park_fid=${dp.fid}'">
+        <div class="day-left">
+          <div class="rank-label">#${rank}</div>
+          <div class="day-score">
+            <span class="day-score-value">🐾</span>
+            <span class="day-score-label">DP</span>
+          </div>
+        </div>
+        <div class="day-content">
+          <div class="beach-name">${dp.name || 'Unnamed dog park'}</div>
+          <div class="window-row">
+            <div class="window-sub status-${verified ? 'go' : 'none'}">${leashLabel} · ${hours}</div>
+            ${distChip}
+          </div>
+          ${operatorLine}
+          ${chipsHtml}
+        </div>
+        <div class="chevron">›</div>
+      </div>`;
+  }
+
+  async function sortAndRenderDogParks() {
+    document.getElementById('top-card').innerHTML   = '<div class="skeleton"></div>';
+    document.getElementById('beach-list').innerHTML =
+      Array(4).fill('<div class="skeleton"></div>').join('');
+    document.getElementById('product-chips').style.display = 'none';
+    document.getElementById('day-pills').style.display     = 'none';
+
+    let dps;
+    try { dps = await loadDogParks(); }
+    catch {
+      document.getElementById('beach-list').innerHTML =
+        '<div class="no-data">Failed to load dog parks.</div>';
+      return;
+    }
+
+    if (!dps.length) {
+      document.getElementById('top-card').innerHTML   = '';
+      document.getElementById('beach-list').innerHTML = '<div class="no-data">No dog parks nearby.</div>';
+      return;
+    }
+
+    // Leash filter applies (off_leash/mixed/on_leash)
+    let filtered = dps;
+    if (leashFilter === 'off_leash')  filtered = dps.filter(d => d.leash_policy === 'off_leash' || d.leash_policy === 'off_leash_voice_control');
+    else if (leashFilter === 'on_leash') filtered = dps.filter(d => d.leash_policy === 'on_leash');
+    else if (leashFilter === 'mixed')    filtered = dps.filter(d => d.leash_policy === 'mixed');
+
+    if (!filtered.length) {
+      document.getElementById('top-card').innerHTML   = '';
+      document.getElementById('beach-list').innerHTML = '<div class="no-data">No dog parks match that leash filter.</div>';
+      return;
+    }
+
+    // Sort: distance if known; else verified-first then name
+    const sorted = [...filtered].sort((a, b) => {
+      if (a.distance_miles != null && b.distance_miles != null) return a.distance_miles - b.distance_miles;
+      const av = a.source === 'operator_posted' ? 0 : 1;
+      const bv = b.source === 'operator_posted' ? 0 : 1;
+      if (av !== bv) return av - bv;
+      return (a.name || '').localeCompare(b.name || '');
+    }).slice(0, DISPLAY_LIMIT);
+
+    const [first, ...rest] = sorted;
+    document.getElementById('top-card').innerHTML   = buildDogParkCard(first, 1);
+    document.getElementById('beach-list').innerHTML = rest.map((d, i) => buildDogParkCard(d, i + 2)).join('');
+
+    // Replace scout blurb with static DP-mode caption (no LLM call)
+    const blurb = document.getElementById('scout-blurb');
+    blurb.classList.remove('loading');
+    const verifiedCount = filtered.filter(d => d.source === 'operator_posted').length;
+    blurb.textContent = verifiedCount
+      ? `${filtered.length} dog parks nearby — ${verifiedCount} with operator-verified rules.`
+      : `${filtered.length} dog parks nearby. Defaults assume off-leash inside fence (most US dog parks).`;
+  }
+
   async function loadBeachesForDate(date) {
     // Cache key includes catalogMode so toggling Scored/All re-fetches
     // instead of returning the prior result.
@@ -780,6 +940,12 @@
 
   // ── Sort and render ────────────────────────────────────────────────
   async function sortAndRender() {
+    if (destination === 'dog_park') {
+      await sortAndRenderDogParks();
+      return;
+    }
+    // Beach flow — restore day pills + chips that DP mode hides
+    document.getElementById('day-pills').style.display = '';
     if (selectedDate === 'now') {
       await sortAndRenderNow();
       return;
@@ -1190,6 +1356,20 @@
     sortAndRender();
   }
 
+  function onDestinationChange(val) {
+    destination = val;
+    try { localStorage.setItem(DEST_KEY, val); } catch { /* storage may be blocked */ }
+    // Reflect in URL without reloading
+    try {
+      const url = new URL(window.location.href);
+      if (val === 'beach') url.searchParams.delete('dest');
+      else url.searchParams.set('dest', val);
+      window.history.replaceState({}, '', url);
+    } catch {}
+    dogParkCache = null;  // refetch on next DP render
+    sortAndRender();
+  }
+
   function matchesLeashFilter(beach) {
     if (leashFilter === 'any') return true;
 
@@ -1363,8 +1543,19 @@
   // Pre-fetch today so TDY pill is instant; warms beach list for NOW mode
   const _todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   loadBeachesForDate(_todayISO);
-  sortAndRenderNow();   // NOW is default — fetch immediately
-  loadAggregatedChips();
+
+  // Restore destination select to persisted/URL state; if dog_park, render DPs
+  (function initDestSelect() {
+    const el = document.getElementById('dest-select');
+    if (el) el.value = destination;
+  })();
+
+  if (destination === 'dog_park') {
+    sortAndRenderDogParks();
+  } else {
+    sortAndRenderNow();   // NOW is default for beaches — fetch immediately
+    loadAggregatedChips();
+  }
 </script>
 <script>
   window.CHAT_CONFIG = {

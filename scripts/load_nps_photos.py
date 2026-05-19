@@ -36,20 +36,29 @@ Env:
   NPS_API_KEY  — free, instant signup at developer.nps.gov
 """
 from __future__ import annotations
+import sys
+sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+
 import argparse
 import json
 import os
 import re
-import sys
 import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+import truststore                # use OS cert store (Win Python 3.14 certifi gap)
+truststore.inject_into_ssl()
+
 import psycopg2
 import psycopg2.extras
+import requests
 from dotenv import load_dotenv
+
+_HTTP = requests.Session()
+_HTTP.headers.update({"User-Agent": "DogBeachScout-temp"})
 
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
@@ -76,14 +85,13 @@ def fetch_park_gallery_assets(park_code: str, limit: int = 50) -> list[dict]:
         "limit": limit,
         "api_key": NPS_API_KEY,
     }
-    url = f"{NPS_BASE}/multimedia/galleries/assets?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    url = f"{NPS_BASE}/multimedia/galleries/assets"
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            d = json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        print(f"  HTTP {e.code} on parkCode={park_code}: {e.reason}", flush=True)
-        return []
+        r = _HTTP.get(url, params=params, headers={"User-Agent": UA}, timeout=30)
+        if r.status_code != 200:
+            print(f"  HTTP {r.status_code} on parkCode={park_code}: {r.text[:120]}", flush=True)
+            return []
+        d = r.json()
     except Exception as e:
         print(f"  fetch fail parkCode={park_code}: {e}", flush=True)
         return []
@@ -106,11 +114,11 @@ def fetch_park_gallery_assets(park_code: str, limit: int = 50) -> list[dict]:
 
 def _fetch_all_nps_parks() -> list[dict]:
     """One-shot fetch of every NPS park via /parks API. ~470 parks total."""
-    url = f"{NPS_BASE}/parks?limit=600&api_key={NPS_API_KEY}"
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        d = json.loads(r.read())
-    return d.get("data", []) or []
+    url = f"{NPS_BASE}/parks"
+    r = _HTTP.get(url, params={"limit": 600, "api_key": NPS_API_KEY},
+                  headers={"User-Agent": UA}, timeout=30)
+    r.raise_for_status()
+    return r.json().get("data", []) or []
 
 
 def _haversine_km(lat1, lon1, lat2, lon2):

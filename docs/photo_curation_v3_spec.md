@@ -99,16 +99,12 @@ For each beach, the top-N photos (per tier cap) are picked by this score. Higher
 ### Hard exclusions (never enter candidate pool)
 
 - `hidden_at IS NOT NULL`
-- `distance_m IS NOT NULL AND distance_m > 500` (500m cap at pre-vision rank; 450m hard cutoff at load per [[photo-distance-450m]] still applies upstream)
-- Title matches `NEGATIVE_RE`:
-  ```
-  gull|tern|plover|sandpiper|larus|crab|anemone|barnacle|specimen|
-  crassadoma|meliscaeva|megapenthes|eristalis|evacanthus|dolichovespula|
-  car|truck|train|RV|parking|highway|sedan|suv|
-  map|chart|satellite|aerial|infographic|
-  festival|tournament|triathlon|race|marathon|wedding|parade|
-  inaturalist
-  ```
+- Distance gate (geo-tagged photos only):
+  - Default: `distance_m > 500` → excluded
+  - **Rare-keyword titles** (dog/surf/sunset/path/etc. — see RARE_KEYWORDS): `distance_m > 2000` → excluded. This is the dog-loose-radius escape per [[loose-radius-dog-filter]] — validated at Del Mar Dog Beach 2026-05-12 where event/cluster photos at the parking lot or trail head (~700-1500m) carry real signal.
+- Title matches `NEGATIVE_RE` — auto-compiled from `NEGATIVE_TERMS` in `_photo_filters.py` (127 entries: vehicles, wildlife-specimens, birds, Latin genus names, maps/diagrams, event content). **Marine mammals deliberately excluded from the list** (whale/dolphin/porpoise are beach spectacle, not specimen clutter — Franz 2026-05-19 "drop the mammals").
+
+`POSITIVE_TERMS_DOG`, `POSITIVE_TERMS_GENERIC`, `POSITIVE_TERMS`, and `NEGATIVE_TERMS` all live in `scripts/_photo_filters.py` as the canonical single source. Loaders import from there (no duplication).
 
 ### Score formula
 
@@ -296,7 +292,47 @@ Discovery query above produces the actual target list per state. Build loaders f
 
 ---
 
-## 7. Implementation sequence (collapsed-architecture revision)
+## 7. Retroactive filter for pre-existing photos
+
+The collapsed architecture (loaders apply the unified filter at ingest) is forward-looking — any new photo loaded via the refactored Flickr / Wikimedia loaders is filter-clean.
+
+But there are **~13,700 photos already in `beach_photos` from prior loader runs** that pre-date the unified filter. They were ingested under the OLD per-source filters. Before paying Haiku $ to vision-tag them at v3, we want to skip the ones that wouldn't survive the new filter (over-tier-cap, negative-keyword title, >500m).
+
+### Approach: `v3_skipped` sentinel
+
+`scripts/filter_non_curated_for_retag.py`:
+1. Pulls all non-curated MVP+ photos missing v3 tags
+2. Groups by beach; fetches `scoring_tier` + `dogs_allowed`
+3. Calls `_photo_filters.pre_vision_rank()` per beach
+4. For **rejected** rows: sets `source_meta.v3_skipped = true` (+ `v3_skipped_at`, `v3_skip_reason`)
+5. Vision tagger's WHERE clause excludes `source_meta->>'v3_skipped' = 'true'`
+
+Curated photos are never marked (curator-touched is sacred). The sentinel is one-way — re-runs only evaluate not-yet-marked rows. Idempotent.
+
+### Result (2026-05-19 dry-run on 7,106 non-curated MVP+ photos)
+
+| | Count | % |
+|---|---:|---:|
+| Would re-tag (survives filter) | 5,021 | 71% |
+| Would skip (over-cap / negative-kw / >500m) | 2,085 | 29% |
+
+Cost saving: ~$6 (re-tag $15 vs $21 unfiltered) just for non-curated MVP+. Bigger savings on the full corpus.
+
+### Recommended targeted re-tag scope
+
+For MVP+ launch, re-tag two narrow populations rather than the full corpus:
+
+| Population | Why | Photos | Cost |
+|---|---|---:|---:|
+| Curated set (curator-kept) | Trains the new `has_path`/`has_vehicle` model weights on positives | 1,091 (of 1,747; 656 already v3) | $3.30 |
+| Non-curated MVP+ post-filter | Enables eligibility for auto-curate selection on MVP+ beaches | 5,021 (filtered from 7,106) | $15.06 |
+| **Total** | | **6,112** | **~$18.40** |
+
+vs ~$38 for full-corpus re-tag. Same model quality (positives drive learning); MVP+ launch quality identical.
+
+---
+
+## 8. Implementation sequence (collapsed-architecture revision)
 
 1. **Vision schema bump** — edit `scripts/load_photo_vision_tags.py`: add `has_path` + `has_vehicle` to `_EXTRACT_PROMPT`, bump `SCHEMA_VERSION = "v3"`. Commit.
 2. **Pre-vision ranking helper** — new module/function `scripts/_photo_filters.py::pre_vision_rank(photos, beach_meta) -> ranked_list_capped` implementing the score formula + per-tier caps + rare-keyword override + 500m exclusion. Unit-testable.

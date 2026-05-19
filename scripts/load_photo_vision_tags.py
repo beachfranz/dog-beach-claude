@@ -42,6 +42,10 @@ import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
 
+# v3 pre-vision rank helpers (photo curation v3 — Franz 2026-05-19)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _photo_filters import pre_vision_rank  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
 POOLER = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
@@ -261,6 +265,95 @@ def tag_photo(image_url: str, beach_name: str, retries: int = 3
 
 # ─── Main loop ────────────────────────────────────────────────────────────
 
+def rank_and_mark(conn, source_filter_sql: str = "", source_params: tuple = (),
+                  chunk_beaches: int = 100) -> dict:
+    """Pre-vision rank pass (v3): for each beach with untagged-or-v2 photos,
+    apply pre_vision_rank() and mark each photo's source_meta.v3_eligible
+    = true|false. Only v3_eligible=true photos enter the main tag loop.
+
+    Marks are sticky within v3 — re-running rank-only only re-evaluates
+    photos still missing v3_eligible (so freshly-loaded photos get ranked
+    without re-walking the whole corpus).
+
+    Returns counts dict {beaches, evaluated, selected, skipped}.
+    """
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("set statement_timeout = '120s'")
+
+    # Pull all photos without v3_eligible mark, grouped per beach.
+    # Title text concatenates attribution + source_meta.title/caption/description.
+    cur.execute(f"""
+        select bp.id, bp.arena_group_id as fid, bp.source, bp.distance_m,
+               bp.attribution, bp.captured_at, bp.curated_at, bp.source_meta,
+               g.scoring_tier, p.dogs_allowed
+          from public.beach_photos bp
+          join public.beaches_gold g on g.fid = bp.arena_group_id
+          left join public.beach_dog_policy p on p.arena_group_id = g.fid
+         where bp.image_url is not null
+           and bp.hidden_at is null
+           and (bp.source_meta ->> 'v3_eligible') is null
+           {source_filter_sql}
+         order by bp.arena_group_id, bp.id
+    """, source_params)
+    rows = cur.fetchall()
+    if not rows:
+        return {"beaches": 0, "evaluated": 0, "selected": 0, "skipped": 0}
+
+    # Group by beach
+    beaches: dict[int, list[dict]] = {}
+    for r in rows:
+        beaches.setdefault(r["fid"], []).append(dict(r))
+
+    # Build title_text + curator_touched per photo
+    def title_text(p):
+        sm = p.get("source_meta") or {}
+        parts = [p.get("attribution") or ""]
+        for k in ("title", "caption", "description"):
+            v = sm.get(k)
+            if isinstance(v, str): parts.append(v)
+        return " ".join(parts)
+
+    counts = {"beaches": len(beaches), "evaluated": 0, "selected": 0, "skipped": 0}
+    upd = conn.cursor()
+    processed_beaches = 0
+
+    for fid, photos in beaches.items():
+        # Normalize each photo dict for pre_vision_rank
+        for p in photos:
+            p["title_text"]      = title_text(p)
+            p["curator_touched"] = p.get("curated_at") is not None
+            p["photographer"]    = p.get("attribution")  # used as photog key
+
+        beach_meta = {
+            "scoring_tier": photos[0].get("scoring_tier"),
+            "dogs_allowed": photos[0].get("dogs_allowed"),
+        }
+        selected = pre_vision_rank(photos, beach_meta)  # photographer_kr=None for v1
+        selected_ids = {p["id"] for p in selected}
+
+        # Mark each photo
+        for p in photos:
+            eligible = p["id"] in selected_ids
+            upd.execute("""
+                update public.beach_photos
+                   set source_meta = coalesce(source_meta, '{}'::jsonb)
+                                     || jsonb_build_object('v3_eligible', %s::boolean)
+                 where id = %s
+            """, (eligible, p["id"]))
+            counts["evaluated"] += 1
+            if eligible: counts["selected"] += 1
+            else:        counts["skipped"]  += 1
+
+        processed_beaches += 1
+        if processed_beaches % chunk_beaches == 0:
+            conn.commit()
+            print(f"  rank-only: {processed_beaches}/{len(beaches)} beaches  "
+                  f"selected={counts['selected']}  skipped={counts['skipped']}",
+                  flush=True)
+    conn.commit()
+    return counts
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--audit", help="Comma-separated fids — print tags, no write")
@@ -277,11 +370,29 @@ def main():
                          "(e.g. 'flickr' or 'flickr,ccc'). Lets two processes run "
                          "concurrently on disjoint sources — one fast (flickr URL-source) "
                          "and one slow (wikimedia base64 + serial lock).")
+    ap.add_argument("--rank-only", action="store_true",
+                    help="v3 pre-vision rank pass — mark each photo's "
+                         "source_meta.v3_eligible per Franz photo-curation-v3 caps. "
+                         "Run this BEFORE the chunked tag pass; no LLM calls.")
     args = ap.parse_args()
 
     conn = psycopg2.connect(**PG)
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("set statement_timeout = '120s'")
+
+    # ── v3 rank-only pass ────────────────────────────────────────────
+    if args.rank_only:
+        sf, sp = "", ()
+        if args.source:
+            sources = [s.strip() for s in args.source.split(",") if s.strip()]
+            sf, sp = "and bp.source = any(%s)", (sources,)
+        print(f"v3 rank-only pass starting (source filter: {args.source or 'all'})…",
+              flush=True)
+        c = rank_and_mark(conn, sf, sp)
+        print(f"\nDone. {c['beaches']} beaches, {c['evaluated']} photos evaluated, "
+              f"{c['selected']} selected for tagging, {c['skipped']} skipped (cap).",
+              flush=True)
+        return
 
     # Build target set.
     if args.audit:
@@ -303,6 +414,9 @@ def main():
             sources = [s.strip() for s in args.source.split(",") if s.strip()]
             source_filter = "and bp.source = any(%s)"
             source_params = (sources,)
+        # v3 cap filter (Franz 2026-05-19): only tag photos marked v3_eligible.
+        # Backward compat: if v3_eligible is missing entirely (haven't run
+        # --rank-only yet), default-include — so old workflow still works.
         cur.execute(f"""
             select bp.id, bp.image_url, bp.thumb_url, bp.source_meta,
                    coalesce(g.display_name_override, g.name) as beach_name
@@ -313,6 +427,7 @@ def main():
                and (source_meta -> 'vision' ->> 'model' is null
                     or source_meta -> 'vision' ->> 'model' != '{MODEL}'
                     or coalesce(source_meta -> 'vision' ->> 'schema_version', 'v1') != '{SCHEMA_VERSION}')
+               and coalesce((source_meta ->> 'v3_eligible')::boolean, true) = true
              order by bp.id
              limit %s
         """, source_params + (args.chunk_size,))

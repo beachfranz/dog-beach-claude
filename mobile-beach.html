@@ -164,6 +164,22 @@
    * Same shape and label sizing as amenities/activities. */
   .combo-chip.caution-warn { background: rgba(251,191,36,0.53); border-color: rgba(180,83,9,0.42); }
   .combo-chip.caution-no_go { background: rgba(239,68,68,0.45); border-color: rgba(153,27,27,0.42); }
+  /* Discrete Cautions card — same combo-chip shape, clickable to expand.
+   * Header label mirrors combo-row-label so the card reads as one row
+   * of the amenities/activities/cautions visual family. */
+  .cautions-card .combo-row { flex-wrap: wrap; justify-content: flex-start; }
+  .cautions-card button.combo-chip {
+    font: inherit; color: inherit; cursor: pointer;
+  }
+  .cautions-card button.combo-chip[aria-expanded="true"] {
+    outline: 2px solid rgba(15,23,42,0.55); outline-offset: -1px;
+  }
+  .caution-detail {
+    margin-top: 8px; padding: 8px 10px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: rgba(0,0,0,0.03); font-size: 12px; line-height: 1.4;
+  }
+  .caution-detail[hidden] { display: none; }
 
   /* Map modal — full-screen-ish popup with OSRM route + distance/time. */
   .map-modal {
@@ -3361,31 +3377,55 @@ async function loadWaterConditionAdvisories(beachFid) {
     return;
   }
 
-  const sevToStatus = {
-    extreme: 'no_go',   severe: 'no_go',
-    moderate: 'caution', minor: 'advisory',
+  // Severity → combo-chip tint class (same palette as amenities/activities).
+  const sevToClass = {
+    extreme: 'caution-no_go', severe: 'caution-no_go',
+    moderate: 'caution-warn', minor: '',
   };
 
-  const rows = items.map(a => {
-    const status = sevToStatus[a.severity] || 'caution';
-    const tip = a.dog_impact_text || a.label || '';
-    const icon = a.icon || '⚠️';
-    const value = a.value || a.event_type || '';
-    return `
-      <li class="advisory-row advisory-${status}" data-tip="${escHtml(tip)}">
-        <span class="advisory-icon">${icon}</span>
-        <span class="advisory-body">
-          <span class="advisory-headline">
-            <span class="advisory-label">${escHtml(a.label || a.event_type || 'Advisory')}</span>
-            <span class="advisory-value">${escHtml(value)}</span>
-          </span>
-          ${a.dog_impact_text ? `<span class="advisory-time">${escHtml(a.dog_impact_text)}</span>` : ''}
-        </span>
-      </li>`;
+  // Compact chip strip — same combo-chip shape used elsewhere on this card.
+  // Click expands the chip and shows its dog-impact text below the row.
+  const chips = items.map((a, i) => {
+    const cls   = sevToClass[a.severity] ?? 'caution-warn';
+    const icon  = a.icon || '⚠️';
+    const label = a.label || a.event_type || 'Advisory';
+    return `<button type="button" class="combo-chip ${cls}"
+                    data-cidx="${i}" aria-expanded="false">
+      <span class="combo-icon">${icon}</span>
+      <div class="combo-label">${escHtml(label)}</div>
+    </button>`;
   }).join('');
 
   card.style.display = '';
-  card.innerHTML = `<h2>Cautions</h2><ul class="advisory-list">${rows}</ul>`;
+  card.innerHTML = `
+    <div class="combo-row-label">Cautions</div>
+    <div class="combo-row">${chips}</div>
+    <div class="caution-detail" id="caution-detail" hidden></div>`;
+
+  const row    = card.querySelector('.combo-row');
+  const detail = card.querySelector('#caution-detail');
+  row.addEventListener('click', (e) => {
+    const btn = e.target.closest('.combo-chip');
+    if (!btn) return;
+    const wasOpen = btn.getAttribute('aria-expanded') === 'true';
+    row.querySelectorAll('.combo-chip[aria-expanded="true"]')
+       .forEach(t => t.setAttribute('aria-expanded', 'false'));
+    if (wasOpen) {
+      detail.hidden = true; detail.innerHTML = '';
+      return;
+    }
+    btn.setAttribute('aria-expanded', 'true');
+    const a = items[parseInt(btn.dataset.cidx, 10)];
+    const text  = a.dog_impact_text || a.label || a.event_type || '';
+    const value = a.value || a.event_type || '';
+    detail.innerHTML = `
+      <div style="font-weight:600; margin-bottom:2px;">
+        ${escHtml(a.label || a.event_type || 'Advisory')}
+        ${value ? `<span style="font-weight:500; color:var(--text-muted); margin-left:6px;">${escHtml(value)}</span>` : ''}
+      </div>
+      <div>${escHtml(text)}</div>`;
+    detail.hidden = false;
+  });
 }
 
 function _detectDpTriggerTier(dogPolicy, hoursToday) {

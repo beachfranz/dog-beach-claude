@@ -218,6 +218,39 @@
    * filter out at the JS layer until the user-feedback affordance
    * lands (project_amenity_user_feedback.md). */
 
+  /* Cautions card — same visual language as amenities (compact tile
+   * grid, icon + short label). Click expands a detail panel below
+   * the grid with the full dog-impact text. Severity tints mirror
+   * .amenity.rule-* color semantics. */
+  .cautions-card h2 { margin-bottom: 6px; }
+  .caution-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px;
+  }
+  @media (min-width: 480px) {
+    .caution-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+  .caution-tile {
+    display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+    border: 1px solid var(--border); border-radius: 6px;
+    font-size: 12px; background: var(--card);
+    text-align: left; cursor: pointer; font-family: inherit;
+    color: inherit; width: 100%;
+  }
+  .caution-tile:hover { filter: brightness(0.97); }
+  .caution-tile[aria-expanded="true"] { outline: 2px solid rgba(15,23,42,0.55); outline-offset: -1px; }
+  .caution-tile .amenity-icon { font-size: 14px; flex-shrink: 0; }
+  .caution-tile .amenity-label { white-space: normal; line-height: 1.2; }
+  /* Severity tints: severe/no_go = red, moderate/caution = amber, minor/advisory = neutral */
+  .caution-tile.sev-no_go    { background: rgba(239,68,68,0.45);  border-color: rgba(153,27,27,0.42); }
+  .caution-tile.sev-caution  { background: rgba(251,191,36,0.53); border-color: rgba(180,83,9,0.42); }
+  .caution-tile.sev-advisory { background: rgba(0,0,0,0.04); }
+  .caution-detail {
+    margin-top: 8px; padding: 8px 10px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--card); font-size: 12px; line-height: 1.4;
+  }
+  .caution-detail[hidden] { display: none; }
+
   /* Weather card — compact icon + chips row, mimics index.html. */
   .weather-card .weather-now {
     display: flex; flex-direction: column; align-items: center;
@@ -2692,45 +2725,60 @@ async function loadWaterConditionAdvisories(beachFid) {
     items = await r.json();
   } catch { return; }
   if (!Array.isArray(items) || items.length === 0) {
-    // No active advisories → hide the (empty) mount card cleanly
     card.style.display = 'none';
     return;
   }
   card.style.display = '';
 
-  // Severity → UI status mapping (matches existing buildCautionsSection)
-  const sevToStatus = {
-    extreme: 'no_go',   severe: 'no_go',
-    moderate: 'caution', minor: 'advisory',
+  // Severity → UI class mapping
+  const sevToClass = {
+    extreme: 'sev-no_go',   severe: 'sev-no_go',
+    moderate: 'sev-caution', minor: 'sev-advisory',
   };
 
-  // Build rows in same shape as buildCautionsSection's metricItems
-  const rows = items.map(a => {
-    const status = sevToStatus[a.severity] || 'caution';
-    const tip = a.dog_impact_text || a.label || '';
-    const icon = a.icon || '⚠️';
-    const value = a.value || a.event_type || '';
-    return `
-      <li class="advisory-row advisory-${status}" data-tip="${escHtml(tip)}">
-        <span class="advisory-icon">${icon}</span>
-        <span class="advisory-body">
-          <span class="advisory-headline">
-            <span class="advisory-label">${escHtml(a.label || a.event_type || 'Advisory')}</span>
-            <span class="advisory-value">${escHtml(value)}</span>
-          </span>
-          ${a.dog_impact_text ? `<span class="advisory-time">${escHtml(a.dog_impact_text)}</span>` : ''}
-        </span>
-      </li>`;
+  // Compact tiles — same shape as amenities (icon + short label).
+  // Detail text shows below the grid on click.
+  const tiles = items.map((a, i) => {
+    const cls   = sevToClass[a.severity] || 'sev-caution';
+    const icon  = a.icon || '⚠️';
+    const label = a.label || a.event_type || 'Advisory';
+    return `<button type="button" class="caution-tile ${cls}"
+                    data-cidx="${i}" aria-expanded="false">
+      <span class="amenity-icon">${icon}</span>
+      <span class="amenity-label">${escHtml(label)}</span>
+    </button>`;
   }).join('');
 
-  // If the Cautions card already exists, append to its list.
-  // If it doesn't (no existing cautions triggered), create the card.
-  let list = card.querySelector('.advisory-list');
-  if (!list) {
-    card.innerHTML = `<h2>Cautions</h2><ul class="advisory-list">${rows}</ul>`;
-  } else {
-    list.insertAdjacentHTML('beforeend', rows);
-  }
+  card.innerHTML = `<h2>Cautions</h2>
+    <div class="caution-grid">${tiles}</div>
+    <div class="caution-detail" id="caution-detail" hidden></div>`;
+
+  const grid   = card.querySelector('.caution-grid');
+  const detail = card.querySelector('#caution-detail');
+  grid.addEventListener('click', (e) => {
+    const btn = e.target.closest('.caution-tile');
+    if (!btn) return;
+    const wasOpen = btn.getAttribute('aria-expanded') === 'true';
+    // Collapse any open tile (single-select detail panel)
+    grid.querySelectorAll('.caution-tile[aria-expanded="true"]')
+        .forEach(t => t.setAttribute('aria-expanded', 'false'));
+    if (wasOpen) {
+      detail.hidden = true;
+      detail.innerHTML = '';
+      return;
+    }
+    btn.setAttribute('aria-expanded', 'true');
+    const a = items[parseInt(btn.dataset.cidx, 10)];
+    const text = a.dog_impact_text || a.label || a.event_type || '';
+    const value = a.value || a.event_type || '';
+    detail.innerHTML = `
+      <div style="font-weight:600; margin-bottom:2px;">
+        ${escHtml(a.label || a.event_type || 'Advisory')}
+        ${value ? `<span style="font-weight:500; color:var(--text-muted); margin-left:6px;">${escHtml(value)}</span>` : ''}
+      </div>
+      <div>${escHtml(text)}</div>`;
+    detail.hidden = false;
+  });
 }
 
 

@@ -83,14 +83,14 @@ def select_targets(args) -> list[dict]:
     if args.fids:
         ids = [int(s) for s in args.fids.split(",")]
         rows = supa("/rest/v1/beaches_gold",
-                    params={"select": "fid,name,display_name_override,lat,lon,state",
+                    params={"select": "fid,name,display_name_override,lat,lon,state,scoring_tier",
                             "fid": f"in.({','.join(map(str, ids))})",
                             "is_active": "eq.true"})
         return _shape(rows or [])
     if args.states:
         states = [s.strip().upper() for s in args.states.split(",")]
         rows = supa("/rest/v1/beaches_gold",
-                    params={"select": "fid,name,display_name_override,lat,lon,state",
+                    params={"select": "fid,name,display_name_override,lat,lon,state,scoring_tier",
                             "is_active": "eq.true",
                             "is_scoreable": "eq.true",
                             "state": f"in.({','.join(states)})",
@@ -98,7 +98,7 @@ def select_targets(args) -> list[dict]:
         return _shape(rows or [])
     if args.pilot or args.full:
         rows = supa("/rest/v1/beaches_gold",
-                    params={"select": "fid,name,display_name_override,lat,lon,state",
+                    params={"select": "fid,name,display_name_override,lat,lon,state,scoring_tier",
                             "is_active": "eq.true",
                             "is_scoreable": "eq.true",
                             "order": "fid.asc",
@@ -109,10 +109,27 @@ def select_targets(args) -> list[dict]:
 
 
 def _shape(rows):
-    return [{"fid": r["fid"],
-             "name": r.get("display_name_override") or r["name"],
-             "lat": r.get("lat"), "lng": r.get("lon"), "state": r.get("state")}
-            for r in rows if r.get("lat") is not None and r.get("lon") is not None]
+    # Fetch dogs_allowed per beach via get_beach_info (needed for v3 cap rule).
+    # Keeps the loader self-contained — same pattern as load_flickr_photos.py.
+    out = []
+    for r in rows:
+        if r.get("lat") is None or r.get("lon") is None:
+            continue
+        try:
+            info = supa("/rest/v1/rpc/get_beach_info", method="POST", body={"p_fid": r["fid"]}) or {}
+            dp = info.get("dog_policy") or {}
+            dogs_allowed = dp.get("dogs_allowed")
+        except Exception:
+            dogs_allowed = None
+        out.append({
+            "fid": r["fid"],
+            "name": r.get("display_name_override") or r["name"],
+            "lat": r.get("lat"), "lng": r.get("lon"),
+            "state": r.get("state"),
+            "scoring_tier": r.get("scoring_tier"),
+            "dogs_allowed": dogs_allowed,
+        })
+    return out
 
 
 # ─── Commons API ──────────────────────────────────────────────────────────
@@ -347,16 +364,29 @@ def rank_and_pick(geo_results: list[dict], info_map: dict[int, dict],
                   beach_lat: float, beach_lng: float,
                   max_radius_m: int, top_n: int,
                   blocked_artists: set[str] | None = None,
-                  beach_name: str = "") -> list[dict]:
-    """Composite = relevance + name_match + proximity * 2.0
-       See project_photo_scoring_spec.md.
+                  beach_name: str = "",
+                  beach_meta: dict | None = None) -> list[dict]:
+    """Pick the best Wikimedia Commons candidates per the unified v3
+    ingest filter. Refactored 2026-05-19 per Franz collapsed-architecture
+    decision — same pattern as load_flickr_photos.pick_best().
 
-    Two-stage sort:
-      1. Selection — top N by composite (best photos win).
-      2. Display   — re-sort kept set by distance asc (name_match desc tiebreak).
-                     Curator UX wants closest-first scan order.
+    All source-side picking logic (negative regex, rare-keyword override,
+    source weight, tier cap, dog-loose-radius) lives in
+    _photo_filters.pre_vision_rank(). MIN_WIDTH removed — vision tagger's
+    quality_issue flag catches genuinely bad images.
+
+    Kept WM-specific filters:
+      - Extension/MIME check (skip SVG/PDF/video that aren't photos)
+      - max_radius_m enforced by pre_vision_rank's 500m default (this
+        arg now informational; dog-loose extends to 2km automatically)
+
+    Args:
+      beach_meta — {scoring_tier, dogs_allowed} for tier cap
+      top_n      — DEPRECATED; cap is from beach_meta. Back-compat only.
     """
-    scored = []
+    from _photo_filters import pre_vision_rank  # local import to avoid cycle
+
+    enriched = []
     for g in geo_results:
         pid = g.get("pageid")
         info = info_map.get(pid)
@@ -365,35 +395,44 @@ def rank_and_pick(geo_results: list[dict], info_map: dict[int, dict],
         ext = _ext_of(title)
         if ext in SKIP_EXTS: continue
         if PHOTO_EXTS and ext and ext not in PHOTO_EXTS: continue
-        if (info.get("width") or 0) < MIN_WIDTH: continue
         mime = info.get("mime") or ""
         if mime and not mime.startswith("image/"): continue
-        d = haversine_m(beach_lat, beach_lng, g.get("lat") or 0, g.get("lon") or 0)
-        if d > max_radius_m: continue
+        d = int(haversine_m(beach_lat, beach_lng, g.get("lat") or 0, g.get("lon") or 0))
 
         extmd = info.get("extmetadata") or {}
         desc = (extmd.get("ImageDescription", {}) or {}).get("value") or ""
         desc = _re_global.sub(r"<[^>]+>", "", desc)
 
-        # Skip blocklisted photographers (set by past low-relevance pattern)
-        if blocked_artists:
-            artist_raw = _meta(extmd, "Artist") or ""
-            if artist_raw and artist_raw.lower() in blocked_artists:
-                continue
+        # Skip blocklisted photographers
+        artist_raw = _meta(extmd, "Artist") or ""
+        if blocked_artists and artist_raw and artist_raw.lower() in blocked_artists:
+            continue
 
-        rel       = _relevance_score(title, desc)
-        name_m    = _name_match_score(beach_name, title)
-        proximity = 1.0 - d / max(max_radius_m, 1)
-        composite = rel + name_m + proximity * 2.0
+        rel    = _relevance_score(title, desc)
+        name_m = _name_match_score(beach_name, title)
 
-        scored.append({**g, "_info": info, "_distance_m": d, "_title": title,
-                       "_relevance":  rel,
-                       "_name_match": name_m,
-                       "_composite":  composite})
-    # Selection: top N by composite (distance tiebreak)
-    scored.sort(key=lambda x: (-x["_composite"], x["_distance_m"]))
-    kept = scored[:top_n]
-    # Display: re-sort kept set by distance asc (name_match desc tiebreak)
+        enriched.append({
+            **g,
+            "_info":          info,
+            "_distance_m":    d,
+            "_title":         title,
+            "_relevance":     rel,
+            "_name_match":    name_m,
+            "_composite":     rel + name_m + (1.0 - d / max(max_radius_m, 1)) * 2.0,
+            # Normalized keys for shared scorer
+            "source":          "wikimedia",
+            "distance_m":      d,
+            "title_text":      title + " " + (desc or "") + " " + (artist_raw or ""),
+            "captured_at":     None,
+            "curator_touched": False,
+            "photographer":    artist_raw,
+        })
+
+    bm = beach_meta or {"scoring_tier": None, "dogs_allowed": "yes"}
+    kept = pre_vision_rank(enriched, bm)
+    if top_n is not None and len(kept) > top_n:
+        kept = kept[:top_n]
+    # Display sort: closest-first (curator UX preference, Franz 2026-05-11)
     kept.sort(key=lambda x: (x["_distance_m"], -x.get("_name_match", 0)))
     return kept
 
@@ -521,7 +560,9 @@ def main():
             info_map = commons_imageinfo([g["pageid"] for g in geo])
             picked = rank_and_pick(geo, info_map, b["lat"], b["lng"],
                                    args.radius, args.per_beach, blocked,
-                                   beach_name=b.get("name", ""))
+                                   beach_name=b.get("name", ""),
+                                   beach_meta={"scoring_tier": b.get("scoring_tier"),
+                                               "dogs_allowed": b.get("dogs_allowed")})
             if not picked:
                 no_photos += 1
                 replace_commons(b["fid"], [])

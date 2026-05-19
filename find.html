@@ -756,32 +756,36 @@
   // ── Dog parks (Phase c — 2026-05-19) ──────────────────────────────
   async function loadDogParks() {
     if (dogParkCache) return dogParkCache;
-    const params = new URLSearchParams();
-    if (userLat !== null && userLng !== null) {
-      params.set('p_lat',   String(userLat));
-      params.set('p_lng',   String(userLng));
-    }
-    params.set('p_limit', String(NEAREST_LIMIT));
-    const res  = await fetch(
-      `${SUPABASE_URL}/rest/v1/rpc/nearest_dog_parks?${params}`,
-      {
-        method:  'POST',
-        headers: {
-          'apikey':        ANON_KEY,
-          'Authorization': `Bearer ${ANON_KEY}`,
-          'Content-Type':  'application/json',
-        },
-        body: JSON.stringify({
-          p_lat:   userLat,
-          p_lng:   userLng,
-          p_limit: NEAREST_LIMIT,
-          p_state: null,
-        }),
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/rpc/nearest_dog_parks`,
+        {
+          method:  'POST',
+          headers: {
+            'apikey':        ANON_KEY,
+            'Authorization': `Bearer ${ANON_KEY}`,
+            'Content-Type':  'application/json',
+          },
+          body: JSON.stringify({
+            p_lat:   userLat,
+            p_lng:   userLng,
+            p_limit: NEAREST_LIMIT,
+            p_state: null,
+          }),
+        }
+      );
+      if (!res.ok) {
+        const txt = await res.text();
+        console.warn('nearest_dog_parks HTTP', res.status, txt);
+        return [];
       }
-    );
-    const rows = await res.json();
-    if (Array.isArray(rows)) dogParkCache = rows;
-    return rows ?? [];
+      const rows = await res.json();
+      if (Array.isArray(rows)) dogParkCache = rows;
+      return rows ?? [];
+    } catch (err) {
+      console.warn('nearest_dog_parks fetch failed:', err);
+      return [];
+    }
   }
 
   function buildDogParkCard(dp, rank) {

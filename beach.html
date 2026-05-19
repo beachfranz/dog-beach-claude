@@ -944,11 +944,6 @@ function render(data, beachFid) {
   const main = [];
   main.push(buildOverviewCard(beach, data.description));
   main.push(buildAlternativesSection(dog_policy, data.alternatives));
-  // DP suggestion mount — async-filled by loadDogParkSuggestion below.
-  // Removed entirely if the beach has no nearest_dog_park within 25mi
-  // OR if the fetch fails. Otherwise renders additive OR reframed mode
-  // depending on trigger (no_dogs / closed / dogs_prohibited window now).
-  main.push(`<section class="card dog-park-card-mount" id="dog-park-mount" style="display:none"></section>`);
   // Photos + Map share a row: photos take most of the width, map is
   // square. Either alone takes the full row. Renders only if at least
   // one is present.
@@ -961,6 +956,12 @@ function render(data, beachFid) {
     main.push(`<div class="photo-map-row">${photoCol}${mapCol}</div>`);
   }
   main.push(buildScoutCard(data.today, beach, dog_policy, amenities, data.hours_today));
+  // DP suggestion mount — async-filled by loadDogParkSuggestion below.
+  // Removed entirely if the beach has no nearest_dog_park within 25mi
+  // OR if the fetch fails. Otherwise renders additive ("extend the day")
+  // OR reframed ("better fit") depending on trigger. Sits next to Pack
+  // List so the "what's next" prompts cluster together.
+  main.push(`<section class="card dog-park-card-mount" id="dog-park-mount" style="display:none"></section>`);
   main.push(buildPackListCard(beach, dog_policy, amenities, data.hours_today));
   main.push(buildDetailsSection(dog_policy));
   main.push(buildLinksSection(beach, beachFid));

@@ -185,7 +185,12 @@ def precheck_jurisdiction(unit: JurisdictionUnit, state: str) -> JurisdictionUni
         "--state-of", state,
     ]
     try:
-        rc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=90)
+        # Windows defaults to cp1252; force UTF-8 since the derive script
+        # uses non-ASCII glyphs (→ ≥ ≤) in its outcome lines. Without this
+        # the parser sees a UnicodeDecodeError + every outcome bucket lands
+        # in "other" instead of "defer_state_baseline_covers".
+        rc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True,
+                            encoding="utf-8", errors="replace", timeout=90)
     except subprocess.TimeoutExpired:
         unit.precheck_outcome = "timeout"
         return unit

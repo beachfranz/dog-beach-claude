@@ -91,6 +91,26 @@ The "418 stranded" framing in the v1 draft was TOO SIMPLE. The actual picture:
 
 **Plus** ~1,500 dog parks (per [[dogpark-rules-are-operator-posted]]) where Operate is the PRIMARY pipeline because there's no codified-statute alternative — these are largely uncovered today.
 
+### Phase 1c audit findings (2026-05-18 evening, via scripts/audit_operator_extractions.py)
+
+Of 22 operators with extractions ≥ pass_c_confidence 0.7:
+
+| Classification | Count | Meaning |
+|---|---:|---|
+| `corrupt` | **15** | Extraction source_url's domain has zero token overlap with operator name. Pattern: Orange County → rpvca.gov; Channel Islands NP → delmar.ca.us; USCG → huntingtonbeachca.gov; Fresno County → cityofpacifica.org. Looks like a SQL JOIN or Cartesian product in the original extractor paired operator_ids with random extraction source URLs. |
+| `duplicative_dirty` | 1 | PSHDB (same as the corruption we caught earlier — its op extraction pointed to Rosie's). Already resolved by today's PSHDB curator-fix migration. |
+| `low_conf` | 6 | pass_c_confidence below 0.7 threshold |
+| `net_new` | **0** | **NO clean bridge candidates from existing extractions** |
+| `duplicative_clean` | 0 | — |
+
+**Headline:** the 418-row extraction infrastructure is broken at the operator-to-source attribution level. There is no "bridge the 418" path that produces real Operate coverage — the data is too corrupted. ALL net-new Operate coverage from here requires either:
+
+1. Re-extraction from scratch with correct operator-URL pairing
+2. Per-operator curator-fixed bridges (like today's PSHDB pattern at ps_287)
+3. Phase 2 beach_operator backfill so re-extraction has a proper attribution path
+
+The 4 well-bridged ps rows (post-Phase-1a backfill: ps_20/22/233/287) are the entire real Operate-pipeline state. Phase 1 is structurally complete.
+
 ### Code state
 
 | Asset | Status |

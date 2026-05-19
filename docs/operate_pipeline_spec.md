@@ -64,11 +64,32 @@ The Cascade consensus engine ranks:
 | `operator_dogs_policy` | **418** | 3-pass LLM extraction output (pass_a default_rule, pass_b temporal, pass_c exceptions) | **NO — disconnected** |
 | `operator_policy_extractions` | **722** | Raw extraction artifacts (per-source fetches, per-pass token counts) | NO — disconnected |
 | `operator_policy_exceptions` | **393** | Per-exception details (off-leash carve-outs, seasonal closures) | NO — disconnected |
-| `policy_source` (subtype='operator_posted_policy') | **11** | Operator rules surfaced to consensus engine | YES |
+| `policy_source` (subtype='operator_posted_policy') | **12** (was 11; +PSHDB curator-fix 2026-05-18) | Operator rules surfaced to consensus engine | YES — but see audit below; only **4 are real operator policies** |
 | `policy_source` (subtype='superintendents_compendium') | 6 (today's NPS shipments) | NPS unit-specific operator-style overrides | YES |
 | `policy_source` (subtype='agency_administrative_policy') | 67 (CA) + today's new | Agency-published operator pages (parks.ca.gov/Dogs, fws.gov refuge pages) | YES |
 
-**The gap:** 418 extracted operator-dogs-policy rows + 722 raw extractions exist, but only 11 made it through to `policy_source` for the cascade. There's ~1,500 data points of prior Operate-extraction work that the consumer surface can't see.
+**The gap (REVISED 2026-05-18 evening after PSHDB Phase 1 apply + 12-row audit):**
+
+The "418 stranded" framing in the v1 draft was TOO SIMPLE. The actual picture:
+
+**Of 12 `operator_posted_policy` ps rows (audit by classification):**
+
+| Classification | Count | Rows | Meaning |
+|---|---:|---|---|
+| `well_bridged` (has FK + has beaches) | **1** | ps_287 PSHDB (today's curator-fix) | Properly attributed + driving consensus |
+| `bridged_but_no_op_fk` (has beaches but issuing_operator_id NULL) | **3** | ps_20 PSHDB-original, ps_22 LB Rosie's, ps_233 Trinidad Coastal Land Trust | Real operator policies driving consensus, just lacking FK metadata |
+| `op_fk_but_no_beaches` | 0 | — | — |
+| `orphaned` (extraction-infrastructure leftovers, not real policies) | **8** | ps_21 EBRPD Crown (real, no beaches), ps_26/28/33/34/35/38/42 — labeled "Park URL Extractor", "Operator Dogs Policy v1", "Section Research Extractor", "Operator Policy Exceptions v1", "Research (curator)", "Beach Policy V2 Dogs" | Meta/placeholder rows from extraction infrastructure setup; NOT real operator policies. Should be CLEANED UP. |
+
+**REAL operator-pipeline coverage today: 4 beaches** (Dog Beach fid 6212, 2 Rosie's Dog Beach fids, 1 Houda Point/Camel Rock fid via Trinidad Coastal Land Trust).
+
+**The 418 stranded extractions are PARTIALLY DUPLICATIVE** of the 4 real ps rows above:
+- PSHDB (operator_id=7) has BOTH an extraction (operator_dogs_policy row, corrupt) AND a ps row (ps_id=20, correct)
+- The 418 extractions don't 1:1 map to "operators with zero ps coverage"
+
+**Real Operate gap, sharpened:** operators with ZERO ps rows AND ZERO bps links today AND a real operator-posted policy worth extracting. The cohort is smaller than 418; needs audit per-operator to identify true gap.
+
+**Plus** ~1,500 dog parks (per [[dogpark-rules-are-operator-posted]]) where Operate is the PRIMARY pipeline because there's no codified-statute alternative — these are largely uncovered today.
 
 ### Code state
 
@@ -299,22 +320,26 @@ Outputs:
 
 ## 7. Migration plan from today's state
 
-**Phase 0 — audit** (1-2 hours):
-1. Locate the existing 3-pass extractor script (probably in `scripts/`)
-2. Verify it runs against operator_dogs_policy rows + understand its CLI
-3. Audit `beach_operator` for the 3 existing rows — what entities, what scope
-4. Sample operator rows by type — understand the 152 operators (cities/counties dominate per the type breakdown above)
+**Phase 0 — audit** (1-2 hours) — PARTIALLY DONE 2026-05-18:
+1. ✓ Located + tested the bridge mechanism (`scripts/bridge_operator_to_cascade.py`)
+2. ✓ Sampled `beach_operator` 3 rows: 1 HBDB (PSHDB→Dog Beach) + 2 Crystal Cove (Conservancy→Crystal Cove SB) — small but coherent
+3. ✓ Audited 12 `operator_posted_policy` ps rows (see §2 audit table): 4 real + 8 cleanup candidates
+4. ✗ Locate + verify existing 3-pass extractor script — still TODO
+5. ✗ Per-operator audit of the 418 extractions vs existing ps rows — still TODO
 
-**Phase 1 — bridge (3-5 hours):**
-1. Build `bridge_operator_to_cascade()` (Python script OR SQL trigger)
-2. For all 418 operator_dogs_policy rows w/ pass_c_confidence >= 0.7, generate policy_source + beach_policy_source rows
-3. Apply (with Franz per-batch approval); cascade fires; expect significant zone_rules diff
-4. Quality-gate Op-3 + Op-4 to verify
+**Phase 1 — bridge** — MOSTLY DONE, FINDING IS BIGGER THAN ANTICIPATED (2026-05-18):
+1. ✓ Bridge script built (`scripts/bridge_operator_to_cascade.py`)
+2. ✓ PSHDB curator-fixed migration applied (ps_id=287) → fid 6212 Dog Beach properly attributed; consensus already correct via pre-existing ps_id=20
+3. ⚠ Mechanical bridge of 418 extractions is NOT the right next move — the audit revealed many extractions are corrupt + many operators already have ps rows. Phase 1 EVOLVES INTO:
+   - 1a. **Cleanup** the 8 orphaned "Extractor"/"v1" ps rows (DELETE or label as deprecated)
+   - 1b. **Backfill `issuing_operator_id`** on the 3 real-but-FK-missing ps rows (ps_20, ps_22, ps_233)
+   - 1c. **Per-operator audit** of the 418 extractions: which are corrupt? which duplicate existing ps? which represent net-new operator coverage?
+   - 1d. **Targeted curator-fixed bridges** like today's PSHDB pattern for net-new operators that have extractable policy
 
 **Phase 2 — beach_operator backfill (5-10 hours):**
-1. The 3-row `beach_operator` table is the bottleneck for Phase 1's value (no beach links → no consumer-surface impact)
+1. The 3-row `beach_operator` table remains the bottleneck for scaling Operate
 2. Build a backfill from PAD-US `mng_name` + OSM `operator` tag + curator-fed CSV
-3. Target: every active beach has ≥1 beach_operator link OR is covered by codify polygon
+3. Target: every active beach with a NAMED operator has ≥1 beach_operator link
 4. Per-state batch via existing tools
 
 **Phase 3 — dog-park Operate (10-20 hours):**
@@ -414,11 +439,16 @@ This single row demonstrates the bridge pattern that needs to scale to 418 rows.
 
 ## 11. Success metrics (when to call Operate "done v1")
 
-- All 418 existing extractions bridged → policy_source + bps rows (Phase 1)
+REVISED 2026-05-18 evening after the audit:
+
+- All **REAL** operator_posted_policy ps rows have `issuing_operator_id` FK populated (today: 1 of 4; target 4 of 4)
+- 8 orphaned "Extractor/v1/Research" ps rows cleaned up (deleted or labeled deprecated)
+- Per-operator audit of 418 extractions complete: classify clean / corrupt / duplicative
+- Net-new operator coverage from curator-fixed bridges (target: 20-30 operators, primarily NPS Compendium-style + named-beach operators that today have ZERO ps rows)
 - ≥ 90% of MVP+ state (CA/OR/WA) beaches have either a codify ps OR an operate ps (Phase 2)
 - Dog parks in MVP+ states have ≥ 50% Operate coverage (Phase 3 — many won't have published rules)
 - Quality gate Op-3 passes: when operator and codify disagree on a beach, consensus picks operator (per-entity override correctness)
-- Quality gate Op-4 = 100% bridged (no orphan extractions)
+- Quality gate Op-4 sharpened: NO orphan ps rows of subtype='operator_posted_policy' that are "extractor placeholders"
 
 ---
 

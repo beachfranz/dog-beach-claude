@@ -1067,6 +1067,9 @@ function render(data, beachFid) {
   // The standalone Cautions card has been folded in to keep the page
   // tight and the visual language uniform.
   leftRail.push(buildAmenitiesAndActivitiesCard(beach, dog_policy, amenities, data.hours_today, data.today));
+  // Cautions mount — async-filled by loadWaterConditionAdvisories below.
+  // Hidden when no active advisories.
+  leftRail.push(`<section class="card cautions-card" style="display:none"></section>`);
   leftRail.push(buildAlternativesSection(dog_policy, data.alternatives));
   // DP suggestion mount — async-filled by loadDogParkSuggestion below.
   leftRail.push(`<section class="card dog-park-card-mount" id="dog-park-mount" style="display:none"></section>`);
@@ -1095,6 +1098,7 @@ function render(data, beachFid) {
   loadScoutBlurb(beach, data.today, dog_policy, data.hours_today, amenities);
   loadWeather(beach, data.hours_today, data.today);
   loadDogParkSuggestion(beach, beachFid, dog_policy, data.hours_today);
+  loadWaterConditionAdvisories(beachFid);
   _wireBestTimeClick();
 }
 
@@ -2133,22 +2137,12 @@ function _wireBestTimeClick() {
 // (icon + tiny label), color-coded by severity. Subset of the items the
 // standalone Cautions card builds; we just relabel to single words.
 function _cautionTiles(today, dogPolicy, hoursToday, beach) {
-  const items = _cautionItems(today, dogPolicy, hoursToday, beach);
-  // Single-word labels for the tiny chip caption.
-  // Caution chip labels — keep terse, but spell out the *direction* of
-  // the concern where the metric name alone is ambiguous (Tide isn't a
-  // hazard; high tide is).
-  const SHORT = {
-    'Tide': 'High tide', 'Wind': 'Wind', 'Rain': 'Rain', 'Crowd': 'Crowd',
-    'Temp': 'Temp', 'UV': 'UV', 'Sand': 'Sand', 'Asphalt': 'Asphalt',
-    'Bacteria': 'Bact.', 'Dogs prohibited': 'No dogs',
-  };
-  return items.map(it => ({
-    icon: it.icon,
-    short: SHORT[it.label] || it.label,
-    status: it.status, // 'no_go' | 'caution'
-    tip: it.time ? `${it.label} · ${it.value} · ${it.time}` : `${it.label} · ${it.value}`,
-  }));
+  // Unified per Franz 2026-05-19: cautions now flow from beach_advisory
+  // RPC via loadWaterConditionAdvisories (async). Combo card's Cautions
+  // row hides when this returns []. _cautionItems is still used by the
+  // Scout LLM prompt below — leave it intact.
+  void today; void dogPolicy; void hoursToday; void beach;
+  return [];
 }
 
 // Build the raw item list (icon/label/status/value/time). Shared between
@@ -3340,6 +3334,58 @@ async function loadDogParkSuggestion(beach, beachFid, dogPolicy, hoursToday) {
   mount.outerHTML = buildDogParkCard(dp, trigger, beach);
 
   loadDpLlmCopy(beach, beachFid, dp, trigger);
+}
+
+// ── Water-condition advisories (NWS + marine + deterministic) ───────
+// Per docs/water_conditions_advisory_spec.md + Franz 2026-05-19 unified
+// beach_advisory store. Mirrors beach.html (desktop). Fills the
+// cautions-card mount; hides it when no advisories.
+async function loadWaterConditionAdvisories(beachFid) {
+  const card = document.querySelector('.cautions-card');
+  if (!card) return;
+  let items = [];
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_beach_advisories`, {
+      method:  'POST',
+      headers: {
+        apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_fid: parseInt(beachFid, 10), p_horizon_hours: 24 }),
+    });
+    if (!r.ok) return;
+    items = await r.json();
+  } catch { return; }
+  if (!Array.isArray(items) || items.length === 0) {
+    card.style.display = 'none';
+    return;
+  }
+
+  const sevToStatus = {
+    extreme: 'no_go',   severe: 'no_go',
+    moderate: 'caution', minor: 'advisory',
+  };
+
+  const rows = items.map(a => {
+    const status = sevToStatus[a.severity] || 'caution';
+    const tip = a.dog_impact_text || a.label || '';
+    const icon = a.icon || '⚠️';
+    const value = a.value || a.event_type || '';
+    return `
+      <li class="advisory-row advisory-${status}" data-tip="${escHtml(tip)}">
+        <span class="advisory-icon">${icon}</span>
+        <span class="advisory-body">
+          <span class="advisory-headline">
+            <span class="advisory-label">${escHtml(a.label || a.event_type || 'Advisory')}</span>
+            <span class="advisory-value">${escHtml(value)}</span>
+          </span>
+          ${a.dog_impact_text ? `<span class="advisory-time">${escHtml(a.dog_impact_text)}</span>` : ''}
+        </span>
+      </li>`;
+  }).join('');
+
+  card.style.display = '';
+  card.innerHTML = `<h2>Cautions</h2><ul class="advisory-list">${rows}</ul>`;
 }
 
 function _detectDpTriggerTier(dogPolicy, hoursToday) {

@@ -2015,6 +2015,41 @@ def emit_migration_sql(jc: JurisdictionClassification, sc: ScopeCheck,
         f"   WHERE citation LIKE {esc(citation_prefix + '%')}\n"
         f");\n"
     )
+
+    # beach_policy_source INSERT (critical fix 2026-05-18 — auto-emitter was
+    # producing ORPHANED ps rows w/ no beach links → no cascade → zero coverage
+    # gain. The hand-built OAR migration this morning had bps inserts because
+    # I knew tenet #5; the auto-emitter didn't.)
+    #
+    # Spatial-join pattern: attach the rule to all active beaches whose geom
+    # intersects the jurisdiction's polygon (city → jurisdictions table, county
+    # → counties table, etc.). region_name defaults to NULL; curator can
+    # supersede per-zone with a separate migration.
+    if jc.polygon_table and jc.polygon_key is not None:
+        polygon_key_column = "id" if jc.polygon_table != "counties" else "geoid"
+        evidence = (cr.evidence_quote or cr.full_text or "")[:600]
+        parts.append(
+            f"-- beach_policy_source: spatial-join attach to all beaches in jurisdiction polygon\n"
+            f"INSERT INTO public.beach_policy_source\n"
+            f"  (beach_fid, policy_source_id, section, rule, operative_status,\n"
+            f"   evidence_verbatim, evidence_url, region_name, extracted_at, last_verified)\n"
+            f"SELECT b.fid, ps.id, 'sand', {esc(cr.rule)},\n"
+            f"       'operative'::operative_status,\n"
+            f"       {esc(evidence)},\n"
+            f"       ps.source_url, NULL, NOW(), NOW()\n"
+            f"FROM public.beaches_gold b\n"
+            f"CROSS JOIN public.policy_source ps\n"
+            f"JOIN public.{jc.polygon_table} p ON ST_Intersects(b.geom, p.geom)\n"
+            f"WHERE ps.citation LIKE {esc(citation_prefix + '%')}\n"
+            f"  AND b.is_active AND b.state = {esc(jc.state)}\n"
+            f"  AND p.{polygon_key_column} = {esc(str(jc.polygon_key))}\n"
+            f"ON CONFLICT (beach_fid, policy_source_id, section) DO NOTHING;\n"
+        )
+    else:
+        parts.append(
+            f"-- WARNING: no polygon for {jc.name}; bps rows NOT auto-generated.\n"
+            f"-- Curator must hand-write beach_policy_source INSERT for this jurisdiction.\n"
+        )
     return "\n".join(parts) + "\n"
 
 

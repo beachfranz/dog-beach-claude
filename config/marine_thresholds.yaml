@@ -1,0 +1,49 @@
+# Open-Meteo marine threshold layer (water-conditions Phase 3)
+# Per docs/water_conditions_advisory_spec.md.
+#
+# Edge-band values that trigger advisories. Middle-band values feed the
+# "real-time appeal" layer (separate surface — not safety).
+#
+# V1: single thresholds. Per-dog-size variants are an open call for v2
+# (Franz 2026-05-19: defer to v2; structure extensible).
+#
+# Units: SI throughout (m, °C, m/s).
+#
+# Sand surface temp note: this section gets populated by the derivation
+# step in fetch_marine_forecast.py (air_temp + solar + cloud + albedo).
+# Existing hot-asphalt path in the UI already uses 50°C as the paw-burn
+# threshold; we mirror that.
+
+sst:
+  too_cold_swim_c: 13      # SST < this → "swim not advised" (cold-water shock risk)
+  paw_cold_c: 5            # ambient water/sand < this → "cold paws on damp sand"
+  too_warm_swim_c: 27      # mostly inland lakes; HAB / algal bloom risk
+  # Output dog-impact texts (mirror NWS YAML style)
+  too_cold_text: "Water temp {sst_c}°C — too cold for swimming. Keep your dog out of the water today."
+  paw_cold_text: "Cold ground — limit time on damp sand; small dogs may need booties."
+  too_warm_text: "Water warm enough that algal blooms become a risk — confirm with the local water-quality advisory before swimming."
+
+wave_height:
+  swim_advisory_m: 1.2     # > this → "skip the swim"
+  swim_advisory_text: "Surf is up ({wave_height_m}m). Skip the swim — currents and waves are too strong for safe dog play."
+
+sand_surface:
+  paw_burn_c: 50           # > this → "hot asphalt" pattern (existing precedent)
+  paw_burn_text: "Sand is paw-burn hot. Go at dawn or dusk; bring water and check the sand with your hand first."
+
+wind:
+  small_dog_advisory_ms: 12        # > this → "blowing sand / small-dog windchill"
+  small_dog_advisory_text: "Wind is strong ({wind_speed_ms} m/s). Blowing sand will sting; small dogs may struggle to walk."
+  large_dog_caution_ms: 18         # > this → caution even for large dogs
+  large_dog_caution_text: "Severe wind — keep dogs leashed and consider a different day."
+
+# Configuration knobs
+hours_horizon: 48             # how many hours ahead to scan for threshold crossings (default: 2 days)
+caution_severity_map:
+  too_cold_swim_c: moderate
+  paw_cold_c: minor
+  too_warm_swim_c: moderate
+  swim_advisory_m: moderate
+  paw_burn_c: severe
+  small_dog_advisory_ms: minor
+  large_dog_caution_ms: severe

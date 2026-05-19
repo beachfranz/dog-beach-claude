@@ -540,6 +540,14 @@
         <option value="beach">Beaches</option>
         <option value="dog_park">Dog parks</option>
       </select>
+      <span class="sort-label">Within</span>
+      <select class="sort-select compact" id="dist-select" onchange="onDistanceFilterChange(this.value)">
+        <option value="5">5 mi</option>
+        <option value="10" selected>10 mi</option>
+        <option value="25">25 mi</option>
+        <option value="50">50 mi</option>
+        <option value="any">Any</option>
+      </select>
     </div>
     <div class="loc-row" id="loc-row">
       <span class="location-label" id="location-label">📍 Detecting location…</span>
@@ -604,6 +612,23 @@
     } catch { return 'beach'; }
   })();
   let dogParkCache = null; // [{...DP row}, ...] — fetched on first DP render
+
+  // Distance filter (miles). 'any' = no cap. Default 10mi. URL ?max_mi=
+  // takes precedence; falls back to localStorage; else 10. Numeric string
+  // in URL = mi cap; 'any' = uncapped.
+  const DIST_KEY = 'find.distanceFilterMi';
+  let distanceFilterMi = (() => {
+    try {
+      const urlMi = new URLSearchParams(window.location.search).get('max_mi');
+      if (urlMi === 'any') return 'any';
+      const n = parseFloat(urlMi);
+      if (!isNaN(n) && n > 0) return n;
+      const stored = localStorage.getItem(DIST_KEY);
+      if (stored === 'any') return 'any';
+      const s = parseFloat(stored);
+      return !isNaN(s) && s > 0 ? s : 10;
+    } catch { return 10; }
+  })();
 
   // Server-bounded nearest-N set. Client filters/sorts within this set.
   // GIST index on beaches.location makes the server query O(log N) at
@@ -872,9 +897,12 @@
     else if (leashFilter === 'on_leash') filtered = dps.filter(d => d.leash_policy === 'on_leash');
     else if (leashFilter === 'mixed')    filtered = dps.filter(d => d.leash_policy === 'mixed');
 
+    // Distance filter applies in DP mode too
+    filtered = filtered.filter(d => matchesDistanceFilter(d.distance_miles));
+
     if (!filtered.length) {
       document.getElementById('top-card').innerHTML   = '';
-      document.getElementById('beach-list').innerHTML = '<div class="no-data">No dog parks match that leash filter.</div>';
+      document.getElementById('beach-list').innerHTML = '<div class="no-data">No dog parks match those filters.</div>';
       return;
     }
 
@@ -977,7 +1005,8 @@
         beach:    b,
         day:      beachToDay(b),
         distance: resolveDistanceMiles(b),
-      }));
+      }))
+      .filter(c => matchesDistanceFilter(c.distance));
 
     // Sort
     let sorted;
@@ -1374,6 +1403,27 @@
     sortAndRender();
   }
 
+  function onDistanceFilterChange(val) {
+    distanceFilterMi = val === 'any' ? 'any' : parseFloat(val);
+    try { localStorage.setItem(DIST_KEY, String(distanceFilterMi)); } catch {}
+    try {
+      const url = new URL(window.location.href);
+      if (val === '10') url.searchParams.delete('max_mi');
+      else url.searchParams.set('max_mi', val);
+      window.history.replaceState({}, '', url);
+    } catch {}
+    nowBeaches = null;  // re-apply filter to NOW set
+    sortAndRender();
+  }
+
+  // Distance filter predicate — returns true when item passes.
+  // Items without a known distance pass through (no penalty for missing data).
+  function matchesDistanceFilter(distanceMi) {
+    if (distanceFilterMi === 'any') return true;
+    if (distanceMi == null) return true;
+    return distanceMi <= distanceFilterMi;
+  }
+
   function matchesLeashFilter(beach) {
     if (leashFilter === 'any') return true;
 
@@ -1552,6 +1602,12 @@
   (function initDestSelect() {
     const el = document.getElementById('dest-select');
     if (el) el.value = destination;
+  })();
+
+  // Restore distance-filter select
+  (function initDistSelect() {
+    const el = document.getElementById('dist-select');
+    if (el) el.value = distanceFilterMi === 'any' ? 'any' : String(distanceFilterMi);
   })();
 
   if (destination === 'dog_park') {

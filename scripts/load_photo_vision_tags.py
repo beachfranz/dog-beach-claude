@@ -307,10 +307,12 @@ def main():
             sources = [s.strip() for s in args.source.split(",") if s.strip()]
             source_filter = "and bp.source = any(%s)"
             source_params = (sources,)
-        # Per Franz 2026-05-19 collapsed-architecture: every photo in
-        # beach_photos by definition passed the unified v3 ingest filter
-        # (loaders apply _photo_filters.pre_vision_rank() at load time).
-        # No second filter needed here — just tag what's not yet v3-tagged.
+        # Per Franz 2026-05-19 collapsed-architecture: every photo loaded
+        # via the refactored Flickr/Wikimedia loaders has already passed
+        # the unified v3 ingest filter. Pre-existing photos (ingested
+        # under old per-source filters) get retroactively evaluated by
+        # scripts/filter_non_curated_for_retag.py — rejects are marked
+        # source_meta.v3_skipped=true. The WHERE clause excludes them.
         cur.execute(f"""
             select bp.id, bp.image_url, bp.thumb_url, bp.source_meta,
                    coalesce(g.display_name_override, g.name) as beach_name
@@ -321,6 +323,7 @@ def main():
                and (source_meta -> 'vision' ->> 'model' is null
                     or source_meta -> 'vision' ->> 'model' != '{MODEL}'
                     or coalesce(source_meta -> 'vision' ->> 'schema_version', 'v1') != '{SCHEMA_VERSION}')
+               and coalesce(source_meta ->> 'v3_skipped', 'false') != 'true'
              order by bp.id
              limit %s
         """, source_params + (args.chunk_size,))

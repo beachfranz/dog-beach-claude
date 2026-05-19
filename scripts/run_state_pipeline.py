@@ -193,6 +193,33 @@ PHASES = [
         'criterion_text': 'all 4 required sources status in (ok, skipped) + noaa_stations(global) loaded',
     },
     {
+        # Codify-cascade phase — per docs/codify_cascade_phase_spec.md
+        # (Franz 2026-05-19). Enumerates federal / county / city
+        # codify universe for the state, pre-checks coverage, emits
+        # a JSON manifest of any units needing agent dispatch. v1
+        # is REPORT-ONLY (doesn't auto-dispatch). Gate: ≤5% of
+        # scoreable beaches may lack a beach_policy_source link.
+        # On new state launches (MA/FL/MI) this will surface real
+        # codify gaps and halt until codify is run. For existing
+        # MVP+ states (CA/OR/WA) the gate passes immediately.
+        'key': 'codify_cascade',
+        'kind': 'python',
+        'action': 'codify_cascade',
+        'criterion':
+            "select (public.count_uncovered_scoreable_beaches($STATE) "
+            "        <= greatest(1, (select count(*) from public.beaches_gold "
+            "                          where state=$STATE and is_active "
+            "                            and scoring_tier in ('daily','hourly')) "
+            "                         / 20))::boolean",
+        'criterion_text':
+            'at most 5% of scoreable beaches lack a beach_policy_source link',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beaches_gold "
+            "             where state=$STATE and is_active and scoring_tier in ('daily','hourly')), "
+            "     d as (select t.n - public.count_uncovered_scoreable_beaches($STATE) as n from t) "
+            "select d.n done, t.n total from d, t",
+    },
+    {
         # 2026-05-13 split: each pass runs in its own autocommitted
         # transaction to bound memory. The monolithic SQL FUNCTION used
         # to OOM Supabase on states with heavy PAD-US (OR's max 915K-
@@ -982,6 +1009,40 @@ def action_operator_merge(state: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+def action_codify_cascade(state: str) -> int:
+    """Per-state codify pre-check + manifest emit.
+
+    Wraps scripts/codify_cascade_phase.py. v1 is REPORT-ONLY — it enumerates
+    the federal / county / city codify universe for the state, dry-runs the
+    derive_policy_source script for each jurisdiction, and emits a JSON
+    manifest under tmp/. Does NOT auto-dispatch agents.
+
+    Coverage gate (separate from this action) is the criterion SQL using
+    public.count_uncovered_scoreable_beaches(state).
+
+    See docs/codify_cascade_phase_spec.md.
+    """
+    rc, out, err = _run_subprocess(
+        [sys.executable, 'scripts/codify_cascade_phase.py', '--state', state],
+        timeout=900,  # OR full run was ~3 min; WA federal-only sub-second; 15min cap
+    )
+    # rc=0 = gate passes; rc=1 = gate fails (informational here — the phase
+    # criterion does the real gate check). Both are "ran successfully";
+    # anything else is a script error.
+    if rc not in (0, 1):
+        raise RuntimeError(f'codify_cascade_phase exit {rc}: {err[-500:]}')
+    # Parse manifest path from output ("Manifest: <path>") for the log
+    manifest = None
+    for line in (out or '').splitlines():
+        line = line.strip()
+        if line.startswith('Manifest:'):
+            manifest = line.split(':', 1)[1].strip()
+            break
+    log(f'    codify_cascade manifest: {manifest or "<not found>"}')
+    log(f'    codify_cascade gate (script): {"PASS" if rc == 0 else "FAIL (see manifest)"}')
+    return 1
+
+
 def action_bep_refire(state: str) -> int:
     """Refire BEP cascade for state's tier-1+2 fids."""
     fids = _state_tier12_fids(state)
@@ -1174,6 +1235,7 @@ PYTHON_ACTIONS = {
     'ensure_overpass':         action_ensure_overpass,
     'ensure_amenities':        action_ensure_amenities,
     'ensure_dog_features':     action_ensure_dog_features,
+    'codify_cascade':          action_codify_cascade,
     'operator_llm_extract':    action_operator_llm_extract,
     'operator_merge':          action_operator_merge,
     'bep_refire':              action_bep_refire,

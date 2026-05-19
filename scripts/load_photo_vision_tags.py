@@ -56,7 +56,8 @@ MODEL = "claude-haiku-4-5-20251001"
 # get re-tagged automatically without manual clearing.
 #   v1: initial schema
 #   v2: added has_surfing + has_active_people, dropped "people" from subjects
-SCHEMA_VERSION = "v2"
+#   v3: added has_path + has_vehicle (Franz 2026-05-19 photo curation v3)
+SCHEMA_VERSION = "v3"
 
 # Anthropic per-1M-tokens (Haiku 4.5): input $1, output $5, image ~1500 tok.
 # Two-pass per photo ≈ 3000 in + 350 out ≈ $0.005. Budget guard below.
@@ -183,6 +184,8 @@ Given the photo and an initial description, return a JSON object with these fiel
   has_surfing: true|false  (visible surfers riding waves, OR surfboards/paddleboards/wetsuits being carried or in use. Just calm flat water with no surf activity = false.)
   has_active_people: true|false  (people doing things on the beach — playing, walking, swimming, picnicking, kids, families. Not just one tiny figure in the distance, but a recognizable beachgoer present and engaged. A close-up portrait counts as active_people=false; use has_human_face_closeup for that.)
   has_human_face_closeup: true|false  (a person's face dominates the frame — selfie or portrait shot)
+  has_path: true|false  (paths, trails, boardwalks, walkways, or stairs leading to or along the beach. Includes wooden boardwalks, dirt trails, paved walking paths, beach-access stairs. NOT roads, parking-lot driveways, or vehicle paths.)
+  has_vehicle: true|false  (cars, trucks, RVs, parking lots, vehicles on the beach or visible in the frame. NOT boats, kayaks, or surfboards. NOT distant background traffic; the vehicle must be prominent enough to be a real element of the photo.)
   scene: one of {SCENES}
   subjects: subset of {SUBJECTS}  (multi-label; pick any that are clearly and prominently present)
   landscape_features: subset of {LANDSCAPE_FEATURES}  (multi-label; ONLY include a feature if it is a PROMINENT, IDENTIFIABLE element of the photo — not background detail.

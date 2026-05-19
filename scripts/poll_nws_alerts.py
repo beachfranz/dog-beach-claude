@@ -69,20 +69,119 @@ def fetch_active_alerts(area: str = "CA") -> list[dict]:
     return data.get("features", []) or []
 
 
-def pip_alert_against_beaches(conn, feature: dict, beach_fids: list[int]) -> list[int]:
-    """For one alert feature, return the list of beach_fids whose geom intersects."""
-    geom = feature.get("geometry")
+_ZONE_URL_RE = None  # lazy import target
+
+def _zone_id_and_type_from_url(zone_url: str) -> tuple[str | None, str | None]:
+    """Parse 'https://api.weather.gov/zones/forecast/PZZ565' → ('PZZ565','forecast').
+    Returns (None, None) if not a recognizable zone URL."""
+    global _ZONE_URL_RE
+    if _ZONE_URL_RE is None:
+        import re
+        _ZONE_URL_RE = re.compile(r"/zones/([a-z]+)/([A-Z0-9_]+)(?:\?|$|/)")
+    m = _ZONE_URL_RE.search(zone_url or "")
+    if not m:
+        return None, None
+    return m.group(2), m.group(1)
+
+
+def get_zone_geom_cached(conn, zone_url: str, ttl_days: int = 365) -> str | None:
+    """Return zone GeoJSON-string (geometry) for the given zone URL, fetching
+    from api.weather.gov on cache miss. Caches into public.nws_zones.
+
+    Zones change ~annually; default TTL is 365 days. Returns None if the
+    URL isn't parseable or the API call fails.
+    """
+    zone_id, zone_type = _zone_id_and_type_from_url(zone_url)
+    if not (zone_id and zone_type):
+        return None
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT ST_AsGeoJSON(geom), fetched_at FROM public.nws_zones
+             WHERE zone_id = %s
+               AND fetched_at > now() - (%s || ' days')::interval
+               AND geom IS NOT NULL
+        """, (zone_id, str(ttl_days)))
+        row = cur.fetchone()
+        if row and row[0]:
+            return row[0]
+    # Cache miss — fetch
+    try:
+        r = requests.get(zone_url, headers={"User-Agent": USER_AGENT,
+                                            "Accept": "application/geo+json"},
+                         timeout=30)
+        if r.status_code != 200:
+            return None
+        feat = r.json()
+    except requests.RequestException:
+        return None
+    geom = feat.get("geometry")
+    props = feat.get("properties", {}) or {}
     if not geom:
-        return []   # zone-coded alerts skipped in v1
+        # Some zones (rare) lack geometry — record a "tried" sentinel anyway
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO public.nws_zones (zone_id, zone_type, name, state, raw)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (zone_id) DO UPDATE SET
+                  fetched_at = now(), raw = EXCLUDED.raw
+            """, (zone_id, zone_type, props.get("name"), props.get("state"),
+                  json.dumps(props)))
+            conn.commit()
+        return None
     geom_json = json.dumps(geom)
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT b.fid FROM public.beaches_gold b
-             WHERE b.fid = ANY(%s)
-               AND b.geom IS NOT NULL
-               AND ST_Intersects(b.geom, ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326))
-        """, (beach_fids, geom_json))
-        return [r[0] for r in cur.fetchall()]
+            INSERT INTO public.nws_zones (zone_id, zone_type, name, state, geom, raw)
+            VALUES (%s, %s, %s, %s, ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326), %s)
+            ON CONFLICT (zone_id) DO UPDATE SET
+              fetched_at = now(), name = EXCLUDED.name, state = EXCLUDED.state,
+              geom = EXCLUDED.geom, raw = EXCLUDED.raw
+        """, (zone_id, zone_type, props.get("name"), props.get("state"),
+              geom_json, json.dumps(props)))
+        conn.commit()
+    return geom_json
+
+
+def pip_alert_against_beaches(conn, feature: dict, beach_fids: list[int]) -> list[int]:
+    """For one alert feature, return the list of beach_fids whose geom intersects.
+
+    Tries the alert's inline GeoJSON geometry first. If absent (which is
+    common for NWS Beach Hazards Statements / High Surf for coastal waters
+    that ship as `affectedZones=[...]` only), falls back to resolving each
+    affected zone polygon via the NWS zones API (cached in nws_zones).
+    """
+    # Path 1: inline geometry
+    geom = feature.get("geometry")
+    if geom:
+        geom_json = json.dumps(geom)
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT b.fid FROM public.beaches_gold b
+                 WHERE b.fid = ANY(%s)
+                   AND b.geom IS NOT NULL
+                   AND ST_Intersects(b.geom, ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326))
+            """, (beach_fids, geom_json))
+            return [r[0] for r in cur.fetchall()]
+
+    # Path 2: zone-coded — resolve each zone polygon and union the matches
+    props = feature.get("properties", {}) or {}
+    zone_urls = props.get("affectedZones") or []
+    if not zone_urls:
+        return []
+    matched: set[int] = set()
+    for zurl in zone_urls:
+        zone_geom_json = get_zone_geom_cached(conn, zurl)
+        if not zone_geom_json:
+            continue
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT b.fid FROM public.beaches_gold b
+                 WHERE b.fid = ANY(%s)
+                   AND b.geom IS NOT NULL
+                   AND ST_Intersects(b.geom, ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326))
+            """, (beach_fids, zone_geom_json))
+            matched.update(r[0] for r in cur.fetchall())
+    return sorted(matched)
 
 
 def upsert_alert(conn, beach_fid: int, alert: dict) -> None:

@@ -104,23 +104,85 @@ RARE_KEYWORDS: set[str] = {
 # Two-word rare keywords (matched as substring after lower()).
 RARE_PHRASES: set[str] = {"golden hour", "sea stack", "sea stacks"}
 
-# Hard exclusion regex — these titles never enter the candidate pool.
-# Extends the existing list in train_photo_model.py with v3 vehicle terms.
-NEGATIVE_RE = re.compile(
-    r"\b("
-    # Wildlife close-ups + iNaturalist scientific specimens
-    r"gull|tern|plover|sandpiper|larus|crab|anemone|barnacle|specimen|"
-    r"crassadoma|meliscaeva|megapenthes|eristalis|evacanthus|dolichovespula|"
-    r"inaturalist|"
-    # Vehicles (v3 expansion per Franz 2026-05-19)
-    r"car|cars|truck|trucks|train|rv|parking|highway|driveway|sedan|suv|"
-    # Maps + abstract content
-    r"map|chart|satellite|aerial|infographic|"
-    # Event content (not dog-beach relevant)
-    r"festival|tournament|triathlon|race|marathon|wedding|parade"
-    r")\b",
-    re.I,
-)
+# ═══════════════════════════════════════════════════════════════════════
+# Consolidated term lists (merged from load_flickr_photos.py +
+# load_wikimedia_commons_photos.py 2026-05-19 per Franz "do the merge").
+# These are now the canonical lists; loaders import from here.
+# ═══════════════════════════════════════════════════════════════════════
+
+POSITIVE_TERMS_DOG: list[str] = [
+    "dog", "dogs", "doggie", "doggy",
+    "puppy", "pup", "pups", "puppies",
+    "canine", "pooch", "hound",
+]
+POSITIVE_TERMS_GENERIC: list[str] = [
+    "sand", "shore",
+    "leash", "leashed", "off-leash", "off leash",
+    "rules", "regulations", "regulation",
+    "permitted", "allowed", "prohibited",
+    "ordinance",
+]
+POSITIVE_TERMS: list[str] = POSITIVE_TERMS_DOG + POSITIVE_TERMS_GENERIC
+
+# Merged from both loaders' NEGATIVE_TERMS + the prior centralized NEGATIVE_RE.
+# Anything matching these (word-boundary, case-insensitive) is hard-excluded
+# at ingest. Photos won't even enter the candidate pool.
+NEGATIVE_TERMS: list[str] = [
+    # ── Vehicles / infrastructure (Franz v3 expansion) ─────────────────
+    "train", "railway", "railroad", "locomotive",
+    "car", "cars", "truck", "trucks", "vehicle", "automobile",
+    "pontiac", "chevrolet", "ford", "toyota", "honda",
+    "parking lot", "parking", "driveway", "highway",
+    "sedan", "suv", "rv",
+    # ── Wildlife / sea creatures (specimen photos clutter the gallery) ─
+    # Marine mammals deliberately NOT here (whale/dolphin/porpoise are
+    # beach spectacle — Franz 2026-05-19 "drop the mammals").
+    "fish", "crab", "lobster", "shrimp",
+    "octopus", "squid", "cuttlefish",
+    "jellyfish", "sea nettle", "sea jelly",
+    "starfish", "sea star",
+    "urchin", "anemone", "barnacle",
+    "scallop", "mussel", "clam", "oyster", "abalone",
+    "sea cucumber", "sea spider", "sea slug", "sea worm",
+    "nudibranch", "mollusk", "crustacean", "specimen",
+    "coral", "plankton",
+    # ── Birds (specimen photos) ────────────────────────────────────────
+    "bird", "birds", "gull", "seagull", "larus",
+    "pelican", "cormorant", "heron", "egret",
+    "tern", "plover", "sandpiper", "shorebird",
+    "duck", "goose", "swan", "raptor", "hawk", "osprey",
+    "curlew", "willet", "godwit", "sanderling", "phalarope",
+    "inaturalist",
+    # ── Latin genus names for specimen photos ──────────────────────────
+    "apostichopus", "pycnogonum", "ophioderma", "crassadoma",
+    "platynereis", "numenius", "phalacrocorax", "pelecanus",
+    "haliaeetus", "calidris", "limosa", "americanus",
+    "panamense", "californicus", "bicanaliculata",
+    "astropecten", "amphistichus", "verrilli", "armatus", "koelzi",
+    "surfperch", "sand star", "spiny sand", "calico surf",
+    "dolichovespula", "meliscaeva", "megapenthes",
+    "eristalis", "evacanthus",
+    # ── Pure-graphic / non-photo ───────────────────────────────────────
+    "map", "diagram", "chart", "logo", "plaque",
+    "satellite", "aerial", "infographic",
+    "construction", "interior", "screenshot",
+    # ── Event content (mostly Flickr-noise per 2026-05-11 pilot) ───────
+    "festival", "tournament", "competition", "triathlon",
+    "race", "marathon", "concert", "wedding",
+    "parade", "fundraiser",
+]
+
+# Compile to a single word-boundary regex from NEGATIVE_TERMS. Multi-word
+# phrases (e.g. "parking lot", "sea star") are matched as substrings
+# (the \b at edges still works on the outermost word boundaries).
+def _compile_negative_re(terms: list[str]) -> re.Pattern:
+    # Escape each term + sort longest-first so multi-word phrases match
+    # before any embedded shorter word.
+    escaped = sorted({re.escape(t) for t in terms}, key=len, reverse=True)
+    pattern = r"\b(" + "|".join(escaped) + r")\b"
+    return re.compile(pattern, re.I)
+
+NEGATIVE_RE = _compile_negative_re(NEGATIVE_TERMS)
 
 # Source priorities — Type B (page-gallery, NULL distance) outranks Type A.
 SOURCE_WEIGHT: dict[str, float] = {

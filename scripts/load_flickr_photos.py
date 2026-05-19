@@ -91,65 +91,14 @@ LICENSE_LABEL = {
 }
 
 # Keyword bias for ranking — mirror of load_wikimedia_commons_photos.py.
-# Same term lists; same scoring weights. Plus a small set of Flickr-specific
-# negatives for event/race photos that Flickr surfaces more than Commons does.
-POSITIVE_TERMS_DOG = [
-    "dog", "dogs", "doggie", "doggy",
-    "puppy", "pup", "pups", "puppies",
-    "canine", "pooch", "hound",
-]
-POSITIVE_TERMS_GENERIC = [
-    "sand", "shore",
-    "leash", "leashed", "off-leash", "off leash",
-    "rules", "regulations", "regulation",
-    "permitted", "allowed", "prohibited",
-    "ordinance",
-]
-POSITIVE_TERMS = POSITIVE_TERMS_DOG + POSITIVE_TERMS_GENERIC
-NEGATIVE_TERMS = [
-    # Vehicles / infrastructure
-    "train", "railway", "railroad", "locomotive",
-    "car", "truck", "vehicle", "automobile", "pontiac", "chevrolet",
-    "ford", "toyota", "honda", "parking lot",
-    # Wildlife / sea creatures (specimen photos clutter the gallery)
-    "fish", "crab", "lobster", "shrimp",
-    "whale", "dolphin", "porpoise",
-    "octopus", "squid", "cuttlefish",
-    "jellyfish", "sea nettle", "sea jelly",
-    "starfish", "sea star",
-    "urchin", "anemone", "barnacle",
-    "scallop", "mussel", "clam", "oyster", "abalone",
-    "sea cucumber", "sea spider", "sea slug", "sea worm",
-    "nudibranch", "mollusk", "crustacean", "specimen",
-    "coral", "plankton",
-    # Birds (specimen photos)
-    "bird", "birds", "gull", "seagull", "larus",
-    "pelican", "cormorant", "heron", "egret",
-    "tern", "plover", "sandpiper", "shorebird",
-    "duck", "goose", "swan", "raptor", "hawk", "osprey",
-    "curlew", "willet", "godwit", "sanderling", "phalarope",
-    "inaturalist",
-    # Common Latin genus names for specimen photos
-    "apostichopus", "pycnogonum", "ophioderma", "crassadoma",
-    "platynereis", "numenius", "phalacrocorax", "pelecanus",
-    "haliaeetus", "calidris", "limosa", "americanus",
-    "panamense", "californicus", "bicanaliculata",
-    "astropecten", "amphistichus", "verrilli", "armatus", "koelzi",
-    "surfperch", "sand star", "spiny sand", "calico surf",
-    "dolichovespula", "meliscaeva", "megapenthes",   # insect specimens — added 2026-05-12
-    "eristalis", "evacanthus",                       # more insect genera, same photographer cohort
-    # Pure-graphic / non-photo
-    "map", "diagram", "chart", "logo", "plaque",
-    "satellite", "aerial",
-    "construction", "interior",
-    "screenshot", "infographic",
-    # Flickr-specific: event/race photos that show up at beach locations
-    # (Pacific Islander Festival, Escape from Alcatraz triathlon, Over-the-Line
-    # tournament, weddings, etc. were the noise in the 2026-05-11 pilot)
-    "festival", "tournament", "competition", "triathlon",
-    "race", "marathon", "concert", "wedding",
-    "parade", "fundraiser",
-]
+# Consolidated 2026-05-19 per Franz: term lists live in _photo_filters.py
+# (single source of truth for both ingest exclusion + relevance scoring).
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+from _photo_filters import (  # noqa: E402
+    POSITIVE_TERMS_DOG, POSITIVE_TERMS_GENERIC, POSITIVE_TERMS, NEGATIVE_TERMS,
+)
 
 
 # Tokens that are too generic to count as name-match signal. Most beach names

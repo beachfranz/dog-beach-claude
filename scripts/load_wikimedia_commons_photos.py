@@ -256,57 +256,16 @@ def haversine_m(la1, lo1, la2, lo2):
 # Two-tier positive bias: dog-specific terms get 2× weight over generic
 # beach terms. A dog-on-the-beach photo should outrank a generic sand
 # photo every time. Franz iteration 4.
-POSITIVE_TERMS_DOG = [
-    "dog", "dogs", "doggie", "doggy",
-    "puppy", "pup", "pups", "puppies",
-    "canine", "pooch", "hound",
-]
-POSITIVE_TERMS_GENERIC = [
-    "sand", "shore",
-    "leash", "leashed", "off-leash", "off leash",
-    "rules", "regulations", "regulation",
-    "permitted", "allowed", "prohibited",
-    "ordinance",
-]
-POSITIVE_TERMS = POSITIVE_TERMS_DOG + POSITIVE_TERMS_GENERIC  # back-compat
-NEGATIVE_TERMS = [
-    # Vehicles / infrastructure
-    "train", "railway", "railroad", "locomotive",
-    "car", "truck", "vehicle", "automobile", "pontiac", "chevrolet",
-    "ford", "toyota", "honda", "parking lot",
-    # Wildlife / sea creatures (specimen photos clutter the gallery)
-    "fish", "crab", "lobster", "shrimp",
-    "whale", "dolphin", "porpoise",
-    "octopus", "squid", "cuttlefish",
-    "jellyfish", "sea nettle", "sea jelly",
-    "starfish", "sea star",
-    "urchin", "anemone", "barnacle",
-    "scallop", "mussel", "clam", "oyster", "abalone",
-    "sea cucumber", "sea spider", "sea slug", "sea worm",
-    "nudibranch", "mollusk", "crustacean", "specimen",
-    "coral", "plankton",
-    # Birds (specimen photos)
-    "bird", "birds", "gull", "seagull", "larus",
-    "pelican", "cormorant", "heron", "egret",
-    "tern", "plover", "sandpiper", "shorebird",
-    "duck", "goose", "swan", "raptor", "hawk", "osprey",
-    "curlew", "willet", "godwit", "sanderling", "phalarope",
-    "inaturalist",  # wildlife photo-sharing app — anything from there is specimen
-    # Common Latin genus names for specimen photos
-    "apostichopus", "pycnogonum", "ophioderma", "crassadoma",
-    "platynereis", "numenius", "phalacrocorax", "pelecanus",
-    "haliaeetus", "calidris", "limosa", "americanus",
-    "panamense", "californicus", "bicanaliculata",
-    "astropecten", "amphistichus", "verrilli", "armatus", "koelzi",
-    "surfperch", "sand star", "spiny sand", "calico surf",
-    "dolichovespula", "meliscaeva", "megapenthes",   # insect specimens — Third Beach (fid 12806371) dump 2026-05-12
-    "eristalis", "evacanthus",                       # more insect genera, same photographer 'xpda' cohort
-    # Pure-graphic / non-photo
-    "map", "diagram", "chart", "logo", "plaque",
-    "satellite", "aerial",
-    "construction", "interior",
-    "screenshot", "infographic",
-]
+# Consolidated 2026-05-19 per Franz: term lists live in _photo_filters.py
+# (single source of truth for both ingest exclusion + relevance scoring).
+# Mammals (whale/dolphin/porpoise) were dropped from NEGATIVE_TERMS in the
+# merge — beach spectacle, not specimen clutter.
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+from _photo_filters import (  # noqa: E402
+    POSITIVE_TERMS_DOG, POSITIVE_TERMS_GENERIC, POSITIVE_TERMS, NEGATIVE_TERMS,
+)
 
 
 def _relevance_score(title: str, description: str) -> float:

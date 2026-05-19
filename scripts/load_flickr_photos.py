@@ -249,7 +249,7 @@ def select_targets(args):
     if args.fids:
         ids = [int(s) for s in args.fids.split(",")]
         rows = supa("/rest/v1/beaches_gold",
-                    params={"select": "fid,name,display_name_override,county_name,state",
+                    params={"select": "fid,name,display_name_override,county_name,state,scoring_tier",
                             "fid": f"in.({','.join(map(str, ids))})",
                             "is_active": "eq.true"})
         # Preserve caller's order — Supabase REST `in.(...)` returns rows in
@@ -259,12 +259,12 @@ def select_targets(args):
         rows = [by_fid[i] for i in ids if i in by_fid]
     elif args.pilot:
         rows = supa("/rest/v1/beaches_gold",
-                    params={"select": "fid,name,display_name_override,county_name,state",
+                    params={"select": "fid,name,display_name_override,county_name,state,scoring_tier",
                             "is_active": "eq.true", "is_scoreable": "eq.true",
                             "order": "fid.asc", "limit": str(int(args.pilot))})
     elif args.full:
         rows = supa("/rest/v1/beaches_gold",
-                    params={"select": "fid,name,display_name_override,county_name,state",
+                    params={"select": "fid,name,display_name_override,county_name,state,scoring_tier",
                             "is_active": "eq.true", "is_scoreable": "eq.true",
                             "order": "fid.asc"})
     else:
@@ -277,11 +277,15 @@ def select_targets(args):
         info = supa("/rest/v1/rpc/get_beach_info", method="POST", body={"p_fid": r["fid"]})
         b = (info or {}).get("beach") or {}
         if b.get("lat") is None: continue
+        # Fetch dogs_allowed for the per-beach cap rule (no_dogs=0)
+        dp = (info or {}).get("dog_policy") or {}
         out.append({
             "fid": r["fid"],
             "name": r.get("display_name_override") or r["name"],
             "county": r.get("county_name"),
             "state": r.get("state"),
+            "scoring_tier": r.get("scoring_tier"),
+            "dogs_allowed": dp.get("dogs_allowed"),
             "lat": b["lat"], "lng": b["lng"],
         })
     return out
@@ -457,22 +461,30 @@ def haversine_m(la1, lo1, la2, lo2):
     return 2 * 6_371_000 * asin(sqrt(a))
 
 
-def pick_best(photos, beach_lat, beach_lng, beach_name="", top_n=PER_BEACH):
-    """Composite scoring — three signals + a hard geo cutoff.
+def pick_best(photos, beach_lat, beach_lng, beach_name="", beach_meta=None, top_n=None):
+    """Pick the best candidates per the unified v3 ingest filter.
 
-       composite = relevance + name_match + proximity * 2.0
+    Refactored 2026-05-19 per Franz collapsed-architecture decision:
+    the v3 criteria we developed for pre-vision rank are NOW the load-time
+    filter. No second post-load filter. Source-side rules (negative regex,
+    rare-keyword override, source weight, tier-aware cap, dog-loose radius)
+    all live in _photo_filters.pre_vision_rank().
 
-    Components:
-      - relevance:   keyword bias from POSITIVE_TERMS / NEGATIVE_TERMS lists
-                     (range ~-5 .. +6 in practice)
-      - name_match:  does the photo title contain the beach's distinctive name
-                     tokens? (range 0 .. +4)
-      - proximity:   1.0 - distance/HARD_CUTOFF_M, weighted x2.0 (range 0 .. +2)
+    Args:
+      photos       — raw Flickr search response objects
+      beach_lat/lng — beach centroid for distance computation
+      beach_name   — used for legacy name-match score (kept in source_meta)
+      beach_meta   — {scoring_tier, dogs_allowed}; required for tier cap
+      top_n        — DEPRECATED; cap is now from beach_meta. If provided,
+                     overrides the tier cap (back-compat for ad-hoc callers).
 
-    Drops anything past HARD_CUTOFF_M and ungeo'd photos. Sort desc by
-    composite with distance tiebreak.
+    Returns: subset of input photos (each enriched with _distance_m,
+    _relevance, _name_match, _composite, _rank_score) in selection order.
+    Geometry: ungeo'd photos still dropped (Flickr is a geo-search source).
     """
-    scored = []
+    from _photo_filters import pre_vision_rank  # local import to avoid cycle
+
+    enriched = []
     for p in photos:
         try:
             plat = float(p.get("latitude") or 0)
@@ -480,28 +492,39 @@ def pick_best(photos, beach_lat, beach_lng, beach_name="", top_n=PER_BEACH):
         except (TypeError, ValueError):
             plat = plng = 0
         if plat == 0 and plng == 0:
-            continue
+            continue   # Flickr ingest path requires geo (Wikimedia loader same)
         d = int(haversine_m(beach_lat, beach_lng, plat, plng))
         title = p.get("title") or ""
-        # Loose cutoff for dog-titled photos (Del Mar Dog Beach pin 2026-05-12).
-        # Generic photos still capped at HARD_CUTOFF_M; dog-titled photos
-        # get the wider DOG_LOOSE_CUTOFF_M.
-        is_dog_titled = bool(DOG_KEYWORDS_RE.search(title))
-        cutoff = DOG_LOOSE_CUTOFF_M if is_dog_titled else HARD_CUTOFF_M
-        if d > cutoff:
-            continue
-        rel       = _relevance_score(title)
-        name_m    = _name_match_score(beach_name, title)
-        proximity = 1.0 - d / max(cutoff, 1)
-        composite = rel + name_m + proximity * 2.0
-        scored.append({**p, "_distance_m": d,
-                       "_relevance":  rel,
-                       "_name_match": name_m,
-                       "_composite":  composite})
-    # Two-stage sort:
-    #   1. SELECTION — pick top N by composite (best photos win).
-    scored.sort(key=lambda x: (-x["_composite"], x["_distance_m"]))
-    kept = scored[:top_n]
+        rel    = _relevance_score(title)
+        name_m = _name_match_score(beach_name, title)
+
+        # Build normalized dict the shared scorer expects (pre_vision_rank
+        # reads: source, distance_m, title_text, captured_at, curator_touched,
+        # photographer). Keep the original Flickr fields too so replace_flickr
+        # can build beach_photos rows from the same dicts.
+        enriched.append({
+            **p,
+            "_distance_m":     d,
+            "_relevance":      rel,
+            "_name_match":     name_m,
+            # Legacy composite kept for source_meta back-compat
+            "_composite":      rel + name_m + (1.0 - d / max(HARD_CUTOFF_M, 1)) * 2.0,
+            # Normalized keys for the shared scorer
+            "source":          "flickr",
+            "distance_m":      d,
+            "title_text":      title + " " + (p.get("ownername") or ""),
+            "captured_at":     None,                # parsed later if needed
+            "curator_touched": False,
+            "photographer":    p.get("ownername"),
+        })
+
+    # Backward compat: if top_n was passed explicitly, use it; else cap from beach tier
+    if top_n is not None:
+        bm = {"scoring_tier": "hourly", "dogs_allowed": "yes"}   # neutral → cap=15
+        kept = pre_vision_rank(enriched, bm)[:top_n]
+    else:
+        bm = beach_meta or {"scoring_tier": None, "dogs_allowed": "yes"}
+        kept = pre_vision_rank(enriched, bm)
     #   2. DISPLAY — re-sort the kept set by distance asc, name-match as
     #      tiebreak. Curator UX wants closest-first (Franz, 2026-05-11).
     kept.sort(key=lambda x: (x["_distance_m"], -x.get("_name_match", 0)))
@@ -680,7 +703,9 @@ def main():
             rej = rejected_by_fid.get(b["fid"]) or set()
             if rej:
                 cands = [c for c in cands if str(c.get("id")) not in rej]
-            picked = pick_best(cands, b["lat"], b["lng"], beach_name=b["name"])
+            picked = pick_best(cands, b["lat"], b["lng"], beach_name=b["name"],
+                               beach_meta={"scoring_tier": b.get("scoring_tier"),
+                                           "dogs_allowed": b.get("dogs_allowed")})
             replace_flickr(b["fid"], picked)
             saved += len(picked)
             tag = f'{len(picked)} photos' if picked else '(none)'

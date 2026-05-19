@@ -3,11 +3,23 @@
 Per Franz 2026-05-19 design conversation. Consolidates six interlocking changes to the photo curation pipeline:
 
 1. **Vision schema v3** — add `has_path` + `has_vehicle` tags
-2. **Per-tier vision-tagging caps** with rare-keyword override
-3. **Pre-vision ranking formula** — picks which photos make the cap
+2. **Per-tier ingest caps** with rare-keyword override (loader-side; not a separate post-load filter)
+3. **Unified scoring formula** — single `score_photo()` used by every loader at ingest time
 4. **Diverse selector update** — new `path` bucket; explicit vehicle penalty
 5. **Auto-curate mode** — picks N best+diverse photos per beach without a human, writes back durably
 6. **Pre-flight: per-state photo source discovery** — identify state-aligned photo-rich sites and wire them in
+
+## Architecture (collapsed per Franz 2026-05-19)
+
+```
+External source → loader fetches raw candidates →
+  apply unified _photo_filters.pre_vision_rank() with beach_meta →
+  insert survivors into beach_photos →
+  vision-tag every inserted row (no second filter) →
+  diverse selector + curator for final gallery
+```
+
+Earlier two-stage design (load-everything + post-load `v3_eligible` filter) was redundant. There's no good reason to ingest junk and then filter it out before vision tagging. The criteria we developed BECOME the load filter.
 
 ---
 
@@ -284,7 +296,7 @@ Discovery query above produces the actual target list per state. Build loaders f
 
 ---
 
-## 7. Implementation sequence (updated)
+## 7. Implementation sequence (collapsed-architecture revision)
 
 1. **Vision schema bump** — edit `scripts/load_photo_vision_tags.py`: add `has_path` + `has_vehicle` to `_EXTRACT_PROMPT`, bump `SCHEMA_VERSION = "v3"`. Commit.
 2. **Pre-vision ranking helper** — new module/function `scripts/_photo_filters.py::pre_vision_rank(photos, beach_meta) -> ranked_list_capped` implementing the score formula + per-tier caps + rare-keyword override + 500m exclusion. Unit-testable.

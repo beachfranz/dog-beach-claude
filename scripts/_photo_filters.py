@@ -227,10 +227,22 @@ def pre_vision_rank(
     beach_meta: dict,
     photographer_kr: dict[str, tuple[float, int]] | None = None,
 ) -> list[dict]:
-    """Apply v3 hard exclusions + score + per-tier cap + rare-keyword override.
+    """Unified ingest filter (Franz 2026-05-19 collapsed architecture):
+    Apply hard exclusions + score + per-tier cap + rare-keyword override.
 
-    Returns the subset of photos that should be vision-tagged, with each
-    photo dict gaining `_rank_score` and `_rank_reason` keys (debug).
+    Used at LOAD time by every photo loader (Flickr, Wikimedia, etc.) so
+    only survivors land in beach_photos. There's no second post-load filter
+    — vision tagging runs on everything inserted.
+
+    Distance policy (mirrors prior Flickr dog-loose pattern per
+    [[loose-radius-dog-filter]]):
+      - default hard cap: 500m
+      - rare-keyword titles (dog/surf/sunset/etc.): hard cap 2000m
+        (catches Del Mar Dog Beach -style event/cluster photos at the
+        parking lot/trail head)
+
+    Returns the subset of photos to ingest, with each gaining a
+    `_rank_score` key (debug).
 
     beach_meta: {scoring_tier, dogs_allowed}
     """
@@ -242,16 +254,20 @@ def pre_vision_rank(
     rare_hits = []
     for p in photos:
         title = p.get("title_text") or ""
-        # Hard exclusions
         d = p.get("distance_m")
-        if d is not None and d > 500:
-            continue
+        rare = has_rare_keyword(title)
+        # Hard exclusions
         if title_excluded(title):
             continue
+        if d is not None:
+            if rare:
+                if d > 2000: continue    # dog-loose-radius escape for rare content
+            else:
+                if d > 500:  continue    # tight default
         # Score
         p["_rank_score"] = score_photo(p, photographer_kr)
         eligible.append(p)
-        if has_rare_keyword(title):
+        if rare:
             rare_hits.append(p)
 
     # Top-N by score

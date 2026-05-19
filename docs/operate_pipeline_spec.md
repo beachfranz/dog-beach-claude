@@ -1,506 +1,289 @@
-# Operate Pipeline — Spec v1
+# Operate Pipeline — Spec v2
 
-**Status:** DRAFT 2026-05-18 — for Franz's review on his return from AFK.
-**Author:** Codify v1 build context (this session).
-**Companion:** [`jurisdiction_policy_source_playbook.md`](jurisdiction_policy_source_playbook.md) (Codify v1 playbook — pattern this spec mirrors).
-
----
-
-## TL;DR
-
-Operate is the third track of the dog-beach data product alongside Codify (built) and Cascade (existing). It targets **operator-posted policies** that govern beach/dog-park behavior — rules posted at the entity by the people who run it (concessionaires, park departments, NPS superintendents, HOA boards, port districts, dog-park managers).
-
-Operate produces `(entity, rule, ...)` tuples; Codify produces `(polygon, rule, ...)` tuples. Both feed the same Cascade (consensus engine → `beach_dog_policy.zone_rules`).
-
-**Big finding from today's audit:** an Operate **extraction layer** already exists (`operator_dogs_policy` 418 rows; `operator_policy_extractions` 722 rows; `operator_policy_exceptions` 393 rows — 3-pass LLM extraction). It's NOT connected to the consensus engine: only **11 `policy_source` rows** of `subtype='operator_posted_policy'` exist. The extracted data is sitting in a parallel structure that the cascade can't see.
-
-The Operate pipeline must therefore do **two things**:
-1. **Bridge** existing extraction → policy_source / beach_policy_source (one-time migration)
-2. **Ongoing pipeline** to find new operator entities, fetch their rules, extract, attach to beaches
+**Status:** REWRITTEN 2026-05-18 evening after today's audit + Franz's framing question.
+**Supersedes:** v1.x drafts. v1's "418 stranded gold mine" + "operate-as-parallel-to-codify" framing oversold the scope.
+**Companion:** [`jurisdiction_policy_source_playbook.md`](jurisdiction_policy_source_playbook.md).
 
 ---
 
-## 1. Vocabulary — the three-track model
+## TL;DR (v2)
 
-| Track | What it produces | Source layer | Scope shape | Examples |
-|---|---|---|---|---|
-| **Codify** (built) | `(polygon, rule, subtype, domain)` | Issuing agencies — city / county / state legislators / federal regulators | TERRITORIAL — applies to all beaches inside polygon X | Bainbridge Island MC §6.04.030, 36 CFR §2.15, OAR 736-021-0070 |
-| **Operate** (this spec) | `(entity, rule, subtype, domain)` | Entity operators — parks depts, concessionaires, NPS superintendents, HOA boards, port districts, dog-park managers | ENTITY-SPECIFIC — applies to that exact beach / dog park / facility | Cape Lookout SP leash override, Rosie's Dog Beach off-leash sign, HBDB concessionaire rules, Crissy Field Compendium, dog-park hours sign |
-| **Cascade** (existing) | `beach_dog_policy.zone_rules` (consumer surface) | Trigger chain on bps INSERT/UPDATE — `promote_entity_dogs_to_beach_dog_policy` → `_promote_zone_rules_for_fid` | Per-beach consensus | What end users see in the app |
+Operate is the third track of the product alongside Codify (built) and Cascade (existing) — but it's **much narrower than the v1 spec assumed**. After today's audit:
 
-Per [[codify-cascade-vocabulary]] + [[operators-as-first-class]] — Operate is the name. Pin [[codify-operate-cascade-vocabulary]] when adopted.
+- **~76% of `operator` rows are codify-duplicates** (cities + counties acting as their own operators). For these, the operator's posted-policy page is just the lawmaking entity announcing its own codified rule → that's `subtype='agency_administrative_policy'` in Codify (Step 6.7 / 6.8 path we built today), not a separate pipeline.
+- **The real Operate cohort is ~13 entity-specific operators** where the operating authority is NOT the lawmaking authority: 11 special_districts (port districts, conservancies) + 2 nonprofits (PSHDB, TCLT) + a handful of partially-codified federal sub-units. Plus all ~6,163 dog parks (where Operate is the PRIMARY pipeline because there's no codified-statute alternative).
+- **The 418-row extraction infrastructure is structurally broken** (Tavily search-precision bug pairs operators with wrong URLs at high LLM confidence). Not "stranded gold mine" — un-bridgable as-is.
+- **Real Operate v1 is essentially done** at 4 well-bridged ps rows. Net-new coverage requires fixing the extractor + dog-park expansion + selective entity-specific curator-fixed bridges.
 
-### Why Operate differs from Codify
+Operate v2's primary value is **dog parks** + the small set of entity-specific operators. Almost everything labeled "operator" in the existing infrastructure is actually Codify under another name.
 
-| Dimension | Codify | Operate |
+---
+
+## 1. The sharper distinction (vs Codify)
+
+| | Codify | Operate (sharper v2 framing) |
 |---|---|---|
-| Source type | Codified statute / regulation | Operator-posted policy (sign, web page, lease, MOU) |
-| Authority basis | Legal (city council, state legislature, federal agency rule-making) | Operational (the operator runs the facility; their posted rules govern) |
-| Discovery | URL templates per platform (Municode, ecode360, etc.) | Per-operator: agency homepage, parks dept, concessionaire site, posted-sign photo OCR, NPS Compendium PDF |
-| Scope | Polygon (jurisdictions / counties / PAD-US units) | Entity (`beach_fid`, `dog_park_id`) |
-| Spatial join | `ST_Intersects(beach.geom, polygon.geom)` | NONE — operator already knows its entities (via `beach_operator`, `dog_park_operator`) |
-| Resolver rank | High for codified law; medium for agency_administrative_policy | High for entity-specific operator rules (they override territorial codified for that entity); medium for general posted rules |
+| Source type | Codified statute / regulation / agency administrative policy | Operator-posted policy where the OPERATOR ≠ THE LAWMAKER |
+| Authority basis | Legal (city council, state legislature, federal agency rule-making) — covers the lawmaking entity's own published policy too | Operational (the operator stewards the facility under delegated authority); the city/state authorizes it but doesn't write the rules |
+| Scope shape | Polygon (jurisdictions / counties / PAD-US units) | Entity (`beach_fid`, `dog_park_id`) |
+| Examples | Bainbridge Island MC, OAR 736-021, 36 CFR §2.15, NPS Olympic Compendium, "Pets at Manhattan Beach" parks-dept page (subtype=agency_admin_policy) | PSHDB at Huntington Dog Beach (nonprofit operator); Port of Astoria dock rules; TCLT at Houda Point; Rosie's Dog Beach operator-posted policy (City of Long Beach as operator); EVERY dog park's posted hours/breed/license rules |
+| Coverage at scale | ~95%+ of MVP+ beaches (CA/OR/WA) | ~4 beaches today; potential ~13 entity-specific + 1,241 dog parks (CA 747 + OR 198 + WA 296, verified via counties spatial join 2026-05-18; only 122 have an OSM operator tag) (CA/OR/WA scope) |
 
-### When operator overrides codified
+### The 76% codify-overlap claim — receipt
 
-Per [[walkthrough-hbdb]] + [[walkthrough-crown-memorial]] layered-authority: operator rules at a SPECIFIC entity override territorial codified rules **for that entity only**. Example: City of Long Beach's general leash ordinance doesn't override Rosie's Dog Beach posted off-leash rule.
+Today's audit of the `operator` table (152 rows):
 
-The Cascade consensus engine ranks:
-1. Per-entity operator rule (Operate) — HIGHEST for that entity
-2. Per-entity codified rule (Codify deep-dive — e.g., NPS Compendium) — same tier as Operate; consensus engine adjudicates
-3. Territorial codified rule (Codify standard) — fills in beaches without entity-specific overrides
-4. State baseline (per [[state-baseline-coverage]]) — bottom layer
+| operator.type | Count | Codify-duplicate? | Real Operate? |
+|---|---:|---|---|
+| city | 73 | Yes — same legal entity as Codify city jurisdiction | No |
+| county | 42 | Yes — same as Codify county | No |
+| state | 7 | Mostly — Codify `--state-agency-rule` already covers | No |
+| county_department | 4 | Mostly — same as parent county Codify | No |
+| federal_department | 12 | Mostly — Codify CFR baselines + Compendium overrides cover NPS/USFWS/USFS | Partial — sub-units rarely |
+| federal_military | 1 | USCG — Codify could cover | No |
+| **special_district** | **11** | **No** — port districts, conservancies, regional authorities | **Yes** |
+| **nonprofit** | **2** | **No** — PSHDB, TCLT | **Yes** |
+| **TOTAL** | **152** | ~115 (76%) | **~13** |
+
+When "City of Manhattan Beach" operator publishes a "Pets at the Beach" page on cityofmanhattanbeach.gov, that's the City announcing its OWN municipal code. The right modeling is **one Codify ps row** (subtype=`agency_administrative_policy` or `municipal_code`) issued by the City as agency. The "operator" row for the City is a redundant entity for the same legal authority.
+
+**Per [[walkthrough-hbdb]] the real Operate pattern is layered authority:** city authorizes, nonprofit/special-district stewards, posted policy reflects the steward's operational rule (which may override the city's general ordinance for the specific entity). That's PSHDB, TCLT, port districts. Not generic city/county operators.
+
+### When operator overrides codified (the layered case)
+
+When a real entity-specific operator (PSHDB-class) IS distinct from the lawmaking entity:
+
+1. Codify provides territorial floor (HB citywide leash law → on_leash for most HB beaches)
+2. Operate provides entity-specific override (PSHDB posted off-leash for Dog Beach specifically)
+3. Consensus engine sees both; operator wins for the SPECIFIC entity
+4. Other beaches in same polygon stay at codify floor
+
+The walkthrough-hbdb pattern is the prototype. Today's PSHDB curator-fix migration (ps_287) ships this exact pattern.
 
 ---
 
-## 2. What exists today (the audit Franz keeps asking about)
+## 2. What exists today (final audit, 2026-05-18 evening)
 
 ### Database state
 
-| Table | Rows | Purpose | Connected to cascade? |
-|---|---:|---|---|
-| `operator` | 152 | Operator entities (HOAs, concessionaires, NPS supt offices, port districts) | Partially — via `beach_operator` |
-| `beach_operator` | **3** | beach × operator mapping w/ scope_section, precedence_rank | YES (table exists) but **massively under-populated** |
-| `operator_dogs_policy` | **418** | 3-pass LLM extraction output (pass_a default_rule, pass_b temporal, pass_c exceptions) | **NO — disconnected** |
-| `operator_policy_extractions` | **722** | Raw extraction artifacts (per-source fetches, per-pass token counts) | NO — disconnected |
-| `operator_policy_exceptions` | **393** | Per-exception details (off-leash carve-outs, seasonal closures) | NO — disconnected |
-| `policy_source` (subtype='operator_posted_policy') | **12** (was 11; +PSHDB curator-fix 2026-05-18) | Operator rules surfaced to consensus engine | YES — but see audit below; only **4 are real operator policies** |
-| `policy_source` (subtype='superintendents_compendium') | 6 (today's NPS shipments) | NPS unit-specific operator-style overrides | YES |
-| `policy_source` (subtype='agency_administrative_policy') | 67 (CA) + today's new | Agency-published operator pages (parks.ca.gov/Dogs, fws.gov refuge pages) | YES |
-
-**The gap (REVISED 2026-05-18 evening after PSHDB Phase 1 apply + 12-row audit):**
-
-The "418 stranded" framing in the v1 draft was TOO SIMPLE. The actual picture:
-
-**Of 12 `operator_posted_policy` ps rows (audit by classification):**
-
-| Classification | Count | Rows | Meaning |
-|---|---:|---|---|
-| `well_bridged` (has FK + has beaches) | **1** | ps_287 PSHDB (today's curator-fix) | Properly attributed + driving consensus |
-| `bridged_but_no_op_fk` (has beaches but issuing_operator_id NULL) | **3** | ps_20 PSHDB-original, ps_22 LB Rosie's, ps_233 Trinidad Coastal Land Trust | Real operator policies driving consensus, just lacking FK metadata |
-| `real_but_no_bps` (real policy w/ no beach link yet) | **1** | ps_21 EBRPD Crown Beach (ebparks.org) | Real EBRPD operator policy; needs beach_operator backfill OR curator bridge to Crown Memorial SB |
-| **BEP source-class anchors — LOAD-BEARING, DO NOT TOUCH** | **7** | ps_26 Park URL Extractor, ps_28 Operator Dogs Policy v1, ps_33 Beach Policy V2 Dogs, ps_34 Operator City Extractor, ps_35 Section Research Extractor v1, ps_38 Research (curator), ps_42 Operator Policy Exceptions v1 | Per `supabase/migrations/20260516_consensus_phase4_backfill_bep.sql`: these are anchor rows tagging ~12,033 BEP (beach_field_consensus) dog-policy rows with `policy_source_id` FK so source-class tier logic flows through the consensus engine. Tier ranking depends on these. DO NOT DELETE. (Original draft of this spec misclassified them as "cleanup candidates"; Franz caught it 2026-05-18.) |
-
-**REAL operator-pipeline coverage today: 4 beaches** (Dog Beach fid 6212, 2 Rosie's Dog Beach fids, 1 Houda Point/Camel Rock fid via Trinidad Coastal Land Trust).
-
-**The 418 stranded extractions are PARTIALLY DUPLICATIVE** of the 4 real ps rows above:
-- PSHDB (operator_id=7) has BOTH an extraction (operator_dogs_policy row, corrupt) AND a ps row (ps_id=20, correct)
-- The 418 extractions don't 1:1 map to "operators with zero ps coverage"
-
-**Real Operate gap, sharpened:** operators with ZERO ps rows AND ZERO bps links today AND a real operator-posted policy worth extracting. The cohort is smaller than 418; needs audit per-operator to identify true gap.
-
-**Plus** ~1,500 dog parks (per [[dogpark-rules-are-operator-posted]]) where Operate is the PRIMARY pipeline because there's no codified-statute alternative — these are largely uncovered today.
-
-### Phase 1c audit findings (2026-05-18 evening, via scripts/audit_operator_extractions.py)
-
-Of 22 operators with extractions ≥ pass_c_confidence 0.7:
-
-| Classification | Count | Meaning |
+| Table | Rows | Status |
 |---|---:|---|
-| `corrupt` | **15** | Extraction source_url's domain has zero token overlap with operator name. Pattern: Orange County → rpvca.gov; Channel Islands NP → delmar.ca.us; USCG → huntingtonbeachca.gov; Fresno County → cityofpacifica.org. Looks like a SQL JOIN or Cartesian product in the original extractor paired operator_ids with random extraction source URLs. |
-| `duplicative_dirty` | 1 | PSHDB (same as the corruption we caught earlier — its op extraction pointed to Rosie's). Already resolved by today's PSHDB curator-fix migration. |
-| `low_conf` | 6 | pass_c_confidence below 0.7 threshold |
-| `net_new` | **0** | **NO clean bridge candidates from existing extractions** |
-| `duplicative_clean` | 0 | — |
+| `operator` | 152 (153 after TCLT add today) | ~13 are real entity-specific; ~115 are codify-duplicates |
+| `beach_operator` | 3 | Sparse; today's PSHDB + Crystal Cove Conservancy entries |
+| `operator_dogs_policy` | 418 | **CORRUPT** — Tavily search-precision bug paired most operators with wrong URLs (15 of 22 conf≥0.7 operators classified as `corrupt` by [[scripts/audit_operator_extractions.py]] 2026-05-18) |
+| `operator_policy_extractions` | 722 | Raw artifacts; same corruption |
+| `operator_policy_exceptions` | 393 | Exception detail; same corruption likely propagates |
+| `policy_source` (subtype=`operator_posted_policy`) | 12 | See classification table below |
 
-**Headline:** the 418-row extraction infrastructure is broken at the operator-to-source attribution level. There is no "bridge the 418" path that produces real Operate coverage — the data is too corrupted. ALL net-new Operate coverage from here requires either:
+### The 12 operator_posted_policy ps rows (post-Phase-1a backfill)
 
-1. Re-extraction from scratch with correct operator-URL pairing
-2. Per-operator curator-fixed bridges (like today's PSHDB pattern at ps_287)
-3. Phase 2 beach_operator backfill so re-extraction has a proper attribution path
+| Classification | Count | Rows | Status |
+|---|---:|---|---|
+| `well_bridged` (FK + beaches) | **4** | ps_20 PSHDB-original, ps_22 LB Rosie's, ps_233 TCLT Houda Pt, ps_287 PSHDB curator-fix | The real Operate state. Driving consensus correctly. |
+| `real_but_no_bps` | **1** | ps_21 EBRPD Crown Beach | Real policy; needs beach_operator link (Phase 1b candidate) |
+| **BEP source-class anchors — LOAD-BEARING, DO NOT TOUCH** | **7** | ps_26 Park URL Extractor, ps_28 Operator Dogs Policy v1, ps_33 Beach Policy V2 Dogs, ps_34 Operator City Extractor, ps_35 Section Research Extractor v1, ps_38 Research (curator), ps_42 Operator Policy Exceptions v1 | Anchor rows tagging ~12,033 BEP (beach_field_consensus) dog-policy rows with `policy_source_id` FK so source-class tier logic flows through the consensus engine. Per `supabase/migrations/20260516_consensus_phase4_backfill_bep.sql`. |
 
-The 4 well-bridged ps rows (post-Phase-1a backfill: ps_20/22/233/287) are the entire real Operate-pipeline state. Phase 1 is structurally complete.
+### The extraction infrastructure (Dagster pipeline)
 
-### Code state
+Live consumers of `operator_dogs_policy.summary`:
+- `scripts/dagster/dog_beach/dog_beach/assets/per_fid_enrichment.py` — Haiku-driven per-section beach rule extraction
+- `scripts/audit/state_population_audit.py` — joins for state coverage audits
+- `scripts/audit_artifacts.py` — audit references
 
-| Asset | Status |
-|---|---|
-| `operator` + `beach_operator` schemas | exist |
-| 3-pass extractor (pass_a/b/c) | Was built (evidence: 418 rows w/ confidence per pass) — script may be in `scripts/` somewhere; needs audit |
-| Bridge to `policy_source` | **MISSING** |
-| Discovery layer (find operator pages) | Partial — Codify Step 6.7 does this for agency_administrative_policy |
-| Per-entity URL templates | Codify has them for codified platforms; Operate needs per-operator-type patterns |
-| CLI mode | None — needs `scripts/derive_operator_posted_policy.py` (analog of derive_policy_source) |
-| `--list-operator-coverage` helper | None |
-| Cascade integration | Cascade already handles `operator_posted_policy` subtype if bps rows exist |
-| Quality gates | None operator-specific |
+Pipeline assets:
+- `scripts/extract_operator_dogs_policy.py` — extractor (Tavily search → URL → 3-pass LLM)
+- `scripts/one_off/merge_operator_dogs_policy.py` — extractions → canonical dogs_policy
+- `scripts/dagster/dog_beach/dog_beach/assets/operator_llm_cascade.py` — orchestrator (Phases 26+27)
 
----
-
-## 3. Data model — minimal changes
-
-### Reuse, don't add
-
-Per [[never-solve-same-problem-twice]] + Franz "leverage existing tables wherever possible" 2026-05-18:
-
-- `operator` (152 rows) — KEEP as canonical entity table
-- `beach_operator` (3 rows) — KEEP; needs massive backfill (target: every beach with a non-jurisdictional operator)
-- `policy_source` (subtype='operator_posted_policy') — KEEP; this is the cascade-facing structure
-- `beach_policy_source` — KEEP; operator policies attach to beaches via this table the same way codified ones do
-- `operator_dogs_policy` (418 rows) — KEEP as the **extraction-artifact table**; consider it the operator analog of `policy_source.full_text` + structured extraction. Bridge to policy_source on-demand.
-- `operator_policy_extractions` (722 rows) — KEEP as the raw-LLM-output audit trail
-- `operator_policy_exceptions` (393 rows) — KEEP as the structured-exception detail (off-leash zones, seasonal closures); analog of `beach_policy_source_temporal`
-
-### What to add
-
-| Object | Purpose | Notes |
-|---|---|---|
-| `dog_park_operator` table (or rename `beach_operator` → `entity_operator` with entity_type column) | dog-park-to-operator mapping; today `beach_operator` only handles beaches | Dog parks are the PRIMARY Operate target ([[dogpark-rules-are-operator-posted]]) |
-| Trigger: `operator_dogs_policy` UPSERT → derive `policy_source` (operator_posted_policy) + `beach_policy_source` for each linked entity | Auto-bridge extraction → cascade | Idempotent; NOT EXISTS / ON CONFLICT pattern from Codify v1 |
-| Optional: `operator_url_templates` table (similar to `STATE_PLATFORM_PRIORITY` from Codify) | Per-operator-type URL discovery patterns (NPS pets.htm, USFWS rules-policies, OPRD per-park) | Could be Python dict; ETL later if it grows |
+**The bug:** the extractor accepts Tavily's top URL without validating that the operator name appears in the URL host or fetched page. Same failure-mode pattern as the Municode-silent-redirect issue we fixed this morning via the catalog pre-check.
 
 ---
 
-## 4. Pipeline architecture (mirrors Codify v1)
+## 3. Real Operate v2 scope
 
-Five phases, analogous to Codify's Phase A/B/C/Step 6/Cascade:
+**Drop from scope:** the ~115 city/county/state/county_department operators that are codify-duplicates. Their "operator pages" are codify-side via `agency_administrative_policy` subtype (Step 6.7/6.8 already handles this).
 
-### Phase A — Operator entity discovery
+**In scope:**
 
-For a target state (or set), enumerate operator entities that own/manage beaches:
+### A. Entity-specific non-government operators (~13 today, more discoverable)
 
-```sql
--- Beaches in state X that lack any beach_operator row
--- → candidates for operator discovery
-SELECT b.fid, b.name, b.state
-FROM beaches_gold b
-WHERE b.state = ANY(:states) AND b.is_active
-  AND NOT EXISTS (SELECT 1 FROM beach_operator bo WHERE bo.beach_fid = b.fid)
-ORDER BY b.name;
-```
+- 11 special_districts (port districts, conservancies, water districts, regional authorities)
+- 2 nonprofits (PSHDB, TCLT) — likely more discoverable via PAD-US `mng_name` + OSM operator tags
+- Per-unit federal sub-units NOT covered by codify CFR baseline + Compendium overrides (small handful)
 
-Discovery sources (priority order):
-1. **OSM `operator` tag** on beach POIs + dog-park polygons (already loaded; 669 dog-park operators captured)
-2. **PAD-US `mng_name`** when the managing org is an operator (e.g., NPS Superintendent's Office for a unit)
-3. **CCC YourCoast** (per [[ca-coastal-beaches-inventory-research]]) — has operator metadata for CA
-4. **Curator-fed** via CSV (`beach_fid, operator_name, operator_type`)
-5. **Agent-discovered** via web_search ("Who manages <beach name>")
+For each: discover → fetch operator-published page → extract rule → bridge via `beach_operator` link.
 
-CLI:
-```bash
-python scripts/derive_operator_posted_policy.py --discover-operators --states OR,WA
-```
+### B. Dog parks (~6,163 entities)
 
-### Phase B — Operator URL discovery
+Per [[dogpark-rules-are-operator-posted]]: dog parks have NO codified-statute alternative. Operate is THE pipeline. Discovery + extraction needed for hours, capacity, license, breed rules.
 
-For each operator entity, find the operator's published pet/rule URL:
+Today's dog-park coverage in `operator_dogs_policy` / `policy_source`: essentially zero. This is the largest greenfield Operate opportunity.
 
-Per-operator-type patterns:
-- **State park operator** (OPRD per-park, CDPR per-park, WSPRC per-park): try `stateparks.<state>.gov/<park-slug>` then `<state>parks.gov/?page=<id>`
-- **NPS superintendent**: `nps.gov/<4letter>/learn/management/superintendents-compendium.htm` + `nps.gov/<4letter>/planyourvisit/pets.htm` (Codify v1 already builds these — share logic)
-- **USFWS refuge**: `fws.gov/refuge/<refuge-slug>/visit-us/activities/dog-walking` or `/rules-policies`
-- **Port district**: per-district website (no template; web_search)
-- **HOA / private operator**: per-operator (no template; AV-flagged per [[deferred-canyon-lake]])
-- **Concessionaire** (HBDB Friends, Stinson Beach Restaurant, etc.): per-operator
-- **Dog-park operator**: city parks dept page or onsite-sign photo
+### C. Walkthrough-hbdb-class layered-authority overrides
 
-CLI:
-```bash
-python scripts/derive_operator_posted_policy.py --discover-urls --operator-ids 12,34,56
-```
-
-Output: `operator.rules_url` filled in (or staged in `operator_dogs_policy.source_url` if pre-existing pattern).
-
-### Phase C — Extract operator rule (3-pass already exists)
-
-The existing 3-pass extractor (evidence: pass_a/b/c columns in `operator_dogs_policy`) does:
-- **Pass A**: default_rule + applies_to_all + leash_required + quotes + confidence
-- **Pass B**: time_windows + seasonal_closures + spatial_zones + quotes + confidence
-- **Pass C**: exceptions + ordinance_reference + summary + quotes + confidence
-
-This is essentially Codify's Step 6 (LLM rule decision) + Codify's `extract_temporal_from_policy_source.py` collapsed into one driver. **Audit existing script; potentially keep as-is.**
-
-If the existing script is functional, just need to:
-1. Locate it (probably in `scripts/`)
-2. Verify it can run against new operators
-3. Add CLI argument compatibility with the codify v1 patterns (--from-csv, --rescue, etc.)
-
-### Phase D — Bridge to cascade (NEW; the main gap)
-
-**This is the missing piece** — current 418 extraction rows don't see the consumer surface.
-
-Build a script + trigger that does:
-
-```sql
--- For each operator_dogs_policy row with pass_c_confidence >= 0.7,
--- create / find a policy_source row of subtype='operator_posted_policy'
--- (issuing_agency_id NULL; issuing_operator_id = operator_dogs_policy.operator_id)
--- then INSERT beach_policy_source rows for every beach_operator link.
-```
-
-Pseudo-code for the bridge:
-
-```python
-def bridge_operator_to_cascade(operator_id):
-    odp = supa("/operator_dogs_policy?operator_id=eq.{operator_id}", limit=1)
-    if not odp or odp[0]['pass_c_confidence'] < 0.7:
-        return  # skip low-confidence
-    rule = _map_default_rule_to_enum(odp[0]['default_rule'], odp[0]['leash_required'])
-    ps = upsert_policy_source(
-        subtype='operator_posted_policy',
-        citation=odp[0].get('summary') or f"{operator.name} posted policy",
-        issuing_operator_id=operator_id,
-        source_url=odp[0]['source_url'],
-        full_text=odp[0].get('summary'),
-    )
-    for beach_link in supa("/beach_operator?operator_id=eq.{operator_id}"):
-        upsert_bps(
-            beach_fid=beach_link['beach_fid'],
-            policy_source_id=ps.id,
-            section=beach_link.get('scope_section', 'sand'),
-            rule=rule,
-            evidence_verbatim=odp[0]['pass_a_quotes'][0],
-            evidence_url=odp[0]['source_url'],
-        )
-    # Optionally: convert operator_policy_exceptions → beach_policy_source_temporal
-```
-
-Or — better — make it a SQL trigger on `operator_dogs_policy` so the bridge fires automatically on extraction. Per playbook tenet #5 design.
-
-### Cascade integration
-
-Same as Codify — `tg_stmt_ins_beach_policy_source` fires automatically on the bridge's bps INSERTs. No new cascade code needed. The 11 existing operator_posted_policy ps rows prove this works.
+When city ordinance says X but a specific entity within the city operates differently (PSHDB off-leash carve-out from HB on-leash; Rosie's off-leash carve-out from LB on-leash; Cape Lookout leash override from OR Ocean Shore baseline). The carve-outs themselves are Operate-side even when stewarded by city departments.
 
 ---
 
-## 5. Quality gates (mirrors Codify §8)
+## 4. Data model — minimal changes (unchanged from v1)
 
-```sql
--- (Op-1) Operator-coverage: every active beach in MVP+ states has at least
---        one bps OR is covered by codify
-SELECT b.state, COUNT(*) FILTER (WHERE n_bps = 0) AS uncovered
-FROM beaches_gold b
-LEFT JOIN (SELECT beach_fid, COUNT(*) AS n_bps FROM beach_policy_source GROUP BY 1) c USING (fid)
-WHERE b.state IN ('CA','OR','WA') AND b.is_active
-GROUP BY b.state;
+Same as v1; reuse `operator` + `beach_operator` + `policy_source(subtype=operator_posted_policy)` + `beach_policy_source` + (optional new) `dog_park_operator`.
 
--- (Op-2) Operator URL deep-link discipline (analog to Codify URL gate)
---        operator_posted_policy can use page-level URLs (per playbook §8); enforce
---        that the URL isn't a bare domain.
-
--- (Op-3) Operator-vs-codify rule conflict surfaced
---        Where a beach has both operator AND codify ps rows w/ DIFFERENT rules,
---        verify the consensus engine picked the operator (per-entity override
---        principle from walkthrough-hbdb).
-SELECT bps_op.beach_fid, g.name,
-       bps_op.rule AS operator_rule, bps_codify.rule AS codify_rule,
-       bdp.zone_rules->'regions'->0->'sections'->'sand'->>'rule' AS consensus_rule
-FROM beach_policy_source bps_op
-JOIN policy_source ps_op ON ps_op.id = bps_op.policy_source_id
-  AND ps_op.subtype = 'operator_posted_policy'
-JOIN beach_policy_source bps_codify ON bps_codify.beach_fid = bps_op.beach_fid
-  AND bps_codify.section = bps_op.section
-JOIN policy_source ps_codify ON ps_codify.id = bps_codify.policy_source_id
-  AND ps_codify.subtype IN ('municipal_code','federal_regulation','state_regulation')
-JOIN beach_dog_policy bdp ON bdp.arena_group_id = bps_op.beach_fid
-JOIN beaches_gold g ON g.fid = bps_op.beach_fid
-WHERE bps_op.rule != bps_codify.rule;
--- For each row, consensus_rule should match operator_rule (operator wins per-entity).
-
--- (Op-4) operator_dogs_policy → policy_source bridge coverage
---        How many extracted rows haven't been bridged yet?
-SELECT COUNT(*) AS extracted_total,
-       COUNT(*) FILTER (WHERE EXISTS (
-         SELECT 1 FROM policy_source ps
-         WHERE ps.issuing_operator_id = odp.operator_id
-           AND ps.subtype = 'operator_posted_policy'
-       )) AS bridged
-FROM operator_dogs_policy odp
-WHERE odp.pass_c_confidence >= 0.7;
--- Today's expected output: 0 bridged (everything queued).
-```
+Phase 2 backfill of `beach_operator` is the structural unlock.
 
 ---
 
-## 6. CLI design (mirrors Codify v1)
+## 5. Pipeline architecture — sharpened
 
-Inspired by the patterns built today (`--state-agency-rule`, `--manual-url`, `--from-csv`, `--rescue`, `--list-federal-coverage`):
+### For entity-specific operators (cohort A above)
 
-```
-python scripts/derive_operator_posted_policy.py
-  --discover-operators  --states OR,WA            # Phase A
-  --discover-urls       --operator-ids 12,34,56   # Phase B
-  --extract-from-url    --operator-id 99 --url <U>  # Phase C single
-  --extract-state       --state OR --pilot 20     # Phase C batch
-  --bridge-to-cascade   --operator-ids 12,34,56   # Phase D
-  --bridge-all-extracted                          # Phase D backfill
-  --list-coverage       --states OR,WA            # Discovery helper
-  --rescue-from-jsonl   <path>                    # Rescue stubborn defers
-  --operator-rule       --operator-id 12 --rule on_leash --url <U> --citation <C>
-                                                  # Curator one-shot (analog of --state-agency-rule)
-```
+Five phases, mirrors Codify:
 
-Outputs:
-- `supabase/migrations/<date>_operate_<label>.sql` (per playbook §7)
-- `tmp/operate_<label>_<ts>_outcomes.jsonl` (per-operator outcome tracker)
-- `tmp/operate_<label>_<ts>_post_apply.sh` (temporal extractor invocation; reuses #2 from Codify)
-- `tmp/operate_<label>_<ts>_REVIEW.sql` (curator-review queue; reuses #12 from Codify)
+1. **Discovery** — find the operator entity (PAD-US `mng_name`, OSM `operator` tag, curator-fed CSV)
+2. **URL discovery** — find operator's published rule page (per-operator-type patterns; web_search fallback)
+3. **Extract** — Tavily / Anthropic LLM (the existing 3-pass extractor with **operator-name validation added** — the missing piece)
+4. **Bridge** — ps + bps via `beach_operator` link
+5. **Cascade** — automatic per playbook tenet #5
+
+### For dog parks (cohort B above)
+
+1. **Catalog** — already exist via `osm_dog_parks` (6,163 rows)
+2. **Operator discovery** — many have `operator` tag from OSM (669); others need web_search
+3. **URL + extract** — per-dog-park pets policy page (often a sign photo or city parks page)
+4. **Bridge** via `dog_park_operator` (new table) + cascade
+
+### For layered-authority overrides (cohort C above)
+
+Per-case curator-fixed bridges (PSHDB pattern from ps_287 today). Not bulk-pipelineable; each is a known operator with a known carve-out.
 
 ---
 
-## 7. Migration plan from today's state
+## 6. Migration plan (v2 — REVISED from v1)
 
-**Phase 0 — audit** (1-2 hours) — PARTIALLY DONE 2026-05-18:
-1. ✓ Located + tested the bridge mechanism (`scripts/bridge_operator_to_cascade.py`)
-2. ✓ Sampled `beach_operator` 3 rows: 1 HBDB (PSHDB→Dog Beach) + 2 Crystal Cove (Conservancy→Crystal Cove SB) — small but coherent
-3. ✓ Audited 12 `operator_posted_policy` ps rows (see §2 audit table): 4 real + 8 cleanup candidates
-4. ✗ Locate + verify existing 3-pass extractor script — still TODO
-5. ✗ Per-operator audit of the 418 extractions vs existing ps rows — still TODO
+**Phase 0 — extractor fix:**
+1. Add operator-name validation to `scripts/extract_operator_dogs_policy.py` — reject Tavily URLs where host + fetched title don't contain operator-name tokens. Analog of the Municode pre-check pattern from this morning.
+2. Re-run extractor on the 15 corrupted-classified operators (cheap; ~$0.10-0.30 LLM each)
+3. Verify post-fix audit drops `corrupt` classification to ≈0
 
-**Phase 1 — bridge** — MOSTLY DONE, FINDING IS BIGGER THAN ANTICIPATED (2026-05-18):
-1. ✓ Bridge script built (`scripts/bridge_operator_to_cascade.py`)
-2. ✓ PSHDB curator-fixed migration applied (ps_id=287) → fid 6212 Dog Beach properly attributed; consensus already correct via pre-existing ps_id=20
-3. ⚠ Mechanical bridge of 418 extractions is NOT the right next move — the audit revealed many extractions are corrupt + many operators already have ps rows. Phase 1 EVOLVES INTO:
-   - 1a. **Backfill `issuing_operator_id`** on the 3 real-but-FK-missing ps rows (ps_20 PSHDB, ps_22 LB Rosie's, ps_233 Trinidad Coastal Land Trust). Mechanical UPDATE migration; small.
-   - 1b. **Bridge ps_21 (EBRPD Crown Beach) to Crown Memorial SB** via beach_operator + bps insert (curator-fixed, similar pattern to today's PSHDB).
-   - 1c. **Per-operator audit** of the 418 extractions: which are corrupt? which duplicate existing ps? which represent net-new operator coverage?
-   - 1d. **Targeted curator-fixed bridges** like today's PSHDB pattern for net-new operators that have extractable policy
+**Phase 1 — done.** 4 well-bridged ps rows; one orphan (ps_21 EBRPD) needs Crown Memorial SB bridge.
 
-NOTE: the 7 BEP source-class anchor ps rows (ps_26/28/33/34/35/38/42) are LOAD-BEARING for the consensus engine's tier logic per the Phase 4 backfill migration. DO NOT DELETE. The v1 draft of this spec incorrectly classified them as cleanup candidates; Franz caught it 2026-05-18.
+**Phase 2 — beach_operator backfill (the structural unlock):**
+1. Backfill from PAD-US `mng_name` for federal+state-park sub-units
+2. Backfill from OSM `operator` tag for tagged beaches (669 sources)
+3. Curator-fed CSV for known nonprofit/special-district operators
+4. Target: every beach with a NAMED entity-specific operator has ≥1 `beach_operator` link
 
-**Phase 2 — beach_operator backfill (5-10 hours):**
-1. The 3-row `beach_operator` table remains the bottleneck for scaling Operate
-2. Build a backfill from PAD-US `mng_name` + OSM `operator` tag + curator-fed CSV
-3. Target: every active beach with a NAMED operator has ≥1 beach_operator link
-4. Per-state batch via existing tools
-
-**Phase 3 — dog-park Operate (10-20 hours):**
-1. Add `dog_park_operator` (or extend `beach_operator` to `entity_operator`)
-2. Run Phase B (URL discovery) + Phase C (extract) for the 6,163 OSM dog parks
-3. Cost estimate: 6,163 × 3 LLM calls × $0.005 avg = ~$92 — affordable
-4. Dog parks become the FIRST class where Operate is the PRIMARY codification (no codify alternative)
+**Phase 3 — dog parks (the greenfield):**
+1. Build `dog_park_operator` (or extend `beach_operator` to `entity_operator`)
+2. Run Phase B+C+D pipeline against the 6,163 OSM dog parks
+3. Cost estimate: 1,241 × 3 LLM calls × $0.005 avg = ~$19 for MVP+ states (vs full US ~$92)
+4. Many dog parks have no published policy (just on-site signage) — defer rate will be high
 
 **Phase 4 — Codify Step 6.7 demotion:**
-1. Step 6.7 (agency-policy fallback) was the seed for Operate; should become Operate-as-primary for entity-scoped queries
-2. Refactor: codify defers to operate-pipeline for unit-specific overrides (e.g., NPS Compendiums move from Codify to Operate)
-3. Today's Compendium ps rows (subtype=superintendents_compendium) can stay where they are; new ones go through Operate
+1. Step 6.7 (agency-policy fallback) currently produces `agency_administrative_policy` ps rows
+2. Refactor: when the operator IS the lawmaking entity, keep as agency_admin_policy in Codify
+3. When the operator is entity-specific (PSHDB-class), promote to Operate
+4. Largely cosmetic — same data, different track label
 
 ---
 
-## 8. Open questions for Franz
+## 7. Quality gates (unchanged from v1 §8)
 
-1. **Bridge mechanism: script or trigger?**
-   - Script (Python, batch-driven, per-batch approval) — matches Codify v1 discipline; explicit per-bridge migrations
-   - Trigger (SQL, auto-fires on operator_dogs_policy UPSERT) — magical, less auditable, harder to debug
-   - **Recommend script** for parity with Codify v1 + auditability
-
-2. **Naming: Operate vs Post?**
-   - "Operate" alliterates w/ Codify + Cascade
-   - "Post" describes what operators DO (post rules)
-   - **Recommend Operate** per the [[operators-as-first-class]] suggestion
-
-3. **Bridge confidence threshold:** pass_c_confidence >= 0.7? 0.5? 0.8?
-   - Codify v1 uses 0.7 for auto_commit, 0.4-0.7 for human_review
-   - **Recommend mirror: >= 0.7 auto-commit; 0.4-0.7 review queue; < 0.4 defer**
-
-4. **Operator-vs-codify resolver:** does operator ALWAYS win per-entity?
-   - Per walkthrough-hbdb yes (Rosie's overrides Long Beach leash)
-   - Edge case: state law explicitly overrides operator (e.g., Endangered Species Act seasonal closure overrides operator's permissive rule)
-   - **Recommend tiered: operator wins for entity-specific rules; state baseline wins for protected-species/health-safety overrides**
-
-5. **Dog-park-only operator scope:** should we batch-run all 6,163 dog parks in v1?
-   - Cost ~$92; wall time ~6-8 hours at 5 parallel agents
-   - Many dog parks have no published policy (just a sign) — defers expected
-   - **Recommend: start with WA + OR + CA dog parks only (~1,800?) for MVP+; defer rest until needed**
-
-6. **HOA / private operator handling:** per [[deferred-canyon-lake]] AV-flagged sources are deferred
-   - **Recommend: AV-flagged operators get an `operator.av_flagged=true` column; pipeline skips them by default; `--include-av-flagged` opt-in**
-
-7. **Bridge artifact format:** SQL migrations per the codify pattern, or direct DB writes?
-   - **Recommend SQL migrations + per-batch approval (matches today's discipline + auditable)**
+Same Op-1 through Op-4 from v1.
 
 ---
 
-## 9. What this spec does NOT cover
+## 8. CLI design (slimmed from v1)
 
-- Per-tribal Operate (deferred per Franz 2026-05-17)
-- HOA-private operator codify (AV-flagged; per [[deferred-canyon-lake]])
-- Operator photo / sign OCR (would need vision model integration; future)
-- Operator-amenity-extraction (already exists per `operator_amenity_claims` table; separate concern)
+```
+scripts/bridge_operator_to_cascade.py
+  --operator-ids 7,52,160 --label phase1_fix
+  --all-bridgable
+  --dry-run
+  --confidence-threshold 0.7
+
+scripts/audit_operator_extractions.py
+  --confidence-threshold 0.7
+  # produces tmp/operate_phase1c_audit_<ts>.{jsonl,md}
+
+# Phase 0 (TODO): extend the extractor
+scripts/extract_operator_dogs_policy.py
+  --validate-operator-name    # NEW; analog of Municode pre-check
+  --re-extract-operator-ids <list>
+```
+
+---
+
+## 9. Success metrics (v2 — REVISED)
+
+- Phase 0 fix: post-fix audit shows `corrupt` ≤ 5% (was 68% pre-fix)
+- Phase 1: 4 well_bridged ps rows + 1 EBRPD bridge → 5 total
+- Phase 2: every beach with a real entity-specific operator (~13 today, perhaps 30-50 after discovery) has `beach_operator` link
+- Phase 3: ≥50% of MVP+ state dog parks have an operator_posted_policy ps row
+- Op-3 consensus correctness: when operator and codify disagree, consensus picks operator (per-entity override correctness)
+
+Drop the v1 metric "all 418 extractions bridged" — that was an artifact of the misframing. The 418 includes many city/county operators that are codify-duplicates; they shouldn't be bridged at all.
 
 ---
 
 ## 10. Worked examples
 
-### Example A — Cape Lookout SP leash override (OR)
+### Example A — PSHDB / Huntington Dog Beach (shipped today)
 
-Cape Lookout SP is operated by OPRD. The OAR 736-010-0030 baseline says strict 6-ft leash on park property; Cape Lookout's operator-posted policy (stateparks.oregon.gov/index.cfm?do=v.page&id=79) adds explicit "Pets must be on a leash on the beach in front of Cape Lookout State Park."
+The prototype. PSHDB nonprofit operates Dog Beach via partnership with City of HB. City's general leash ordinance applies citywide; PSHDB's posted off-leash optional rule overrides for the carve-out. Today's ps_287 is the canonical Operate row.
 
-Operate flow:
-1. **Phase A**: Cape Lookout SP is identified as an OPRD-operated entity (PAD-US: STAT/SPR/Cape Lookout State Park)
-2. **Phase B**: URL = `https://stateparks.oregon.gov/index.cfm?do=v.page&id=79#cape-lookout` (or a per-park URL if it exists)
-3. **Phase C**: extract rule=on_leash + spatial_zones=[Cape Lookout beach front] + confidence 0.95
-4. **Phase D**: bridge → policy_source(subtype='operator_posted_policy', issuing_operator_id=<oprd op id>) + beach_policy_source for the Cape Lookout SP beach fids
-5. **Cascade**: bps INSERT auto-fires; consensus engine sees operator_posted_policy + codified OAR 736-010-0030 + OAR 736-021-0070 (Ocean Shore); operator-posted wins for entity-specific override
+### Example B — Port of Astoria (in scope, not yet shipped)
 
-### Example B — Rosie's Dog Beach (Long Beach CA)
+Port of Astoria (special_district operator) manages docks + adjacent shoreline. Has its own posted rules different from City of Astoria's general ordinance. Real Operate target — entity-specific authority that overrides territorial codify for that entity.
 
-Rosie's Dog Beach is operated by City of Long Beach Parks & Rec; posted off-leash. Long Beach has a citywide leash ordinance.
+### Example C — City of Manhattan Beach (NOT in scope)
 
-Operate flow:
-1. **Phase A**: Rosie's identified as a Long Beach P&R-operated entity (OSM operator tag + city PAD-US)
-2. **Phase B**: URL = `https://www.longbeach.gov/park/park-and-facilities/parks-centers-pier/dog-beach-zone/`
-3. **Phase C**: extract rule=off_leash + spatial_zones=[Rosie's polygon] + posted-hours window
-4. **Phase D**: bridge → policy_source(operator_posted_policy, issuing_operator_id=<long-beach-pnr>) + bps for Rosie's beach_fid
-5. **Cascade**: operator_posted wins for Rosie's specifically; Long Beach citywide leash still applies to OTHER Long Beach beaches
+The "operator" row for City of Manhattan Beach IS codify-duplicate. The City's "Pets at the Beach" page on cityofmanhattanbeach.gov is just the City announcing its own MC. Properly modeled as Codify's `agency_administrative_policy` subtype, NOT Operate. Drop from Operate scope.
 
-### Example C — Henlopen Acres Block W Beach (DE; already in extraction data)
+### Example D — Any random dog park (greenfield)
 
-Per the 418 operator_dogs_policy rows: `https://henlopenacres.delaware.gov/files/2020/12/HAPOC-Rules-for-Use-of-the-Block-W-Beach.pdf` was extracted with default_rule=restricted + leash_required=true + pass_c_confidence=0.99. This data EXISTS but isn't bridged.
-
-Operate Phase D bridge:
-1. Read operator_dogs_policy row
-2. Find or create operator row for "Henlopen Acres" (HOA / nonprofit type)
-3. Find or create beach_operator row linking the HAPOC-Block-W beach (assuming beach_fid known)
-4. Generate policy_source (subtype='operator_posted_policy', source_url=the PDF) + bps row
-5. Cascade fires; Block W Beach's zone_rules now reflects the HAPOC rule
-
-This single row demonstrates the bridge pattern that needs to scale to 418 rows.
+E.g., a city dog park in Portland. No codified-statute layer. Posted hours (6am-10pm), breed restrictions, license requirements — all operator-posted by the city parks dept (acting as operator, not lawmaker). Operate is THE pipeline because Codify has nothing to say.
 
 ---
 
-## 11. Success metrics (when to call Operate "done v1")
+## 11. Closed decisions (was §13 in v1)
 
-REVISED 2026-05-18 evening after the audit:
-
-- All **REAL** operator_posted_policy ps rows have `issuing_operator_id` FK populated (today: 1 of 4; target 4 of 4)
-- ps_21 EBRPD Crown Beach bridged to Crown Memorial SB (curator pattern from PSHDB)
-- (Do NOT touch the 7 BEP source-class anchor rows — they're load-bearing for ~12,033 BEP rows' consensus tier logic.)
-- Per-operator audit of 418 extractions complete: classify clean / corrupt / duplicative
-- Net-new operator coverage from curator-fixed bridges (target: 20-30 operators, primarily NPS Compendium-style + named-beach operators that today have ZERO ps rows)
-- ≥ 90% of MVP+ state (CA/OR/WA) beaches have either a codify ps OR an operate ps (Phase 2)
-- Dog parks in MVP+ states have ≥ 50% Operate coverage (Phase 3 — many won't have published rules)
-- Quality gate Op-3 passes: when operator and codify disagree on a beach, consensus picks operator (per-entity override correctness)
-- Quality gate Op-4 sharpened: NO orphan ps rows of subtype='operator_posted_policy' that are "extractor placeholders"
-
----
-
-## 12. Related pins + docs
-
-- [[operators-as-first-class]] — the parent insight
-- [[dogpark-rules-are-operator-posted]] — dog parks are operator-primary
-- [[codify-cascade-vocabulary]] — extends to three-track
-- [[walkthrough-hbdb]] — concessionaire pattern
-- [[walkthrough-crown-memorial]] — special district + MPA overlay
-- [[walkthrough-fort-funston]] — superintendents_compendium pattern
-- [[no-human-visibility-principle]] — operators are infrastructure, not user-surfaced
-- [[deferred-canyon-lake]] — HOA / AV-flagged exclusion
-- [[operator-not-pseudo-agency]] — operator ≠ agency; use delegated_authority_via FK
-- [[never-solve-same-problem-twice]] — leverage existing 418-row extraction infrastructure
-- [`jurisdiction_policy_source_playbook.md`](jurisdiction_policy_source_playbook.md) — Codify playbook this spec mirrors
-- [`codify_pip_resolver_architecture.md`](codify_pip_resolver_architecture.md) — needs an Operate section after this spec is approved
+| Question | Resolution |
+|---|---|
+| Naming | **Operate** ✓ (Franz 2026-05-18) |
+| Bridge mechanism | **Python script + migration files** ✓ (Franz 2026-05-18) |
+| Phase sequencing | Phase 1 bridge first (done — outcome was sharper scope, not coverage gain) |
+| Dog-park scope | **MVP+ states only** (CA/OR/WA) for v1 — recommend 1,241 dog parks (CA 747 + OR 198 + WA 296, verified via counties spatial join 2026-05-18; only 122 have an OSM operator tag) (full 6,163 deferred) |
+| HOA / AV-flagged | Skip by default; `--include-av-flagged` opt-in |
+| Per-batch approval | Same as Codify ✓ (continued discipline) |
+| 418-stranded gold-mine | **MISFRAMED in v1** — they're mostly redundant city/county extractions, and the corrupt-attribution bug means even non-redundant ones are unreliable |
+| Operator overlap with codify entities | **~76% are codify-duplicates** — drop from Operate scope, model as agency_admin_policy in Codify |
 
 ---
 
-## 13. Decision summary requested from Franz
+## 12. Related
 
-Before implementation starts, confirm:
-1. **Naming**: Operate (recommended) or Post?
-2. **Bridge mechanism**: Python script + migration files (recommended) or SQL trigger?
-3. **Phase 0 audit scope**: full audit of existing extractor before Phase 1, or skip-and-rebuild?
-4. **Dog-park batch v1**: WA+OR+CA only (recommended) or full ~6,163?
-5. **HOA / AV-flagged**: skip by default (recommended) or include w/ flag?
-6. **Sequencing**: Phase 1 bridge first (fastest consumer-surface impact, recommended) or Phase 2 beach_operator backfill first?
-7. **Per-batch approval discipline**: same as Codify (per-batch DB apply) or autonomous-ship-on-confidence?
+- [[operators-as-first-class]] — the parent insight that triggered Operate as a distinct track
+- [[dogpark-rules-are-operator-posted]] — dog parks are Operate's primary value
+- [[walkthrough-hbdb]] — concessionaire / layered-authority pattern; the canonical real-Operate case
+- [[walkthrough-crown-memorial]] — special-district pattern (EBRPD)
+- [[dont-classify-unknowns-for-deletion]] — applies to the BEP source-class anchors
+- [[operator-not-pseudo-agency]] — non-gov operators stay as operators with delegated_authority_via FK
+- [[never-solve-same-problem-twice]] — applied to today's audit: the 76% codify-overlap was already implicit in [[operator-not-pseudo-agency]] but not surfaced until Franz asked
+- `scripts/bridge_operator_to_cascade.py` — bridge mechanism (Phase 1)
+- `scripts/audit_operator_extractions.py` — audit tool (Phase 1c, revealed corruption)
+- `scripts/extract_operator_dogs_policy.py` — extractor (Phase 0 fix target)
+- `scripts/dagster/dog_beach/dog_beach/assets/operator_llm_cascade.py` — Dagster orchestrator
 
-After approvals, I'll spawn the build per the playbook discipline (one phase at a time + per-batch DB approvals + commit per phase).
+---
+
+## 13. What today's session produced
+
+- This spec (v2 after audit-driven rewrite)
+- `scripts/bridge_operator_to_cascade.py` (mechanism)
+- `scripts/audit_operator_extractions.py` (audit tool, revealed extractor corruption)
+- 2 migrations applied: PSHDB curator-fix (ps_287) + FK backfill (3 ps + 1 new operator TCLT)
+- 1 new HARD pin [[dont-classify-unknowns-for-deletion]]
+- This refined framing of Operate (76% overlap insight) — the most-load-bearing learning of the Operate work
+
+**Real Operate state (2026-05-18 evening):** 4 well-bridged ps rows + 1 EBRPD orphan + extractor needs Phase-0 fix before scaling. Real coverage gain is Phase 2/3 work, not bridging.

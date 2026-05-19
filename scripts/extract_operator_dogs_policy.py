@@ -458,6 +458,49 @@ def _call_anthropic(model: str, system: str, user_blocks: list,
     return {"error": f"retries_exhausted: {last_err}", "raw": "", "usage": {}}
 
 
+def _operator_name_tokens(operator_name: str) -> set[str]:
+    """Lowercase token set from operator name, dropping common stopwords.
+    Used by the operator-name validator below."""
+    stop = {"city", "of", "county", "the", "and", "national", "state", "park",
+            "recreation", "area", "society", "preservation", "department",
+            "preserve", "dept", "service", "services", "parks",
+            "association", "district", "land", "trust", "conservancy",
+            "united", "states", "co", "ca",
+            # Domain-specific generics — too common to be distinctive:
+            "beach", "beaches", "dog", "dogs", "ocean", "coast", "coastal",
+            "bay", "harbor", "pier", "river", "lake", "marine",
+            "town", "village", "borough", "township"}
+    return {t for t in operator_name.lower().replace(",", " ").replace("-", " ").split()
+            if t and t not in stop and len(t) > 2}
+
+
+def _hit_mentions_operator(operator: dict, hit: dict) -> bool:
+    """Deterministic check: does the URL host OR title OR snippet contain ANY
+    distinctive operator-name token? Catches the corruption pattern (Tavily
+    returning a same-state-but-wrong-jurisdiction URL with high relevance).
+
+    Per [[dont-classify-unknowns-for-deletion]] + 2026-05-18 Phase 0 fix:
+    same pattern as Municode catalog pre-check — reject URLs that have
+    NO token overlap with the operator name.
+    """
+    op_tokens = _operator_name_tokens(operator.get("canonical_name") or "")
+    if not op_tokens:
+        return True  # fail-open when operator name has no distinctive tokens
+    url = (hit.get("url") or "").lower()
+    title = (hit.get("title") or "").lower()
+    snippet = (hit.get("content") or "")[:1000].lower()
+    haystack = url + " " + title + " " + snippet
+    # Match if ANY op-name token appears in URL/title/snippet
+    for tok in op_tokens:
+        if tok in haystack:
+            return True
+    # Also check concatenated form (e.g., "manhattanbeach" in cityofmanhattanbeach.gov)
+    op_concat = "".join(op_tokens)
+    if op_concat and op_concat in haystack.replace(" ", "").replace("-", "").replace("_", ""):
+        return True
+    return False
+
+
 def pick_url(operator: dict, hits: list[dict], context: str) -> tuple[str | None, str]:
     """Have Haiku pick the most authoritative dog-policy URL from Tavily hits.
 
@@ -479,6 +522,21 @@ def pick_url(operator: dict, hits: list[dict], context: str) -> tuple[str | None
         filtered.append(h)
     if not filtered:
         return (None, f"all_candidates_cross_state (operator state={state_code})")
+
+    # Phase 0 fix 2026-05-18: deterministic operator-name validation. Reject
+    # candidates that have ZERO token overlap with the operator name in
+    # URL/title/snippet. Catches the corruption pattern (Tavily returning
+    # same-state but wrong-jurisdiction URLs at high relevance — Orange
+    # County → rpvca.gov; Manhattan Beach → cityofventura.ca.gov; etc.).
+    # 15 of 22 conf>=0.7 extractions classified as corrupt by
+    # scripts/audit_operator_extractions.py traced to this gap.
+    name_filtered = [h for h in filtered if _hit_mentions_operator(operator, h)]
+    if not name_filtered:
+        op_concat = "".join(_operator_name_tokens(operator.get("canonical_name") or ""))
+        return (None,
+                f"all_candidates_name_mismatch (operator='{operator.get('canonical_name')}', "
+                f"tokens={op_concat or '<none>'}, none in URL/title/snippet)")
+    filtered = name_filtered
 
     candidates = "\n".join(
         f"{i+1}. {h.get('url')}\n   title: {h.get('title','')[:120]}\n   snippet: {(h.get('content','') or '')[:200]}"

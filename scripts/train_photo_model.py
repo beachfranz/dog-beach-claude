@@ -470,6 +470,13 @@ def apply_vision_rules(prob: float, vision: dict | None) -> tuple[float, list[st
             prob = max(prob, 0.65); rules.append("floor:surf")
         elif vision.get("has_active_people"):
             prob = max(prob, 0.65); rules.append("floor:active_people")
+
+    # VEHICLE PENALTY — Franz 2026-05-19 photo curation v3.
+    # Explicit -0.15 belt+suspenders alongside the model's learned weight.
+    # Applies AFTER floors so a dog-with-vehicle photo still surfaces.
+    if vision.get("has_vehicle"):
+        prob = max(prob - 0.15, 0.0)
+        rules.append("penalty:vehicle")
     return prob, rules
 
 

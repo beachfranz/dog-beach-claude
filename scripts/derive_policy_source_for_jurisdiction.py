@@ -286,9 +286,21 @@ def triage(jc: JurisdictionClassification) -> TriageDecision:
             recurse_to=None,
         )
     if jc.governance_class == "federal":
+        # Federal codify path enabled 2026-05-18 per #1 encapsulation.
+        # Federal units codify via:
+        #   (a) Federal CFR baselines via --state-agency-rule mode (one-shot per
+        #       agency: NPS 36 CFR §2.15 baseline shipped 2026-05-18 for all
+        #       NPS-managed beaches in CA/OR/WA → 79 beaches)
+        #   (b) Per-unit Compendium / unit-policy via --state-agency-rule with
+        #       --pad-unit-name-ilike for the specific unit
+        #   (c) --list-federal-coverage helper enumerates units + suggests
+        #       per-unit codify commands per state
+        # If --jurisdiction "Olympic National Park" is invoked, proceed
+        # through the standard pipeline; federal Phase A discovers nps.gov/
+        # USFS/etc URL patterns via web_search Step 6.8.
         return TriageDecision(
-            action="branch_federal",
-            reason="Federal land manager — separate codify path (TODO: derive_policy_source_for_federal_authority.py)",
+            action="proceed",
+            reason="Federal codify path enabled (per #1 encapsulation 2026-05-18)",
             recurse_to=None,
         )
     if jc.governance_class == "unknown":
@@ -2641,6 +2653,140 @@ def list_state_jurisdictions(state: str, pilot: int | None = None,
     return [(r[0], state) for r in rows]
 
 
+# ─── #1 — Federal coverage discovery helper ──────────────────────────
+#
+# Lists federal-managed beaches per state, grouped by managing agency +
+# unit_name. Prints actionable codify commands per opportunity using the
+# existing --state-agency-rule mode.
+#
+# Per [[wa-codify-layered-roadmap]] Layer 2 ("federal land managers = BIGGEST gap")
+# + Walkthroughs #3 (Fort Funston/GGNRA) + #4 (Crown Memorial MPA).
+
+# PAD-US mng_name → (agency_id, canonical_name, federal_baseline_cfr)
+FEDERAL_AGENCY_MAP = {
+    "NPS":   (307, "National Park Service",                  "36 CFR §2.15 (Pets)"),
+    "FWS":   (308, "United States Fish and Wildlife Service","50 CFR Part 26 (Public Entry and Use)"),
+    "USFS":  (292, "United States Forest Service",           "36 CFR Part 261 (Prohibitions)"),
+    "BLM":   (288, "United States Bureau of Land Management","43 CFR Part 8360 (Visitor Services)"),
+    "USACE": (311, "United States Army Corps of Engineers",  "36 CFR Part 327 (Rules and Regulations Governing Public Use)"),
+    "USBR":  (289, "United States Bureau of Reclamation",    "43 CFR Part 423 (Public Conduct on BoR Facilities)"),
+    "NOAA":  (None, "National Oceanic and Atmospheric Administration", "15 CFR Part 922 (NMS Regulations)"),  # agency not yet in DB
+    "DOD":   (291, "United States Department of Defense",    "(installation-specific)"),
+}
+
+
+def list_federal_coverage(states: list[str]) -> dict:
+    """Enumerate federal-managed beach coverage opportunities. Returns
+    structured dict: { mng_name: { unit_name: [(fid, beach_name), ...] } }.
+
+    Caller (run_list_federal_coverage) prints actionable codify commands.
+    """
+    conn = _connect_pg()
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT b.state, pad.mng_name, pad.unit_name, pad.des_tp, b.fid, b.name
+                FROM public.beach_relevant_pad_us pad
+                JOIN public.beaches_gold b ON ST_Intersects(b.geom, pad.geom)
+                WHERE b.is_active AND b.state = ANY(%s)
+                  AND pad.mng_type = 'FED'
+                ORDER BY b.state, pad.mng_name, pad.unit_name, b.name
+            """, (list(states),))
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    coverage: dict = {}
+    for state, mng_name, unit_name, des_tp, fid, beach_name in rows:
+        unit = coverage.setdefault(mng_name, {}).setdefault(unit_name, {
+            "state": state, "des_tp": des_tp, "beaches": [], "_seen_fids": set()
+        })
+        if fid not in unit["_seen_fids"]:
+            unit["beaches"].append((fid, beach_name))
+            unit["_seen_fids"].add(fid)
+    # Strip the dedup helper before returning
+    for units in coverage.values():
+        for info in units.values():
+            info.pop("_seen_fids", None)
+    return coverage
+
+
+def run_list_federal_coverage(args) -> int:
+    """Subcommand: --list-federal-coverage."""
+    states = [s.strip().upper() for s in args.states.split(",") if s.strip()]
+    coverage = list_federal_coverage(states)
+
+    if not coverage:
+        print(f"No federal-managed beaches found in {states}.")
+        return 0
+
+    # Tally
+    total_units = sum(len(units) for units in coverage.values())
+    total_beaches = sum(
+        len(info["beaches"])
+        for units in coverage.values()
+        for info in units.values()
+    )
+    print(f"\n=== FEDERAL COVERAGE — {','.join(states)} ===")
+    print(f"  {len(coverage)} agencies × {total_units} units × {total_beaches} beaches")
+    print()
+
+    # Sort agencies by total beach count (biggest opportunity first)
+    agency_totals = sorted(
+        ((mng, sum(len(u["beaches"]) for u in units.values()))
+         for mng, units in coverage.items()),
+        key=lambda x: -x[1]
+    )
+
+    for mng, agency_total in agency_totals:
+        agency_id, agency_canonical, baseline_cfr = FEDERAL_AGENCY_MAP.get(
+            mng, (None, mng, "(no baseline pattern known)")
+        )
+        print(f"━━ {mng}  ({agency_canonical}, agency_id={agency_id}) — {agency_total} beaches")
+        print(f"   Baseline CFR: {baseline_cfr}")
+        if agency_id is None:
+            print(f"   ⚠️  Agency not in DB; create canonical agency row first")
+
+        units = coverage[mng]
+        for unit_name in sorted(units, key=lambda u: -len(units[u]["beaches"])):
+            info = units[unit_name]
+            n = len(info["beaches"])
+            print(f"   • {info['state']} {unit_name!r}  ({info['des_tp']}) — {n} beach{'es' if n != 1 else ''}")
+            for fid, name in info["beaches"][:3]:
+                print(f"        fid {fid:<12} {name}")
+            if n > 3:
+                print(f"        … and {n-3} more")
+
+        print()
+        # Suggested codify command (uses existing --state-agency-rule mode)
+        if agency_id:
+            print(f"   ↳ Per-unit codify pattern (substitute <unit-keyword> + URL + verbatim):")
+            print(f'     python scripts/derive_policy_source_for_jurisdiction.py \\')
+            print(f'       --state-agency-rule \\')
+            print(f'       --agency-name "{agency_canonical}" --agency-type federal_department \\')
+            print(f'       --states {",".join(states)} \\')
+            print(f'       --pad-mng-type FED --pad-mng-name {mng} \\')
+            print(f'       --pad-unit-name-ilike "%<unit-keyword>%" \\')
+            print(f'       --subtype superintendents_compendium \\')
+            print(f'       --citation "<unit name> Superintendent\\\'s Compendium §X.Y (Pets)" \\')
+            print(f'       --rule-url "<deep-link to pets policy>" \\')
+            print(f'       --rule <on_leash|off_leash|not_allowed|off_leash_voice_control> --section sand \\')
+            print(f'       --evidence-verbatim "<quote>" \\')
+            print(f'       --full-text-file <path-to-verbatim-text> \\')
+            print(f'       --label federal_codify_<state>_<unit-slug>')
+        print()
+
+    print("=" * 60)
+    print("Federal baselines already shipped 2026-05-18:")
+    print("  • NPS 36 CFR §2.15 (Pets)  → 79 beaches across CA/OR/WA (ps id=1)")
+    print()
+    print("Per-unit overrides (Compendiums / refuge plans / FR rules) are still")
+    print("manual via the --state-agency-rule commands above. Each per-unit emit")
+    print("uses subtype=superintendents_compendium for NPS or agency_administrative_policy")
+    print("for USFWS/USFS/BLM (per playbook §6 layered authority).")
+    return 0
+
+
 # ─── #8 — Rescue-mode orchestration ──────────────────────────────────
 #
 # Reads a prior-run outcomes JSONL, generates per-jurisdiction agent
@@ -3167,6 +3313,11 @@ def main() -> int:
                         "emit per-jurisdiction agent prompts + starter CSV for the "
                         "stubborn-rescue workflow. Requires --from-jsonl. Optional "
                         "--include-review adds success_human_review entries.")
+    g.add_argument("--list-federal-coverage", action="store_true",
+                   help="Mode: enumerate federal-managed beach coverage opportunities "
+                        "per state. Lists each (agency, unit, beaches) triple + suggests "
+                        "actionable --state-agency-rule commands for per-unit codify. "
+                        "Requires --states.")
 
     # rescue mode arguments
     rg = ap.add_argument_group("rescue mode arguments")
@@ -3238,6 +3389,13 @@ def main() -> int:
             print("ERROR: --rescue requires --from-jsonl <path>", file=sys.stderr)
             return 2
         return run_rescue_mode(args)
+
+    # ── --list-federal-coverage mode: separate code path, exits early ──
+    if args.list_federal_coverage:
+        if not args.states:
+            print("ERROR: --list-federal-coverage requires --states <code,code>", file=sys.stderr)
+            return 2
+        return run_list_federal_coverage(args)
 
     # ── --state-agency-rule mode: separate code path, exits early ──
     if args.state_agency_rule:

@@ -109,6 +109,24 @@ SELECT g.fid FROM beaches_gold g WHERE g.cpad_unit_id IN (SELECT unit_id FROM cp
 -- Operator (Conservancy, Tribal): enumerate by name match + coord cluster
 ```
 
+**Federal codify path** (added 2026-05-18 per #1 encapsulation):
+
+1. **Discover what's eligible**:
+   ```bash
+   python scripts/derive_policy_source_for_jurisdiction.py --list-federal-coverage --states WA,OR,CA
+   ```
+   Lists per-agency unit breakdown + suggests per-unit codify commands. Today's evidence: 172 federal-managed beaches across WA+OR alone (BLM San Juan Islands NM=50, NPS Olympic=24, NPS Ebey's Landing=12, USFWS Oregon Islands NWR=12, etc.).
+
+2. **Ship federal CFR baselines** via `--state-agency-rule` (one-shot per agency):
+   - **NPS 36 CFR §2.15 (Pets)** — SHIPPED 2026-05-18, 79 beaches (ps id=1)
+   - **BLM 43 CFR Part 8360** — TODO per-unit (BLM units publish supplementary rules in Federal Register, not a single CFR section)
+   - **USFWS 50 CFR Part 26** — TODO per-refuge (refuges open/close discretionarily)
+   - **USFS 36 CFR Part 261** — TODO per-forest
+
+3. **Ship per-unit overrides** (Compendiums, refuge plans, FR supplementary rules) via the same `--state-agency-rule` mode with `--pad-unit-name-ilike "%<keyword>%"`. Use `subtype=superintendents_compendium` for NPS or `agency_administrative_policy` for USFWS/USFS/BLM. Per playbook §6 layered authority: federal baseline + per-unit override BOTH coexist; consensus engine ranks them.
+
+4. **Per-jurisdiction path** also works for federal: `--jurisdiction "Olympic National Park" --state-of WA` now triages as `proceed` (federal triage unblocked 2026-05-18). The pipeline falls through to Step 6.8 web_search for the unit's pets page. emit_migration_sql currently emits a polygon-not-found warning for federal (use `--state-agency-rule` instead for clean per-unit bps inserts).
+
 **Encapsulated path for state/federal-agency rules** (added 2026-05-18 per [[never-solve-same-problem-twice]] after OAR 736-010-0030 hand-SQL pattern):
 
 ```bash

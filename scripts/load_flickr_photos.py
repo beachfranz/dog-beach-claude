@@ -289,6 +289,115 @@ def select_targets(args):
 
 # ─── Flickr search ────────────────────────────────────────────────────────
 
+# ── Agency-account fetch (Franz 2026-05-19 photo curation v3.9) ────────
+# Per [[per-state-photo-source-discovery-2026-05-19]]: state/county park
+# sites mostly lack per-park URLs in BEP, so HTML scraping won't work.
+# Instead, use agency Flickr accounts (curated by definition).
+# Registry: scripts/pipeline/agency_flickr_accounts.csv
+
+AGENCY_CSV = ROOT / "scripts" / "data" / "agency_flickr_accounts.csv"
+
+
+def load_agency_accounts(state: str | None = None) -> list[dict]:
+    """Return rows from the agency CSV, optionally filtered to one state.
+    Skips rows without a resolved NSID (run --resolve-agencies first)."""
+    import csv as _csv
+    rows: list[dict] = []
+    if not AGENCY_CSV.exists():
+        return rows
+    with open(AGENCY_CSV, encoding="utf-8") as f:
+        for r in _csv.DictReader(f):
+            if not (r.get("nsid") or "").strip():
+                continue
+            states = (r.get("states") or "").strip()
+            if state and states not in ("*", "") and state not in states.split(","):
+                continue
+            rows.append(r)
+    return rows
+
+
+def flickr_find_username_nsid(username: str) -> str | None:
+    """Resolve a Flickr screen name → NSID via flickr.people.findByUsername."""
+    params = {
+        "method":  "flickr.people.findByUsername",
+        "api_key": FLICKR_KEY,
+        "username": username,
+        "format":  "json",
+        "nojsoncallback": "1",
+    }
+    url = "https://api.flickr.com/services/rest/?" + urllib.parse.urlencode(params)
+    try:
+        with urllib.request.urlopen(url, timeout=20) as r:
+            d = json.loads(r.read())
+        if d.get("stat") == "ok":
+            return ((d.get("user") or {}).get("nsid")) or None
+        print(f"  findByUsername failed for {username}: {d.get('message')}", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"  findByUsername exception for {username}: {e}", file=sys.stderr)
+        return None
+
+
+def resolve_agencies_command() -> int:
+    """One-shot: read CSV, resolve any blank NSIDs, write back."""
+    import csv as _csv
+    if not AGENCY_CSV.exists():
+        print(f"ERROR: {AGENCY_CSV} not found", file=sys.stderr); return 1
+    with open(AGENCY_CSV, encoding="utf-8") as f:
+        rows = list(_csv.DictReader(f))
+        fieldnames = list(rows[0].keys()) if rows else []
+    n_resolved = 0
+    for r in rows:
+        if (r.get("nsid") or "").strip():
+            continue
+        un = (r.get("flickr_username") or "").strip()
+        if not un:
+            continue
+        nsid = flickr_find_username_nsid(un)
+        if nsid:
+            r["nsid"] = nsid
+            n_resolved += 1
+            print(f"  ✔ {r['agency_name']:50s} {un} → {nsid}")
+        else:
+            print(f"  ✗ {r['agency_name']:50s} {un} (could not resolve)")
+        time.sleep(1.0)  # be polite
+    with open(AGENCY_CSV, "w", encoding="utf-8", newline="") as f:
+        w = _csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader(); w.writerows(rows)
+    print(f"\nResolved {n_resolved} NSIDs. CSV updated.")
+    return 0
+
+
+def flickr_search_by_user(user_id: str, text: str, per_page: int = 20) -> list[dict]:
+    """Search a specific user's CC photos for a text query.
+    Used for agency-account fetching (e.g., WA State Parks @ wastateparks).
+    No geo constraint — agency photos are often not geo-tagged but are
+    well-titled."""
+    params = {
+        "method":   "flickr.photos.search",
+        "api_key":  FLICKR_KEY,
+        "user_id":  user_id,
+        "text":     text,
+        "license":  CC_LICENSES,
+        "extras":   "license,owner_name,date_taken,geo,url_z,url_l,url_m,url_n,description",
+        "sort":     "relevance",
+        "media":    "photos",
+        "per_page": str(per_page),
+        "format":   "json",
+        "nojsoncallback": "1",
+    }
+    url = "https://api.flickr.com/services/rest/?" + urllib.parse.urlencode(params)
+    try:
+        with urllib.request.urlopen(url, timeout=30) as r:
+            d = json.loads(r.read())
+        if d.get("stat") != "ok":
+            return []
+        return (d.get("photos") or {}).get("photo") or []
+    except Exception as e:
+        print(f"  agency search ({user_id}): {e}", file=sys.stderr)
+        return []
+
+
 def flickr_search(text, lat, lng, radius_km=RADIUS_KM, per_page=20):
     """Geo-only search. The text+geo AND filter is too restrictive in practice
     (e.g. Boston-area Carson Beach returns 0 with 'Carson Beach Suffolk' but 10
@@ -502,12 +611,22 @@ def main():
     grp.add_argument("--fids",  help="comma-separated list of fids")
     grp.add_argument("--pilot", type=int, help="run on first N beaches")
     grp.add_argument("--full",  action="store_true")
+    grp.add_argument("--resolve-agencies", action="store_true",
+                     help="One-shot: resolve usernames in agency_flickr_accounts.csv "
+                          "to NSIDs and write back. Run this once before --use-agencies.")
     ap.add_argument("--refresh", action="store_true", help="redo even if rows exist")
     ap.add_argument("--radius-km", type=float, default=None,
                     help="Override the default search RADIUS_KM. Use 2 for "
                          "loose-radius dog sweep (validated at Del Mar Dog "
                          "Beach 2026-05-12: +8 dog photos at 700-1500m).")
+    ap.add_argument("--use-agencies", action="store_true",
+                    help="In addition to geo search, query each applicable "
+                         "agency Flickr account (per state) for beach-name "
+                         "text matches. Requires --resolve-agencies first.")
     args = ap.parse_args()
+
+    if args.resolve_agencies:
+        return resolve_agencies_command()
     if args.radius_km is not None:
         global RADIUS_KM
         RADIUS_KM = args.radius_km
@@ -529,6 +648,7 @@ def main():
               f"across {len(rejected_by_fid)} beaches (will skip)")
 
     saved = errored = 0
+    n_agency_cands_total = 0
     for i, b in enumerate(targets, 1):
         try:
             query_parts = [b["name"]]
@@ -537,6 +657,21 @@ def main():
             if b.get("county"): query_parts.append(b["county"])
             text = " ".join(query_parts)
             cands = flickr_search(text, b["lat"], b["lng"])
+
+            # ── Agency-account pass (Franz 2026-05-19 v3.9) ────────────
+            if args.use_agencies:
+                agencies = load_agency_accounts(state=b.get("state"))
+                seen_ids = {str(c.get("id")) for c in cands}
+                for ag in agencies:
+                    ag_cands = flickr_search_by_user(ag["nsid"], b["name"])
+                    for ac in ag_cands:
+                        if str(ac.get("id")) in seen_ids:
+                            continue
+                        seen_ids.add(str(ac.get("id")))
+                        cands.append(ac)
+                        n_agency_cands_total += 1
+                    time.sleep(0.5)  # polite per-agency
+
             # Filter blocked photographers before scoring
             if blocked:
                 cands = [c for c in cands

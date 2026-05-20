@@ -190,8 +190,12 @@ SOURCE_WEIGHT: dict[str, float] = {
     "cdpr":      2.0,   # Type B
     "nps":       2.0,   # Type B
     "wsprc":     2.0,   # Type B — parks.wa.gov page galleries (2026-05-19)
+    "flickr":    1.3,   # Type A geo-tagged. Small bonus over wikimedia because
+                        # Flickr fetches parallelize cleanly (no per-host serial
+                        # lock); wikimedia is serial-locked + 1.5s paced per
+                        # the wikimedia-integration pin. Same quality bar,
+                        # better pipeline throughput. Per Franz 2026-05-19.
     "wikimedia": 1.0,   # Type A geo-tagged
-    "flickr":    1.0,   # Type A geo-tagged
     "mapillary": 0.0,
     "unsplash":  0.0,
     "manual":    3.0,   # curator-uploaded

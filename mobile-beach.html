@@ -3374,6 +3374,16 @@ async function loadWaterConditionAdvisories(beachFid) {
     if (!r.ok) return;
     items = await r.json();
   } catch { return; }
+  // Today-only filter (user's local time). Drop advisories that don't
+  // start until after end-of-day today. Per Franz 2026-05-19.
+  if (Array.isArray(items)) {
+    const eod = new Date(); eod.setHours(23, 59, 59, 999);
+    items = items.filter(a => {
+      if (!a.valid_from) return true;
+      const from = new Date(a.valid_from);
+      return isNaN(from.getTime()) || from <= eod;
+    });
+  }
   if (!Array.isArray(items) || items.length === 0) {
     card.style.display = 'none';
     return;

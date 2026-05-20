@@ -401,6 +401,10 @@
       <label><input type="checkbox" class="src-chk" value="mapillary"> Mapillary</label>
     </div>
   </div>
+  <select id="sel-mode" style="min-width:160px" title="Curator mode">
+    <option value="manual">Manual curate</option>
+    <option value="auto">Auto-curate review</option>
+  </select>
   <select id="sel-state" style="min-width:140px"></select>
   <label style="display:flex;align-items:center;gap:6px;color:#fff;font-size:12px;cursor:pointer;">
     <input type="checkbox" id="chk-dog-only" style="cursor:pointer;"> 🐶 Dog only
@@ -457,6 +461,7 @@ const SS_STATE   = 'curator_state';
 const SS_SOURCES = 'curator_sources';   // comma-list of source codes; empty = all
 const SS_DOGONLY = 'curator_dog_only';
 const SS_NOPHOTO = 'curator_no_photo';
+const SS_MODE    = 'curator_mode';   // 'manual' (default) | 'auto'
 let token = sessionStorage.getItem(SS_TOKEN);
 let curatorUser = sessionStorage.getItem(SS_USER) || 'curator';
 let currentState  = sessionStorage.getItem(SS_STATE)  || 'CA';
@@ -499,6 +504,37 @@ let dogOnly       = sessionStorage.getItem(SS_DOGONLY) === '1';
 let noPhotoOnly   = sessionStorage.getItem(SS_NOPHOTO) === '1';
 let dogFidSet     = null;  // Set of fids with uncurated dog-titled photos, populated when filter is on
 let noPhotoFidSet = null;  // Set of fids with zero photos in current source, populated when no-photo filter is on
+
+// ─── Auto-curate review mode (Franz 2026-05-19) ─────────────────────
+// MODE='auto' switches the entire UI: state/county/beach pickers
+// filter to beaches with curated_by LIKE 'auto:%' photos; photo grid
+// renders an auto-panel with Approve / Clear / comment + bulk approve.
+// See docs/curator_auto_curate_mode_spec.md.
+let MODE          = sessionStorage.getItem(SS_MODE) || 'manual';
+let autoFidSet    = null;  // Set of fids with ≥1 auto-curated photo
+let autoStateSet  = null;  // Set of state codes ('WA','CA',...) with autoFid presence
+let autoCountySet = null;  // Set of "STATE|county" strings with autoFid presence
+let autoRowsByFid = null;  // fid → {n_auto_photos, auto_marker, state, county, beach_name}
+
+async function loadAutoFids() {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_auto_curated_beach_fids`, {
+      method: 'POST',
+      headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
+                 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_state: null }),
+    });
+    if (!res.ok) { console.warn('loadAutoFids: HTTP', res.status); autoFidSet = new Set(); return; }
+    const rows = (await res.json()) || [];
+    autoFidSet    = new Set(rows.map(r => r.beach_fid));
+    autoStateSet  = new Set(rows.map(r => r.state));
+    autoCountySet = new Set(rows.map(r => `${r.state}|${r.county || ''}`));
+    autoRowsByFid = new Map(rows.map(r => [r.beach_fid, r]));
+  } catch (e) {
+    console.warn('loadAutoFids failed:', e);
+    autoFidSet = new Set();
+  }
+}
 let progress = null;        // get_curation_progress(state) result
 let currentCounty = null;
 let currentBeach = null;
@@ -642,6 +678,20 @@ async function showApp() {
     await loadProgress();
   };
   if (noPhotoOnly) await loadNoPhotoFids();
+  // Wire Mode dropdown — switches between Manual and Auto-curate Review
+  const modeSel = document.getElementById('sel-mode');
+  modeSel.value = MODE;
+  modeSel.onchange = async () => {
+    MODE = modeSel.value;
+    sessionStorage.setItem(SS_MODE, MODE);
+    if (MODE === 'auto') await loadAutoFids();
+    else { autoFidSet = autoStateSet = autoCountySet = autoRowsByFid = null; }
+    currentCounty = null;
+    currentBeach = null;
+    await loadStates();
+    await loadProgress();
+  };
+  if (MODE === 'auto') await loadAutoFids();
   await loadStates();
   await loadProgress();
 }
@@ -721,6 +771,10 @@ async function loadStates() {
   if (dogOnly && dogFidSet && dogFidSet.size > 0) {
     const dogStates = await fetchDogStates();
     states = states.filter(s => dogStates.has(s.state));
+  }
+  // Auto-curate review mode — restrict to states with ≥1 auto-curated beach.
+  if (MODE === 'auto' && autoStateSet) {
+    states = states.filter(s => autoStateSet.has(s.state));
   }
   // 📷 No photos filter: restrict states to those with at least one
   // no-photo beach (the noPhotoFidSet is per-fid but we derive states).
@@ -813,6 +867,10 @@ function renderCountyDropdown() {
       const anyNoPhoto = (c.beaches || []).some(b => noPhotoFidSet.has(b.fid));
       if (!anyNoPhoto) continue;
     }
+    if (MODE === 'auto' && autoFidSet) {
+      const anyAuto = (c.beaches || []).some(b => autoFidSet.has(b.fid));
+      if (!anyAuto) continue;
+    }
     const opt = document.createElement('option');
     let mark = '';
     if (c.is_done) mark = ' ✓';
@@ -849,6 +907,7 @@ function renderBeachDropdown() {
   for (const b of (currentCounty?.beaches || [])) {
     if (dogOnly && dogFidSet && !dogFidSet.has(b.fid)) continue;
     if (noPhotoOnly && noPhotoFidSet && !noPhotoFidSet.has(b.fid)) continue;
+    if (MODE === 'auto' && autoFidSet && !autoFidSet.has(b.fid)) continue;
     const opt = document.createElement('option');
     const done = b.is_curated ? ' ✓' : '';
     opt.value = String(b.fid);
@@ -1233,10 +1292,16 @@ function renderBeach() {
     });
   }
 
+  // Auto-curate review banner (MODE='auto'): prepends Approve / Clear /
+  // comment input + bulk approve. Wires up via wireAutoPanel() after
+  // grid.innerHTML lands. Sits at the top of the photo grid.
+  const autoPanelHTML = _autoCuratePanelHTML(beachData.beach.fid);
+
   if (!pool.length) {
-    grid.innerHTML = dogOnly
+    grid.innerHTML = autoPanelHTML + (dogOnly
       ? `<div class="empty">No dog photos here. (Beach is in the dog-filter cohort because uncurated dog photos exist; they may have just been curated.)</div>`
-      : `<div class="empty">No photos for this beach (in the selected source set).</div>`;
+      : `<div class="empty">No photos for this beach (in the selected source set).</div>`);
+    _wireAutoPanel();
     return;
   }
 
@@ -1244,7 +1309,7 @@ function renderBeach() {
   const display = selectDisplayPhotos(pool);
   const hidden = pool.length - display.length;
 
-  grid.innerHTML = display.map((p, i) => renderPhotoCard(p, i)).join('') +
+  grid.innerHTML = autoPanelHTML + display.map((p, i) => renderPhotoCard(p, i)).join('') +
     (hidden > 0
       ? `<div style="grid-column: 1 / -1; text-align: center; padding: 12px;">
            <button type="button" id="btn-show-all-photos"
@@ -1270,7 +1335,138 @@ function renderBeach() {
   if (showAllBtn) showAllBtn.onclick = () => { _showAllPhotos = true; renderBeach(); };
   const showTopBtn = document.getElementById('btn-show-top-photos');
   if (showTopBtn) showTopBtn.onclick = () => { _showAllPhotos = false; renderBeach(); };
+  _wireAutoPanel();
   updateSummary();
+}
+
+// ─── Auto-curate review panel (MODE='auto') ─────────────────────────
+
+function _autoCuratePanelHTML(beachFid) {
+  if (MODE !== 'auto' || !autoFidSet || !autoFidSet.has(beachFid)) return '';
+  const info = autoRowsByFid ? autoRowsByFid.get(beachFid) : null;
+  const marker = info ? info.auto_marker : 'auto';
+  const nPhotos = info ? info.n_auto_photos : '?';
+  const stateBulkCount = autoStateSet
+    ? [...autoFidSet].filter(fid => {
+        const r = autoRowsByFid ? autoRowsByFid.get(fid) : null;
+        return r && r.state === currentState;
+      }).length
+    : 0;
+  return `
+    <div id="auto-panel" style="grid-column:1/-1; padding:10px 12px;
+                                border:1px solid #fb923c; border-radius:8px;
+                                background:rgba(251,146,60,0.10); margin-bottom:10px;
+                                display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+      <span style="font-weight:600; color:#fb923c;">⚙ Auto-curated</span>
+      <span style="color:#94a3b8; font-size:12px;">
+        ${nPhotos} photo${nPhotos===1?'':'s'} (${marker})
+      </span>
+      <input type="text" id="auto-comment" maxlength="500" placeholder="Optional comment..."
+             style="flex:1; min-width:160px; padding:4px 8px; border:1px solid var(--border,#334);
+                    border-radius:4px; font-size:12px; background:transparent; color:inherit;">
+      <button id="btn-approve-auto" type="button"
+              style="padding:4px 10px; background:#16a34a; color:#fff; border:none;
+                     border-radius:4px; cursor:pointer; font-weight:600;">
+        ✓ Approve
+      </button>
+      <button id="btn-clear-auto" type="button"
+              style="padding:4px 10px; background:#94a3b8; color:#fff; border:none;
+                     border-radius:4px; cursor:pointer;">
+        ✗ Clear &amp; re-decide
+      </button>
+      <button id="btn-approve-state" type="button" title="Approve every auto-curated beach in ${currentState}"
+              style="padding:4px 10px; margin-left:auto; background:#0ea5e9; color:#fff;
+                     border:none; border-radius:4px; cursor:pointer;">
+        ✓ Approve ALL ${stateBulkCount} in ${currentState}
+      </button>
+    </div>`;
+}
+
+function _wireAutoPanel() {
+  const panel = document.getElementById('auto-panel');
+  if (!panel) return;
+  panel.querySelector('#btn-approve-auto').onclick = () => _autoCurateAction('approve');
+  panel.querySelector('#btn-clear-auto').onclick   = () => _autoCurateAction('clear');
+  panel.querySelector('#btn-approve-state').onclick = () => _autoCurateBulk();
+}
+
+async function _autoCurateAction(action) {
+  if (!beachData || !beachData.beach) return;
+  const fid = beachData.beach.fid;
+  const comment = (document.getElementById('auto-comment') || {}).value || null;
+  const rpc = action === 'approve'
+    ? 'approve_auto_curated_beach'
+    : 'clear_auto_curated_beach';
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${rpc}`, {
+      method: 'POST',
+      headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
+                 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        p_beach_fid: fid, p_curator: curatorUser, p_comment: comment,
+      }),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      alert(`${action} failed: HTTP ${res.status}\n${t.slice(0,200)}`);
+      return;
+    }
+    const n = await res.json();
+    // Drop this fid from the auto-set so the dropdowns + render refresh
+    autoFidSet.delete(fid);
+    if (autoRowsByFid) autoRowsByFid.delete(fid);
+    // Reload the beach to reflect the new curated_by state
+    await loadBeach(fid, { fromHistory: true });
+    // Optional: refresh the county/beach dropdowns so the removed beach disappears
+    renderCountyDropdown();
+    renderBeachDropdown();
+  } catch (e) {
+    alert(`${action} failed: ${e.message}`);
+  }
+}
+
+async function _autoCurateBulk() {
+  if (!currentState) return;
+  const expected = autoStateSet
+    ? [...autoFidSet].filter(fid => {
+        const r = autoRowsByFid ? autoRowsByFid.get(fid) : null;
+        return r && r.state === currentState;
+      }).length
+    : 0;
+  if (!expected) return;
+  const comment = (document.getElementById('auto-comment') || {}).value || null;
+  if (!confirm(`Approve auto-curated photos on all ${expected} beaches in ${currentState}?\n\nThis cannot be undone (clears the auto-curate state).`)) return;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/approve_auto_curated_state`, {
+      method: 'POST',
+      headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`,
+                 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        p_state: currentState, p_curator: curatorUser, p_comment: comment,
+        p_expected_fid_count: expected,
+      }),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      alert(`bulk approve failed: HTTP ${res.status}\n${t.slice(0,200)}`);
+      return;
+    }
+    const n = await res.json();
+    alert(`Approved ${n} photo${n===1?'':'s'} across ${expected} beach${expected===1?'':'es'} in ${currentState}.`);
+    // Drop all in-state auto-fids from local sets
+    for (const fid of [...autoFidSet]) {
+      const r = autoRowsByFid ? autoRowsByFid.get(fid) : null;
+      if (r && r.state === currentState) {
+        autoFidSet.delete(fid);
+        if (autoRowsByFid) autoRowsByFid.delete(fid);
+      }
+    }
+    // Re-render
+    await loadStates();
+    await loadProgress();
+  } catch (e) {
+    alert(`bulk approve failed: ${e.message}`);
+  }
 }
 
 function fmtDistance(m) {

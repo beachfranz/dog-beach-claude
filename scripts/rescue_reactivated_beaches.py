@@ -104,10 +104,13 @@ def verify_catchment(conn, fids: list[int]) -> dict[int, tuple]:
         return {fid: (tier, cs) for fid, tier, cs in cur.fetchall()}
 
 
-def verify_bps(conn, fids: list[int]) -> dict[int, int]:
+def verify_zone_rules(conn, fids: list[int]) -> dict[int, int]:
+    """Return per-fid count of regions in zone_rules. Refire BEP cascade
+    is supposed to populate this. >=1 region = success."""
     with conn.cursor() as cur:
-        cur.execute("SELECT beach_fid, count(*) FROM beach_policy_source "
-                    " WHERE beach_fid = ANY(%s) GROUP BY beach_fid", (fids,))
+        cur.execute("""SELECT arena_group_id,
+                              coalesce(jsonb_array_length(zone_rules->'regions'), 0)
+                        FROM beach_dog_policy WHERE arena_group_id = ANY(%s)""", (fids,))
         return {fid: n for fid, n in cur.fetchall()}
 
 
@@ -226,7 +229,7 @@ def main() -> int:
 
         # ─ STEP 3 ─────────────────────────────────────────────────────
         log("\n=== STEP 3: BEP refire (per-fid) ===")
-        before = verify_bps(conn, fids)
+        before = verify_zone_rules(conn, fids)
         results = {}
         for f in fids:
             try:
@@ -239,9 +242,10 @@ def main() -> int:
                 log(f"  ✗ fid={f} refire ERR: {e}")
                 results[f] = False
                 if halt: raise SystemExit(f"step 3 failed on fid {f}")
-        after = verify_bps(conn, fids)
-        v = step_print_verify("beach_policy_source rows", before, after, fids,
-                               lambda b, a: (a or 0) >= (b or 0))
+        after = verify_zone_rules(conn, fids)
+        # Success: cascade ran without error AND zone_rules has ≥1 region after.
+        v = step_print_verify("zone_rules regions", before, after, fids,
+                               lambda b, a: (a or 0) >= 1)
         for f, ok in results.items(): summary[f]["3_bep_refire"] = ok and v.get(f, False)
 
         # ─ STEP 4 + 5 ──────────────────────────────────────────────────
@@ -268,29 +272,62 @@ def main() -> int:
 
         # ─ STEP 6 ─────────────────────────────────────────────────────
         if not args.skip_vision:
-            log("\n=== STEP 6: Vision tag (state-scoped) ===")
+            log("\n=== STEP 6: Vision tag (fid-scoped) ===")
+            # How many photos exist for these fids — needed to judge success.
+            photo_counts = {}
+            with conn.cursor() as cur:
+                cur.execute("SELECT arena_group_id, count(*) FROM beach_photos "
+                            " WHERE arena_group_id = ANY(%s) GROUP BY 1", (fids,))
+                photo_counts = {fid: n for fid, n in cur.fetchall()}
             before = verify_vision_tagged(conn, fids)
-            state_csv = ",".join(states)
+            # Fid-scoped so the scoreboard reflects THIS batch only — not a CA-wide tag pass.
             run_sub([sys.executable, "scripts/load_photo_vision_tags.py",
-                     "--state", state_csv, "--workers", "5", "--budget-usd", "5"],
-                    halt, f"vision tag --state {state_csv}")
+                     "--fids", ",".join(map(str, fids)),
+                     "--workers", "5", "--budget-usd", "5",
+                     "--chunk-size", str(max(50, sum(photo_counts.values()) + 10))],
+                    halt, f"vision tag --fids <{len(fids)}>")
             after = verify_vision_tagged(conn, fids)
-            v = step_print_verify("vision-tagged photos", before, after, fids,
-                                   lambda b, a: (a or 0) >= (b or 0))
+            # Success: if a fid had ≥1 photo, it must now have ≥1 tagged.
+            # If a fid had 0 photos (steps 4+5 found none), tagging can't run → mark None.
+            v = {}
+            for f in fids:
+                if (photo_counts.get(f, 0) or 0) == 0:
+                    v[f] = None
+                    log(f"      - fid={f:<10} no photos to tag (skip)")
+                else:
+                    ok = (after.get(f) or 0) >= 1
+                    mark = '✓' if ok else '✗'
+                    log(f"      {mark} fid={f:<10} {(before.get(f) or 0)} → {(after.get(f) or 0)} (of {photo_counts.get(f)} photos)")
+                    v[f] = ok
             for f, ok in v.items(): summary[f]["6_vision"] = ok
+            if halt and any(ok is False for ok in v.values()):
+                raise SystemExit("step 6 verification failed (some fids have photos but no vision tags)")
         else:
             for f in fids: summary[f]["6_vision"] = None
 
         # ─ STEP 7 ─────────────────────────────────────────────────────
         if not args.skip_curate:
             log("\n=== STEP 7: Auto-curate (per-fid) ===")
+            tagged_counts = verify_vision_tagged(conn, fids)
             before = verify_auto_curated(conn, fids)
             run_sub([sys.executable, "scripts/auto_curate.py", "--fids", ",".join(map(str, fids)), "--n", str(args.n)],
                     halt, f"auto_curate --fids <{len(fids)}> --n {args.n}")
             after = verify_auto_curated(conn, fids)
-            v = step_print_verify("auto-curated photos", before, after, fids,
-                                   lambda b, a: (a or 0) >= (b or 0))
+            # Success: if fid has ≥1 vision-tagged photo, must now have ≥1 auto-curated.
+            # If no tagged photos, auto-curate has nothing to pick → mark None.
+            v = {}
+            for f in fids:
+                if (tagged_counts.get(f) or 0) == 0:
+                    v[f] = None
+                    log(f"      - fid={f:<10} no vision-tagged photos (skip)")
+                else:
+                    ok = (after.get(f) or 0) >= 1
+                    mark = '✓' if ok else '✗'
+                    log(f"      {mark} fid={f:<10} {(before.get(f) or 0)} → {(after.get(f) or 0)} (of {tagged_counts.get(f)} tagged)")
+                    v[f] = ok
             for f, ok in v.items(): summary[f]["7_curate"] = ok
+            if halt and any(ok is False for ok in v.values()):
+                raise SystemExit("step 7 verification failed")
         else:
             for f in fids: summary[f]["7_curate"] = None
 

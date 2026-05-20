@@ -291,11 +291,17 @@ def tag_photo(image_url: str, beach_name: str, retries: int = 3
             return tags, usage
         except Exception as e:
             last_err = e
+            # Fast-fail on deterministic non-recoverable errors — no point
+            # burning 3×exponential-backoff retries on a malformed URL or
+            # an image we cannot resize.
+            msg = str(e)
+            if msg.startswith("bad_url:") or "image too large after resize" in msg:
+                raise RuntimeError(f"non-recoverable: {msg}") from e
             # 429s (wikimedia or anthropic) need longer backoff
-            is_429 = "429" in str(e) or "rate" in str(e).lower()
+            is_429 = "429" in msg or "rate" in msg.lower()
             if attempt < retries:
                 wait = (15 if is_429 else 3) * (2 ** attempt)  # 15/30/60 or 3/6/12
-                print(f"    retry {attempt+1}/{retries} after {wait}s: {str(e)[:120]}",
+                print(f"    retry {attempt+1}/{retries} after {wait}s: {msg[:120]}",
                       flush=True)
                 time.sleep(wait)
     raise RuntimeError(f"giving up after {retries} retries: {last_err}")
@@ -322,6 +328,10 @@ def main():
     ap.add_argument("--state", default=None,
                     help="Comma-separated state codes to limit beaches (e.g. CA,OR,WA). "
                          "Useful for MVP+-targeted backfill runs.")
+    ap.add_argument("--fids", default=None,
+                    help="Comma-separated beach fids — only tag photos for these "
+                         "beaches. Used by rescue_reactivated_beaches.py so the "
+                         "scoreboard accurately reflects this batch only.")
     args = ap.parse_args()
 
     conn = psycopg2.connect(**PG)
@@ -353,6 +363,11 @@ def main():
             states = [s.strip().upper() for s in args.state.split(",") if s.strip()]
             state_filter = "and g.state = any(%s)"
             source_params = source_params + (states,)
+        fid_filter = ""
+        if args.fids:
+            fid_list = [int(s) for s in args.fids.split(",") if s.strip()]
+            fid_filter = "and bp.arena_group_id = any(%s)"
+            source_params = source_params + (fid_list,)
         # Per Franz 2026-05-19 collapsed-architecture: every photo loaded
         # via the refactored Flickr/Wikimedia loaders has already passed
         # the unified v3 ingest filter. Pre-existing photos (ingested
@@ -367,6 +382,7 @@ def main():
              where bp.image_url is not null
                {source_filter}
                {state_filter}
+               {fid_filter}
                and (source_meta -> 'vision' ->> 'model' is null
                     or source_meta -> 'vision' ->> 'model' != '{MODEL}'
                     or coalesce(source_meta -> 'vision' ->> 'schema_version', 'v1') != '{SCHEMA_VERSION}')

@@ -35,9 +35,10 @@ Unchanged.
 2. **Per-beach panel** (when a beach is loaded):
    - Top row: the auto-curated set (badged with the n=, sorted by `sort_order`)
    - Bottom row: alternatives — uncurated photos with `predicted_keep_prob` ≥ some floor (e.g., 0.5), so curator sees what the model didn't pick
-   - Two per-beach buttons:
-     - **Approve** — flips `curated_by` from `'auto:n=N'` to the curator's name (locks; future `auto_curate.py` runs skip this beach per the script's existing `LIKE 'auto:%'` guard)
-     - **Clear & re-decide** — sets `curated_by=NULL, curated_at=NULL` on the auto rows. No tombstone (intentional — see "Why not tombstone" below). Next auto-curate run will re-pick.
+   - **Optional comment field** — single-line text input adjacent to the Approve / Clear buttons. Captures *why* the curator approved or cleared (e.g., "all looked clean", "wrong-beach photos slipped in"). Persisted to `beach_curator_review_log` (new table — see Data below). Always optional; empty submit is fine.
+   - Two per-beach buttons (comment value attached to whichever fires):
+     - **Approve** — flips `curated_by` from `'auto:n=N'` to the curator's name (locks; future `auto_curate.py` runs skip this beach per the script's existing `LIKE 'auto:%'` guard). Writes one log row with `action='approve'` + comment.
+     - **Clear & re-decide** — sets `curated_by=NULL, curated_at=NULL` on the auto rows. No tombstone (intentional — see "Why not tombstone" below). Next auto-curate run will re-pick. Writes one log row with `action='clear'` + comment.
 3. **Bulk action**: at the top of the beach list, "Approve all auto-curated in {state}" button — applies Approve to every auto-curated beach in the current state filter (with confirm dialog showing row count).
 
 ### Why not tombstone on Clear
@@ -47,14 +48,30 @@ Future `auto_curate.py` runs may use a different `n` (Franz wants to try `n=8`).
 ## Implementation notes
 
 ### Data
-- No schema changes. `curated_by` text column already discriminates (`auto:n=6` vs human name).
+- `curated_by` text column on `beach_photos` already discriminates (`auto:n=6` vs human name). No change there.
 - `curated_by` filter: `curated_by IS NOT NULL AND curated_by LIKE 'auto:%'` for auto-curated; `IS NOT NULL AND curated_by NOT LIKE 'auto:%'` for human.
+- **New table `beach_curator_review_log`** captures the comment + action audit:
+  ```
+  CREATE TABLE beach_curator_review_log (
+    id           bigserial PRIMARY KEY,
+    beach_fid    bigint NOT NULL REFERENCES beaches_gold(fid) ON DELETE CASCADE,
+    curator      text   NOT NULL,
+    action       text   NOT NULL CHECK (action IN ('approve','clear','override')),
+    auto_marker  text,            -- e.g., 'auto:n=6' at time of review
+    n_photos     int,             -- count of auto rows touched
+    comment      text,            -- optional curator note (≤500 chars)
+    created_at   timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE INDEX ON beach_curator_review_log(beach_fid, created_at DESC);
+  CREATE INDEX ON beach_curator_review_log(curator, created_at DESC);
+  ```
+  Bulk approve writes one row per beach with `action='approve'` and `comment = '<bulk> in {state}'` (or whatever the curator typed in the bulk-confirm dialog).
 
 ### RPCs (probably need)
 - `get_auto_curated_beach_fids(state, county?, ...)` — returns fids with ≥1 auto-curated photo. Drives the beach picker.
-- `approve_auto_curated_beach(fid, curator_name)` — UPDATE `curated_by = curator_name` WHERE `arena_group_id = fid AND curated_by LIKE 'auto:%'`. Returns row count.
-- `clear_auto_curated_beach(fid)` — UPDATE `curated_by = NULL, curated_at = NULL` WHERE same predicate. Returns row count.
-- `approve_auto_curated_state(state, curator_name)` — bulk apply. Confirm-dialog precondition: caller passes expected row count + state; RPC compares actual vs expected, refuses if mismatch (avoids race surprises).
+- `approve_auto_curated_beach(fid, curator_name, comment text DEFAULT NULL)` — UPDATE `curated_by = curator_name` WHERE `arena_group_id = fid AND curated_by LIKE 'auto:%'` + INSERT into `beach_curator_review_log` with action='approve'. Returns row count.
+- `clear_auto_curated_beach(fid, curator_name, comment text DEFAULT NULL)` — UPDATE `curated_by = NULL, curated_at = NULL` WHERE same predicate + INSERT log row with action='clear'. Returns row count.
+- `approve_auto_curated_state(state, curator_name, comment text DEFAULT NULL)` — bulk apply. Confirm-dialog precondition: caller passes expected row count + state; RPC compares actual vs expected, refuses if mismatch (avoids race surprises). Logs one row per beach.
 
 ### UI
 - Single Mode dropdown insert at top of `curate.html` controls section.

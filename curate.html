@@ -207,6 +207,13 @@
     padding: 1px 5px; border-radius: 4px;
     background: rgba(0,0,0,0.06); color: var(--muted);
   }
+  /* Photo has no lat/lng — assignment is park-name-match only,
+     cross-park leaks possible (Lake Tahoe → Marin etc.). Per Franz
+     2026-05-20. */
+  .photo-source.no-geo {
+    background: rgba(185,28,28,0.12); color: var(--red);
+    border: 1px solid rgba(185,28,28,0.3);
+  }
   .photo-distance {
     display: inline-block; font-size: 11px; font-weight: 600;
     padding: 1px 5px; border-radius: 4px;
@@ -1672,7 +1679,7 @@ function renderPhotoCard(p, idx) {
     <img src="${p.image_url || p.thumb_url}" alt="" loading="lazy">
     <div class="photo-meta">
       <div class="meta-row">
-        <span class="photo-source" title="Source: ${escHtml(sourceLabel)} · match: ${escHtml(mqLabel)}">${escHtml(sourceLabel)}</span>
+        <span class="photo-source${(p.lat == null) ? ' no-geo' : ''}" title="Source: ${escHtml(sourceLabel)}${(p.lat == null) ? ' · ⚠ NO GEO — assigned by park-name match only, may be wrong beach' : ''} · match: ${escHtml(mqLabel)}">${escHtml(sourceLabel)}${(p.lat == null) ? ' ⚠' : ''}</span>
         ${curatorChipHtml}
         ${distScoreHtml}
         ${probHtml}

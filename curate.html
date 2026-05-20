@@ -1611,12 +1611,21 @@ function renderPhotoCard(p, idx) {
   // (Manchester Beach photos titled "Manchester Beach" all = 0.0).
   // Recompute client-side using the current title + beach name so the
   // displayed value is always fresh. Per Franz 2026-05-20.
-  const wordMatch = _wordMatchScore(beachData?.beach?.display_name_override || beachData?.beach?.name || '',
-                                     meta.title || '');
+  //
+  // Title source fallback chain: source_meta.title (Wikimedia/Flickr),
+  // source_meta.description (some loaders), p.title direct, source_meta.
+  // vision.description (last resort — Haiku output).
+  const _bn = (beachData?.beach?.display_name_override
+               || beachData?.beach?.name
+               || p.beach_name || p.arena_group_name || '');
+  const _tt = (meta.title || p.title
+               || (meta.vision && meta.vision.description) || '');
+  const wordMatch = _wordMatchScore(_bn, _tt);
   const wordMatchPct = wordMatch !== null ? Math.round((wordMatch / 4) * 100) : null;
+  const wmTitle = `Beach: "${_bn || '(unknown)'}" vs title: "${(_tt || '(empty)').slice(0,80)}". Token overlap; raw 0-4 shown as % of max.`;
   const wordMatchHtml = wordMatchPct !== null
-    ? `<span class="label">Word</span><span class="word-match" title="Name-match score (token overlap with beach name). Raw 0-4 shown as % of max. Currently a tiebreaker — not weighted into primary rank.">${wordMatchPct}%</span>`
-    : `<span class="label">Word</span><span class="word-match" style="color:var(--muted)">—</span>`;
+    ? `<span class="label">Word</span><span class="word-match" title="${escHtml(wmTitle)}">${wordMatchPct}%</span>`
+    : `<span class="label">Word</span><span class="word-match" style="color:var(--muted)" title="${escHtml(wmTitle)}">—</span>`;
 
   // Predicted keep probability (the model's score) — same value the 🤖 badge
   // shows above, repeated on the score-row so dist / word / prob / override

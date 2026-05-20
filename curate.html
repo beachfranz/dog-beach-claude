@@ -263,9 +263,10 @@
   .tag-chip.good { background: rgba(21,128,61,0.10); color: var(--green); border-color: rgba(21,128,61,0.2); }
   .photo-caption {
     font-size: 11px; color: var(--text); line-height: 1.3;
-    margin: 4px 0; max-height: 2.6em; overflow: hidden;
-    text-overflow: ellipsis; display: -webkit-box;
-    -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    margin: 4px 0;
+    /* one line + ellipsis; hover for full text (Franz 2026-05-20) */
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    cursor: help;
   }
   .photo-actions {
     display: flex; gap: 4px;
@@ -1533,7 +1534,9 @@ function renderPhotoCard(p, idx) {
     mlHtml = `<span class="ml-badge ${cls}" title="ML keep probability (${escHtml(mlModel)})">🤖 ${pct}%</span>`;
   }
   const title = (meta.title || '').replace(/^File:/,'').replace(/\.(jpe?g|png|tif{1,2}|webp)$/i,'').trim();
-  const desc = (meta.description || '').trim();
+  // Description lives at vision.description (Haiku), not at meta.description.
+  // Fixed 2026-05-20 — was previously almost always empty.
+  const desc = ((meta.vision && meta.vision.description) || meta.description || '').trim();
   const captionText = [title, desc].filter(Boolean).join(' — ');
   const captionHtml = captionText
     ? `<div class="photo-caption" title="${escHtml(captionText)}">${escHtml(captionText)}</div>`
@@ -1616,14 +1619,12 @@ function renderPhotoCard(p, idx) {
     <img src="${p.image_url || p.thumb_url}" alt="" loading="lazy">
     <div class="photo-meta">
       <div class="meta-row">
-        <span class="photo-source">${escHtml(sourceLabel)}</span>
-        ${curatorChipHtml}
         ${distScoreHtml}
-        ${wordMatchHtml}
         ${probHtml}
+        ${wordMatchHtml}
         ${overrideHtml}
-        ${mlHtml}
-        <span class="match-label match-${escHtml(mq)}" title="Match quality (auto)">${escHtml(mqLabel)}</span>
+        ${curatorChipHtml}
+        <span class="photo-source" title="Source: ${escHtml(sourceLabel)} · match: ${escHtml(mqLabel)}">${escHtml(sourceLabel)}</span>
       </div>
       ${tagsHtml}
       ${captionHtml}

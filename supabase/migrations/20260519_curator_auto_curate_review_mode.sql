@@ -71,7 +71,7 @@ as $$
   select g.fid                                   as beach_fid,
          coalesce(g.display_name_override, g.name) as beach_name,
          g.state                                 as state,
-         g.county                                as county,
+         g.county_name                           as county,
          count(*)::int                           as n_auto_photos,
          max(bp.curated_by)                      as auto_marker
     from public.beaches_gold g
@@ -79,8 +79,8 @@ as $$
    where (p_state is null or g.state = upper(p_state))
      and g.is_active
      and bp.curated_by like 'auto:%'
-   group by g.fid, g.name, g.display_name_override, g.state, g.county
-   order by g.state, g.county nulls last, beach_name
+   group by g.fid, g.name, g.display_name_override, g.state, g.county_name
+   order by g.state, g.county_name nulls last, beach_name
 $$;
 
 grant execute on function public.get_auto_curated_beach_fids(text)

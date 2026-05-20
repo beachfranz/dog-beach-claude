@@ -158,7 +158,10 @@ def replace_unsplash(fid, photos):
             },
         })
     if rows:
+        # PostgREST honors resolution=ignore-duplicates ONLY when on_conflict
+        # is set; without it, dup-key raises 409 mid-batch. See Flickr loader.
         supa("/rest/v1/beach_photos", method="POST", body=rows,
+             params={"on_conflict": "arena_group_id,source,external_id"},
              prefer="return=minimal,resolution=ignore-duplicates")
 
 

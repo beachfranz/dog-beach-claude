@@ -923,6 +923,32 @@ document.getElementById('close-btn').href =
 
 // Zone-rules constants + helpers + renderers now live in
 // src/zone-rules-block.js (window.ZoneRulesBlock). escHtml is kept here
+
+// Mirror of beach.html — renders the shared ZoneRulesBlock into its
+// mount card. Today + current hour for season + day-part tab autoselect.
+function _renderZoneRulesBlock(beach, dogPolicy) {
+  const mount = document.getElementById('zone-rules-mount');
+  if (!mount || !window.ZoneRulesBlock) return;
+  const zr = dogPolicy?.zone_rules;
+  if (!zr || (Array.isArray(zr.regions) && zr.regions.length === 0)) {
+    mount.style.display = 'none';
+    return;
+  }
+  const tz = beach?.timezone || 'America/Los_Angeles';
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', hour12: false,
+  }).formatToParts(new Date());
+  const get = t => parts.find(p => p.type === t)?.value || '';
+  const ctx = {
+    isToday: true,
+    currentLocalHour: parseInt(get('hour'), 10) % 24,
+    viewMonthDay: `${get('month')}-${get('day')}`,
+    beachName: '',
+  };
+  window.ZoneRulesBlock.render(mount, zr, ctx);
+  mount.style.display = '';
+}
 // because it's used throughout beach.html.
 
 const escHtml = s => String(s ?? '')
@@ -1089,6 +1115,11 @@ function render(data, beachFid) {
   // Hidden when no active advisories.
   leftRail.push(`<section class="card cautions-card" style="display:none"></section>`);
   leftRail.push(buildAlternativesSection(dog_policy, data.alternatives));
+  // Zone-rules block (shared with detail.html + beach.html) — full
+  // regions × sections × day-part-tabs × current-season rendering.
+  // Per Franz 2026-05-19 — beach (+ mobile-beach) becoming main consumer
+  // page; previously only detail.html surfaced this. Hidden when empty.
+  leftRail.push(`<section class="card" id="zone-rules-mount" style="display:none"></section>`);
   leftRail.push(buildNowBlurbCard(data.today));
   // DP suggestion mount — async-filled by loadDogParkSuggestion below.
   // Sits next to Pack List so the "what's next" prompts cluster.
@@ -1118,6 +1149,7 @@ function render(data, beachFid) {
   loadWeather(beach, data.hours_today, data.today);
   loadDogParkSuggestion(beach, beachFid, dog_policy, data.hours_today);
   loadWaterConditionAdvisories(beachFid);
+  _renderZoneRulesBlock(beach, dog_policy);
   _wireBestTimeClick();
 }
 

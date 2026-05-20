@@ -799,6 +799,36 @@ document.getElementById('close-btn').href =
 // src/zone-rules-block.js (window.ZoneRulesBlock). escHtml is kept here
 // because it's used throughout beach.html.
 
+// Render the shared ZoneRulesBlock into its mount card. Pulls the current
+// local hour + today's MM-DD so the day-part tabs auto-select correctly
+// and only the current season's zones show. Hides the card on empty data.
+function _renderZoneRulesBlock(beach, dogPolicy) {
+  const mount = document.getElementById('zone-rules-mount');
+  if (!mount || !window.ZoneRulesBlock) return;
+  const zr = dogPolicy?.zone_rules;
+  if (!zr || (Array.isArray(zr.regions) && zr.regions.length === 0)) {
+    mount.style.display = 'none';
+    return;
+  }
+  // Context for the block: today + current hour + view date for season.
+  const tz = beach?.timezone || 'America/Los_Angeles';
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', hour12: false,
+  }).formatToParts(new Date());
+  const get = t => parts.find(p => p.type === t)?.value || '';
+  const todayMd = `${get('month')}-${get('day')}`;
+  const ctx = {
+    isToday: true,
+    currentLocalHour: parseInt(get('hour'), 10) % 24,
+    viewMonthDay: todayMd,
+  };
+  // beachName='' suppresses the paw-name prefix — the page already shows
+  // the beach name in the h1 above.
+  window.ZoneRulesBlock.render(mount, zr, { ...ctx, beachName: '' });
+  mount.style.display = '';
+}
+
 const escHtml = s => String(s ?? '')
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -948,6 +978,12 @@ function render(data, beachFid) {
   const hasPhotos = Array.isArray(data.photos) && data.photos.length > 0;
   const main = [];
   main.push(buildOverviewCard(beach, data.description));
+  // Zone-rules block — shared renderer from src/zone-rules-block.js.
+  // Per Franz 2026-05-19, beach.html becomes the main consumer detail
+  // page. Mount before Alternatives so the canonical "what's the rule
+  // here?" answer reads high on the page. Filled async by
+  // _renderZoneRulesBlock(); hidden when zone_rules has no data.
+  main.push(`<section class="card" id="zone-rules-mount" style="display:none"></section>`);
   main.push(buildAlternativesSection(dog_policy, data.alternatives));
   // Photos + Map share a row: photos take most of the width, map is
   // square. Either alone takes the full row. Renders only if at least
@@ -972,6 +1008,7 @@ function render(data, beachFid) {
   main.push(buildLinksSection(beach, beachFid));
   document.getElementById('main-content').innerHTML = main.filter(Boolean).join('');
 
+  _renderZoneRulesBlock(beach, dog_policy);
   // Shared photo block — 1 hero + 5 thumbs + view-all (src/photo-block.js).
   // Mount AFTER the section HTML has been injected so the target exists.
   if (hasPhotos) {

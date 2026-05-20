@@ -671,8 +671,49 @@ def _state_tier12_fids(state: str) -> list[int]:
 
 
 def _run_subprocess(cmd: list[str], timeout: int = 14400) -> tuple[int, str, str]:
-    rc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, timeout=timeout)
-    return rc.returncode, rc.stdout, rc.stderr
+    """Stream subprocess output line-by-line to our stdout while also
+    collecting it for parse_fn callers. capture_output=True buffered
+    the entire run, giving zero progress visibility on long LLM/loader
+    phases. Diagnosed during 2026-05-19 rescue work (Popen+tee pattern
+    surfaces real-time progress through the BG-task harness pipe)."""
+    deadline = time.time() + timeout
+    proc = subprocess.Popen(cmd, cwd=str(ROOT), stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True,
+                            encoding='utf-8', errors='replace', bufsize=1)
+    out_lines: list[str] = []
+    err_lines: list[str] = []
+    # Drain stdout on main thread (tee); pull stderr from a worker.
+    def _drain_stderr():
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            err_lines.append(line)
+    t_err = threading.Thread(target=_drain_stderr, daemon=True)
+    t_err.start()
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        print(f'      | {line.rstrip()}', flush=True)
+        out_lines.append(line)
+        if time.time() > deadline:
+            proc.kill()
+            raise subprocess.TimeoutExpired(cmd, timeout)
+    rc = proc.wait(timeout=max(1.0, deadline - time.time()))
+    t_err.join(timeout=2.0)
+    return rc, ''.join(out_lines), ''.join(err_lines)
+
+
+def _ping_or_reconnect(conn):
+    """Return a live conn. Long SQL passes (30-min statement_timeout) sit
+    behind pgbouncer's idle timeout; the held psycopg2 conn dies silently.
+    Ping SELECT 1; if broken, close + reopen. Cheap and idempotent.
+    Diagnosed in rescue 2026-05-19 (feedback_pgbouncer_kills_held_conn)."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute('SELECT 1'); cur.fetchone()
+        return conn
+    except Exception:
+        try: conn.close()
+        except Exception: pass
+        return open_conn()
 
 
 def _ensure_loader(state: str, source: str, script_name: str,
@@ -741,24 +782,44 @@ def action_operators_chunked(state: str) -> int:
     ]
     is_ca = (state == 'CA')
     total = 0
-    # Open a dedicated autocommit connection so each pass commits on its own.
-    c = psycopg2.connect(**PG)
-    c.set_session(autocommit=True)
+
+    def _fresh_conn():
+        # Dedicated autocommit conn; each pass commits on its own. 30 min
+        # statement_timeout bounds a single pass; pgbouncer may still cut
+        # the conn during multi-pass runs, so we ping+reconnect per pass.
+        cc = psycopg2.connect(**PG)
+        cc.set_session(autocommit=True)
+        with cc.cursor() as cu:
+            cu.execute("SET statement_timeout = '1800s'")
+        return cc
+
+    c = _fresh_conn()
     try:
-        with c.cursor() as cur:
-            cur.execute("SET statement_timeout = '1800s'")  # 30 min per pass
-            for label, fn_name, skip_for_ca in passes:
-                if skip_for_ca and is_ca:
-                    log(f'    {label}: SKIP (CA)')
-                    continue
-                t0 = time.time()
+        for label, fn_name, skip_for_ca in passes:
+            if skip_for_ca and is_ca:
+                log(f'    {label}: SKIP (CA)')
+                continue
+            t0 = time.time()
+            # Ping before each pass; reconnect if pgbouncer dropped us
+            # between long-running predecessor passes. Diagnosed in
+            # 2026-05-19 rescue (feedback_pgbouncer_kills_held_conn).
+            try:
+                with c.cursor() as cur:
+                    cur.execute('SELECT 1'); cur.fetchone()
+            except Exception:
+                log(f'    {label}: conn dropped; reconnecting')
+                try: c.close()
+                except Exception: pass
+                c = _fresh_conn()
+            with c.cursor() as cur:
                 cur.execute(f"SELECT public.{fn_name}(%s)", (state,))
                 n = int(cur.fetchone()[0])
-                dt = time.time() - t0
-                total += n
-                log(f'    {label}: +{n} rows in {dt:.1f}s')
+            dt = time.time() - t0
+            total += n
+            log(f'    {label}: +{n} rows in {dt:.1f}s')
     finally:
-        c.close()
+        try: c.close()
+        except Exception: pass
     return total
 
 

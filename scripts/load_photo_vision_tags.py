@@ -404,6 +404,24 @@ def main():
     lock = threading.Lock()
     t0 = time.time()
 
+    # Workers do ~1-3s API calls; while they're out, the DB conn idles
+    # behind pgbouncer's timeout and gets cut. _safe_update reconnects
+    # silently on OperationalError + retries the write. Diagnosed 2026-05-19.
+    nonlocal_state = {"conn": conn, "cur": upd_cur}
+    def _safe_update(tags, pid):
+        sql = ("update public.beach_photos "
+               "   set source_meta = source_meta || jsonb_build_object('vision', %s::jsonb) "
+               " where id = %s")
+        params = (json.dumps(tags), pid)
+        try:
+            nonlocal_state["cur"].execute(sql, params)
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            try: nonlocal_state["conn"].close()
+            except Exception: pass
+            nonlocal_state["conn"] = psycopg2.connect(**PG)
+            nonlocal_state["cur"] = nonlocal_state["conn"].cursor()
+            nonlocal_state["cur"].execute(sql, params)
+
     def process(p):
         url = p["thumb_url"] or p["image_url"]
         try:
@@ -440,13 +458,9 @@ def main():
             r = process(p)
             if r is None: continue
             pid, tags, d = r
-            upd_cur.execute("""
-                update public.beach_photos
-                   set source_meta = source_meta || jsonb_build_object('vision', %s::jsonb)
-                 where id = %s
-            """, (json.dumps(tags), pid))
+            _safe_update(tags, pid)
             if d % 20 == 0:
-                conn.commit()
+                nonlocal_state["conn"].commit()
                 _progress(state, len(targets), t0)
             time.sleep(0.15)
     else:
@@ -458,17 +472,13 @@ def main():
                 r = fut.result()
                 if r is None: continue
                 pid, tags, d = r
-                upd_cur.execute("""
-                    update public.beach_photos
-                       set source_meta = source_meta || jsonb_build_object('vision', %s::jsonb)
-                     where id = %s
-                """, (json.dumps(tags), pid))
+                _safe_update(tags, pid)
                 if d % 20 == 0:
-                    conn.commit()
+                    nonlocal_state["conn"].commit()
                     _progress(state, len(targets), t0)
 
     if not args.audit:
-        conn.commit()
+        nonlocal_state["conn"].commit()
 
     actual = state["in"] * 1e-6 + state["out"] * 5e-6   # Haiku 4.5 pricing
     print(f"\nDone in {time.time()-t0:.0f}s. ok={state['ok']} err={state['err']}",

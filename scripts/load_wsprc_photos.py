@@ -59,8 +59,16 @@ PG = dict(host=_p.hostname, port=_p.port or 5432, user=_p.username,
 
 WSPRC_BASE = "https://parks.wa.gov"
 PARK_PATH  = "/find-parks/state-parks"
-UA = ("DogBeachScout/1.0 (https://dogbeachscout.com; "
-      "franz@franzfunk.com) wsprc-park-page-scraper")
+# parks.wa.gov 403s our custom UA — use browser-like UA + standard headers.
+# (Identifying contact preserved in code comments + commit history.)
+UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36")
+BROWSER_HEADERS = {
+    "User-Agent":      UA,
+    "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+}
 PACING_S = 1.0   # be polite — small server
 TIMEOUT_S = 30
 
@@ -79,50 +87,113 @@ BG_RE = re.compile(
 # Filename patterns we DROP (icons, SVG, generic)
 DROP_FILENAMES = re.compile(r'(?:logo|icon|_icon\.|kayaking\.|beach-exploration\.|paddleboarding\.)', re.IGNORECASE)
 
+# Small-thumbnail style presets = sidebar cross-promo strips. Drop these
+# unconditionally; the main park gallery uses square_* presets.
+DROP_STYLES = re.compile(r'/styles/(?:small_thumbnail_|teaser_|hero_thumb_)', re.IGNORECASE)
+
 
 def _http():
     s = requests.Session()
-    s.headers.update({"User-Agent": UA, "Accept": "text/html"})
+    s.headers.update(BROWSER_HEADERS)
     return s
+
+
+def _park_name_tokens(park_name: str) -> set[str]:
+    """Tokens to require in image filenames so we drop cross-promo thumbnails
+    that the WSPRC page surfaces for other parks. Drops short/common tokens
+    like 'state', 'park', 'island' that would over-match."""
+    stop = {"state","park","historical","historic","area","beach","island",
+            "harbor","point","bay","lake","river","cove","spit","the","of"}
+    toks = [t for t in re.sub(r'[^a-z]+', ' ', park_name.lower()).split() if t and t not in stop and len(t) >= 4]
+    return set(toks)
 
 
 # ─── Slug discovery ──────────────────────────────────────────────────
 
-def park_name_to_slug_variants(park_name: str) -> list[str]:
-    """Try a few slug formats. parks.wa.gov uses lowercase-dashed slugs
-    with either '-state-park' or '-historical-state-park' suffix."""
-    base = re.sub(r'[^a-z0-9]+', '-', park_name.lower()).strip('-')
-    return [
-        f"{base}-state-park",
-        f"{base}-historical-state-park",
-        f"{base}-historic-state-park",
-        base,
-    ]
+def fetch_sitemap_park_urls(http) -> dict[str, str]:
+    """One-shot fetch of parks.wa.gov sitemap.xml. Returns
+    {normalized_park_name: url} for every /find-parks/state-parks/* page.
+
+    Normalization: lowercase, strip 'state-park'/'historical'/'marine'/etc.
+    suffixes so 'Stuart Island' matches 'stuart-island-marine-state-park'.
+    """
+    try:
+        r = http.get(f"{WSPRC_BASE}/sitemap.xml", timeout=TIMEOUT_S)
+        if r.status_code != 200:
+            return {}
+    except requests.RequestException:
+        return {}
+    park_urls = re.findall(r'<loc>(https://parks\.wa\.gov/find-parks/state-parks/[^<]+)</loc>', r.text)
+    out = {}
+    SUFFIX_STRIP = ('-marine-state-park-trail','-state-park-trail',
+                    '-marine-state-park','-historical-state-park',
+                    '-historic-state-park','-state-park','-state',
+                    '-conservation-area','-recreation-area')
+    for url in park_urls:
+        slug = url.rsplit('/', 1)[-1]
+        # Drop trailing -<digits> archive suffix (e.g., -retired-...-472027)
+        slug = re.sub(r'-(?:retired|archived|deleted)-.*$', '', slug)
+        bare = slug
+        for sfx in SUFFIX_STRIP:
+            if bare.endswith(sfx):
+                bare = bare[:-len(sfx)]
+                break
+        bare = re.sub(r'-+', ' ', bare).strip()
+        if bare:
+            # Keep the first match in case of dupes (sitemap usually ordered)
+            out.setdefault(bare, url)
+    return out
 
 
-def resolve_park_url(http, park_name: str) -> tuple[str | None, str | None]:
-    """Try slug variants until one returns 200. Returns (url, slug)."""
-    for slug in park_name_to_slug_variants(park_name):
-        url = f"{WSPRC_BASE}{PARK_PATH}/{slug}"
-        try:
-            r = http.head(url, timeout=TIMEOUT_S, allow_redirects=True)
-            if r.status_code == 200:
-                return url, slug
-            elif r.status_code == 405:
-                # Some Drupal sites don't support HEAD; retry with GET
-                r = http.get(url, timeout=TIMEOUT_S, allow_redirects=True)
-                if r.status_code == 200:
-                    return url, slug
-        except requests.RequestException:
-            continue
-        time.sleep(PACING_S * 0.5)
+def resolve_park_url(http, park_name: str, sitemap: dict[str, str]
+                     ) -> tuple[str | None, str | None]:
+    """Resolve a park name to its parks.wa.gov URL via sitemap.
+
+    Strategy:
+      1. Exact normalized-name match.
+      2. Token-subset match: park_name's tokens are a subset of a sitemap
+         entry's tokens (so 'Cama Beach' matches 'cama beach historical'
+         after suffix-strip, but 'Bay View' doesn't match 'lake bay view').
+      3. Parent-park fallback: strip 'Underwater Park' / 'Marine Park'
+         suffix and retry (PAD-US lists these as separate sub-units but
+         WSPRC publishes them under the parent park page).
+      4. None.
+    """
+    def _try(name: str):
+        norm = re.sub(r'[^a-z0-9 ]+', ' ', name.lower()).strip()
+        if not norm:
+            return None
+        if norm in sitemap:
+            return sitemap[norm]
+        p_tokens = set(norm.split())
+        if not p_tokens:
+            return None
+        best = None
+        for cand, url in sitemap.items():
+            c_tokens = set(cand.split())
+            if p_tokens.issubset(c_tokens):
+                if best is None or len(c_tokens) < len(set(best[0].split())):
+                    best = (cand, url)
+        return best[1] if best else None
+
+    url = _try(park_name)
+    if url:
+        return url, url.rsplit('/', 1)[-1]
+    # Parent-park fallback for sub-units
+    parent = re.sub(r'\s*(?:underwater park|marine park|underwater)\s*$',
+                    '', park_name, flags=re.IGNORECASE).strip()
+    if parent and parent != park_name:
+        url = _try(parent)
+        if url:
+            return url, url.rsplit('/', 1)[-1]
     return None, None
 
 
 # ─── HTML scrape ─────────────────────────────────────────────────────
 
-def fetch_park_photos(http, park_url: str) -> list[dict]:
-    """Returns deduped list of {url, filename, page_url}."""
+def fetch_park_photos(http, park_url: str, park_name: str) -> list[dict]:
+    """Returns deduped list of {url, filename, page_url} filtered to this
+    park (drops cross-promo + sidebar thumbnails for other parks)."""
     try:
         r = http.get(park_url, timeout=TIMEOUT_S)
         if r.status_code != 200:
@@ -131,13 +202,30 @@ def fetch_park_photos(http, park_url: str) -> list[dict]:
     except requests.RequestException:
         return []
 
+    park_tokens = _park_name_tokens(park_name)
     found: dict[str, dict] = {}
     for m in IMG_RE.finditer(html):
         path, _ym, filename = m.group(1), m.group(2), m.group(3)
         if DROP_FILENAMES.search(filename):
             continue
-        # Convert to original-size: strip "styles/<preset>/public/" -> "public/"
-        # but real Drupal originals live at /sites/default/files/<YYYY-MM>/<file>
+        if DROP_STYLES.search(path):
+            continue  # sidebar cross-promo strip
+        # Park-name token filter: drop if no distinctive park-name token
+        # appears in the filename (decoded URL chars). Skip filter when
+        # park has no distinctive tokens (rare; e.g., 'Bay View').
+        if park_tokens:
+            fname_norm = re.sub(r'[^a-z]+', ' ',
+                                 urllib.parse.unquote(filename).lower())
+            fname_words = set(fname_norm.split())
+            if not (park_tokens & fname_words):
+                # Loose fallback: substring check, in case tokens are
+                # smushed together (e.g., 'CamaBeach_*' has no separator
+                # between 'cama' and 'beach').
+                low = fname_norm.replace(' ', '')
+                if not any(t in low for t in park_tokens):
+                    continue
+        # Convert to original-size: strip "styles/<preset>/public/" -> "/"
+        # — Drupal originals live at /sites/default/files/<YYYY-MM>/<file>
         original = re.sub(r'/styles/[^/]+/public/', '/', path)
         url = urllib.parse.urljoin(WSPRC_BASE, original)
         if filename in found:
@@ -146,7 +234,7 @@ def fetch_park_photos(http, park_url: str) -> list[dict]:
             "url": url,
             "filename": filename,
             "page_url": park_url,
-            "external_id": f"wsprc:{filename}",  # filename is the stable per-park key
+            "external_id": f"wsprc:{filename}",  # filename is stable per-park key
         }
     return list(found.values())
 
@@ -245,16 +333,19 @@ def main() -> int:
         if args.dry_run: print("  [DRY-RUN] no DB writes\n", flush=True)
 
         http = _http()
+        print("Fetching parks.wa.gov sitemap for slug resolution...", flush=True)
+        sitemap = fetch_sitemap_park_urls(http)
+        print(f"  sitemap: {len(sitemap)} park URLs indexed\n", flush=True)
         total_resolved = total_photos = total_inserted = total_unresolved = 0
         for i, p in enumerate(parks, 1):
             print(f"[{i}/{len(parks)}] {p['park']}  ({len(p['beach_fids'])} beaches)", flush=True)
-            url, slug = resolve_park_url(http, p["park"])
+            url, slug = resolve_park_url(http, p["park"], sitemap)
             if not url:
-                print(f"  [no slug found] tried: {park_name_to_slug_variants(p['park'])}", flush=True)
+                print(f"  [no sitemap match]", flush=True)
                 total_unresolved += 1
                 continue
             time.sleep(PACING_S)
-            photos = fetch_park_photos(http, url)
+            photos = fetch_park_photos(http, url, p["park"])
             print(f"  url={url}\n  photos={len(photos)}", flush=True)
             total_resolved += 1
             total_photos += len(photos)

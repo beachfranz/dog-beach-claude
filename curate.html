@@ -1573,8 +1573,17 @@ function renderPhotoCard(p, idx) {
   // Predicted keep probability (the model's score) — same value the 🤖 badge
   // shows above, repeated on the score-row so dist / word / prob / override
   // sit in one comparison line. Per Franz 2026-05-19.
+  //
+  // Missingness flag: when the photo has NO vision tags, the keep_prob
+  // is an under-evidence guess (no vision penalties applied, model
+  // defaults to "kept"). Visually flag with ⚠ so the curator knows
+  // not to over-trust the score. Per Franz 2026-05-19.
+  const hasVision = !!(meta.vision && meta.vision.model);
+  const noVisionWarn = (mlProb != null && !hasVision)
+    ? `<span title="No vision tags — keep_prob is an under-evidence guess (no penalty for screenshot/interior/vehicle/etc). Re-tag this photo to sharpen." style="color:#fb923c; cursor:help; margin-left:2px;">⚠</span>`
+    : '';
   const probHtml = mlProb != null && !isNaN(mlProb)
-    ? `<span class="label">prob</span><span class="word-match" title="Predicted keep probability from Tier-2 model (${escHtml(mlModel)}).">${mlProb.toFixed(2)}</span>`
+    ? `<span class="label">prob</span><span class="word-match" title="Predicted keep probability from Tier-2 model (${escHtml(mlModel)}).">${mlProb.toFixed(2)}${noVisionWarn}</span>`
     : `<span class="label">prob</span><span class="word-match" style="color:var(--muted)">—</span>`;
 
   // Score override input. Pre-fills with override_keep_prob if set, else

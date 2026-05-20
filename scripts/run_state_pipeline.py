@@ -179,6 +179,37 @@ PHASES = [
             "                 where source='osm_dog_features' and state=$STATE), false)",
         'criterion_text': "external_source_status['osm_dog_features', state] in (ok, skipped)",
     },
+    # PIP-prelaunch — populate beach_polygon_membership for the state.
+    # Per docs/pip_prelaunch_spec.md. Refactored RPC asserts indices
+    # exist + state-filters every polygon kind; per-fid ~1.1s on WA.
+    # Must run AFTER ensure_pad_us (needs polygons loaded) and BEFORE
+    # codify_cascade (which reads PIP via codify_federal_coverage).
+    {
+        'key': 'ensure_pip_membership',
+        'kind': 'python',
+        'action': 'ensure_pip_membership',
+        'criterion':
+            # Every active beach in the state has ≥1 polygon_membership row.
+            # (PAD-US has near-universal coverage in MVP+ states.)
+            "select coalesce("
+            "  (select count(*) filter (where exists ("
+            "         select 1 from public.beach_polygon_membership m "
+            "          where m.gold_fid = g.fid)) "
+            "        = count(*) "
+            "    from public.beaches_gold g "
+            "   where g.state = $STATE and g.is_active and g.geom is not null), "
+            "  false)",
+        'criterion_text':
+            'every active beach in state has ≥1 beach_polygon_membership row',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beaches_gold "
+            "             where state=$STATE and is_active and geom is not null), "
+            "     d as (select count(*)::int n from public.beaches_gold g "
+            "             where g.state=$STATE and g.is_active and g.geom is not null "
+            "               and exists (select 1 from public.beach_polygon_membership m "
+            "                             where m.gold_fid = g.fid)) "
+            "select d.n done, t.n total from d, t",
+    },
     # precheck moved here from phase #1: now serves as the final sanity
     # check that all loaders above succeeded. With the ensure_* phases
     # auto-running missing loaders, precheck is now belt-and-suspenders
@@ -1009,6 +1040,50 @@ def action_operator_merge(state: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+def action_ensure_pip_membership(state: str) -> int:
+    """Per-state PIP populate via refresh_beach_polygon_membership.
+
+    Iterates active beach fids and calls the RPC once per fid (bulk call
+    times out at the pooler statement_timeout; per-fid is sub-second per
+    the post-perf-fix benchmarks in docs/pip_prelaunch_spec.md).
+
+    Idempotent — the RPC DELETEs scope first then re-inserts, so re-runs
+    overwrite cleanly. Returns the total polygon-membership rows written
+    (sum of n_rows across all kinds for all fids).
+    """
+    log(f'    PIP populate: scanning beaches_gold for state={state}')
+    total_rows = 0
+    n_fids = n_err = 0
+    with open_conn() as c:
+        c.autocommit = True
+        cur = c.cursor()
+        cur.execute(
+            "select fid from public.beaches_gold "
+            " where state = %s and is_active and geom is not null "
+            " order by scoring_tier in ('daily','hourly') desc, fid",
+            (state,),
+        )
+        fids = [r[0] for r in cur.fetchall()]
+        log(f'    {len(fids)} fids to PIP')
+        for i, fid in enumerate(fids, 1):
+            try:
+                cur.execute(
+                    "select kind, n_rows from public.refresh_beach_polygon_membership(%s, %s)",
+                    (state, fid),
+                )
+                for _kind, n in cur.fetchall():
+                    total_rows += (n or 0)
+                n_fids += 1
+            except Exception as e:
+                n_err += 1
+                if n_err <= 5:
+                    log(f'    fid={fid} ERR: {e}')
+            if i % 100 == 0:
+                log(f'    {i}/{len(fids)} done  membership_rows={total_rows} err={n_err}')
+        log(f'    done. fids={n_fids} err={n_err} membership_rows={total_rows}')
+    return total_rows
+
+
 def action_codify_cascade(state: str) -> int:
     """Per-state codify pre-check + manifest emit.
 
@@ -1235,6 +1310,7 @@ PYTHON_ACTIONS = {
     'ensure_overpass':         action_ensure_overpass,
     'ensure_amenities':        action_ensure_amenities,
     'ensure_dog_features':     action_ensure_dog_features,
+    'ensure_pip_membership':   action_ensure_pip_membership,
     'codify_cascade':          action_codify_cascade,
     'operator_llm_extract':    action_operator_llm_extract,
     'operator_merge':          action_operator_merge,

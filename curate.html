@@ -168,15 +168,18 @@
     border-color: #d4a017;
     box-shadow: 0 0 0 2px rgba(212, 160, 23, 0.25);
   }
-  /* Curator chip — separate badge in the meta-row, gold-styled. Sits
-     alongside the original source chip (cdpr / flickr / etc.) so
-     provenance is preserved AND curator-status is marked. */
+  /* Curator chip — gold star for Curated:Human, silver star for
+     Curated:AI (Franz 2026-05-20). Provenance + status indicator. */
   .curator-chip {
     display: inline-block; font-size: 10px; font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.04em;
     padding: 1px 6px; border-radius: 4px;
     background: rgba(212, 160, 23, 0.18); color: #92740a;
     border: 1px solid rgba(212, 160, 23, 0.4);
+  }
+  .curator-chip.is-ai {
+    background: rgba(148, 163, 184, 0.18); color: #475569;
+    border-color: rgba(148, 163, 184, 0.5);
   }
   /* Number badge top-left of card image (matches the on-map dot label) */
   .photo-num {
@@ -263,9 +266,9 @@
   .tag-chip.good { background: rgba(21,128,61,0.10); color: var(--green); border-color: rgba(21,128,61,0.2); }
   .photo-caption {
     font-size: 11px; color: var(--text); line-height: 1.3;
-    margin: 4px 0;
-    /* one line + ellipsis; hover for full text (Franz 2026-05-20) */
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    margin: 4px 0; max-height: 2.6em; overflow: hidden;
+    text-overflow: ellipsis; display: -webkit-box;
+    -webkit-line-clamp: 2; -webkit-box-orient: vertical;
     cursor: help;
   }
   .photo-actions {
@@ -1543,10 +1546,16 @@ function renderPhotoCard(p, idx) {
     : '';
   const curatorCls = isCuratorPhoto(p) ? ' is-curator' : '';
   // Source stays as the original loader source (cdpr/flickr/etc.).
-  // Curator status shows as a separate chip when applicable.
   const sourceLabel = p.source;
-  const curatorChipHtml = isCuratorPhoto(p)
-    ? `<span class="curator-chip" title="Curator-promoted: this photo was manually kept by a curator.">★ curator</span>`
+  // Curator status: gold ★ for Curated:Human, silver ★ for Curated:AI.
+  // Anything else (legacy 'cakers', 'derived:sibling', null) → no chip.
+  // Per Franz 2026-05-20.
+  const curBy = p.curated_by || '';
+  const curatorChipHtml =
+      curBy === 'Curated:Human'
+        ? `<span class="curator-chip" title="Curated:Human — picked by a human curator">★ Human</span>`
+    : curBy === 'Curated:AI'
+        ? `<span class="curator-chip is-ai" title="Curated:AI — picked by the auto-curate model">★ AI</span>`
     : '';
   // Preserve trash/hide state across re-renders (drag reorder rebuilds the
   // grid via renderPhotoCard; without this the visual state from dirtyMap
@@ -1562,8 +1571,8 @@ function renderPhotoCard(p, idx) {
 
   // Distance — shown prominently in the score-row alongside word-match.
   const distScoreHtml = distLabel
-    ? `<span class="label">dist</span><span class="word-match" title="Distance from beach point (used in rank: -0.15 per km).">${escHtml(distLabel)}</span>`
-    : `<span class="label">dist</span><span class="word-match" style="color:var(--muted)">—</span>`;
+    ? `<span class="label">Dist</span><span class="word-match" title="Distance from beach point (used in rank: -0.15 per km).">${escHtml(distLabel)}</span>`
+    : `<span class="label">Dist</span><span class="word-match" style="color:var(--muted)">—</span>`;
 
   // Word-match score (name_match_score from source_meta).
   // Raw range 0-4 — displayed as a percent of max (= score/4 * 100) per
@@ -1572,8 +1581,8 @@ function renderPhotoCard(p, idx) {
   const wordMatch = parseFloat(meta.name_match_score);
   const wordMatchPct = !isNaN(wordMatch) ? Math.round((wordMatch / 4) * 100) : null;
   const wordMatchHtml = wordMatchPct !== null
-    ? `<span class="label">word</span><span class="word-match" title="Name-match score (token overlap with beach name). Raw 0-4 shown as % of max. Currently a tiebreaker — not weighted into primary rank.">${wordMatchPct}%</span>`
-    : `<span class="label">word</span><span class="word-match" style="color:var(--muted)">—</span>`;
+    ? `<span class="label">Word</span><span class="word-match" title="Name-match score (token overlap with beach name). Raw 0-4 shown as % of max. Currently a tiebreaker — not weighted into primary rank.">${wordMatchPct}%</span>`
+    : `<span class="label">Word</span><span class="word-match" style="color:var(--muted)">—</span>`;
 
   // Predicted keep probability (the model's score) — same value the 🤖 badge
   // shows above, repeated on the score-row so dist / word / prob / override
@@ -1588,8 +1597,8 @@ function renderPhotoCard(p, idx) {
     ? `<span title="No vision tags — keep_prob is an under-evidence guess (no penalty for screenshot/interior/vehicle/etc). Re-tag this photo to sharpen." style="color:#fb923c; cursor:help; margin-left:2px;">⚠</span>`
     : '';
   const probHtml = mlProb != null && !isNaN(mlProb)
-    ? `<span class="label">prob</span><span class="word-match" title="Predicted keep probability from Tier-2 model (${escHtml(mlModel)}).">${mlProb.toFixed(2)}${noVisionWarn}</span>`
-    : `<span class="label">prob</span><span class="word-match" style="color:var(--muted)">—</span>`;
+    ? `<span class="label">Qual</span><span class="word-match" title="Predicted keep probability from Tier-2 model (${escHtml(mlModel)}).">${mlProb.toFixed(2)}${noVisionWarn}</span>`
+    : `<span class="label">Qual</span><span class="word-match" style="color:var(--muted)">—</span>`;
 
   // Score override input. Pre-fills with override_keep_prob if set, else
   // shows placeholder of current ML prob. Edits update dirtyMap.
@@ -1619,12 +1628,12 @@ function renderPhotoCard(p, idx) {
     <img src="${p.image_url || p.thumb_url}" alt="" loading="lazy">
     <div class="photo-meta">
       <div class="meta-row">
+        <span class="photo-source" title="Source: ${escHtml(sourceLabel)} · match: ${escHtml(mqLabel)}">${escHtml(sourceLabel)}</span>
+        ${curatorChipHtml}
         ${distScoreHtml}
         ${probHtml}
-        ${wordMatchHtml}
         ${overrideHtml}
-        ${curatorChipHtml}
-        <span class="photo-source" title="Source: ${escHtml(sourceLabel)} · match: ${escHtml(mqLabel)}">${escHtml(sourceLabel)}</span>
+        ${wordMatchHtml}
       </div>
       ${tagsHtml}
       ${captionHtml}

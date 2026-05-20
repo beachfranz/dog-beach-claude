@@ -442,6 +442,18 @@ def cv_by_beach(X: pd.DataFrame, y: pd.Series, beach_ids: pd.Series,
 #
 # Precedence: hard-reject ceils ALWAYS win over keep floors. So an
 # interior-dog photo gets the interior ceil, not the dog floor.
+#
+# KNOWN FAILURE MODE (Franz 2026-05-20, fid 8717 Pope Beach):
+# Macro/close-up shots of plants and wildlife photographed near beaches
+# score P~1.0 (the model sees "well-composed nature photo, no quality
+# issues" and rates highly). Example: Salix drummondiana willow at
+# Pope Beach got P=0.9999 and auto-picked above the actual beach shot.
+# The training set's rejected pool is dominated by interior/screenshot/
+# face/vehicle — "well-composed but off-topic" close-ups aren't
+# represented. Fix candidates: (a) vision schema bump to add
+# `is_macro_closeup` boolean; (b) ceil here when subjects matches
+# ["plant"|"flower"|"leaf"|"insect"|"bird_closeup"] and scene='other'.
+# See memory: feedback_model_picks_plant_closeups.
 
 def apply_vision_rules(prob: float, vision: dict | None) -> tuple[float, list[str]]:
     """Return (adjusted_prob, list_of_rule_names_applied)."""

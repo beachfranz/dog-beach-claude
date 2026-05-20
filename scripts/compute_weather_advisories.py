@@ -142,23 +142,46 @@ def main() -> int:
             for h in hours:
                 by_date.setdefault(str(h["local_date"]), []).append(h)
 
+            # Time-aware filter: cautions only matter for the rest of the
+            # day. If a high tide peaked at 7am and it's now 2pm, nobody
+            # needs a warning about it — strip past hours before computing
+            # the extreme + valid_from. Past-only triggered events are
+            # actively retired so any row from an earlier run drops out.
+            now_utc = datetime.now(timezone.utc)
             for date_iso, day_hours in by_date.items():
                 for (status_col, value_col, label, icon, klass, text_tmpl, unit_fmt) in HOURLY_METRICS:
-                    triggered = [h for h in day_hours if h.get(status_col) in ("caution","no_go","advisory")]
-                    if not triggered:
+                    triggered_all = [h for h in day_hours if h.get(status_col) in ("caution","no_go","advisory")]
+                    if not triggered_all:
                         continue
-                    # Worst status in the day
-                    worst = max((h[status_col] for h in triggered),
+                    # Worst status — use FULL-day data so the advisory_key
+                    # stays stable across runs (we drop the row entirely
+                    # below if no future-only triggered hours remain).
+                    worst = max((h[status_col] for h in triggered_all),
                                 key=lambda s: {"advisory":1,"caution":2,"no_go":3}.get(s, 0))
+                    advisory_key = f"det:{status_col}_{worst}:{date_iso}"
+
+                    # Future-only triggered hours
+                    triggered = [h for h in triggered_all
+                                 if h.get("forecast_ts") and h["forecast_ts"] >= now_utc]
+                    if not triggered:
+                        # Spike already in the past — retire any prior row.
+                        if not args.dry_run:
+                            upd.execute("""
+                                DELETE FROM public.beach_advisory
+                                 WHERE beach_fid = %s AND advisory_key = %s
+                            """, (fid, advisory_key))
+                        continue
+
                     severity = STATUS_SEVERITY[worst]
                     # Observed extreme (max for "high X" metrics, min for cold)
+                    # — computed over future-only hours so the displayed
+                    # value is what the user can still act on.
                     vals = [h[value_col] for h in triggered if h[value_col] is not None]
                     if not vals: continue
                     extreme = (min if status_col == "temp_cold_status" else max)(vals)
                     text = text_tmpl.format(observed=extreme)
                     value_str = unit_fmt.format(extreme)
                     first = triggered[0]; last = triggered[-1]
-                    advisory_key = f"det:{status_col}_{worst}:{date_iso}"
                     if args.dry_run:
                         print(f"  fid={fid:<10} {date_iso}  {status_col:<18} {worst:<8} val={extreme}  → {text}", flush=True)
                         continue
@@ -183,7 +206,8 @@ def main() -> int:
                         klass, text, label, value_str, icon,
                         json.dumps({"hours_triggered": len(triggered),
                                     "extreme_value": float(extreme),
-                                    "worst_status": worst}),
+                                    "worst_status": worst,
+                                    "now_aware_filter": True}),
                     ))
                     n_advisories += 1
 

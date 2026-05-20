@@ -61,6 +61,21 @@ def log(msg: str) -> None:
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
+def _ping_or_reconnect(conn):
+    """Return a live connection. Long subprocesses (e.g. train_photo_model
+    ~60s) sit behind pgbouncer's idle timeout; the held conn dies silently.
+    Ping with SELECT 1; if broken, close + reopen. Cheap and idempotent."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+        return conn
+    except Exception:
+        try: conn.close()
+        except Exception: pass
+        return _connect()
+
+
 def run_sub(cmd: list[str], halt_on_error: bool, label: str) -> int:
     """Run a subprocess streaming its stdout to our stdout line-by-line
     (so the BG harness's piped file doesn't lose output mid-step). Returns
@@ -229,6 +244,7 @@ def main() -> int:
             for state in states:
                 run_sub([sys.executable, "scripts/refresh_catchment.py", "--state", state],
                         halt, f"refresh_catchment --state {state}")
+            conn = _ping_or_reconnect(conn)
             after = verify_catchment(conn, fids)
             results = step_print_verify("catchment_score", before, after, fids,
                                          lambda b, a: a is not None and a[1] is not None)
@@ -284,6 +300,7 @@ def main() -> int:
             before_f = verify_photos(conn, fids, "flickr")
             run_sub([sys.executable, "scripts/load_flickr_photos.py", "--fids", ",".join(map(str, fids))],
                     halt, f"load_flickr_photos --fids <{len(fids)}>")
+            conn = _ping_or_reconnect(conn)
             after_f = verify_photos(conn, fids, "flickr")
             for f, r in _photo_verify("Flickr", before_f, after_f).items():
                 summary[f]["4_flickr"] = r
@@ -292,6 +309,7 @@ def main() -> int:
             before_w = verify_photos(conn, fids, "wikimedia")
             run_sub([sys.executable, "scripts/load_wikimedia_commons_photos.py", "--fids", ",".join(map(str, fids))],
                     halt, f"load_wikimedia_commons_photos --fids <{len(fids)}>")
+            conn = _ping_or_reconnect(conn)
             after_w = verify_photos(conn, fids, "wikimedia")
             for f, r in _photo_verify("Wikimedia", before_w, after_w).items():
                 summary[f]["5_wikimedia"] = r
@@ -314,6 +332,7 @@ def main() -> int:
                      "--workers", "5", "--budget-usd", "5",
                      "--chunk-size", str(max(50, sum(photo_counts.values()) + 10))],
                     halt, f"vision tag --fids <{len(fids)}>")
+            conn = _ping_or_reconnect(conn)
             after = verify_vision_tagged(conn, fids)
             # Success: if a fid had ≥1 photo, it must now have ≥1 tagged.
             # If a fid had 0 photos (steps 4+5 found none), tagging can't run → mark None.
@@ -343,6 +362,7 @@ def main() -> int:
             before = verify_keep_prob_scored(conn, fids)
             run_sub([sys.executable, "scripts/train_photo_model.py"],
                     halt, "train_photo_model (re-score full population)")
+            conn = _ping_or_reconnect(conn)
             after = verify_keep_prob_scored(conn, fids)
             v = {}
             with conn.cursor() as cur:
@@ -369,6 +389,7 @@ def main() -> int:
             before = verify_auto_curated(conn, fids)
             run_sub([sys.executable, "scripts/auto_curate.py", "--fids", ",".join(map(str, fids)), "--n", str(args.n)],
                     halt, f"auto_curate --fids <{len(fids)}> --n {args.n}")
+            conn = _ping_or_reconnect(conn)
             after = verify_auto_curated(conn, fids)
             # Per-fid: tagged>0 + curated>0 = ✓; tagged>0 + curated=0 = ⚠
             # (model scored all photos too low — surfaceable to curator);

@@ -127,6 +127,7 @@ begin
 
     if v_pick.id is not null then
       v_result := v_result || jsonb_build_array(jsonb_build_object(
+        'id',          v_pick.id,
         'source',      v_pick.source,
         'image_url',   v_pick.image_url,
         'thumb_url',   v_pick.thumb_url,

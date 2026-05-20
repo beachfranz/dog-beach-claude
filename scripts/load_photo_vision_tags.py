@@ -319,6 +319,9 @@ def main():
                          "(e.g. 'flickr' or 'flickr,ccc'). Lets two processes run "
                          "concurrently on disjoint sources — one fast (flickr URL-source) "
                          "and one slow (wikimedia base64 + serial lock).")
+    ap.add_argument("--state", default=None,
+                    help="Comma-separated state codes to limit beaches (e.g. CA,OR,WA). "
+                         "Useful for MVP+-targeted backfill runs.")
     args = ap.parse_args()
 
     conn = psycopg2.connect(**PG)
@@ -345,6 +348,11 @@ def main():
             sources = [s.strip() for s in args.source.split(",") if s.strip()]
             source_filter = "and bp.source = any(%s)"
             source_params = (sources,)
+        state_filter = ""
+        if args.state:
+            states = [s.strip().upper() for s in args.state.split(",") if s.strip()]
+            state_filter = "and g.state = any(%s)"
+            source_params = source_params + (states,)
         # Per Franz 2026-05-19 collapsed-architecture: every photo loaded
         # via the refactored Flickr/Wikimedia loaders has already passed
         # the unified v3 ingest filter. Pre-existing photos (ingested
@@ -358,6 +366,7 @@ def main():
               join public.beaches_gold g on g.fid = bp.arena_group_id
              where bp.image_url is not null
                {source_filter}
+               {state_filter}
                and (source_meta -> 'vision' ->> 'model' is null
                     or source_meta -> 'vision' ->> 'model' != '{MODEL}'
                     or coalesce(source_meta -> 'vision' ->> 'schema_version', 'v1') != '{SCHEMA_VERSION}')

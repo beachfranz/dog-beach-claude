@@ -230,10 +230,11 @@
     .caution-grid { grid-template-columns: repeat(3, 1fr); }
   }
   .caution-tile {
-    display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 6px 8px;
     border: 1px solid var(--border); border-radius: 6px;
     font-size: 12px; background: var(--card);
-    text-align: left; cursor: pointer; font-family: inherit;
+    text-align: center; cursor: pointer; font-family: inherit;
     color: inherit; width: 100%;
   }
   .caution-tile:hover { filter: brightness(0.97); }
@@ -251,6 +252,7 @@
     margin-top: 8px; padding: 8px 10px;
     border: 1px solid var(--border); border-radius: 6px;
     background: var(--card); font-size: 12px; line-height: 1.4;
+    text-align: center;
   }
   .caution-detail[hidden] { display: none; }
 

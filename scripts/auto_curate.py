@@ -46,6 +46,21 @@ def _connect_pg():
     )
 
 
+def _ping_or_reconnect(conn):
+    """Return a live conn. Long --reset loops over the full catalog
+    (13k+ fids) exceed pgbouncer's idle timeout and the held conn dies.
+    Ping SELECT 1; reconnect if broken.
+    See feedback_pgbouncer_kills_held_conn."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1"); cur.fetchone()
+        return conn
+    except Exception:
+        try: conn.close()
+        except Exception: pass
+        return _connect_pg()
+
+
 def beach_has_human_curation(cur, fid: int) -> bool:
     """True if any photo on this beach was curated by a human (not auto:*)."""
     cur.execute("""
@@ -141,38 +156,43 @@ def main():
         if args.reset and not args.dry_run:
             print("  --reset: clearing prior auto:* selections for in-scope beaches first…",
                   flush=True)
-            with conn.cursor() as cur:
-                for i in range(0, len(fids), args.chunk):
-                    batch = fids[i:i + args.chunk]
+            for i in range(0, len(fids), args.chunk):
+                batch = fids[i:i + args.chunk]
+                conn = _ping_or_reconnect(conn)
+                with conn.cursor() as cur:
                     for fid in batch:
                         if not beach_has_human_curation(cur, fid):
                             clear_auto_curate_for_beach(cur, fid)
-                    conn.commit()
+                conn.commit()
             print("  reset complete.", flush=True)
 
         counts = {"selected": 0, "skipped_human": 0, "no_photos": 0, "no_ids": 0}
         beaches_with_selections = 0
         t0 = time.time()
 
-        with conn.cursor() as cur:
-            for i, fid in enumerate(fids, 1):
+        # Process in chunks; reconnect between chunks to survive pgbouncer
+        # idle timeout on long full-catalog runs.
+        for i, fid in enumerate(fids, 1):
+            if (i - 1) % args.chunk == 0:
+                conn = _ping_or_reconnect(conn)
+            with conn.cursor() as cur:
                 r = auto_curate_beach(cur, fid, args.n, dry_run=args.dry_run)
-                counts[r["status"]] = counts.get(r["status"], 0) + 1
-                if r["status"] == "selected":
-                    counts["selected_photos"] = counts.get("selected_photos", 0) + r["selected"]
-                    beaches_with_selections += 1
-                if i % args.chunk == 0:
-                    if not args.dry_run:
-                        conn.commit()
-                    elapsed = time.time() - t0
-                    rate = i / elapsed if elapsed > 0 else 0
-                    print(f"  {i}/{len(fids)} processed  "
-                          f"selected={beaches_with_selections}  "
-                          f"skipped_human={counts.get('skipped_human', 0)}  "
-                          f"no_photos={counts.get('no_photos', 0)}  "
-                          f"({rate:.1f}/s)", flush=True)
-            if not args.dry_run:
-                conn.commit()
+            counts[r["status"]] = counts.get(r["status"], 0) + 1
+            if r["status"] == "selected":
+                counts["selected_photos"] = counts.get("selected_photos", 0) + r["selected"]
+                beaches_with_selections += 1
+            if i % args.chunk == 0:
+                if not args.dry_run:
+                    conn.commit()
+                elapsed = time.time() - t0
+                rate = i / elapsed if elapsed > 0 else 0
+                print(f"  {i}/{len(fids)} processed  "
+                      f"selected={beaches_with_selections}  "
+                      f"skipped_human={counts.get('skipped_human', 0)}  "
+                      f"no_photos={counts.get('no_photos', 0)}  "
+                      f"({rate:.1f}/s)", flush=True)
+        if not args.dry_run:
+            conn.commit()
 
         print(f"\n=== SUMMARY ===", flush=True)
         print(f"  beaches processed:       {len(fids)}", flush=True)

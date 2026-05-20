@@ -1570,6 +1570,13 @@ function renderPhotoCard(p, idx) {
     ? `<span class="label">word</span><span class="word-match" title="Name-match score (token overlap with beach name). Range 0-4. Currently a tiebreaker — not weighted into primary rank.">${wordMatch.toFixed(2)}</span>`
     : `<span class="label">word</span><span class="word-match" style="color:var(--muted)">—</span>`;
 
+  // Predicted keep probability (the model's score) — same value the 🤖 badge
+  // shows above, repeated on the score-row so dist / word / prob / override
+  // sit in one comparison line. Per Franz 2026-05-19.
+  const probHtml = mlProb != null && !isNaN(mlProb)
+    ? `<span class="label">prob</span><span class="word-match" title="Predicted keep probability from Tier-2 model (${escHtml(mlModel)}).">${mlProb.toFixed(2)}</span>`
+    : `<span class="label">prob</span><span class="word-match" style="color:var(--muted)">—</span>`;
+
   // Score override input. Pre-fills with override_keep_prob if set, else
   // shows placeholder of current ML prob. Edits update dirtyMap.
   const dirty = dirtyMap.get(p.id) || {};
@@ -1606,6 +1613,7 @@ function renderPhotoCard(p, idx) {
       <div class="score-row">
         ${distScoreHtml}
         ${wordMatchHtml}
+        ${probHtml}
         ${overrideHtml}
       </div>
       ${tagsHtml}

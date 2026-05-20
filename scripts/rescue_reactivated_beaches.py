@@ -260,24 +260,41 @@ def main() -> int:
         for f, ok in results.items(): summary[f]["3_bep_refire"] = ok and v.get(f, False)
 
         # ─ STEP 4 + 5 ──────────────────────────────────────────────────
+        # Verify is "loader ran without error; report per-fid count
+        # change". Loaders are sometimes destructive (eviction by new
+        # top-N) — count going down is a soft-warn (⚠), not a halt.
+        # The only hard fail is the subprocess itself erroring.
+        def _photo_verify(src: str, before: dict, after: dict) -> dict[int, str | bool]:
+            r = {}
+            for f in fids:
+                b, a = (before.get(f) or 0), (after.get(f) or 0)
+                if a == 0 and b == 0:
+                    r[f] = None
+                    log(f"      - fid={f:<10} {src}: 0 → 0 (no photos found at this beach)")
+                elif a < b:
+                    r[f] = "warn"
+                    log(f"      ⚠ fid={f:<10} {src}: {b} → {a} (loader evicted {b-a})")
+                else:
+                    r[f] = True
+                    log(f"      ✓ fid={f:<10} {src}: {b} → {a}")
+            return r
+
         if not args.skip_photos:
             log("\n=== STEP 4: Load Flickr photos ===")
             before_f = verify_photos(conn, fids, "flickr")
             run_sub([sys.executable, "scripts/load_flickr_photos.py", "--fids", ",".join(map(str, fids))],
                     halt, f"load_flickr_photos --fids <{len(fids)}>")
             after_f = verify_photos(conn, fids, "flickr")
-            v = step_print_verify("Flickr photos", before_f, after_f, fids,
-                                   lambda b, a: (a or 0) >= (b or 0))
-            for f, ok in v.items(): summary[f]["4_flickr"] = ok
+            for f, r in _photo_verify("Flickr", before_f, after_f).items():
+                summary[f]["4_flickr"] = r
 
             log("\n=== STEP 5: Load Wikimedia photos ===")
             before_w = verify_photos(conn, fids, "wikimedia")
             run_sub([sys.executable, "scripts/load_wikimedia_commons_photos.py", "--fids", ",".join(map(str, fids))],
                     halt, f"load_wikimedia_commons_photos --fids <{len(fids)}>")
             after_w = verify_photos(conn, fids, "wikimedia")
-            v = step_print_verify("Wikimedia photos", before_w, after_w, fids,
-                                   lambda b, a: (a or 0) >= (b or 0))
-            for f, ok in v.items(): summary[f]["5_wikimedia"] = ok
+            for f, r in _photo_verify("Wikimedia", before_w, after_w).items():
+                summary[f]["5_wikimedia"] = r
         else:
             for f in fids: summary[f]["4_flickr"] = summary[f]["5_wikimedia"] = None
 
@@ -353,21 +370,23 @@ def main() -> int:
             run_sub([sys.executable, "scripts/auto_curate.py", "--fids", ",".join(map(str, fids)), "--n", str(args.n)],
                     halt, f"auto_curate --fids <{len(fids)}> --n {args.n}")
             after = verify_auto_curated(conn, fids)
-            # Success: if fid has ≥1 vision-tagged photo, must now have ≥1 auto-curated.
-            # If no tagged photos, auto-curate has nothing to pick → mark None.
+            # Per-fid: tagged>0 + curated>0 = ✓; tagged>0 + curated=0 = ⚠
+            # (model scored all photos too low — surfaceable to curator);
+            # no tagged = - (skip). The script DOESN'T halt on ⚠ — that's
+            # legitimate model behavior, not a pipeline error.
             v = {}
             for f in fids:
-                if (tagged_counts.get(f) or 0) == 0:
+                t, a = (tagged_counts.get(f) or 0), (after.get(f) or 0)
+                if t == 0:
                     v[f] = None
                     log(f"      - fid={f:<10} no vision-tagged photos (skip)")
+                elif a >= 1:
+                    v[f] = True
+                    log(f"      ✓ fid={f:<10} auto-curated {a} of {t} tagged")
                 else:
-                    ok = (after.get(f) or 0) >= 1
-                    mark = '✓' if ok else '✗'
-                    log(f"      {mark} fid={f:<10} {(before.get(f) or 0)} → {(after.get(f) or 0)} (of {tagged_counts.get(f)} tagged)")
-                    v[f] = ok
+                    v[f] = "warn"
+                    log(f"      ⚠ fid={f:<10} 0 of {t} tagged scored high enough — model didn't pick any (curator review)")
             for f, ok in v.items(): summary[f]["7_curate"] = ok
-            if halt and any(ok is False for ok in v.values()):
-                raise SystemExit("step 7 verification failed")
         else:
             for f in fids: summary[f]["7_curate"] = None
 
@@ -379,11 +398,24 @@ def main() -> int:
         log(header)
         for f in fids:
             s = summary[f]
-            def m(v): return '✓' if v else ('-' if v is None else '✗')
+            def m(v):
+                if v is True: return '✓'
+                if v is None: return '-'
+                if v == 'warn': return '⚠'
+                return '✗'
             log(f"  {f:<10} {m(s.get('1_active')):<6} {m(s.get('2_catchment')):<6} {m(s.get('3_bep_refire')):<6} {m(s.get('4_flickr')):<6} {m(s.get('5_wikimedia')):<6} {m(s.get('6_vision')):<6} {m(s.get('6.5_score')):<7} {m(s.get('7_curate')):<6}  {info[f]['name']}")
-        all_ok = all(all(v is not False for v in summary[f].values()) for f in fids)
-        log(f"\n{'ALL GREEN ✓' if all_ok else '✗ ERRORS PRESENT — see above'}")
-        return 0 if all_ok else 1
+        # GREEN = no hard ✗. ⚠ is acceptable (soft warn, expected for some real-world data).
+        any_fail = any(v is False for f in fids for v in summary[f].values())
+        any_warn = any(v == 'warn' for f in fids for v in summary[f].values())
+        if any_fail:
+            log("\n✗ HARD ERRORS PRESENT — see above")
+            return 1
+        elif any_warn:
+            log("\n⚠ all hard checks pass; soft warns surfaced (see above)")
+            return 0
+        else:
+            log("\nALL GREEN ✓")
+            return 0
     finally:
         conn.close()
 

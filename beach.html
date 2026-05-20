@@ -242,7 +242,10 @@
   .caution-tile .amenity-label { white-space: normal; line-height: 1.2; }
   /* Severity tints: severe/no_go = red, moderate/caution = amber, minor/advisory = neutral */
   .caution-tile.sev-no_go    { background: rgba(239,68,68,0.45);  border-color: rgba(153,27,27,0.42); }
-  .caution-tile.sev-caution  { background: rgba(251,191,36,0.53); border-color: rgba(180,83,9,0.42); }
+  /* Moderate-severity tint: reddish-amber (orange-400) rather than the
+   * pure amber used for rule-on_leash, so cautions read clearly as
+   * "warning" not "status." */
+  .caution-tile.sev-caution  { background: rgba(251,146,60,0.55); border-color: rgba(154,52,18,0.45); }
   .caution-tile.sev-advisory { background: rgba(0,0,0,0.04); }
   .caution-detail {
     margin-top: 8px; padding: 8px 10px;

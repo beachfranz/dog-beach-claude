@@ -62,24 +62,30 @@ def _ping_or_reconnect(conn):
 
 
 def beach_has_human_curation(cur, fid: int) -> bool:
-    """True if any photo on this beach was curated by a human (not auto:*)."""
+    """True if any photo on this beach was curated by a real human pick.
+    Excludes AI-auto picks AND sibling-propagation artifacts (which look
+    like human attributions but are auto-derived from a curator action at
+    a DIFFERENT beach — they shouldn't block auto-curate at this beach)."""
     cur.execute("""
         SELECT 1 FROM public.beach_photos
          WHERE arena_group_id = %s
            AND curated_at IS NOT NULL
-           AND (curated_by IS NULL OR curated_by NOT LIKE 'auto:%%')
+           AND curated_by NOT IN ('Curated:AI')
+           AND curated_by NOT LIKE 'derived:%%'
+           AND curated_by NOT LIKE 'auto:%%'
          LIMIT 1
     """, (fid,))
     return cur.fetchone() is not None
 
 
 def clear_auto_curate_for_beach(cur, fid: int) -> int:
-    """Reset any prior auto-curate selections on this beach so re-runs converge."""
+    """Reset any prior AI auto-curate selections on this beach so re-runs
+    converge. Preserves Curated:Human + derived:sibling."""
     cur.execute("""
         UPDATE public.beach_photos
            SET curated_at = NULL, curated_by = NULL
          WHERE arena_group_id = %s
-           AND curated_by LIKE 'auto:%%'
+           AND (curated_by = 'Curated:AI' OR curated_by LIKE 'auto:%%')
     """, (fid,))
     return cur.rowcount
 
@@ -103,7 +109,7 @@ def auto_curate_beach(cur, fid: int, n: int, dry_run: bool = False) -> dict:
     cleared = 0
     if not dry_run:
         cleared = clear_auto_curate_for_beach(cur, fid)
-        method = f"auto:n={n}"
+        method = "Curated:AI"  # was auto:n=<N>; collapsed to Curated:AI 2026-05-20
         for photo_id, rank in picks:
             cur.execute("""
                 UPDATE public.beach_photos

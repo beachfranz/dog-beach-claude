@@ -266,7 +266,10 @@ Deno.serve(async (req: Request) => {
       const update: Record<string, unknown> = {
         sort_order: p.sort_order,
         curated_at: new Date().toISOString(),
-        curated_by: body.curated_by ?? null,
+        // Franz 2026-05-20 — collapsed username-based attribution into the
+        // canonical Curated:Human label. The original username is dropped
+        // intentionally (audit trail can live in a separate log if needed).
+        curated_by: "Curated:Human",
         // Always clear hidden_at on keep — covers the un-hide-via-restore path.
         hidden_at: null,
         hidden_by: null,
@@ -299,9 +302,15 @@ Deno.serve(async (req: Request) => {
         .select("source, external_id")
         .eq("id", p.id).single();
       if (!meta?.external_id) continue;
+      // Sibling propagation: a curator action at beach A also marks the
+      // same photo (by source+external_id) at other beaches B,C,... as
+      // curated. Pre-2026-05-20 these inherited 'Curated:Human', which
+      // mis-counted them as actual human picks and blocked auto-curate
+      // at those siblings. Now labeled 'derived:sibling' so the
+      // beach_has_human_curation check (auto_curate.py) ignores them.
       const siblingUpdate: Record<string, unknown> = {
         curated_at: update.curated_at,
-        curated_by: update.curated_by,
+        curated_by: "derived:sibling",
       };
       if (p.match_quality) siblingUpdate.match_quality = p.match_quality;
       const { error: sibErr, count: sibCount } = await supabase

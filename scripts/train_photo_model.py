@@ -462,10 +462,19 @@ def apply_vision_rules(prob: float, vision: dict | None) -> tuple[float, list[st
     q = vision.get("quality_issue")
     scene = vision.get("scene")
 
-    # HARD REJECT — ceil at 0.10
-    if q in ("distressing", "screenshot"):
+    # HARD REJECT — ceil at 0.10 for most categories.
+    # Screenshot + map scenes get a TIGHTER ceil at 0.01 (Franz 2026-05-20):
+    # they're not even candidates for curator review; they're never
+    # acceptable beach hero shots. This also keeps them out of the
+    # selector's eligible CTE (0.65 floor) AND signals "auto-remove from
+    # curation" via P below any reasonable threshold.
+    if q == "screenshot":
+        prob = min(prob, 0.01); rules.append(f"ceil:quality=screenshot")
+    elif q == "distressing":
         prob = min(prob, 0.10); rules.append(f"ceil:quality={q}")
-    if scene in ("interior", "screenshot_or_map", "food"):
+    if scene == "screenshot_or_map":
+        prob = min(prob, 0.01); rules.append(f"ceil:scene=screenshot_or_map")
+    elif scene in ("interior", "food"):
         prob = min(prob, 0.10); rules.append(f"ceil:scene={scene}")
     # HARD REJECT — close-up portraits aren't beach photos.
     # Data-driven: 0 keeps in 19 curator-labeled face_closeup photos

@@ -340,6 +340,11 @@ def main():
                     help="Comma-separated beach fids — only tag photos for these "
                          "beaches. Used by rescue_reactivated_beaches.py so the "
                          "scoreboard accurately reflects this batch only.")
+    ap.add_argument("--include-v3-skipped", action="store_true",
+                    help="Override the v3_skipped sentinel filter. Default is to "
+                         "skip photos marked v3_skipped=true (cost-saving for "
+                         "non-curated MVP+ per task #76). Pass this to force "
+                         "tagging — e.g. NPS backfill 2026-05-20.")
     args = ap.parse_args()
 
     conn = psycopg2.connect(**PG)
@@ -376,6 +381,11 @@ def main():
             fid_list = [int(s) for s in args.fids.split(",") if s.strip()]
             fid_filter = "and bp.arena_group_id = any(%s)"
             source_params = source_params + (fid_list,)
+        # v3_skipped sentinel (task #76) marks photos to NOT re-tag for
+        # cost savings. --include-v3-skipped overrides for cases where
+        # tagging IS wanted (e.g. NPS backfill — Franz 2026-05-20).
+        v3_skipped_filter = ("" if args.include_v3_skipped
+                              else "and coalesce(source_meta ->> 'v3_skipped', 'false') != 'true'")
         # Per Franz 2026-05-19 collapsed-architecture: every photo loaded
         # via the refactored Flickr/Wikimedia loaders has already passed
         # the unified v3 ingest filter. Pre-existing photos (ingested
@@ -394,7 +404,7 @@ def main():
                and (source_meta -> 'vision' ->> 'model' is null
                     or source_meta -> 'vision' ->> 'model' != '{MODEL}'
                     or coalesce(source_meta -> 'vision' ->> 'schema_version', 'v1') != '{SCHEMA_VERSION}')
-               and coalesce(source_meta ->> 'v3_skipped', 'false') != 'true'
+               {v3_skipped_filter}
              order by bp.id
              limit %s
         """, source_params + (args.chunk_size,))

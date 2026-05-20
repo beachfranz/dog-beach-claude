@@ -667,61 +667,73 @@
   });
 
   // ── NOW mode ───────────────────────────────────────────────────────
-  async function sortAndRenderNow() {
-    if (!nowBeaches) {
-      document.getElementById('top-card').innerHTML   = '<div class="skeleton"></div>';
-      document.getElementById('beach-list').innerHTML =
-        Array(4).fill('<div class="skeleton"></div>').join('');
+  // Request-ID guard: each sortAndRender* invocation increments the
+  // token. Stale async resumptions check the token before touching DOM
+  // and bail silently — kills the "renders twice with different beaches"
+  // flicker when geolocation lands mid-render. Per Franz 2026-05-19.
+  let _renderToken = 0;
 
-      // Pull beach list via loadBeachesForDate so the spatial-bounded
-      // nearest-N path is used consistently (was: raw REST fetching all
-      // active beaches, which doesn't scale). distance_m is preserved
-      // so NOW cards can render the car icon without waiting on the
-      // client-side haversine path.
-      const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-      const beachList = (await loadBeachesForDate(todayISO))
-        .map(b => ({ location_id: b.location_id, arena_group_id: b.arena_group_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule, has_on_leash: b.has_on_leash, has_off_leash: b.has_off_leash, dogs_allowed: b.dogs_allowed, location_tier: b.location_tier, distance_m: b.distance_m, day_status: b.day_status, composite_score: b.composite_score }));
-
-      const filteredBeachList = beachList.filter(b => matchesLeashFilter(b));
-
-      // Only fetch live NOW data for beaches that have scoring (curated set).
-      // For unscored beaches in the catalog (gold-only, no daily-beach-refresh
-      // run yet), skip the get-beach-now call — the card renders from
-      // composite_score directly.
-      const hasScoring = b => b.day_status && b.day_status !== 'no_data';
-      const results = await Promise.all(
-        filteredBeachList.map(b =>
-          hasScoring(b)
-            ? fetch(`${SUPABASE_URL}/functions/v1/get-beach-now?${b.arena_group_id ? 'arena_group_id=' + b.arena_group_id : 'location_id=' + b.location_id}`,
-                { headers: { 'Authorization': `Bearer ${ANON_KEY}` } })
-                .then(r => r.json())
-                .then(d => ({ beach: b, day: nowToDay(d) }))
-                .catch(() => ({ beach: b, day: null }))
-            : Promise.resolve({ beach: b, day: null })
-        )
-      );
-      nowBeaches = results;
+  function _sortCards(cards, mode) {
+    if (mode === 'distance') {
+      return [...cards].sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999));
     }
-
-    const cards = nowBeaches.map(({ beach, day }) => ({
-      beach,
-      day,
-      distance: resolveDistanceMiles(beach),
-    }));
-
-    let sorted;
-    if (currentSort === 'distance') {
-      sorted = [...cards].sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999));
-    } else if (currentSort === 'blend') {
+    if (mode === 'blend') {
       const maxDist = Math.max(...cards.map(c => c.distance ?? 0), 1);
-      sorted = [...cards].sort((a, b) => blendScore(b, maxDist) - blendScore(a, maxDist));
-    } else {
-      sorted = [...cards].sort((a, b) =>
-        (b.day?.composite_score ?? 0) - (a.day?.composite_score ?? 0)
-      );
+      return [...cards].sort((a, b) => blendScore(b, maxDist) - blendScore(a, maxDist));
     }
+    return [...cards].sort((a, b) =>
+      (b.day?.composite_score ?? 0) - (a.day?.composite_score ?? 0));
+  }
 
-    renderSorted(sorted.slice(0, DISPLAY_LIMIT));
+  async function sortAndRenderNow() {
+    const myToken = ++_renderToken;
+    document.getElementById('top-card').innerHTML   = '<div class="skeleton"></div>';
+    document.getElementById('beach-list').innerHTML =
+      Array(4).fill('<div class="skeleton"></div>').join('');
+
+    // Pull beach list via loadBeachesForDate so the spatial-bounded
+    // nearest-N path is used consistently. distance_m is preserved so
+    // NOW cards can render the car icon without the client-side haversine.
+    const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const beachList = (await loadBeachesForDate(todayISO))
+      .map(b => ({ location_id: b.location_id, arena_group_id: b.arena_group_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule, has_on_leash: b.has_on_leash, has_off_leash: b.has_off_leash, dogs_allowed: b.dogs_allowed, location_tier: b.location_tier, distance_m: b.distance_m, day_status: b.day_status, composite_score: b.composite_score }));
+    if (myToken !== _renderToken) return;   // superseded
+
+    // ── Pass 1: sort using STATIC beach data (composite_score from the
+    // beach row + distance_m). Render immediately so the UI shows the
+    // right cards within milliseconds instead of waiting on N get-beach-now
+    // Edge Function calls. Per Franz 2026-05-19 — this was the "glacial"
+    // bottleneck (was fanning out to 30-100 beaches per render).
+    const staticCards = beachList
+      .filter(b => matchesLeashFilter(b))
+      .map(b => ({
+        beach:    b,
+        day:      { composite_score: b.composite_score, day_status: b.day_status },
+        distance: resolveDistanceMiles(b),
+      }))
+      .filter(c => matchesDistanceFilter(c.distance));
+    const sortedStatic = _sortCards(staticCards, currentSort);
+    const topN = sortedStatic.slice(0, DISPLAY_LIMIT);
+    renderSortedNoScout(topN);
+
+    // ── Pass 2: fetch live get-beach-now for top-N only (was: every
+    // filtered beach). Refine display + fire Scout LLM on accurate data.
+    const hasScoring = b => b.day_status && b.day_status !== 'no_data';
+    const refined = await Promise.all(topN.map(c =>
+      hasScoring(c.beach)
+        ? fetch(`${SUPABASE_URL}/functions/v1/get-beach-now?${c.beach.arena_group_id ? 'arena_group_id=' + c.beach.arena_group_id : 'location_id=' + c.beach.location_id}`,
+            { headers: { 'Authorization': `Bearer ${ANON_KEY}` } })
+            .then(r => r.json())
+            .then(d => ({ ...c, day: nowToDay(d) || c.day }))
+            .catch(() => c)
+        : Promise.resolve(c)
+    ));
+    if (myToken !== _renderToken) return;   // superseded mid-fetch
+
+    // Re-sort with live day data and re-render (top card may shuffle)
+    const sortedLive = _sortCards(refined, currentSort);
+    nowBeaches = refined;
+    renderSorted(sortedLive);
   }
 
   function nowToDay(d) {
@@ -1013,20 +1025,30 @@
 
   // ── Render sorted list: #1 above blurb, rest in list ──────────────
   function renderSorted(sorted) {
+    renderSortedNoScout(sorted);
+    if (sorted.length) loadScoutBlurb(sorted);
+  }
+
+  // Render without firing the Scout LLM — used by sortAndRenderNow's
+  // Pass 1 (static-data render) so the LLM only fires after Pass 2's
+  // live data is in. Otherwise we'd burn an LLM call per render token.
+  function renderSortedNoScout(sorted) {
     if (!sorted.length) {
       document.getElementById('top-card').innerHTML   = '';
       document.getElementById('beach-list').innerHTML = '<div class="no-data">No data available.</div>';
       return;
     }
-
     const [first, ...rest] = sorted;
     document.getElementById('top-card').innerHTML   = buildBeachCard(first, 1);
     document.getElementById('beach-list').innerHTML = rest.map((c, i) => buildBeachCard(c, i + 2)).join('');
-    loadScoutBlurb(sorted);
   }
 
   // ── Scout blurb ────────────────────────────────────────────────────
   const scoutCache = {};
+  // Abort the prior in-flight LLM call when a new render fires. Prevents
+  // stale chat responses from clobbering fresh-render text + saves the
+  // wasted Anthropic call. Per Franz 2026-05-19.
+  let _scoutAbortCtrl = null;
 
   async function loadScoutBlurb(sorted) {
     const first    = sorted[0];
@@ -1040,6 +1062,11 @@
       el.classList.remove('loading');
       return;
     }
+
+    // Cancel any prior in-flight chat fetch
+    if (_scoutAbortCtrl) _scoutAbortCtrl.abort();
+    _scoutAbortCtrl = new AbortController();
+    const myCtrl = _scoutAbortCtrl;
 
     // Full context with scores + distances for all sort modes
     const contextLines = sorted.slice(0, 5).map((c, i) => {
@@ -1082,12 +1109,17 @@
         method:  'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON_KEY}` },
         body:    JSON.stringify({ location_id: first.beach.location_id, question }),
+        signal:  myCtrl.signal,
       });
+      // If another loadScoutBlurb ran while we were waiting, bail
+      if (myCtrl !== _scoutAbortCtrl) return;
       const data  = await res.json();
+      if (myCtrl !== _scoutAbortCtrl) return;
       const text  = data.answer ?? '';
       scoutCache[cacheKey] = text;
       el.textContent = text;
-    } catch {
+    } catch (e) {
+      if (e.name === 'AbortError') return;   // expected on supersede
       el.textContent = '';
     }
     el.classList.remove('loading');

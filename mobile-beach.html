@@ -3420,14 +3420,49 @@ async function loadWaterConditionAdvisories(beachFid) {
     const a = items[parseInt(btn.dataset.cidx, 10)];
     const text  = a.dog_impact_text || a.label || a.event_type || '';
     const value = a.value || a.event_type || '';
+    const window = _formatAdvisoryWindow(a.valid_from, a.valid_to);
     detail.innerHTML = `
       <div style="font-weight:600; margin-bottom:2px;">
         ${escHtml(a.label || a.event_type || 'Advisory')}
         ${value ? `<span style="font-weight:500; color:var(--text-muted); margin-left:6px;">${escHtml(value)}</span>` : ''}
       </div>
-      <div>${escHtml(text)}</div>`;
+      <div>${escHtml(text)}</div>
+      ${window ? `<div style="margin-top:4px; color:var(--text-muted); font-size:11px;">${escHtml(window)}</div>` : ''}`;
     detail.hidden = false;
   });
+}
+
+// Friendly time-window string for a beach_advisory row.
+// "Until 9pm" when valid_from is in the past, else "4pm–9pm" same day,
+// or "Today 4pm to Tue 9pm" across days. Returns '' on missing data.
+function _formatAdvisoryWindow(fromIso, toIso) {
+  if (!toIso) return '';
+  const to = new Date(toIso);
+  const from = fromIso ? new Date(fromIso) : null;
+  if (isNaN(to.getTime())) return '';
+  const now = new Date();
+  const fmtT = d => {
+    const h = d.getHours(); const m = d.getMinutes();
+    const ap = h >= 12 ? 'pm' : 'am';
+    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return m ? `${h12}:${String(m).padStart(2,'0')}${ap}` : `${h12}${ap}`;
+  };
+  const sameDay = (a, b) => a.toDateString() === b.toDateString();
+  const dayLabel = d => sameDay(d, now) ? 'today'
+                    : sameDay(d, new Date(now.getTime() + 86400000)) ? 'tomorrow'
+                    : d.toLocaleDateString(undefined, { weekday: 'short' });
+  if (from && from <= now) {
+    return sameDay(to, now) ? `Until ${fmtT(to)}` : `Until ${dayLabel(to)} ${fmtT(to)}`;
+  }
+  if (!from) {
+    return sameDay(to, now) ? `Until ${fmtT(to)}` : `Until ${dayLabel(to)} ${fmtT(to)}`;
+  }
+  if (sameDay(from, to)) {
+    return sameDay(from, now)
+      ? `${fmtT(from)}–${fmtT(to)}`
+      : `${dayLabel(from)} ${fmtT(from)}–${fmtT(to)}`;
+  }
+  return `${dayLabel(from)} ${fmtT(from)} to ${dayLabel(to)} ${fmtT(to)}`;
 }
 
 function _detectDpTriggerTier(dogPolicy, hoursToday) {

@@ -189,6 +189,7 @@ SOURCE_WEIGHT: dict[str, float] = {
     "ccc":       3.0,   # CA-only; highest curator-keep density (81%)
     "cdpr":      2.0,   # Type B
     "nps":       2.0,   # Type B
+    "wsprc":     2.0,   # Type B — parks.wa.gov page galleries (2026-05-19)
     "wikimedia": 1.0,   # Type A geo-tagged
     "flickr":    1.0,   # Type A geo-tagged
     "mapillary": 0.0,

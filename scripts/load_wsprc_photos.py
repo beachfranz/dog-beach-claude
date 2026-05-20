@@ -39,8 +39,10 @@ import argparse
 import json
 import os
 import re
+import threading
 import time
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -311,6 +313,8 @@ def main() -> int:
                     help="DELETE existing wsprc rows for each beach before insert")
     ap.add_argument("--dry-run", action="store_true",
                     help="Print plan + photos found, but skip DB writes")
+    ap.add_argument("--workers", type=int, default=5,
+                    help="Parallel HTTP fetch workers for park pages (default: 5)")
     args = ap.parse_args()
 
     if not (args.pilot or args.full or args.park):
@@ -336,28 +340,61 @@ def main() -> int:
         print("Fetching parks.wa.gov sitemap for slug resolution...", flush=True)
         sitemap = fetch_sitemap_park_urls(http)
         print(f"  sitemap: {len(sitemap)} park URLs indexed\n", flush=True)
-        total_resolved = total_photos = total_inserted = total_unresolved = 0
-        for i, p in enumerate(parks, 1):
-            print(f"[{i}/{len(parks)}] {p['park']}  ({len(p['beach_fids'])} beaches)", flush=True)
-            url, slug = resolve_park_url(http, p["park"], sitemap)
-            if not url:
-                print(f"  [no sitemap match]", flush=True)
+
+        # Phase 1: resolve every park URL (in-memory lookup, fast)
+        resolved: list[tuple[dict, str]] = []  # (park_record, url)
+        total_unresolved = 0
+        for p in parks:
+            url, _slug = resolve_park_url(http, p["park"], sitemap)
+            if url:
+                resolved.append((p, url))
+            else:
                 total_unresolved += 1
-                continue
-            time.sleep(PACING_S)
-            photos = fetch_park_photos(http, url, p["park"])
-            print(f"  url={url}\n  photos={len(photos)}", flush=True)
+                print(f"  [unresolved] {p['park']}", flush=True)
+        print(f"\nResolved {len(resolved)}/{len(parks)} parks. "
+              f"Fetching pages with {args.workers} workers...\n", flush=True)
+
+        # Phase 2: parallel page fetch (I/O-bound, ThreadPoolExecutor)
+        # Per-thread http session (requests.Session is thread-safe for GET
+        # but a fresh session per worker avoids any shared-state issues).
+        _local = threading.local()
+        def _worker_http():
+            if not hasattr(_local, "s"):
+                _local.s = _http()
+            return _local.s
+        def _fetch_one(park_url):
+            park, url = park_url
+            try:
+                photos = fetch_park_photos(_worker_http(), url, park["park"])
+                return park, url, photos, None
+            except Exception as e:
+                return park, url, [], str(e)
+
+        fetch_results: list[tuple[dict, str, list, str | None]] = []
+        with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+            futs = [pool.submit(_fetch_one, pu) for pu in resolved]
+            for i, fut in enumerate(as_completed(futs), 1):
+                park, url, photos, err = fut.result()
+                fetch_results.append((park, url, photos, err))
+                if err:
+                    print(f"  [{i}/{len(resolved)}] {park['park']} ERROR: {err}", flush=True)
+                else:
+                    print(f"  [{i}/{len(resolved)}] {park['park']:<40}  photos={len(photos)}", flush=True)
+
+        # Phase 3: insert per-fid (sequential — DB writes are cheap, parallel
+        # would just lock-contend with no real gain)
+        total_resolved = total_photos = total_inserted = 0
+        for park, url, photos, err in fetch_results:
+            if err: continue
             total_resolved += 1
             total_photos += len(photos)
             if args.dry_run:
                 for ph in photos[:3]: print(f"    {ph['filename']}", flush=True)
                 if len(photos) > 3: print(f"    ... +{len(photos)-3} more", flush=True)
                 continue
-            # Insert per-fid for every beach in this park
-            for fid in p["beach_fids"]:
-                n = insert_photos_for_fid(pg, fid, photos, p["park"], args.refresh)
+            for fid in park["beach_fids"]:
+                n = insert_photos_for_fid(pg, fid, photos, park["park"], args.refresh)
                 total_inserted += n
-            time.sleep(PACING_S)
 
         print(f"\n=== TOTALS ===")
         print(f"  parks targeted:    {len(parks)}")

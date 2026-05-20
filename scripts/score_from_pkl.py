@@ -43,6 +43,12 @@ def main() -> int:
                     help='Minimal rule: if vision.has_dog=true, set P=1.001 '
                          '(above the model ceiling so dog photos always hero). '
                          'Compatible with --with-rules but useful alone.')
+    ap.add_argument('--photographer-min-n', type=int, default=5,
+                    help='Min N labels before applying photographer_kept_rate. '
+                         'Below this, the artist is treated as neutral (0.5). '
+                         'Without this gate, an artist with 2 prior rejects gets '
+                         'rate=0.0 which crushes all their future photos to ~0%% '
+                         'regardless of content. Default 5; set 0 to disable.')
     ap.add_argument('--dry-run', action='store_true')
     args = ap.parse_args()
 
@@ -54,6 +60,20 @@ def main() -> int:
         art = pickle.load(f)
     pipe = art['pipe']
     photographer_rates = art.get('photographer_rates', {})
+
+    # Min-N gate on photographer_kept_rate. Without this, an artist with
+    # only 2 prior rejections gets rate=0.0 → crushes all their new photos
+    # to ~0%. Diagnosed by Franz 2026-05-20 on fid 6813 Arch Beach where
+    # www78 (kept_rate=0.0, n=2) had 7 Pirate Tower photos all at P<0.5%.
+    if args.photographer_min_n > 0:
+        neutralized = 0
+        for artist, (rate, n) in list(photographer_rates.items()):
+            if n < args.photographer_min_n:
+                photographer_rates[artist] = (0.5, n)
+                neutralized += 1
+        print(f'  photographer min-N gate (n<{args.photographer_min_n}): '
+              f'neutralized {neutralized}/{len(photographer_rates)} artists to (0.5, n)')
+
     model_id = f'rollback:{pkl.stem}' + ('+rules' if args.with_rules else '')
     print(f'  model_id = {model_id}')
     print(f'  photographer_rates: {len(photographer_rates)}')

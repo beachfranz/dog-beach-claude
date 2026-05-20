@@ -1615,7 +1615,8 @@ function renderPhotoCard(p, idx) {
   // Title source fallback chain: source_meta.title (Wikimedia/Flickr),
   // source_meta.description (some loaders), p.title direct, source_meta.
   // vision.description (last resort — Haiku output).
-  const _bn = (beachData?.beach?.display_name_override
+  const _bn = (beachData?.beach?.display_name
+               || beachData?.beach?.display_name_override
                || beachData?.beach?.name
                || p.beach_name || p.arena_group_name || '');
   const _tt = (meta.title || p.title

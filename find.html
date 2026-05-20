@@ -699,11 +699,10 @@
       .map(b => ({ location_id: b.location_id, arena_group_id: b.arena_group_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule, has_on_leash: b.has_on_leash, has_off_leash: b.has_off_leash, dogs_allowed: b.dogs_allowed, location_tier: b.location_tier, distance_m: b.distance_m, day_status: b.day_status, composite_score: b.composite_score }));
     if (myToken !== _renderToken) return;   // superseded
 
-    // ── Pass 1: sort using STATIC beach data (composite_score from the
-    // beach row + distance_m). Render immediately so the UI shows the
-    // right cards within milliseconds instead of waiting on N get-beach-now
-    // Edge Function calls. Per Franz 2026-05-19 — this was the "glacial"
-    // bottleneck (was fanning out to 30-100 beaches per render).
+    // Sort by STATIC beach data first to pick the top-N candidates that
+    // need live get-beach-now refinement. Skeleton stays up during the
+    // fetch — no card render in this pass (would flicker when live
+    // data re-sorts the top card). Per Franz 2026-05-19.
     const staticCards = beachList
       .filter(b => matchesLeashFilter(b))
       .map(b => ({
@@ -712,12 +711,10 @@
         distance: resolveDistanceMiles(b),
       }))
       .filter(c => matchesDistanceFilter(c.distance));
-    const sortedStatic = _sortCards(staticCards, currentSort);
-    const topN = sortedStatic.slice(0, DISPLAY_LIMIT);
-    renderSortedNoScout(topN);
+    const topN = _sortCards(staticCards, currentSort).slice(0, DISPLAY_LIMIT);
 
-    // ── Pass 2: fetch live get-beach-now for top-N only (was: every
-    // filtered beach). Refine display + fire Scout LLM on accurate data.
+    // Fetch live get-beach-now for top-N only (was: every filtered
+    // beach — 30-100 concurrent Edge calls, the "glacial" bottleneck).
     const hasScoring = b => b.day_status && b.day_status !== 'no_data';
     const refined = await Promise.all(topN.map(c =>
       hasScoring(c.beach)
@@ -730,10 +727,9 @@
     ));
     if (myToken !== _renderToken) return;   // superseded mid-fetch
 
-    // Re-sort with live day data and re-render (top card may shuffle)
-    const sortedLive = _sortCards(refined, currentSort);
+    // Single render with live day data — no intermediate flicker.
     nowBeaches = refined;
-    renderSorted(sortedLive);
+    renderSorted(_sortCards(refined, currentSort));
   }
 
   function nowToDay(d) {

@@ -1563,12 +1563,13 @@ function renderPhotoCard(p, idx) {
     : `<span class="label">dist</span><span class="word-match" style="color:var(--muted)">—</span>`;
 
   // Word-match score (name_match_score from source_meta).
-  // Range observed: 0-4 (NOT 0-1). Higher = more title/description tokens
-  // match the beach display name. Currently a tiebreaker in sortScore;
-  // not weighted into the primary rank.
+  // Raw range 0-4 — displayed as a percent of max (= score/4 * 100) per
+  // Franz 2026-05-20 "use % for word match not text" for at-a-glance
+  // readability alongside dist/prob/override.
   const wordMatch = parseFloat(meta.name_match_score);
-  const wordMatchHtml = !isNaN(wordMatch)
-    ? `<span class="label">word</span><span class="word-match" title="Name-match score (token overlap with beach name). Range 0-4. Currently a tiebreaker — not weighted into primary rank.">${wordMatch.toFixed(2)}</span>`
+  const wordMatchPct = !isNaN(wordMatch) ? Math.round((wordMatch / 4) * 100) : null;
+  const wordMatchHtml = wordMatchPct !== null
+    ? `<span class="label">word</span><span class="word-match" title="Name-match score (token overlap with beach name). Raw 0-4 shown as % of max. Currently a tiebreaker — not weighted into primary rank.">${wordMatchPct}%</span>`
     : `<span class="label">word</span><span class="word-match" style="color:var(--muted)">—</span>`;
 
   // Predicted keep probability (the model's score) — same value the 🤖 badge

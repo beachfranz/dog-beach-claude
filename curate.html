@@ -1547,15 +1547,17 @@ function renderPhotoCard(p, idx) {
   const curatorCls = isCuratorPhoto(p) ? ' is-curator' : '';
   // Source stays as the original loader source (cdpr/flickr/etc.).
   const sourceLabel = p.source;
-  // Curator status: gold ★ for Curated:Human, silver ★ for Curated:AI.
-  // Anything else (legacy 'cakers', 'derived:sibling', null) → no chip.
-  // Per Franz 2026-05-20.
+  // Curator status: gold ★ for human picks, silver ★ for AI picks.
+  // 'Curated:Human' is canonical; legacy 'cakers' (pre-edge-function-
+  // deploy) treated as human. 'Curated:AI' is canonical; legacy
+  // 'auto:%' treated as AI. 'derived:sibling' → no chip (sibling
+  // propagation, not a real pick). null → no chip. Franz 2026-05-20.
   const curBy = p.curated_by || '';
+  const isAi    = curBy === 'Curated:AI' || curBy.startsWith('auto:');
+  const isHuman = !!curBy && !isAi && !curBy.startsWith('derived:');
   const curatorChipHtml =
-      curBy === 'Curated:Human'
-        ? `<span class="curator-chip" title="Curated:Human — picked by a human curator">★ Human</span>`
-    : curBy === 'Curated:AI'
-        ? `<span class="curator-chip is-ai" title="Curated:AI — picked by the auto-curate model">★ AI</span>`
+      isAi    ? `<span class="curator-chip is-ai" title="Curated:AI — picked by the auto-curate model (${escHtml(curBy)})">★ AI</span>`
+    : isHuman ? `<span class="curator-chip" title="Curated:Human — picked by a human curator (${escHtml(curBy)})">★ Human</span>`
     : '';
   // Preserve trash/hide state across re-renders (drag reorder rebuilds the
   // grid via renderPhotoCard; without this the visual state from dirtyMap

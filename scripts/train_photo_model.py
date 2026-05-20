@@ -474,8 +474,17 @@ def apply_vision_rules(prob: float, vision: dict | None) -> tuple[float, list[st
     if vision.get("has_human_face_closeup"):
         prob = min(prob, 0.05); rules.append("ceil:face_closeup")
 
-    # KEEP BOOSTS — only if no hard ceil already applied (else prob<=0.30)
-    if prob > 0.30:
+    # KEEP BOOSTS — only if no hard ceil already applied. Gate by checking
+    # the rules list (whether a ceil:* fired), NOT by raw prob value.
+    #
+    # Bug fixed 2026-05-20 (Franz, fid 4377 Shaver Lake): the old gate was
+    # `if prob > 0.30:` which conflated "ceil applied" with "raw model
+    # score is low." A real dog photo with raw P=0.04 (Flickr title noise
+    # confusing the model) was skipping floor:dog because prob<=0.30 —
+    # directly violating Franz's directive "dogs are the most important,
+    # never down-rank one" (2026-05-12). The new gate fires the floor
+    # whenever NO ceil applied, regardless of raw score.
+    if not any(r.startswith("ceil:") for r in rules):
         if vision.get("has_dog"):
             prob = max(prob, 0.85); rules.append("floor:dog")
         elif vision.get("has_surfing"):

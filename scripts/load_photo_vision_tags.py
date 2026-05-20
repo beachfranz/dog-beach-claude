@@ -123,6 +123,44 @@ def _image_source(image_url: str, force_b64: bool = False) -> dict:
     if not image_url.startswith("https://"):
         raise RuntimeError(f"bad_url: not https ({image_url[:60]})")
     url = _strip_utm(image_url)
+    # parks.wa.gov 403s Anthropic's URL fetcher UA — download server-side
+    # with browser UA, base64 to Anthropic. No serial lock needed (small
+    # site but no per-IP rate limit observed). Per WSPRC loader 2026-05-19.
+    if "parks.wa.gov" in url:
+        browser_ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/130.0.0.0 Safari/537.36")
+        req = urllib.request.Request(url, headers={
+            "User-Agent": browser_ua,
+            "Accept": "image/avif,image/webp,image/jpeg,image/png,*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = r.read()
+            ct = r.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+        # Anthropic vision 5MB cap is on the BASE64-ENCODED size, not
+        # raw — so cap raw at 3.5 MB (base64 inflates ~33%, plus margin).
+        # WSPRC originals routinely 4-6 MB raw → 5-8 MB base64. Resize via
+        # Pillow, stepping the longest edge down 2000→1400→1000 until under.
+        RAW_CAP = 3 * 1024 * 1024 + 512 * 1024   # 3.5 MB raw → ~4.67 MB b64
+        if len(data) > RAW_CAP:
+            from PIL import Image  # local import — Pillow is available
+            import io
+            for max_edge in (2000, 1400, 1000):
+                img = Image.open(io.BytesIO(data))
+                img.thumbnail((max_edge, max_edge))
+                buf = io.BytesIO()
+                if img.mode in ("RGBA", "P"):
+                    img = img.convert("RGB")
+                img.save(buf, format="JPEG", quality=85, optimize=True)
+                data = buf.getvalue()
+                ct = "image/jpeg"
+                if len(data) <= RAW_CAP:
+                    break
+            if len(data) > RAW_CAP:
+                raise RuntimeError(f"wsprc image too large after resize: {len(data)} bytes raw")
+        return {"type": "base64", "media_type": ct,
+                "data": base64.b64encode(data).decode()}
     if force_b64 or "wikimedia.org" in url or "wikipedia.org" in url:
         with _wm_lock:                         # serial wikimedia access
             req = urllib.request.Request(url, headers={"User-Agent": WIKIMEDIA_UA})

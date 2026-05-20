@@ -105,17 +105,20 @@
   }
   .beach-sub { font-size: 13px; color: var(--muted); }
 
-  /* Photo grid — exactly 3 columns on desktop. Photos at native aspect ratio.
-     Falls back to 2 columns on tablet (<1200px), 1 column on phone (<800px). */
+  /* Photo grid — 4 columns on desktop (was 3; tightened 2026-05-20 Franz
+     "25% smaller photos"). Falls back to 3 cols on tablet, 2 on phone. */
   .photo-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 18px;
   }
   @media (max-width: 1200px) {
-    .photo-grid { grid-template-columns: repeat(2, 1fr); }
+    .photo-grid { grid-template-columns: repeat(3, 1fr); }
   }
   @media (max-width: 800px) {
+    .photo-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 500px) {
     .photo-grid { grid-template-columns: 1fr; }
   }
   .photo-card {
@@ -193,6 +196,7 @@
   .photo-meta { padding: 6px 8px; }
   .meta-row {
     display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+    flex-wrap: wrap;
   }
   .photo-source {
     display: inline-block; font-size: 10px; font-weight: 700;
@@ -225,27 +229,24 @@
   .ml-badge.ml-low  { background: rgba(185,28,28,0.10); color: var(--red);   }
   .ml-badge.ml-na   { color: var(--muted); }
 
-  /* Score-detail row (below the source-row): word-match, score override
-     input, and tag chips. Curator can type a number 0-1 to override the
-     model's predicted_keep_prob. Override is captured into dirtyMap and
-     saved with the rest of the curation state. */
-  .score-row {
-    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-    padding: 4px 0; font-size: 11px;
-  }
-  .score-row .label {
+  /* Score chips (dist/word/prob/override) — moved into .meta-row 2026-05-20
+     per Franz "move dist, word and override to top row. get rid of second
+     row". Selectors apply in either container for safety. */
+  .meta-row .label, .score-row .label {
     color: var(--muted); font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px;
   }
-  .score-row .word-match { color: var(--text); font-weight: 600; }
-  .score-row .override-input {
+  .meta-row .word-match, .score-row .word-match {
+    color: var(--text); font-weight: 600; font-size: 11px;
+  }
+  .meta-row .override-input, .score-row .override-input {
     width: 56px; padding: 2px 4px;
     font-family: inherit; font-size: 11px; font-weight: 700;
     border: 1px solid var(--border); border-radius: 4px;
     background: var(--card); color: var(--accent);
     text-align: right;
   }
-  .score-row .override-input.dirty {
+  .meta-row .override-input.dirty, .score-row .override-input.dirty {
     border-color: var(--accent); background: rgba(29,78,216,0.06);
   }
   .tags-row {
@@ -1616,14 +1617,12 @@ function renderPhotoCard(p, idx) {
       <div class="meta-row">
         <span class="photo-source">${escHtml(sourceLabel)}</span>
         ${curatorChipHtml}
-        ${mlHtml}
-        <span class="match-label match-${escHtml(mq)}" title="Match quality (auto)">${escHtml(mqLabel)}</span>
-      </div>
-      <div class="score-row">
         ${distScoreHtml}
         ${wordMatchHtml}
         ${probHtml}
         ${overrideHtml}
+        ${mlHtml}
+        <span class="match-label match-${escHtml(mq)}" title="Match quality (auto)">${escHtml(mqLabel)}</span>
       </div>
       ${tagsHtml}
       ${captionHtml}

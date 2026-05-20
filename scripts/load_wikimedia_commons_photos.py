@@ -446,7 +446,11 @@ def replace_commons(fid: int, photos: list[dict]):
                                "name_match_score": round(p.get("_name_match", 0.0), 2),
                                "composite_score":  round(p.get("_composite", 0.0), 2)},
         })
+    # PostgREST needs on_conflict= to honor resolution=ignore-duplicates;
+    # without it, dup-key 409s mid-batch leaves DELETE half-applied (lost
+    # photos). Diagnosed 2026-05-19 — fid 6065 went 5→1.
     supa("/rest/v1/beach_photos", method="POST", body=rows,
+         params={"on_conflict": "arena_group_id,source,external_id"},
          prefer="return=minimal,resolution=ignore-duplicates")
 
 

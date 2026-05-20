@@ -295,7 +295,15 @@ def tag_photo(image_url: str, beach_name: str, retries: int = 3
             # burning 3×exponential-backoff retries on a malformed URL or
             # an image we cannot resize.
             msg = str(e)
-            if msg.startswith("bad_url:") or "image too large after resize" in msg:
+            # Non-recoverable: malformed URL, oversized image (local or
+            # upstream API rejection at 5MB cap). All deterministic — no
+            # point burning 3x retries. Wikimedia originals up to ~10MB
+            # come back oversized even at width=500.
+            if (msg.startswith("bad_url:")
+                    or "image too large after resize" in msg
+                    or "too large even at width=" in msg
+                    or "exceeds 5 MB maximum" in msg
+                    or "exceeds 5 MB" in msg):
                 raise RuntimeError(f"non-recoverable: {msg}") from e
             # 429s (wikimedia or anthropic) need longer backoff
             is_429 = "429" in msg or "rate" in msg.lower()

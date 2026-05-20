@@ -403,6 +403,10 @@ def rank_and_pick(geo_results: list[dict], info_map: dict[int, dict],
 # ─── Persistence ──────────────────────────────────────────────────────────
 
 def replace_commons(fid: int, photos: list[dict]):
+    # API transient = "nothing to replace with" — preserve existing rather
+    # than wipe-then-fail-to-refill. Diagnosed 2026-05-19 for Flickr; same
+    # risk shape applies here.
+    if not photos: return
     # Delete ONLY uncurated rows (curated photos are preserved). Also: the
     # stored source is 'wikimedia' — historical bug used 'wikimedia_commons'
     # in the DELETE which never matched, making the loader silently additive.
@@ -411,7 +415,6 @@ def replace_commons(fid: int, photos: list[dict]):
         "source":         "eq.wikimedia",
         "curated_at":     "is.null",
     }, prefer="return=minimal")
-    if not photos: return
     rows = []
     for i, p in enumerate(photos):
         info = p["_info"]

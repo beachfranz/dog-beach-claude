@@ -487,6 +487,12 @@ def pick_best(photos, beach_lat, beach_lng, beach_name="", beach_meta=None, top_
 # ─── Persistence ──────────────────────────────────────────────────────────
 
 def replace_flickr(fid, photos):
+    # API transient = "nothing to replace with" — preserve existing rather
+    # than wipe-then-fail-to-refill. Diagnosed 2026-05-19: fid 6017 went
+    # 20 → 0 because Flickr search returned (none) on a re-run that
+    # had returned 20 photos minutes earlier. The DELETE-then-INSERT
+    # pattern assumed the API is authoritative-per-call; it isn't.
+    if not photos: return
     # Delete ONLY uncurated rows. Curated photos (sort_order set by the curator
     # via the admin-curate-beach edge function) are preserved across re-runs.
     # If a candidate from this batch matches a kept photo by external_id, the
@@ -497,7 +503,6 @@ def replace_flickr(fid, photos):
         "source":         "eq.flickr",
         "curated_at":     "is.null",
     }, prefer="return=minimal")
-    if not photos: return
     rows = []
     for i, p in enumerate(photos):
         owner = p.get("ownername") or "Flickr user"

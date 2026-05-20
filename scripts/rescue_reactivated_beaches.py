@@ -131,6 +131,17 @@ def verify_vision_tagged(conn, fids: list[int]) -> dict[int, int]:
         return {fid: n for fid, n in cur.fetchall()}
 
 
+def verify_keep_prob_scored(conn, fids: list[int]) -> dict[int, int]:
+    """Per-fid count of photos with predicted_keep_prob set. Written by
+    train_photo_model.py — must run AFTER vision tag, BEFORE auto-curate."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT arena_group_id, count(*) FROM beach_photos "
+                    " WHERE arena_group_id = ANY(%s) "
+                    " AND (source_meta->>'predicted_keep_prob') IS NOT NULL GROUP BY 1",
+                    (fids,))
+        return {fid: n for fid, n in cur.fetchall()}
+
+
 def verify_auto_curated(conn, fids: list[int]) -> dict[int, int]:
     with conn.cursor() as cur:
         cur.execute("SELECT arena_group_id, count(*) FROM beach_photos "
@@ -305,6 +316,35 @@ def main() -> int:
         else:
             for f in fids: summary[f]["6_vision"] = None
 
+        # ─ STEP 6.5 ───────────────────────────────────────────────────
+        # Vision tagger writes source_meta.vision.*. auto_curate reads
+        # source_meta.predicted_keep_prob, written by train_photo_model.
+        # Without this step, the new vision-tagged photos look "no photos
+        # available" to auto-curate. Surfaced by batch-1 re-run halt.
+        if not args.skip_curate and not args.skip_vision:
+            log("\n=== STEP 6.5: Re-score predicted_keep_prob (model inference) ===")
+            before = verify_keep_prob_scored(conn, fids)
+            run_sub([sys.executable, "scripts/train_photo_model.py"],
+                    halt, "train_photo_model (re-score full population)")
+            after = verify_keep_prob_scored(conn, fids)
+            v = {}
+            with conn.cursor() as cur:
+                cur.execute("SELECT arena_group_id, count(*) FROM beach_photos "
+                            " WHERE arena_group_id = ANY(%s) GROUP BY 1", (fids,))
+                photo_counts = {fid: n for fid, n in cur.fetchall()}
+            for f in fids:
+                if (photo_counts.get(f, 0) or 0) == 0:
+                    v[f] = None
+                    log(f"      - fid={f:<10} no photos (skip)")
+                else:
+                    ok = (after.get(f) or 0) >= 1
+                    mark = '✓' if ok else '✗'
+                    log(f"      {mark} fid={f:<10} {(before.get(f) or 0)} → {(after.get(f) or 0)} (of {photo_counts.get(f)} photos)")
+                    v[f] = ok
+            for f, ok in v.items(): summary[f]["6.5_score"] = ok
+            if halt and any(ok is False for ok in v.values()):
+                raise SystemExit("step 6.5 verification failed (some photos still have no predicted_keep_prob)")
+
         # ─ STEP 7 ─────────────────────────────────────────────────────
         if not args.skip_curate:
             log("\n=== STEP 7: Auto-curate (per-fid) ===")
@@ -335,12 +375,12 @@ def main() -> int:
         log("\n" + "=" * 90)
         log("FINAL PER-FID SUMMARY")
         log("=" * 90)
-        header = f"  {'fid':<10} {'1act':<6} {'2cat':<6} {'3bep':<6} {'4flk':<6} {'5wmc':<6} {'6vis':<6} {'7cur':<6}  name"
+        header = f"  {'fid':<10} {'1act':<6} {'2cat':<6} {'3bep':<6} {'4flk':<6} {'5wmc':<6} {'6vis':<6} {'6.5sc':<7} {'7cur':<6}  name"
         log(header)
         for f in fids:
             s = summary[f]
             def m(v): return '✓' if v else ('-' if v is None else '✗')
-            log(f"  {f:<10} {m(s.get('1_active')):<6} {m(s.get('2_catchment')):<6} {m(s.get('3_bep_refire')):<6} {m(s.get('4_flickr')):<6} {m(s.get('5_wikimedia')):<6} {m(s.get('6_vision')):<6} {m(s.get('7_curate')):<6}  {info[f]['name']}")
+            log(f"  {f:<10} {m(s.get('1_active')):<6} {m(s.get('2_catchment')):<6} {m(s.get('3_bep_refire')):<6} {m(s.get('4_flickr')):<6} {m(s.get('5_wikimedia')):<6} {m(s.get('6_vision')):<6} {m(s.get('6.5_score')):<7} {m(s.get('7_curate')):<6}  {info[f]['name']}")
         all_ok = all(all(v is not False for v in summary[f].values()) for f in fids)
         log(f"\n{'ALL GREEN ✓' if all_ok else '✗ ERRORS PRESENT — see above'}")
         return 0 if all_ok else 1

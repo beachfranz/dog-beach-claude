@@ -91,6 +91,18 @@ ALLOWED_TEMPORAL_RULES = {'not_allowed', 'on_leash', 'off_leash', 'off_leash_voi
 ALLOWED_OPERATIVE_STATUS = {'operative', 'non_enforced', 'superseded_by_lower_tier', 'inactive'}
 
 
+# Amenity-class sections — region_name is meaningless for these (per
+# Franz 2026-05-21, Phase 3). The LLM sometimes emits a region_name
+# like "Long Beach beach between Granada Avenue and Roycroft Avenue —
+# parking lot access point" for a parking_lot rule. The rule still
+# applies (parking is on-leash), but it attaches to the parking
+# amenity tile in the default region — no separate zone card needed.
+AMENITY_CLASS_SECTIONS = {
+    'parking_lot', 'walkway', 'restrooms', 'showers', 'restrooms_showers',
+    'picnic_area', 'fire_pits', 'playground', 'campground',
+}
+
+
 # ── region_name contamination guards (Franz 2026-05-20, Phase 5) ──────
 # When the LLM emits a region_name that names a DIFFERENT beach in
 # beaches_gold, skip the insert under THIS beach_fid — the row will land
@@ -258,6 +270,12 @@ def write_rows(conn, beach_fid: int, policy_source_id: int, subtype: str,
         evidence = (raw_row.get('evidence_verbatim') or '')[:1500]
         region_name = raw_row.get('region')      # None/null → __default__ via index
         region_anchor = raw_row.get('region_anchor')
+
+        # Phase 3 guard (Franz 2026-05-21). Amenity-class sections never
+        # carry region_name — the rule attaches to the amenity tile in
+        # the default region.
+        if region_name and section in AMENITY_CLASS_SECTIONS:
+            region_name = None
 
         # Phase 5 contamination guards (Franz 2026-05-20).
         if region_name:

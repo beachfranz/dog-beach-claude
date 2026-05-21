@@ -90,10 +90,26 @@ def clear_auto_curate_for_beach(cur, fid: int) -> int:
     return cur.rowcount
 
 
-def auto_curate_beach(cur, fid: int, n: int, dry_run: bool = False) -> dict:
+def beach_freshly_auto_curated(cur, fid: int, within_days: int) -> bool:
+    """True if any auto-curate photo on this beach has curated_at within
+    the last N days. Used by --skip-if-fresh-within pre-flight."""
+    cur.execute("""
+        SELECT 1 FROM public.beach_photos
+         WHERE arena_group_id = %s
+           AND curated_at >= now() - (%s || ' days')::interval
+           AND (curated_by = 'Curated:AI' OR curated_by LIKE 'auto:%%')
+         LIMIT 1
+    """, (fid, within_days))
+    return cur.fetchone() is not None
+
+
+def auto_curate_beach(cur, fid: int, n: int, dry_run: bool = False,
+                      skip_if_fresh_within: int = 0) -> dict:
     """Auto-curate a single beach. Returns counts dict."""
     if beach_has_human_curation(cur, fid):
         return {"status": "skipped_human", "selected": 0, "cleared": 0}
+    if skip_if_fresh_within > 0 and beach_freshly_auto_curated(cur, fid, skip_if_fresh_within):
+        return {"status": "skipped_fresh", "selected": 0, "cleared": 0}
 
     cur.execute("SELECT public.get_beach_photos_diverse(%s, %s)", (fid, n))
     row = cur.fetchone()
@@ -134,6 +150,9 @@ def main():
                     help="Clear auto-curate selections for in-scope beaches and re-run "
                          "(human curations are NEVER cleared)")
     ap.add_argument("--chunk",    type=int, default=100, help="Commit per N beaches")
+    ap.add_argument("--skip-if-fresh-within", type=int, default=0, metavar="DAYS",
+                    help="Skip beaches whose auto-curate run is within the last N days "
+                         "(default 0 = always run; pipeline passes 7)")
     args = ap.parse_args()
 
     conn = _connect_pg()
@@ -182,7 +201,8 @@ def main():
             if (i - 1) % args.chunk == 0:
                 conn = _ping_or_reconnect(conn)
             with conn.cursor() as cur:
-                r = auto_curate_beach(cur, fid, args.n, dry_run=args.dry_run)
+                r = auto_curate_beach(cur, fid, args.n, dry_run=args.dry_run,
+                                       skip_if_fresh_within=args.skip_if_fresh_within)
             counts[r["status"]] = counts.get(r["status"], 0) + 1
             if r["status"] == "selected":
                 counts["selected_photos"] = counts.get("selected_photos", 0) + r["selected"]
@@ -205,6 +225,7 @@ def main():
         print(f"  selected (auto-curated): {counts.get('selected', 0)}", flush=True)
         print(f"  total photos selected:   {counts.get('selected_photos', 0)}", flush=True)
         print(f"  skipped (human owns):    {counts.get('skipped_human', 0)}", flush=True)
+        print(f"  skipped (fresh):         {counts.get('skipped_fresh', 0)}", flush=True)
         print(f"  no photos available:     {counts.get('no_photos', 0)}", flush=True)
         if args.dry_run:
             print(f"\n  [dry-run] no writes performed", flush=True)

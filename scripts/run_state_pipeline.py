@@ -386,6 +386,31 @@ PHASES = [
         'criterion_text': 'every active beach in state has scoring_tier set',
     },
     {
+        # 2026-05-21: refresh beaches_gold.nearest_dog_park_* materialized
+        # cols per state. Powers the cliff/no-sand-access overlay
+        # (project_deferred_beach_dogpark_cross_reference). Idempotent
+        # per-fid UPDATE; self-chunks at 250/commit. Runs after
+        # catchment_refresh (both maintain derived columns on beaches_gold).
+        'key': 'refresh_nearest_dog_park',
+        'kind': 'python',
+        'action': 'refresh_nearest_dog_park',
+        'criterion':
+            "select (count(*) filter (where nearest_dog_park_fid is not null "
+            "                            or nearest_dog_park_distance_m is not null) "
+            "        >= floor(count(*) * 0.95))::boolean "
+            "from public.beaches_gold "
+            "where state = $STATE and is_active",
+        'criterion_text': 'at least 95% of active beaches have nearest_dog_park_* populated',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beaches_gold "
+            "             where state=$STATE and is_active), "
+            "     d as (select count(*)::int n from public.beaches_gold "
+            "             where state=$STATE and is_active "
+            "               and (nearest_dog_park_fid is not null "
+            "                    or nearest_dog_park_distance_m is not null)) "
+            "select d.n done, t.n total from d, t",
+    },
+    {
         'key': 'purge_pollution',
         'action':
             "select rows_purged from public.purge_cross_state_extractions($STATE)",
@@ -480,6 +505,239 @@ PHASES = [
             "select d.n done, t.n total from d, t",
     },
     {
+        # 2026-05-21: v2 area-first re-extract (Franz). Supersedes
+        # section_extract's operator-summary path. Reads policy_source
+        # full_text directly with area-first prompt + canonical_area_description
+        # hint; rewrites bps/temporals per beach. Multi-ps beaches re-run
+        # each ps. Skips manual_curator. Cascade picks up changes via
+        # existing _zr_inject_from_policy_sources injector — no extra
+        # wiring downstream.
+        #
+        # section_extract is retained as a no-op-on-clean path (idempotent
+        # if its operator_summary input is unchanged), but v2 is now the
+        # source of truth for sections/regions/windows.
+        'key': 'zone_rules_v2_refresh',
+        'kind': 'python',
+        'action': 'zone_rules_v2_refresh',
+        'criterion':
+            # Pass: at least 80% of MVP+ beaches have a bps row extracted
+            # in the last 7 days (this phase only runs when fresh data
+            # exists; --skip-recent inside reextract handles idempotency).
+            "select (count(*) filter (where exists ("
+            "          select 1 from public.beach_policy_source bps "
+            "           where bps.beach_fid = g.fid "
+            "             and bps.extracted_at >= now() - interval '7 days')) "
+            "        >= floor(count(*) * 0.8))::boolean "
+            "from public.beaches_gold g "
+            "join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
+            "where g.state=$STATE and g.is_active "
+            "  and bdp.source <> 'manual_curator' "
+            "  and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "      in ('1_off-leash','2_on-leash')",
+        'criterion_text': 'at least 80% of MVP+ beaches re-extracted via v2 within last 7 days',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beaches_gold g "
+            "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
+            "             where g.state=$STATE and g.is_active "
+            "               and bdp.source <> 'manual_curator' "
+            "               and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "                   in ('1_off-leash','2_on-leash')), "
+            "     d as (select count(distinct g.fid)::int n "
+            "             from public.beaches_gold g "
+            "             join public.beach_policy_source bps on bps.beach_fid=g.fid "
+            "            where g.state=$STATE and g.is_active "
+            "              and bps.extracted_at >= now() - interval '7 days') "
+            "select d.n done, t.n total from d, t",
+    },
+    {
+        # 2026-05-21: materialize beach_section_hour_status. Walks
+        # zone_rules per-minute (most-restrictive-wins) with seasonal
+        # filter + operating-hours clip, sampling at :30 of each hour.
+        # Powers scoring + rendered chips/tiles without re-running that
+        # logic at request time. Idempotent: deletes + re-inserts
+        # (beach_fid, valid_date) slice per fid.
+        #
+        # Must run AFTER zone_rules_v2_refresh (depends on freshly
+        # extracted zone_rules) and BEFORE descriptions (so generated
+        # copy can reference the rendered chip state).
+        'key': 'hourly_status_refresh',
+        'kind': 'python',
+        'action': 'hourly_status_refresh',
+        'criterion':
+            # Pass: at least 80% of MVP+ beaches have a row in
+            # beach_section_hour_status for today's date.
+            "select (count(*) filter (where exists ("
+            "          select 1 from public.beach_section_hour_status h "
+            "           where h.beach_fid = g.fid "
+            "             and h.valid_date = current_date)) "
+            "        >= floor(count(*) * 0.8))::boolean "
+            "from public.beaches_gold g "
+            "join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
+            "where g.state=$STATE and g.is_active "
+            "  and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "      in ('1_off-leash','2_on-leash')",
+        'criterion_text': 'at least 80% of MVP+ beaches have today\'s hourly status materialized',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beaches_gold g "
+            "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
+            "             where g.state=$STATE and g.is_active "
+            "               and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "                   in ('1_off-leash','2_on-leash')), "
+            "     d as (select count(distinct h.beach_fid)::int n "
+            "             from public.beach_section_hour_status h "
+            "             join public.beaches_gold g on g.fid=h.beach_fid "
+            "            where g.state=$STATE and g.is_active "
+            "              and h.valid_date = current_date) "
+            "select d.n done, t.n total from d, t",
+    },
+    {
+        # Phase 24 swapped from Mapillary → Wikimedia Commons (2026-05-09).
+        # Wikimedia produces ~3× higher-quality photos (CC-licensed real
+        # photos vs Mapillary's street-view shots) and the loader has
+        # keyword bias + photographer auto-blocklist. Mapillary loader
+        # still exists at scripts/load_mapillary_photos.py for ad-hoc
+        # use but is no longer in the canon.
+        #
+        # 2026-05-21: moved AHEAD of descriptions so the description
+        # generator can leverage tagged + curated photos. Order is now
+        # photos_wikimedia → photos_tag → photos_curate → descriptions.
+        'key': 'photos_wikimedia',
+        'kind': 'python',
+        'action': 'photos_wikimedia',
+        'criterion': "select true",  # coverage varies by region; 0 acceptable
+        'criterion_text':
+            'wikimedia loader ran (Commons coverage varies; rural beaches may have 0)',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beaches_gold g "
+            "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
+            "             where g.state=$STATE and g.is_active "
+            "               and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "                   in ('1_off-leash','2_on-leash')), "
+            "     d as (select count(distinct bp.arena_group_id)::int n "
+            "             from public.beach_photos bp "
+            "             join public.beaches_gold g on g.fid=bp.arena_group_id "
+            "            where g.state=$STATE and g.is_active and bp.source='wikimedia') "
+            "select d.n done, t.n total from d, t",
+    },
+    {
+        # 2026-05-21: Flickr photos (alongside Commons). Both feed the
+        # downstream photos_tag → photos_curate selector. ON CONFLICT
+        # DO NOTHING in the loader makes re-runs safe (HARD pin
+        # feedback_photo_loaders_not_idempotent).
+        'key': 'photos_flickr',
+        'kind': 'python',
+        'action': 'photos_flickr',
+        'criterion': "select true",  # coverage varies (API rate, keyword bias)
+        'criterion_text': 'flickr loader ran (coverage varies)',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beaches_gold g "
+            "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
+            "             where g.state=$STATE and g.is_active "
+            "               and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "                   in ('1_off-leash','2_on-leash')), "
+            "     d as (select count(distinct bp.arena_group_id)::int n "
+            "             from public.beach_photos bp "
+            "             join public.beaches_gold g on g.fid=bp.arena_group_id "
+            "            where g.state=$STATE and g.is_active and bp.source='flickr') "
+            "select d.n done, t.n total from d, t",
+    },
+    {
+        # 2026-05-21: state-conditional agency photo loaders.
+        #   NPS (always, --state filter)
+        #   CDPR + CCC (CA only)
+        #   WSPRC (WA only)
+        #   OPRD (OR only — NOT BUILT, flagged in log)
+        # Agency-driven (not beach-fid driven) so single-shot, not chunked.
+        'key': 'state_photo_galleries',
+        'kind': 'python',
+        'action': 'state_photo_galleries',
+        'criterion': "select true",  # coverage varies by state; NPS-only states may be light
+        'criterion_text': 'agency photo loaders ran (NPS always; CDPR+CCC for CA; WSPRC for WA)',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beaches_gold g "
+            "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
+            "             where g.state=$STATE and g.is_active "
+            "               and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "                   in ('1_off-leash','2_on-leash')), "
+            "     d as (select count(distinct bp.arena_group_id)::int n "
+            "             from public.beach_photos bp "
+            "             join public.beaches_gold g on g.fid=bp.arena_group_id "
+            "            where g.state=$STATE and g.is_active "
+            "              and bp.source in ('nps','cdpr','ccc','wsprc','oprd')) "
+            "select d.n done, t.n total from d, t",
+    },
+    {
+        # 2026-05-21: vision-tag photos so the description generator and
+        # the auto-curator can use scene/subject/landscape tags. Tagger
+        # is idempotent (skips photos already at current model id).
+        'key': 'photos_tag',
+        'kind': 'python',
+        'action': 'photos_tag',
+        'criterion':
+            # Pass: at least 80% of MVP+ beaches have at least one tagged
+            # photo (source_meta->'vision' present).
+            "select (count(*) filter (where exists ("
+            "          select 1 from public.beach_photos bp "
+            "           where bp.arena_group_id = g.fid "
+            "             and (bp.source_meta ? 'vision' "
+            "                  or bp.source_meta->'vision' is not null))) "
+            "        >= floor(count(*) * 0.8))::boolean "
+            "from public.beaches_gold g "
+            "join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
+            "where g.state=$STATE and g.is_active "
+            "  and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "      in ('1_off-leash','2_on-leash')",
+        'criterion_text': 'at least 80% of MVP+ beaches have at least one vision-tagged photo',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beaches_gold g "
+            "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
+            "             where g.state=$STATE and g.is_active "
+            "               and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "                   in ('1_off-leash','2_on-leash')), "
+            "     d as (select count(distinct g.fid)::int n "
+            "             from public.beaches_gold g "
+            "             join public.beach_photos bp on bp.arena_group_id=g.fid "
+            "            where g.state=$STATE and g.is_active "
+            "              and bp.source_meta ? 'vision') "
+            "select d.n done, t.n total from d, t",
+    },
+    {
+        # 2026-05-21: auto-curate N best+diverse photos per beach using
+        # the vision-tag-aware diverse selector. HUMAN ALWAYS WINS: skips
+        # any beach where a manual curator already picked photos.
+        'key': 'photos_curate',
+        'kind': 'python',
+        'action': 'photos_curate',
+        'criterion':
+            # Pass: at least 80% of MVP+ beaches have at least one
+            # curated photo (curated_at NOT NULL).
+            "select (count(*) filter (where exists ("
+            "          select 1 from public.beach_photos bp "
+            "           where bp.arena_group_id = g.fid "
+            "             and bp.curated_at is not null)) "
+            "        >= floor(count(*) * 0.8))::boolean "
+            "from public.beaches_gold g "
+            "join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
+            "where g.state=$STATE and g.is_active "
+            "  and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "      in ('1_off-leash','2_on-leash')",
+        'criterion_text': 'at least 80% of MVP+ beaches have at least one curated photo',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beaches_gold g "
+            "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
+            "             where g.state=$STATE and g.is_active "
+            "               and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "                   in ('1_off-leash','2_on-leash')), "
+            "     d as (select count(distinct g.fid)::int n "
+            "             from public.beaches_gold g "
+            "             join public.beach_photos bp on bp.arena_group_id=g.fid "
+            "            where g.state=$STATE and g.is_active "
+            "              and bp.curated_at is not null) "
+            "select d.n done, t.n total from d, t",
+    },
+    {
+        # 2026-05-21: descriptions moved AFTER photos_tag + photos_curate
+        # so the generator can reference the tagged + curated gallery.
         'key': 'descriptions',
         'kind': 'python',
         'action': 'descriptions',
@@ -503,31 +761,6 @@ PHASES = [
             "             from public.beach_descriptions bd "
             "             join public.beaches_gold g on g.fid=bd.arena_group_id "
             "            where g.state=$STATE and g.is_active) "
-            "select d.n done, t.n total from d, t",
-    },
-    {
-        # Phase 24 swapped from Mapillary → Wikimedia Commons (2026-05-09).
-        # Wikimedia produces ~3× higher-quality photos (CC-licensed real
-        # photos vs Mapillary's street-view shots) and the loader has
-        # keyword bias + photographer auto-blocklist. Mapillary loader
-        # still exists at scripts/load_mapillary_photos.py for ad-hoc
-        # use but is no longer in the canon.
-        'key': 'photos_wikimedia',
-        'kind': 'python',
-        'action': 'photos_wikimedia',
-        'criterion': "select true",  # coverage varies by region; 0 acceptable
-        'criterion_text':
-            'wikimedia loader ran (Commons coverage varies; rural beaches may have 0)',
-        'progress_sql':
-            "with t as (select count(*)::int n from public.beaches_gold g "
-            "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
-            "             where g.state=$STATE and g.is_active "
-            "               and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
-            "                   in ('1_off-leash','2_on-leash')), "
-            "     d as (select count(distinct bp.arena_group_id)::int n "
-            "             from public.beach_photos bp "
-            "             join public.beaches_gold g on g.fid=bp.arena_group_id "
-            "            where g.state=$STATE and g.is_active and bp.source='wikimedia') "
             "select d.n done, t.n total from d, t",
     },
     {
@@ -1101,6 +1334,30 @@ def action_operator_merge(state: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+def action_refresh_nearest_dog_park(state: str) -> int:
+    """Refresh beaches_gold.nearest_dog_park_* materialized columns for
+    state's active beaches.
+
+    Per Franz 2026-05-21. Single-shot subprocess (script self-chunks at
+    250 beaches/commit per its --chunk default). Drives the cliff/no-
+    sand-access "nearby dog park" overlay feature. Idempotent: each
+    UPDATE just rewrites the materialized values.
+
+    Runs AFTER ensure_dog_features (depends on dog-park geometry being
+    loaded) and AFTER promote (depends on beaches_gold having
+    state-tagged rows). Cheap pure-DB work.
+    """
+    cmd = [sys.executable, 'scripts/refresh_nearest_dog_park.py',
+           '--state', state]
+    log(f'    refresh_nearest_dog_park --state {state}')
+    rc, out, err = _run_subprocess(cmd, timeout=1800)
+    if rc != 0:
+        raise RuntimeError(f'refresh_nearest_dog_park exit {rc}: {err[-500:]}')
+    # Parse "✔ done — N beaches refreshed" if present
+    m = re.search(r'(\d+)\s+beaches refreshed', out or '')
+    return int(m.group(1)) if m else 0
+
+
 def action_ensure_pip_membership(state: str) -> int:
     """Per-state PIP populate via refresh_beach_polygon_membership.
 
@@ -1203,6 +1460,60 @@ def action_section_extract(state: str) -> int:
     )
 
 
+def action_zone_rules_v2_refresh(state: str) -> int:
+    """v2 area-first re-extract of ALL policy_sources per MVP+ beach.
+
+    Per Franz 2026-05-21. Supersedes the operator-summary path
+    (action_section_extract) which derived section rules from
+    operator_dogs_policy.summary. v2 reads beach_policy_source.full_text
+    directly with an area-first prompt + canonical_area_description
+    hint, and rewrites bps/temporals per beach. Multi-ps beaches get
+    each source re-run (helper iterates).
+
+    Downstream: bps changes fire the existing _zr_inject_from_policy_sources
+    cascade (no extra wiring needed). hourly_status_refresh phase runs
+    AFTER this to materialize the new minute-by-minute rule layer.
+
+    Skips beaches whose beach_dog_policy.source = 'manual_curator'
+    (curator overrides are preserved). Chunked at 30 fids/subprocess
+    (each fid runs ~1 LLM call per ps × ~1-3 ps, ~$0.03/beach).
+    """
+    fids = _state_tier12_fids(state)
+    if not fids:
+        return 0
+    return _chunked_subprocess(
+        'scripts/reextract_beach_all_ps.py', fids,
+        flag_name='--fids', chunk_size=30, per_chunk_timeout=900,
+        extra_args=['--skip-if-fresh-within', '7'],
+        parse_fn=None,
+    )
+
+
+def action_hourly_status_refresh(state: str) -> int:
+    """Materialize beach_section_hour_status for MVP+ beaches.
+
+    Walks zone_rules per-minute (most-restrictive-wins) with seasonal
+    filter + operating-hours clip, sampling at :30 of each hour. Mirrors
+    beach.html _regionTimeBucketTiles logic in Python. The hourly_status
+    table powers scoring + the rendered chip/tile state without re-running
+    that logic at request time.
+
+    Runs AFTER action_zone_rules_v2_refresh so the materialization
+    reflects the freshly-extracted zone_rules. Idempotent: deletes +
+    re-inserts (beach_fid, valid_date) slice per fid.
+
+    Chunked at 100 fids/subprocess (~50ms/beach Python-side, no LLM cost).
+    """
+    fids = _state_tier12_fids(state)
+    if not fids:
+        return 0
+    return _chunked_subprocess(
+        'scripts/refresh_beach_section_hour_status.py', fids,
+        flag_name='--fids', chunk_size=100, per_chunk_timeout=600,
+        parse_fn=_parse_section_ok,
+    )
+
+
 def action_descriptions(state: str) -> int:
     """Generate descriptions for state's tier-1+2 fids. Chunked into
     groups of 30 fids (~5min each)."""
@@ -1232,6 +1543,112 @@ def action_photos_wikimedia(state: str) -> int:
         'scripts/load_wikimedia_commons_photos.py', fids,
         flag_name='--fids', chunk_size=100, per_chunk_timeout=600,
         parse_fn=_parse_photos_saved,
+    )
+
+
+def action_photos_flickr(state: str) -> int:
+    """Flickr photos for state's tier-1+2 fids. Chunked at 50 fids
+    (Flickr API has stricter pacing than Commons).
+
+    Runs alongside photos_wikimedia — both produce candidate photos
+    that downstream photos_tag will vision-tag and photos_curate will
+    rank + select from. ON CONFLICT DO NOTHING in the loader makes
+    re-runs safe (HARD pin feedback_photo_loaders_not_idempotent).
+    """
+    fids = _state_tier12_fids(state)
+    if not fids:
+        return 0
+    return _chunked_subprocess(
+        'scripts/load_flickr_photos.py', fids,
+        flag_name='--fids', chunk_size=50, per_chunk_timeout=900,
+        parse_fn=_parse_photos_saved,
+    )
+
+
+def action_state_photo_galleries(state: str) -> int:
+    """State-conditional agency photo loaders.
+
+    These loaders are agency-driven (not beach-fid driven) so they don't
+    chunk via _chunked_subprocess. Each is a single-shot subprocess
+    with a long timeout. Runs:
+      - NPS (always, --state filter) — national parks coastal beaches
+      - CDPR (CA only) — California State Parks gallery
+      - CCC (CA only) — California Coastal Commission
+      - WSPRC (WA only) — Washington State Parks
+      - OPRD (OR only) — NOT BUILT YET, flagged in log
+        (see project_state_parks_dept_baseline_photo_source memory)
+    """
+    runs: list[tuple[str, list[str], int]] = [
+        ('NPS', ['scripts/load_nps_photos.py', '--state', state, '--full'], 1800),
+    ]
+    if state == 'CA':
+        runs.append(('CDPR', ['scripts/load_cdpr_park_gallery.py', '--full'], 1800))
+        runs.append(('CCC',  ['scripts/load_ccc_photos.py', '--full'], 1800))
+    elif state == 'WA':
+        runs.append(('WSPRC', ['scripts/load_wsprc_photos.py', '--full'], 1800))
+    elif state == 'OR':
+        log(f'    OPRD loader not built yet — OR state-parks photos GAP. See pin.')
+
+    total = 0
+    for name, cmd, timeout in runs:
+        log(f'    state_photo_galleries → {name} ...')
+        full_cmd = [sys.executable] + cmd
+        t0 = time.time()
+        try:
+            rc, out, err = _run_subprocess(full_cmd, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            log(f'      {name}: TIMEOUT after {timeout}s — skipping')
+            continue
+        elapsed = time.time() - t0
+        if rc != 0:
+            log(f'      {name}: FAIL rc={rc} ({elapsed:.0f}s): {err[-200:] if err else ""}')
+            continue
+        rows = _parse_photos_saved(out) if out else 0
+        total += rows
+        log(f'      {name}: ok ({elapsed:.0f}s; saved={rows})')
+    return total
+
+
+def action_photos_tag(state: str) -> int:
+    """Vision-tag MVP+ beach photos via Claude Haiku.
+
+    Per Franz 2026-05-21. Runs AFTER photos_wikimedia so newly-loaded
+    photos get tagged; runs BEFORE descriptions so the description
+    generator can leverage scene/subject/landscape tags. Idempotent:
+    tagger skips any photo where source_meta.vision.model == current
+    model id.
+
+    Chunked at 30 fids/subprocess (~5-10 photos/fid × Haiku vision call
+    ≈ $0.001/photo). Per-chunk timeout 30min."""
+    fids = _state_tier12_fids(state)
+    if not fids:
+        return 0
+    return _chunked_subprocess(
+        'scripts/load_photo_vision_tags.py', fids,
+        flag_name='--fids', chunk_size=30, per_chunk_timeout=1800,
+        parse_fn=None,
+    )
+
+
+def action_photos_curate(state: str) -> int:
+    """Auto-curate (pick N best+diverse photos per beach).
+
+    Per Franz 2026-05-21 photo curation v3. Runs AFTER photos_tag so
+    the diverse-photo selector can use vision tags as ranking inputs;
+    runs BEFORE descriptions so the description generator sees the
+    curated gallery. Per HARD pin (feedback_auto_curate_default_broad)
+    auto-curate is safe broad: skipped_human guard prevents stomping
+    manual selections.
+
+    Chunked at 100 fids/subprocess (DB-only, no LLM cost)."""
+    fids = _state_tier12_fids(state)
+    if not fids:
+        return 0
+    return _chunked_subprocess(
+        'scripts/auto_curate.py', fids,
+        flag_name='--fids', chunk_size=100, per_chunk_timeout=600,
+        extra_args=['--skip-if-fresh-within', '7'],
+        parse_fn=None,
     )
 
 
@@ -1371,14 +1788,21 @@ PYTHON_ACTIONS = {
     'ensure_overpass':         action_ensure_overpass,
     'ensure_amenities':        action_ensure_amenities,
     'ensure_dog_features':     action_ensure_dog_features,
+    'refresh_nearest_dog_park': action_refresh_nearest_dog_park,
     'ensure_pip_membership':   action_ensure_pip_membership,
     'codify_cascade':          action_codify_cascade,
     'operator_llm_extract':    action_operator_llm_extract,
     'operator_merge':          action_operator_merge,
     'bep_refire':              action_bep_refire,
     'section_extract':         action_section_extract,
-    'descriptions':            action_descriptions,
+    'zone_rules_v2_refresh':   action_zone_rules_v2_refresh,
+    'hourly_status_refresh':   action_hourly_status_refresh,
     'photos_wikimedia':        action_photos_wikimedia,
+    'photos_flickr':           action_photos_flickr,
+    'state_photo_galleries':   action_state_photo_galleries,
+    'photos_tag':              action_photos_tag,
+    'photos_curate':           action_photos_curate,
+    'descriptions':            action_descriptions,
     'daily_refresh_fire':      action_daily_refresh_fire,
     'field_population_check':  action_field_population_check,
 }

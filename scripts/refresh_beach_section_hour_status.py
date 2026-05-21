@@ -269,6 +269,8 @@ def main():
     ap = argparse.ArgumentParser()
     grp = ap.add_mutually_exclusive_group(required=True)
     grp.add_argument('--fid', type=int)
+    grp.add_argument('--fids', type=str,
+                     help='comma-separated list of fids (for pipeline chunked dispatch)')
     grp.add_argument('--all', action='store_true')
     grp.add_argument('--listen', action='store_true',
                      help='Listen on NOTIFY zone_rules_changed and refresh per-beach')
@@ -281,6 +283,23 @@ def main():
         n = refresh_one(cur, args.fid)
         conn.commit()
         print(f'fid={args.fid}: {n} rows')
+        print(f'Done. ok=1')
+        return 0
+
+    if args.fids:
+        fids = [int(x) for x in args.fids.split(',') if x.strip()]
+        ok = 0
+        total = 0
+        for fid in fids:
+            try:
+                n = refresh_one(cur, fid)
+                conn.commit()
+                total += n
+                ok += 1
+            except Exception as e:
+                conn.rollback()
+                print(f'  fid={fid} FAIL: {e}')
+        print(f'Done. ok={ok} rows={total}')
         return 0
 
     if args.all:

@@ -41,22 +41,29 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument('--fid', type=int, nargs='+', help='one or more beach fids')
+    g.add_argument('--fids', type=str,
+                    help='comma-separated list of fids (for pipeline chunked dispatch)')
     g.add_argument('--fids-file', type=str, help='file with one fid per line')
     ap.add_argument('--refresh-hourly', action='store_true',
                      help='also refresh beach_section_hour_status for each fid')
     ap.add_argument('--skip-manual-curator', action='store_true', default=True,
                      help='skip beaches with source=manual_curator (default)')
+    ap.add_argument('--skip-if-fresh-within', type=int, default=0, metavar='DAYS',
+                     help='skip fids whose bps rows were all re-extracted within '
+                          'the last N days (default 0 = always run; pipeline passes 7)')
     args = ap.parse_args()
 
     if args.fid:
         fids = args.fid
+    elif args.fids:
+        fids = [int(x) for x in args.fids.split(',') if x.strip()]
     else:
         fids = [int(l.strip()) for l in Path(args.fids_file).read_text().splitlines() if l.strip()]
 
     conn = _connect()
     cur = conn.cursor()
 
-    totals = {'beach_skip_manual': 0, 'beach_done': 0,
+    totals = {'beach_skip_manual': 0, 'beach_skip_fresh': 0, 'beach_done': 0,
               'ps_runs': 0, 'ps_failed': 0, 'hourly_refreshed': 0}
 
     for i, fid in enumerate(fids, 1):
@@ -68,6 +75,20 @@ def main() -> int:
             print(f'[{i}/{len(fids)}] fid={fid} SKIP (manual_curator)')
             totals['beach_skip_manual'] += 1
             continue
+
+        # Skip if all bps rows were re-extracted within --skip-if-fresh-within days
+        if args.skip_if_fresh_within > 0:
+            cur.execute("""
+              SELECT COUNT(*) FILTER (WHERE extracted_at < now() - (%s || ' days')::interval) AS stale,
+                     COUNT(*) AS total
+                FROM beach_policy_source
+               WHERE beach_fid = %s
+            """, (args.skip_if_fresh_within, fid))
+            stale, total = cur.fetchone()
+            if total > 0 and stale == 0:
+                print(f'[{i}/{len(fids)}] fid={fid} SKIP (all {total} bps rows fresh within {args.skip_if_fresh_within}d)')
+                totals['beach_skip_fresh'] += 1
+                continue
 
         ps_ids = fetch_ps_for_fid(cur, fid)
         if not ps_ids:
@@ -114,6 +135,7 @@ def main() -> int:
     print('=== SUMMARY ===')
     print(f'  beaches done:        {totals["beach_done"]}')
     print(f'  beaches skip manual: {totals["beach_skip_manual"]}')
+    print(f'  beaches skip fresh:  {totals["beach_skip_fresh"]}')
     print(f'  ps runs ok:          {totals["ps_runs"]}')
     print(f'  ps runs fail:        {totals["ps_failed"]}')
     print(f'  hourly refreshed:    {totals["hourly_refreshed"]}')

@@ -178,7 +178,7 @@ def emit_sql(catalog_rows: list[tuple[str, str, str]], beach_park_names: dict[st
                 f"       'sand', '{rule}', 'operative'::operative_status,\n"
                 f"       '{sql_escape(verbatim_full)}',\n"
                 "       'https://www.parks.ca.gov/Dogs'\n"
-                "ON CONFLICT (beach_fid, policy_source_id, section) DO NOTHING;"
+                "ON CONFLICT (beach_fid, policy_source_id, section, (COALESCE(region_name, '__default__')), rule) DO NOTHING;"
             )
         print()
 

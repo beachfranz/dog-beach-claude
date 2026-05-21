@@ -2055,7 +2055,7 @@ def emit_migration_sql(jc: JurisdictionClassification, sc: ScopeCheck,
             f"WHERE ps.citation LIKE {esc(citation_prefix + '%')}\n"
             f"  AND b.is_active AND b.state = {esc(jc.state)}\n"
             f"  AND p.{polygon_key_column} = {esc(str(jc.polygon_key))}\n"
-            f"ON CONFLICT (beach_fid, policy_source_id, section) DO NOTHING;\n"
+            f"ON CONFLICT (beach_fid, policy_source_id, section, (COALESCE(region_name, '__default__')), rule) DO NOTHING;\n"
         )
     else:
         parts.append(
@@ -3194,7 +3194,7 @@ SELECT v.fid, ps.id, {esc(section)}, {esc(rule)},
 FROM (VALUES {values_list}) AS v(fid)
 CROSS JOIN public.policy_source ps
 WHERE ps.source_url = {esc(source_url)}
-ON CONFLICT (beach_fid, policy_source_id, section) DO NOTHING;
+ON CONFLICT (beach_fid, policy_source_id, section, (COALESCE(region_name, '__default__')), rule) DO NOTHING;
 
 COMMIT;
 """

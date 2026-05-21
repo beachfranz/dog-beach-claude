@@ -261,7 +261,7 @@ def emit_operator_block(row: dict, beach_links: list[dict], rule: str) -> str:
             f"WHERE ps.issuing_operator_id = {op_id}\n"
             f"  AND ps.subtype = 'operator_posted_policy'\n"
             f"  AND ps.source_url = {esc(source_url)}\n"
-            f"ON CONFLICT (beach_fid, policy_source_id, section) DO NOTHING;\n"
+            f"ON CONFLICT (beach_fid, policy_source_id, section, (COALESCE(region_name, '__default__')), rule) DO NOTHING;\n"
         )
     return "\n".join(parts) + "\n"
 
@@ -399,7 +399,7 @@ def main() -> int:
             f.write(f"-- Confidence threshold: {args.confidence_threshold}\n")
             f.write(f"--\n")
             f.write(f"-- Idempotent: NOT EXISTS guard on ps (issuing_operator_id + subtype + source_url);\n")
-            f.write(f"-- ON CONFLICT (beach_fid, policy_source_id, section) DO NOTHING on bps.\n")
+            f.write(f"-- ON CONFLICT (beach_fid, policy_source_id, section, (COALESCE(region_name, '__default__')), rule) DO NOTHING on bps.\n")
             f.write(f"-- Per playbook tenet #5: cascade fires automatically on bps INSERT.\n\n")
             f.write("BEGIN;\n\n")
             for block in sql_blocks:

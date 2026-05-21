@@ -3386,6 +3386,8 @@ function _amenityTimePillsHtml(zoneRules, beach) {
   const items = [];
   for (const reg of regions) {
     for (const [sn, sd] of Object.entries(reg?.sections || {})) {
+      // Skip 'global' — meta-section, not a place. Franz 2026-05-21.
+      if (sn === 'global') continue;
       const baseRawRule = sd?.rule || 'unknown';
       const baseCoerced = RULE_COERCE[baseRawRule] || baseRawRule;
       const baseCls = (baseCoerced === 'off_leash' || baseCoerced === 'on_leash' || baseCoerced === 'not_allowed')
@@ -3458,11 +3460,25 @@ function _amenityTimePillsHtml(zoneRules, beach) {
     );
   };
   return items.map(it => {
+    // Skip degenerate windows post-substitution (< 30 min after dawn/dusk shift)
+    let dispStart = it.sMin;
+    let dispEnd   = it.eMin;
+    if (sun) {
+      if (dispStart === 0     && sun.sunriseMin != null) dispStart = sun.sunriseMin;
+      if (dispEnd   === 24*60 && sun.sunsetMin  != null) dispEnd   = sun.sunsetMin;
+    }
+    if (dispEnd - dispStart < 30) return '';
     const sl = SECTION_LABEL[it.section] || it.section;
     const parts = sl.split(' ');
     const icon = parts[0];
     const label = parts.slice(1).join(' ') || it.section;
-    const range = `${fmtEdge(it.sMin, true)}-${fmtEdge(it.eMin, false)}`;
+    const minToFmt = (min) => {
+      const r = (((min / 60) % 24) + 24) % 24;
+      const h = Math.floor(r);
+      const hh = h === 0 ? 12 : h > 12 ? h - 12 : h;
+      return `${hh}${h >= 12 ? 'pm' : 'am'}`;
+    };
+    const range = `${minToFmt(dispStart)}-${minToFmt(dispEnd)}`;
     return `<div class="combo-chip rule-${it.cls}" data-tip="${escHtml(label + ' · ' + range)}">
       <span class="combo-icon">${icon}</span>
       <div class="combo-label">${escHtml(label)} ${escHtml(range)}</div>

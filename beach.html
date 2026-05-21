@@ -1604,6 +1604,9 @@ function _regionTimeBucketTiles(reg, beach) {
 
   const merged = [];
   for (const [sn, sd] of Object.entries(reg?.sections || {})) {
+    // Skip 'global' — it's a meta-section (whole-beach rules), not a
+    // geographic place; rendering it as a tile is confusing.
+    if (sn === 'global') continue;
     const baseRawRule = sd.rule || 'unknown';
     const baseCoerced = _TW_RULE_COERCE[baseRawRule] || baseRawRule;
     const baseCls = (baseCoerced === 'off_leash' || baseCoerced === 'on_leash' || baseCoerced === 'not_allowed')
@@ -1702,8 +1705,17 @@ function _regionTimeBucketTiles(reg, beach) {
   };
 
   return merged.map(it => {
-    const tw = { _mergedStart: it.sMin, _mergedEnd: it.eMin };
-    const range = `${fmtEdge(it.sMin, true)}-${fmtEdge(it.eMin, false)}`;
+    // Compute substituted endpoint minutes; skip degenerate windows
+    // (start >= end after substitution — e.g. 12am-5am base rule chip
+    // with sunrise=5am collapses to 5am-5am, which is meaningless).
+    let dispStart = it.sMin;
+    let dispEnd   = it.eMin;
+    if (sun) {
+      if (dispStart === 0 && sun.sunriseMin != null) dispStart = sun.sunriseMin;
+      if (dispEnd === 24*60 && sun.sunsetMin != null) dispEnd = sun.sunsetMin;
+    }
+    if (dispEnd - dispStart < 30) return '';  // skip <30min chips post-substitution
+    const range = `${minToFmt(dispStart)}-${minToFmt(dispEnd)}`;
     const sectionLabel = (window.ZoneRulesBlock?.SECTION_LABEL || {})[it.section] || it.section;
     const parts = sectionLabel.split(' ');
     const icon = parts[0];

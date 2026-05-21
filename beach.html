@@ -1629,9 +1629,12 @@ function _regionTimeBucketTiles(reg, beach) {
   }
 
   const merged = [];
+  // 'global' is a meta-section in the DEFAULT (unnamed) region, but in
+  // a NAMED region it IS the area's rule (e.g. Habitat Restoration Area
+  // with global=not_allowed). Render it in named regions, skip in default.
+  const isDefaultRegion = (reg?.name == null);
   for (const [sn, sd] of Object.entries(reg?.sections || {})) {
-    // Skip 'global' — meta-section, not a place.
-    if (sn === 'global') continue;
+    if (sn === 'global' && isDefaultRegion) continue;
     // Skip amenity-class sections — rule is constant, amenity tile renders it.
     if (AMENITY_SECTIONS_FOR_CHIPS.has(sn)) continue;
     const baseRawRule = sd.rule || 'unknown';
@@ -1958,9 +1961,14 @@ function buildAmenitiesSection(amenities, dogPolicy, beach) {
       const c = ({off_leash_voice_control:'off_leash', on_leash_or_voice:'on_leash'})[r] || r;
       return ['off_leash','on_leash','not_allowed'].includes(c) ? c : 'unknown';
     };
+    const isNamedReg = (reg?.name != null);
     for (const [name, sec] of secEntries) {
       if (_SECTION_TO_AMENITY[name]) continue;
-      const t = _SECTION_TILE[name];
+      // For 'global' in a named region, render an "Area" tile so the
+      // region's overarching rule is visible. Skip in default region
+      // (handled by other section tiles + global_notes).
+      const isGlobalInNamed = (name === 'global' && isNamedReg);
+      const t = isGlobalInNamed ? { icon: '⛳', label: 'Area' } : _SECTION_TILE[name];
       if (!t) continue;
       const baseC = _coerce(sec?.rule);
       const hasVar = (sec?.time_windows || []).some(tw => _coerce(tw.rule || sec?.rule) !== baseC);
@@ -1968,7 +1976,7 @@ function buildAmenitiesSection(amenities, dogPolicy, beach) {
       tilesForRegion.push({
         key: `section:${name}`, icon: t.icon, label: t.label,
         sectionName: name,
-        _i: 100 + Object.keys(_SECTION_TILE).indexOf(name),
+        _i: isGlobalInNamed ? 50 : 100 + Object.keys(_SECTION_TILE).indexOf(name),
       });
     }
     const hasAnyTimeWindow = Object.values(secs).some(s => Array.isArray(s?.time_windows) && s.time_windows.length > 0);

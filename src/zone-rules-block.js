@@ -37,10 +37,26 @@
     water_swim: '🌊 Water', parking_lot: '🅿️ Parking',
     restrooms: '🚻 Restrooms', showers: '🚿 Showers',
     restrooms_showers: '🚿 Restrooms',
+    // Deep-extract additions (Franz 2026-05-20)
+    water: '🌊 Water', turf: '🌱 Turf', walkway: '🚶 Walkway',
+    pier: '🏗️ Pier', jetty: '🪨 Jetty', tide_pool: '🐚 Tide pool',
+    swimming_beach: '🏊 Swim beach', dune_restoration: '🌾 Dune restoration',
+    developed_recreation_site: '🏞️ Developed area',
+    snowy_plover_protection_area: '🪺 Plover protection',
   };
   const ZR_RULE_LABEL = {
     off_leash: '🟢 Off-leash', on_leash: '⚪ On-leash',
     not_allowed: '🔴 Not allowed', unknown: '❓ Unknown',
+  };
+
+  // Global notes — meta-rules that apply across the whole beach (rendered
+  // as a small footer area, NOT as section pills). Per docs/codify_deep_extract_full_spec.md.
+  const ZR_GLOBAL_NOTE_LABEL = {
+    nuisance_restriction:      { icon: '🚫', text: 'No excessive barking or harassment' },
+    waste_pickup_required:     { icon: '💩', text: 'Pick up after your dog' },
+    collar_tag_required:       { icon: '🏷️', text: 'Collar + tag required' },
+    local_stricter_authorized: { icon: '📜', text: 'Local rules may add restrictions' },
+    no_policy_published:       { icon: '❓', text: 'No posted dog policy' },
   };
 
   function parseHHMM(s) {
@@ -259,12 +275,34 @@
       });
     });
     if (cards.length === 0) return '';
+
+    // global_notes footer — meta-rules that apply across the whole beach.
+    // Deep-extract (Franz 2026-05-20): nuisance, waste, collar, etc.
+    let globalNotesHtml = '';
+    if (Array.isArray(zr.global_notes) && zr.global_notes.length > 0) {
+      const items = zr.global_notes.map(n => {
+        const meta = ZR_GLOBAL_NOTE_LABEL[n.kind] || { icon: '⚠️', text: n.kind };
+        const ev = n.evidence || {};
+        const cite = ev.citation ? ` — ${escHtml(ev.citation)}` : '';
+        const url = ev.source_url
+          ? `<a href="${escHtml(ev.source_url)}" target="_blank" rel="noopener" class="zr-gn-cite">${escHtml(ev.citation || 'source')}</a>`
+          : (ev.citation ? `<span class="zr-gn-cite">${escHtml(ev.citation)}</span>` : '');
+        const quoteAttr = ev.quote ? ` title="${escHtml(ev.quote)}"` : '';
+        return `<li class="zr-gn-item"${quoteAttr}>
+                  <span class="zr-gn-icon">${meta.icon}</span>
+                  <span class="zr-gn-text">${escHtml(meta.text)}</span>
+                  ${url}
+                </li>`;
+      }).join('');
+      globalNotesHtml = `<ul class="zr-global-notes">${items}</ul>`;
+    }
+
     // When there's exactly one zone card, hide its header — the "Whole
     // beach"/zone-name label is redundant noise without a comparison.
     if (cards.length === 1) {
-      return cards[0].replace(/<div class="zr-header">[\s\S]*?<\/div>/, '');
+      return cards[0].replace(/<div class="zr-header">[\s\S]*?<\/div>/, '') + globalNotesHtml;
     }
-    return cards.join('');
+    return cards.join('') + globalNotesHtml;
   }
 
   // Document-level tab handler. Installed once on first render so the

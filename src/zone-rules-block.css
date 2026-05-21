@@ -118,3 +118,25 @@
   padding-top: 10px; border-top: 1px dashed rgba(0,0,0,0.08);
   line-height: 1.5;
 }
+
+/* Global notes — meta-rules that apply across the whole beach
+   (nuisance, waste, collar, etc.) Rendered as small footer items
+   beneath the zone cards. Per docs/codify_deep_extract_full_spec.md. */
+.zr-global-notes {
+  list-style: none; padding: 0; margin: 10px 0 0 0;
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 11px;
+}
+.zr-gn-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px; border-radius: 4px;
+  background: rgba(0,0,0,0.03); color: var(--text-muted, #64748b);
+  cursor: help;
+}
+.zr-gn-icon { font-size: 13px; line-height: 1; }
+.zr-gn-text { flex: 1; min-width: 0; }
+.zr-gn-cite {
+  font-size: 10px; color: var(--text-muted, #94a3b8);
+  text-decoration: none; opacity: 0.7;
+}
+.zr-gn-cite:hover { opacity: 1; text-decoration: underline; }

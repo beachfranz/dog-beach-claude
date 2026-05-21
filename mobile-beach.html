@@ -3238,13 +3238,26 @@ function _flatTopAmenities(amenities, dogPolicy, limit) {
       _amen: amenities,
     });
   }
-  // Bare section tiles (Sand, Water, Trails, etc.) restored 2026-05-20
-  // — the Times row only emits when time_windows exist, so multi-section
-  // beaches with constant rules need these tiles to show their rule color.
+  // Bare section tiles — only when the section has NO time windows.
+  // Time-windowed sections render as chips in the Times row below
+  // (Franz 2026-05-20). Tile would be redundant.
+  const zr = dogPolicy?.zone_rules;
+  const sectionHasWindows = {};
+  const allRegs = (zr?.regions && Array.isArray(zr.regions))
+    ? zr.regions
+    : (Array.isArray(zr?.seasons) ? zr.seasons.flatMap(s => s.regions || []) : []);
+  for (const reg of allRegs) {
+    for (const [sn, sd] of Object.entries(reg?.sections || {})) {
+      if (Array.isArray(sd?.time_windows) && sd.time_windows.length > 0) {
+        sectionHasWindows[sn] = true;
+      }
+    }
+  }
   for (const [secName, rule] of Object.entries(ruleMap)) {
     if (rule === 'unknown') continue;
     if (_SECTION_TO_AMENITY[secName]) continue;
     if (_AMENITY_DEDUP_SECTIONS.has(secName)) continue;
+    if (sectionHasWindows[secName]) continue;
     const sec = _SECTION_TILE[secName]; if (!sec) continue;
     out.push({
       kind: 'section', sectionName: secName, icon: sec.icon, rule,

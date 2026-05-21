@@ -1000,7 +1000,7 @@ function render(data, beachFid) {
   //   Amenities (merged with Dog Policy section-tiles — rule color
   //   tints them in place), Cautions, Hours, Weather and Tides.
   const leftRail = [];
-  leftRail.push(buildAmenitiesSection(amenities, dog_policy));
+  leftRail.push(buildAmenitiesSection(amenities, dog_policy, beach));
   leftRail.push(buildCautionsSection(data.today, dog_policy, data.hours_today, beach));
   leftRail.push(buildHoursSection(beach, amenities, dog_policy));
   leftRail.push(buildWeatherSection(beach));
@@ -1535,9 +1535,43 @@ function _amenityTimePillsHtml(reg) {
   return `<div class="amenity-time-row">${pills}</div>`;
 }
 
-function buildAmenitiesSection(amenities, dogPolicy) {
+// Collapse named regions whose name matches this beach's display name
+// into the unnamed/default region (Franz 2026-05-20). After Class A
+// cleanup, the only remaining same-beach named regions are redundant
+// duplicates of the default. Sub-features (Bluebird Park on Fisherman's
+// Cove, Duncan's Cove on Sonoma Coast) don't match and stay separate.
+function _collapseSelfNamedRegions(regions, beachName) {
+  if (!beachName || !Array.isArray(regions) || regions.length < 2) return regions;
+  const nameLower = String(beachName).toLowerCase().trim();
+  const selfRegex = new RegExp('^\\s*' + nameLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$', 'i');
+  const out = [];
+  let defaultReg = null;
+  for (const r of regions) {
+    if (!r) continue;
+    if (r.name == null) {
+      defaultReg = { ...r, sections: { ...(r.sections || {}) } };
+      out.push(defaultReg);
+    } else if (selfRegex.test(r.name.trim())) {
+      // Merge this region's sections into default
+      if (!defaultReg) {
+        defaultReg = { name: null, sections: { ...(r.sections || {}) } };
+        out.push(defaultReg);
+      } else {
+        for (const [sn, sd] of Object.entries(r.sections || {})) {
+          if (!defaultReg.sections[sn]) defaultReg.sections[sn] = sd;
+        }
+      }
+    } else {
+      out.push(r);
+    }
+  }
+  return out;
+}
+
+function buildAmenitiesSection(amenities, dogPolicy, beach) {
   if (!amenities && !dogPolicy?.zone_rules) return '';
-  const regions = _zrRegions(dogPolicy?.zone_rules);
+  let regions = _zrRegions(dogPolicy?.zone_rules);
+  regions = _collapseSelfNamedRegions(regions, beach?.display_name || beach?.name);
 
   // Build the all-zones amenity tiles (has_X=true items not tied to
   // a specific zone) — lifeguards, drinking_water, fire_pits, food,
@@ -1551,11 +1585,23 @@ function buildAmenitiesSection(amenities, dogPolicy) {
   // SINGLE-ZONE (or no zone_rules) — collapse to one grid.
   if (regions.length <= 1) {
     const ruleMap = _ruleMapFromZoneRules(dogPolicy?.zone_rules || {});
+    // Map sectionName → bool: does this section have any time windows?
+    // Built from the (possibly collapsed) regions list so we know which
+    // sections render as per-window chips below and don't need a bare tile.
+    const sectionHasWindows = {};
+    for (const reg of regions) {
+      for (const [sn, sd] of Object.entries(reg?.sections || {})) {
+        if (Array.isArray(sd?.time_windows) && sd.time_windows.length > 0) {
+          sectionHasWindows[sn] = true;
+        }
+      }
+    }
     const sectionTiles = [];
     for (const [secName, rule] of Object.entries(ruleMap)) {
       if (_SECTION_TO_AMENITY[secName]) continue;
       const tile = _SECTION_TILE[secName];
       if (!tile) continue;
+      if (sectionHasWindows[secName]) continue;  // chips below carry this
       sectionTiles.push({
         key: `section:${secName}`, icon: tile.icon, label: tile.label,
         sectionName: secName,
@@ -1607,14 +1653,14 @@ function buildAmenitiesSection(amenities, dogPolicy) {
         .find(([sec, key]) => key === t.key)?.[0];
       if (matchingSection && secs[matchingSection]) tilesForRegion.push(t);
     }
-    // Bare section tiles (Sand, Water, Trails, etc.) restored 2026-05-20
-    // — the time-pill row only renders when actual time_windows exist,
-    // so without these tiles, multi-section regions like Kayak Point
-    // would show nothing at all.
-    for (const [name] of secEntries) {
+    // Bare section tiles — only when the section has NO time windows.
+    // Sections WITH windows render as per-window chips below, so the
+    // bare tile would be redundant (Franz 2026-05-20).
+    for (const [name, sec] of secEntries) {
       if (_SECTION_TO_AMENITY[name]) continue;
       const t = _SECTION_TILE[name];
       if (!t) continue;
+      if (Array.isArray(sec?.time_windows) && sec.time_windows.length > 0) continue;
       tilesForRegion.push({
         key: `section:${name}`, icon: t.icon, label: t.label,
         sectionName: name,

@@ -299,7 +299,108 @@ INSERT anyway + INSERT vocab_review_queue row.
 8. **Codify-side persist patch** (task #94) — write full_text on every codify run going forward
 9. **Geometry workstream** (separate — region_anchor → polygon resolution)
 
-## 8. Acceptance criteria
+## 8. Phase 2 — URL-derived enrichment (beyond rare-type backfill)
+
+Once the fetch-and-parse infrastructure exists for task #94 (codify text
+persistence), the same path can extract these high-value fields from
+URLs we already have:
+
+### A. Structured effective / amendment dates
+
+Most ordinances end with: `(Ord. No. 940, § 1, 9-4-2018; Ord. No. 1023,
+§ 2, 11-1-2022)`. Currently captured as substring in `citation` text; not
+queryable.
+
+```sql
+ALTER TABLE policy_source ADD COLUMN last_amended DATE;
+ALTER TABLE policy_source ADD COLUMN amendment_history JSONB;
+-- amendment_history = [
+--   {ord_no: '940', date: '2018-09-04', section: '1'},
+--   {ord_no: '1023', date: '2022-11-01', section: '2'}
+-- ]
+```
+
+Uses:
+- Consensus engine prefers recent over old
+- `last_verified` watcher detects re-amendments
+- Consumer surface: "law last updated Nov 2022" footer
+
+### B. Followup / cross-reference links
+
+Codify rows reference other rules: "see §4.08.030", "as amended by Ord.
+1234", Compendium "Exhibits #32-36". Each is a potential new
+policy_source row.
+
+```sql
+ALTER TABLE policy_source ADD COLUMN cross_references JSONB;
+-- cross_references = [
+--   {kind: 'internal_section', citation: '§4.08.030', url: null,
+--    extracted_at: '...'},
+--   {kind: 'amending_ord',     citation: 'Ord. No. 1234',
+--    url: 'https://library.municode.com/...', extracted_at: '...'},
+--   {kind: 'compendium_exhibit', citation: 'Exhibit #32',
+--    url: 'https://www.nps.gov/.../exh32.pdf', extracted_at: '...'}
+-- ]
+```
+
+Plus a follow-up queue:
+```sql
+CREATE TABLE codify_followup_queue (
+  id BIGSERIAL PRIMARY KEY,
+  source_ref TEXT NOT NULL,           -- citation
+  url        TEXT,
+  parent_policy_source_id BIGINT REFERENCES policy_source(id),
+  status TEXT DEFAULT 'pending'
+         CHECK (status IN ('pending','fetched','codified','skipped','dead_link')),
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+```
+
+Codify agent picks up `pending` entries on its next run.
+
+### C. Penalty / enforcement language
+
+Many ordinances include fine schedules: "violation is an infraction
+punishable by a fine not to exceed $250". The `policy_source.penalty_summary`
+column already exists but is sparsely populated.
+
+```jsonc
+// extraction output adds:
+{
+  "penalty_summary": {
+    "kind": "infraction" | "misdemeanor" | "civil_fine" | "warning_only" | null,
+    "fine_amount_max_usd": 250 | null,
+    "fine_amount_min_usd": null,
+    "enforcement_agency": "Animal Services" | null,
+    "evidence_verbatim": "..."
+  }
+}
+```
+
+Uses:
+- Consumer surface weight: "fine up to $250" signals "rule is real, not
+  advisory"
+- Tooltips on rule chips can show enforcement context
+
+### D. Document version / fetch fingerprint (low priority)
+
+For change detection on re-fetch:
+
+```sql
+ALTER TABLE policy_source ADD COLUMN fetched_sha256 TEXT;
+ALTER TABLE policy_source ADD COLUMN last_fetched_at TIMESTAMPTZ;
+```
+
+Cron job re-fetches each URL monthly; if SHA changed → queue for re-extract.
+
+### E. Issuing-agency contact info (low priority)
+
+Already partially via `policy_source.issuing_agency_id` FK → `agency.web_url`.
+Could enrich with phone / email when present on the source page. Powers
+"ask the operator" deep-links on the consumer surface.
+
+## 9. Acceptance criteria
 
 - [ ] Del Mar zone_rules has 4 named regions (north of 29th / 25th-29th band / Powerhouse Park summer prohibition / Powerhouse Park sub-zones)
 - [ ] Avila Beach zone_rules has `sand.time_windows` with 3 entries (sunrise-10am / 10am-5pm / 5pm-sunset)
@@ -310,7 +411,19 @@ INSERT anyway + INSERT vocab_review_queue row.
 - [ ] All 5 vocab_review_queue entries triaged before bulk rollout
 - [ ] `ZoneRulesBlock.render()` displays new sections (playground/turf/walkway/etc.) with proper labels
 
-## 9. Open questions
+### Phase 2 (URL-enrichment) acceptance
+- [ ] Del Mar Municipal Code §4.08.020 has `last_amended = 2018-09-04`
+      + `amendment_history` with 4 ord entries
+- [ ] 36 CFR §2.15 has `cross_references` including the supplementary
+      §2.15(b) Superintendent designation entries
+- [ ] GOGA Compendium has `cross_references` for Exhibits #32-36
+      → each spawns a follow-up queue row
+- [ ] Carlsbad Municipal Code has `penalty_summary.fine_amount_max_usd`
+      populated
+- [ ] Re-fetch detects when an ordinance is amended (SHA changes)
+      → queues for re-extraction
+
+## 10. Open questions
 
 - Auto-promotion threshold for `_is_new` vocab → canonical (3 hits? 5? curator-only?)
 - Re-extract existing 282 policy_source rows once vs only NEW codify going forward? (Recommend: bulk re-extract — $20 one-time)

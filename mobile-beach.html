@@ -384,30 +384,23 @@
   .amenity.rule-not_allowed { background: rgba(239,68,68,0.45); border-color: rgba(153,27,27,0.42); }
   .amenity.rule-unknown     { background: rgba(0,0,0,0.04); }
 
-  /* Time-of-day pill strip (zone-rules-block). Sits above the zone-rules
-   * card on mobile; color = leash policy in that window (Franz 2026-05-21). */
-  .zr-time-strip { display: flex; flex-wrap: wrap; gap: 6px; }
-  .zr-time-pill {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 6px 10px; border-radius: 999px;
-    border: 1px solid rgba(0,0,0,0.08);
-    background: rgba(0,0,0,0.04);
-    font-size: 13px; font-weight: 600; line-height: 1;
-    cursor: pointer; color: #1f2937;
-    transition: transform 0.05s, box-shadow 0.15s;
+  /* Per-region time-window pills inside the Amenities card (Franz
+   * 2026-05-21). Umbrella icon + near-hour range, tinted by leash. */
+  .amenity-time-row {
+    display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;
   }
-  .zr-time-pill .zr-time-icon  { font-size: 14px; }
-  .zr-time-pill .zr-time-range { letter-spacing: -0.01em; }
-  .zr-time-pill.off_leash   { background: rgba(34,197,94,0.45);  border-color: rgba(21,128,61,0.42); }
-  .zr-time-pill.on_leash    { background: rgba(251,191,36,0.53); border-color: rgba(180,83,9,0.42); }
-  .zr-time-pill.not_allowed { background: rgba(239,68,68,0.45);  border-color: rgba(153,27,27,0.42); }
-  .zr-time-pill.unknown     { background: rgba(0,0,0,0.04); }
-  .zr-time-pill.active {
-    box-shadow: 0 0 0 2px rgba(30,64,175,0.45);
-    transform: translateY(-1px);
+  .amenity-time-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 8px; border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    font-size: 12px; line-height: 1.2;
   }
-  /* Strip drives the panes — hide the in-card tabs on mobile too. */
-  .zr-time-tabs { display: none; }
+  .amenity-time-icon { font-size: 14px; flex-shrink: 0; }
+  .amenity-time-pill.rule-off_leash   { background: rgba(34,197,94,0.45);  border-color: rgba(21,128,61,0.42); }
+  .amenity-time-pill.rule-on_leash    { background: rgba(251,191,36,0.53); border-color: rgba(180,83,9,0.42); }
+  .amenity-time-pill.rule-not_allowed { background: rgba(239,68,68,0.45);  border-color: rgba(153,27,27,0.42); }
+  .amenity-time-pill.rule-unknown     { background: rgba(0,0,0,0.04); }
 
   /* Zone-name sub-header inside the unified Amenities card (multi-zone beaches). */
   .amenity-zone-header {
@@ -974,19 +967,6 @@ function _renderZoneRulesBlock(beach, dogPolicy) {
   };
   window.ZoneRulesBlock.render(mount, zr, ctx);
   mount.style.display = '';
-
-  // Time-pill strip mount above the zone-rules card (Franz 2026-05-21).
-  // Empty when there are no time windows.
-  const stripMount = document.getElementById('time-strip-mount');
-  if (stripMount && window.ZoneRulesBlock.buildTimeStripHtml) {
-    const stripHtml = window.ZoneRulesBlock.buildTimeStripHtml(zr, ctx);
-    if (stripHtml) {
-      stripMount.innerHTML = stripHtml;
-      stripMount.style.display = '';
-    } else {
-      stripMount.style.display = 'none';
-    }
-  }
 }
 // because it's used throughout beach.html.
 
@@ -1158,8 +1138,8 @@ function render(data, beachFid) {
   // regions × sections × day-part-tabs × current-season rendering.
   // Per Franz 2026-05-19 — beach (+ mobile-beach) becoming main consumer
   // page; previously only detail.html surfaced this. Hidden when empty.
-  leftRail.push(`<section class="card" id="time-strip-mount" style="display:none"></section>`);
-  leftRail.push(`<section class="card" id="zone-rules-mount" style="display:none"></section>`);
+  // Zone-rules card removed per Franz 2026-05-21 — section coloring +
+  // time pills live in the Amenities+Activities combo card above.
   leftRail.push(buildNowBlurbCard(data.today));
   // DP suggestion mount — async-filled by loadDogParkSuggestion below.
   // Sits next to Pack List so the "what's next" prompts cluster.
@@ -3315,11 +3295,60 @@ function _renderComboChip(it) {
   </div>`;
 }
 
+// Build per-region time-window pills row from zone_rules. Unions windows
+// across all regions; one pill per unique (start,end). Times round to
+// nearest hour. Color = most-favorable rule observed in that window.
+function _amenityTimePillsHtml(zoneRules) {
+  const RULE_COERCE = {
+    off_leash_voice_control: 'off_leash',
+    on_leash_or_voice:       'on_leash',
+  };
+  const FAVOR = { off_leash: 0, on_leash: 1, unknown: 2, not_allowed: 3 };
+  const regions = (zoneRules?.regions && Array.isArray(zoneRules.regions))
+    ? zoneRules.regions
+    : (Array.isArray(zoneRules?.seasons) ? zoneRules.seasons.flatMap(s => s.regions || []) : []);
+  const wins = new Map();
+  for (const reg of regions) {
+    for (const sec of Object.values(reg?.sections || {})) {
+      for (const tw of (sec?.time_windows || [])) {
+        if (!tw.start || !tw.end) continue;
+        const key = `${tw.start}|${tw.end}`;
+        if (!wins.has(key)) wins.set(key, { start: tw.start, end: tw.end, counts: {} });
+        const w = wins.get(key);
+        const raw = tw.rule || sec?.rule || 'unknown';
+        const coerced = RULE_COERCE[raw] || raw;
+        const cls = (coerced === 'off_leash' || coerced === 'on_leash' || coerced === 'not_allowed')
+          ? coerced : 'unknown';
+        w.counts[cls] = (w.counts[cls] || 0) + 1;
+      }
+    }
+  }
+  if (wins.size === 0) return '';
+  const toMin = s => { const [h, m] = String(s).split(':').map(Number); return (h||0)*60 + (m||0); };
+  const roundHour = s => {
+    const [h, m] = String(s).split(':').map(Number);
+    const r = ((h || 0) + Math.round((m || 0) / 60)) % 24;
+    const hh = r === 0 ? 12 : r > 12 ? r - 12 : r;
+    return `${hh}${r >= 12 ? 'pm' : 'am'}`;
+  };
+  const arr = Array.from(wins.values()).sort((a, b) => toMin(a.start) - toMin(b.start));
+  const pills = arr.map(w => {
+    const dominant = Object.keys(w.counts).sort((a, b) => (FAVOR[a]??9) - (FAVOR[b]??9))[0] || 'unknown';
+    const range = `${roundHour(w.start)}-${roundHour(w.end)}`;
+    return `<span class="amenity-time-pill rule-${dominant}">
+              <span class="amenity-time-icon">🏖️</span>
+              <span>${escHtml(range)}</span>
+            </span>`;
+  }).join('');
+  return `<div class="amenity-time-row">${pills}</div>`;
+}
+
 function buildAmenitiesAndActivitiesCard(beach, dogPolicy, amenities, hoursToday, today) {
   const amenTiles = _flatTopAmenities(amenities, dogPolicy, 8);
   const actTiles  = _activityIcons(beach, dogPolicy, amenities, hoursToday);
   const cautTiles = _cautionTiles(today, dogPolicy, hoursToday, beach);
-  if (!amenTiles.length && !actTiles.length && !cautTiles.length) return '';
+  const timesHtml = _amenityTimePillsHtml(dogPolicy?.zone_rules);
+  if (!amenTiles.length && !actTiles.length && !cautTiles.length && !timesHtml) return '';
   const amenRow = amenTiles.map(_renderComboChip).join('');
   const actRow  = actTiles.map(it => {
     const ruleClass = it.rule ? ` rule-${it.rule}` : '';
@@ -3340,6 +3369,7 @@ function buildAmenitiesAndActivitiesCard(beach, dogPolicy, amenities, hoursToday
   }).join('');
   return `<section class="card combo-card">
     ${amenTiles.length ? `<div class="combo-row-label">Amenities</div><div class="combo-row">${amenRow}</div>` : ''}
+    ${timesHtml       ? `<div class="combo-row-label">Times</div>${timesHtml}`                                : ''}
     ${actTiles.length  ? `<div class="combo-row-label">Activities</div><div class="combo-row">${actRow}</div>`  : ''}
     ${cautTiles.length ? `<div class="combo-row-label">Cautions</div><div class="combo-row">${cautRow}</div>`   : ''}
   </section>`;

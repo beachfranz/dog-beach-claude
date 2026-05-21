@@ -383,6 +383,32 @@
   .amenity.rule-on_leash    { background: rgba(251,191,36,0.53); border-color: rgba(180,83,9,0.42); }
   .amenity.rule-not_allowed { background: rgba(239,68,68,0.45); border-color: rgba(153,27,27,0.42); }
   .amenity.rule-unknown     { background: rgba(0,0,0,0.04); }
+
+  /* Time-of-day pill strip (zone-rules-block). Sits above the zone-rules
+   * card on mobile; color = leash policy in that window (Franz 2026-05-21). */
+  .zr-time-strip { display: flex; flex-wrap: wrap; gap: 6px; }
+  .zr-time-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 10px; border-radius: 999px;
+    border: 1px solid rgba(0,0,0,0.08);
+    background: rgba(0,0,0,0.04);
+    font-size: 13px; font-weight: 600; line-height: 1;
+    cursor: pointer; color: #1f2937;
+    transition: transform 0.05s, box-shadow 0.15s;
+  }
+  .zr-time-pill .zr-time-icon  { font-size: 14px; }
+  .zr-time-pill .zr-time-range { letter-spacing: -0.01em; }
+  .zr-time-pill.off_leash   { background: rgba(34,197,94,0.45);  border-color: rgba(21,128,61,0.42); }
+  .zr-time-pill.on_leash    { background: rgba(251,191,36,0.53); border-color: rgba(180,83,9,0.42); }
+  .zr-time-pill.not_allowed { background: rgba(239,68,68,0.45);  border-color: rgba(153,27,27,0.42); }
+  .zr-time-pill.unknown     { background: rgba(0,0,0,0.04); }
+  .zr-time-pill.active {
+    box-shadow: 0 0 0 2px rgba(30,64,175,0.45);
+    transform: translateY(-1px);
+  }
+  /* Strip drives the panes — hide the in-card tabs on mobile too. */
+  .zr-time-tabs { display: none; }
+
   /* Zone-name sub-header inside the unified Amenities card (multi-zone beaches). */
   .amenity-zone-header {
     font-size: 11px; font-weight: 700; text-transform: uppercase;
@@ -948,6 +974,19 @@ function _renderZoneRulesBlock(beach, dogPolicy) {
   };
   window.ZoneRulesBlock.render(mount, zr, ctx);
   mount.style.display = '';
+
+  // Time-pill strip mount above the zone-rules card (Franz 2026-05-21).
+  // Empty when there are no time windows.
+  const stripMount = document.getElementById('time-strip-mount');
+  if (stripMount && window.ZoneRulesBlock.buildTimeStripHtml) {
+    const stripHtml = window.ZoneRulesBlock.buildTimeStripHtml(zr, ctx);
+    if (stripHtml) {
+      stripMount.innerHTML = stripHtml;
+      stripMount.style.display = '';
+    } else {
+      stripMount.style.display = 'none';
+    }
+  }
 }
 // because it's used throughout beach.html.
 
@@ -1119,6 +1158,7 @@ function render(data, beachFid) {
   // regions × sections × day-part-tabs × current-season rendering.
   // Per Franz 2026-05-19 — beach (+ mobile-beach) becoming main consumer
   // page; previously only detail.html surfaced this. Hidden when empty.
+  leftRail.push(`<section class="card" id="time-strip-mount" style="display:none"></section>`);
   leftRail.push(`<section class="card" id="zone-rules-mount" style="display:none"></section>`);
   leftRail.push(buildNowBlurbCard(data.today));
   // DP suggestion mount — async-filled by loadDogParkSuggestion below.

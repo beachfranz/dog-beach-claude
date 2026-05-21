@@ -218,6 +218,34 @@
    * filter out at the JS layer until the user-feedback affordance
    * lands (project_amenity_user_feedback.md). */
 
+  /* Time-of-day pill strip (zone-rules-block). Moved out of the main
+   * column into the left rail per Franz 2026-05-21 — color = leash
+   * policy in that window (most-favorable across sections). */
+  #left-rail .zr-time-strip {
+    display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 4px;
+  }
+  .zr-time-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 10px; border-radius: 999px;
+    border: 1px solid rgba(0,0,0,0.08);
+    background: rgba(0,0,0,0.04);
+    font-size: 13px; font-weight: 600; line-height: 1;
+    cursor: pointer; transition: transform 0.05s, box-shadow 0.15s;
+    color: #1f2937;
+  }
+  .zr-time-pill .zr-time-icon { font-size: 14px; }
+  .zr-time-pill .zr-time-range { letter-spacing: -0.01em; }
+  .zr-time-pill.off_leash   { background: rgba(34,197,94,0.45);  border-color: rgba(21,128,61,0.42); }
+  .zr-time-pill.on_leash    { background: rgba(251,191,36,0.53); border-color: rgba(180,83,9,0.42); }
+  .zr-time-pill.not_allowed { background: rgba(239,68,68,0.45);  border-color: rgba(153,27,27,0.42); }
+  .zr-time-pill.unknown     { background: rgba(0,0,0,0.04); }
+  .zr-time-pill.active {
+    box-shadow: 0 0 0 2px rgba(30,64,175,0.45);
+    transform: translateY(-1px);
+  }
+  /* Strip drives the panes — hide the in-card tab row on beach.html. */
+  #main-content .zr-time-tabs { display: none; }
+
   /* Cautions card — same visual language as amenities (compact tile
    * grid, icon + short label). Click expands a detail panel below
    * the grid with the full dog-impact text. Severity tints mirror
@@ -827,6 +855,19 @@ function _renderZoneRulesBlock(beach, dogPolicy) {
   // the beach name in the h1 above.
   window.ZoneRulesBlock.render(mount, zr, { ...ctx, beachName: '' });
   mount.style.display = '';
+
+  // Time-pill strip in the left rail (Franz 2026-05-21). Empty when the
+  // beach has no time windows — then the strip card stays hidden.
+  const stripMount = document.getElementById('time-strip-mount');
+  if (stripMount && window.ZoneRulesBlock.buildTimeStripHtml) {
+    const stripHtml = window.ZoneRulesBlock.buildTimeStripHtml(zr, ctx);
+    if (stripHtml) {
+      stripMount.innerHTML = stripHtml;
+      stripMount.style.display = '';
+    } else {
+      stripMount.style.display = 'none';
+    }
+  }
 }
 
 const escHtml = s => String(s ?? '')
@@ -966,6 +1007,9 @@ function render(data, beachFid) {
   //   Amenities (merged with Dog Policy section-tiles — rule color
   //   tints them in place), Cautions, Hours, Weather and Tides.
   const leftRail = [];
+  // Time-pill strip mount — filled async by _renderZoneRulesBlock once
+  // it has the zone_rules data. Hidden when the beach has no time windows.
+  leftRail.push(`<section class="card" id="time-strip-mount" style="display:none"></section>`);
   leftRail.push(buildAmenitiesSection(amenities, dog_policy));
   leftRail.push(buildCautionsSection(data.today, dog_policy, data.hours_today, beach));
   leftRail.push(buildHoursSection(beach, amenities, dog_policy));

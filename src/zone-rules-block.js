@@ -219,7 +219,9 @@
     const tabPanes = tabs.map((t, i) => {
       const rows = sectionList.map(([name, sec]) =>
         sectionPill(name, ruleInTab(sec, t), sec)).join('');
+      const winAttr = t.isOther ? 'other' : `${t.start}|${t.end}`;
       return `<div class="zr-time-pane" data-zr-time-key="${tabKey}" data-zr-time-pane="${i}"
+                   data-zr-window="${winAttr}"
                    style="${i === activeIdx ? '' : 'display:none;'}">
                 <div class="zr-sections">${rows}</div>
               </div>`;
@@ -323,6 +325,59 @@
     return cards.join('') + globalNotesHtml;
   }
 
+  // Unified time-pill strip for the left rail (Franz 2026-05-21). Returns
+  // a single pill row that drives every .zr-time-pane on the page via
+  // matching data-zr-window. Color = most-favorable rule observed in that
+  // window across all sections (off > on > unknown > not_allowed); icon
+  // is time-of-day glyph; range uses prettyRange with ASCII hyphen.
+  function buildTimeStripHtml(zr, ctx) {
+    if (!zr) return '';
+    let seasons = (Array.isArray(zr.seasons) && zr.seasons.length)
+      ? zr.seasons
+      : (Array.isArray(zr.regions) ? [{ regions: zr.regions }] : []);
+    const viewMd = ctx?.viewMonthDay;
+    if (viewMd) seasons = filterToCurrentSeason(seasons, viewMd);
+
+    const winMap = new Map();
+    for (const season of seasons) {
+      for (const reg of (season.regions || [])) {
+        for (const sec of Object.values(reg.sections || {})) {
+          for (const tw of (sec?.time_windows || [])) {
+            if (!tw.start || !tw.end) continue;
+            const key = `${tw.start}|${tw.end}`;
+            if (!winMap.has(key)) winMap.set(key, { start: tw.start, end: tw.end, counts: {} });
+            const w = winMap.get(key);
+            const cls = ruleClass(tw.rule || sec?.rule || 'unknown');
+            w.counts[cls] = (w.counts[cls] || 0) + 1;
+          }
+        }
+      }
+    }
+    if (winMap.size === 0) return '';
+
+    const FAVOR = { off_leash: 0, on_leash: 1, unknown: 2, not_allowed: 3 };
+    const tabs = Array.from(winMap.values())
+      .sort((a, b) => parseHHMM(a.start) - parseHHMM(b.start))
+      .map(w => ({
+        ...w,
+        dominant: Object.keys(w.counts).sort((a, b) => (FAVOR[a] ?? 9) - (FAVOR[b] ?? 9))[0] || 'unknown',
+      }));
+    const activeIdx = pickActiveTab(tabs, ctx);
+
+    const pills = tabs.map((t, i) => {
+      const startH = parseHHMM(t.start) / 60;
+      const icon = startH < 9 ? '🌅' : startH < 15 ? '☀️' : startH < 19 ? '🌆' : '🌙';
+      const range = prettyRange(t.start, t.end).replace('–', '-');
+      return `<button class="zr-time-pill ${t.dominant} ${i === activeIdx ? 'active' : ''}"
+                       data-zr-window="${t.start}|${t.end}">
+                <span class="zr-time-icon">${icon}</span>
+                <span class="zr-time-range">${escHtml(range)}</span>
+              </button>`;
+    }).join('');
+
+    return `<div class="zr-time-strip">${pills}</div>`;
+  }
+
   // Document-level tab handler. Installed once on first render so the
   // block stays standalone (no setup call required by caller).
   let handlersInstalled = false;
@@ -331,14 +386,36 @@
     handlersInstalled = true;
     document.addEventListener('click', (e) => {
       const btn = e.target.closest('.zr-time-tab');
-      if (!btn) return;
-      const key = btn.dataset.zrTimeKey;
-      const idx = btn.dataset.zrTimeTab;
-      document.querySelectorAll(`.zr-time-tab[data-zr-time-key="${key}"]`)
-        .forEach(t => t.classList.toggle('active', t === btn));
-      document.querySelectorAll(`[data-zr-time-pane][data-zr-time-key="${key}"]`).forEach(p => {
-        p.style.display = p.dataset.zrTimePane === idx ? '' : 'none';
-      });
+      if (btn) {
+        const key = btn.dataset.zrTimeKey;
+        const idx = btn.dataset.zrTimeTab;
+        document.querySelectorAll(`.zr-time-tab[data-zr-time-key="${key}"]`)
+          .forEach(t => t.classList.toggle('active', t === btn));
+        document.querySelectorAll(`[data-zr-time-pane][data-zr-time-key="${key}"]`).forEach(p => {
+          p.style.display = p.dataset.zrTimePane === idx ? '' : 'none';
+        });
+        return;
+      }
+      const pill = e.target.closest('.zr-time-pill');
+      if (pill) {
+        const win = pill.dataset.zrWindow;
+        pill.parentElement.querySelectorAll('.zr-time-pill').forEach(p =>
+          p.classList.toggle('active', p === pill));
+        // Each zone-card has its own pane set. For each card, show the
+        // pane matching this window if it exists. Cards without a matching
+        // window are left alone (no time-window data → static pills).
+        const cards = new Map();  // key → [panes]
+        document.querySelectorAll('.zr-time-pane[data-zr-window]').forEach(p => {
+          const k = p.dataset.zrTimeKey || '__';
+          if (!cards.has(k)) cards.set(k, []);
+          cards.get(k).push(p);
+        });
+        for (const panes of cards.values()) {
+          const match = panes.find(p => p.dataset.zrWindow === win);
+          if (!match) continue;
+          panes.forEach(p => { p.style.display = p === match ? '' : 'none'; });
+        }
+      }
     });
   }
 
@@ -356,5 +433,5 @@
     installHandlers();
   }
 
-  global.ZoneRulesBlock = { render, buildHtml, SECTION_LABEL: ZR_SECTION_LABEL, RULE_LABEL: ZR_RULE_LABEL };
+  global.ZoneRulesBlock = { render, buildHtml, buildTimeStripHtml, SECTION_LABEL: ZR_SECTION_LABEL, RULE_LABEL: ZR_RULE_LABEL };
 })(window);

@@ -36,7 +36,30 @@ temporal-condition) combination becomes a separate row.
 
 Rules are atomic facts about WHO/WHERE/WHEN dogs are allowed (or not).
 You are EXTRACTING — never inferring beyond the text. If the text doesn't
-say it, you don't emit it."""
+say it, you don't emit it.
+
+CRITICAL — ONE ROW PER OPERATIVE RULE, NOT PER MENTION:
+- If the same (region, section, rule, temporal) appears multiple times in
+  the source with different wording, emit ONE row and collate all the
+  supporting language into evidence_verbatim (separate quotes with ' / ').
+- If text DEFINES a term (e.g. ORS lists 9 sub-clauses defining 'public
+  nuisance'), emit ONE row for the rule. The sub-clauses go into
+  evidence_verbatim as a single quote, not 9 rows.
+- If two sources cite the same external regulation (e.g. Siuslaw NF and
+  Oregon Dunes NRA both reference 36 CFR §261.16(j)), each source still
+  emits its own row — but within ONE source, don't duplicate the rule.
+
+PREFER CONTROLLED VOCABULARY (re-use these where they fit):
+  rules: on_leash, off_leash, off_leash_voice_control, on_leash_or_voice,
+         not_allowed, nuisance_restriction, feces_removal_required,
+         waste_pickup_required, collar_tag_required
+  sections: sand, water, playground, turf, walkway, restroom, parking_lot,
+            picnic_area, tide_pool, dune_restoration, pier, jetty,
+            developed_recreation_site, swimming_beach,
+            snowy_plover_protection_area, global
+If the source genuinely requires a NEW rule or section not in the lists
+above, use a new lowercase_snake_case value AND add "_is_new": true on
+the row so a reviewer can promote it."""
 
 
 SCHEMA = """OUTPUT SCHEMA — return ONLY this JSON, no prose, no markdown:
@@ -71,9 +94,11 @@ SCHEMA = """OUTPUT SCHEMA — return ONLY this JSON, no prose, no markdown:
       "evidence_verbatim": "the exact passage that supports this row, copy/
                             paste from the source (max 400 chars; include
                             the subsection label)",
-      "supersedes_baseline": true | false   // true if this row OVERRIDES a
+      "supersedes_baseline": true | false,  // true if this row OVERRIDES a
                                             // more general rule earlier in
                                             // the same source
+      "_is_new": true | false               // OMIT unless rule/section is
+                                            // outside the controlled vocab
     }
   ]
 }

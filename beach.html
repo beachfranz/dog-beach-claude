@@ -1678,9 +1678,13 @@ function _regionTimeBucketTiles(reg, beach) {
         intervals.push({ sMin, eMin, cls });
       }
     }
-    // Minute layer: undefined means no window covers this minute → use base.
+    // Window minutes — ONLY set when the window's rule DIFFERS from
+    // the section's base rule. Windows confirming the base are
+    // redundant (the bare section tile carries the base via color).
+    // Per Franz 2026-05-21 "lingering all-day times" fix.
     const winMinutes = new Array(24 * 60).fill(null);
     for (const iv of intervals) {
+      if (iv.cls === baseCls) continue;
       for (let m = Math.max(0, iv.sMin); m < Math.min(24 * 60, iv.eMin); m++) {
         const cur = winMinutes[m];
         if (cur == null || (RANK[iv.cls] ?? 0) > (RANK[cur] ?? 0)) {
@@ -1688,8 +1692,9 @@ function _regionTimeBucketTiles(reg, beach) {
         }
       }
     }
-    // Final minute layer = window if any, else base. Base may be null.
-    const minutes = winMinutes.map(c => c != null ? c : baseCls);
+    // Keep minutes nullable — RLE will skip null runs (no chip for
+    // base-rule portions). The bare section tile handles those.
+    const minutes = winMinutes;
     // RLE.
     let runStart = null, runCls = null;
     for (let m = 0; m < 24 * 60; m++) {
@@ -1868,23 +1873,15 @@ function buildAmenitiesSection(amenities, dogPolicy, beach) {
   // SINGLE-ZONE (or no zone_rules) — collapse to one grid.
   if (regions.length <= 1) {
     const ruleMap = _ruleMapFromZoneRules(dogPolicy?.zone_rules || {});
-    // Map sectionName → bool: does this section have any time windows?
-    // Built from the (possibly collapsed) regions list so we know which
-    // sections render as per-window chips below and don't need a bare tile.
-    const sectionHasWindows = {};
-    for (const reg of regions) {
-      for (const [sn, sd] of Object.entries(reg?.sections || {})) {
-        if (Array.isArray(sd?.time_windows) && sd.time_windows.length > 0) {
-          sectionHasWindows[sn] = true;
-        }
-      }
-    }
+    // Render bare section tile for EVERY section with a base rule.
+    // Chip rendering emits ONLY for time-VARIED minutes (where window
+    // rule differs from base), so the tile carries the base rule via
+    // color and chips carry exceptions. Franz 2026-05-21.
     const sectionTiles = [];
     for (const [secName, rule] of Object.entries(ruleMap)) {
       if (_SECTION_TO_AMENITY[secName]) continue;
       const tile = _SECTION_TILE[secName];
       if (!tile) continue;
-      if (sectionHasWindows[secName]) continue;  // chips below carry this
       sectionTiles.push({
         key: `section:${secName}`, icon: tile.icon, label: tile.label,
         sectionName: secName,
@@ -1936,14 +1933,13 @@ function buildAmenitiesSection(amenities, dogPolicy, beach) {
         .find(([sec, key]) => key === t.key)?.[0];
       if (matchingSection && secs[matchingSection]) tilesForRegion.push(t);
     }
-    // Bare section tiles — only when the section has NO time windows.
-    // Sections WITH windows render as per-window chips below, so the
-    // bare tile would be redundant (Franz 2026-05-20).
+    // Bare section tile for EVERY section with a base rule. Chip
+    // rendering emits ONLY for time-VARIED minutes; the tile carries
+    // the base rule via color, chips carry exceptions. Franz 2026-05-21.
     for (const [name, sec] of secEntries) {
       if (_SECTION_TO_AMENITY[name]) continue;
       const t = _SECTION_TILE[name];
       if (!t) continue;
-      if (Array.isArray(sec?.time_windows) && sec.time_windows.length > 0) continue;
       tilesForRegion.push({
         key: `section:${name}`, icon: t.icon, label: t.label,
         sectionName: name,

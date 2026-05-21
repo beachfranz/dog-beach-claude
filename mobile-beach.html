@@ -3246,7 +3246,8 @@ function _flatTopAmenities(amenities, dogPolicy, limit) {
     if (rule === 'unknown') continue;
     if (_SECTION_TO_AMENITY[secName]) continue;
     if (_AMENITY_DEDUP_SECTIONS.has(secName)) continue;
-    if (sectionHasWindows[secName]) continue;
+    // Bare tile renders for every section with a base rule (Franz 2026-05-21).
+    // Chips only emit for time-varied minutes, so tile + chips coexist.
     const sec = _SECTION_TILE[secName]; if (!sec) continue;
     out.push({
       kind: 'section', sectionName: secName, icon: sec.icon, rule,
@@ -3441,14 +3442,16 @@ function _amenityTimePillsHtml(zoneRules, beach) {
           intervals.push({ sMin, eMin, cls });
         }
       }
+      // Only set window minutes when rule differs from base (Franz 2026-05-21).
       const winMinutes = new Array(24 * 60).fill(null);
       for (const iv of intervals) {
+        if (iv.cls === baseCls) continue;
         for (let mm = Math.max(0, iv.sMin); mm < Math.min(24 * 60, iv.eMin); mm++) {
           const cur = winMinutes[mm];
           if (cur == null || (RANK[iv.cls] ?? 0) > (RANK[cur] ?? 0)) winMinutes[mm] = iv.cls;
         }
       }
-      const minutes = winMinutes.map(c => c != null ? c : baseCls);
+      const minutes = winMinutes;  // null runs skipped → no all-day chips
       let runStart = null, runCls = null;
       for (let mm = 0; mm < 24 * 60; mm++) {
         const c = minutes[mm];

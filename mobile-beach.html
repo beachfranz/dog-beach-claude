@@ -1625,11 +1625,18 @@ function buildAmenitiesSection(amenities, dogPolicy) {
   if (sharedAmenityTiles.length) {
     blocks.push(`<div class="amenity-grid">${_renderTileSet(sharedAmenityTiles, amenities, null)}</div>`);
   }
+  const _RULE_COERCE = {
+    off_leash_voice_control: 'off_leash',
+    on_leash_or_voice:       'on_leash',
+  };
   for (const reg of regions) {
     const secs = reg?.sections || {};
     const secEntries = Object.entries(secs);
     if (!secEntries.length) continue;
-    const ruleHere = name => secs[name]?.rule || 'unknown';
+    const ruleHere = name => {
+      const raw = secs[name]?.rule || 'unknown';
+      return _RULE_COERCE[raw] || raw;
+    };
     // Tiles for THIS region only:
     //  - zone-tied amenity tiles where the matching section is in this region
     //  - section-only tiles for everything else in this region

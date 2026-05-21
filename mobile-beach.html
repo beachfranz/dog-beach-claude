@@ -387,16 +387,17 @@
   /* Per-region time-window pills inside the Amenities card (Franz
    * 2026-05-21). Umbrella icon + near-hour range, tinted by leash. */
   .amenity-time-row {
-    display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;
+    display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px;
   }
   .amenity-time-pill {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 4px 8px; border-radius: 999px;
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 3px 7px; border-radius: 999px;
     border: 1px solid var(--border);
     background: var(--card);
-    font-size: 12px; line-height: 1.2;
+    font-size: 11px; line-height: 1.2;
+    white-space: nowrap;
   }
-  .amenity-time-icon { font-size: 14px; flex-shrink: 0; }
+  .amenity-time-icon { font-size: 12px; flex-shrink: 0; }
   .amenity-time-pill.rule-off_leash   { background: rgba(34,197,94,0.45);  border-color: rgba(21,128,61,0.42); }
   .amenity-time-pill.rule-on_leash    { background: rgba(251,191,36,0.53); border-color: rgba(180,83,9,0.42); }
   .amenity-time-pill.rule-not_allowed { background: rgba(239,68,68,0.45);  border-color: rgba(153,27,27,0.42); }
@@ -3237,17 +3238,10 @@ function _flatTopAmenities(amenities, dogPolicy, limit) {
       _amen: amenities,
     });
   }
-  for (const [secName, rule] of Object.entries(ruleMap)) {
-    if (rule === 'unknown') continue;
-    if (_SECTION_TO_AMENITY[secName]) continue;
-    if (_AMENITY_DEDUP_SECTIONS.has(secName)) continue;
-    const sec = _SECTION_TILE[secName]; if (!sec) continue;
-    out.push({
-      kind: 'section', sectionName: secName, icon: sec.icon, rule,
-      short: _SECTION_SHORT[secName] || sec.label,
-      tip: `${sec.label} · ${({off_leash:'Off-leash',on_leash:'On-leash',not_allowed:'Not allowed'})[rule] || rule}`,
-    });
-  }
+  // Bare section tiles (Sand, Water, etc.) intentionally NOT added —
+  // the Times row in the combo card carries the same info (Franz
+  // 2026-05-21). Section tiles for zone-tied amenities like restrooms
+  // are emitted via the first loop above.
   // Sort: dog-favorability first (off_leash > on_leash > neutral > not_allowed),
   // then by the explicit _AMENITY_PRIORITY map. Amenities without a rule
   // (parking, water, restrooms…) live in the middle "neutral" bucket so
@@ -3323,7 +3317,28 @@ function _amenityTimePillsHtml(zoneRules) {
       }
     }
   }
-  if (wins.size === 0) return '';
+  // No windows anywhere — fall back to ONE "All day" pill colored by
+  // the most-restrictive section rule across all regions.
+  if (wins.size === 0) {
+    const RANK = { not_allowed: 3, on_leash: 2, off_leash: 1, unknown: 0 };
+    let worst = null;
+    for (const reg of regions) {
+      for (const sec of Object.values(reg?.sections || {})) {
+        if (!sec?.rule) continue;
+        const coerced = RULE_COERCE[sec.rule] || sec.rule;
+        const cls = (coerced === 'off_leash' || coerced === 'on_leash' || coerced === 'not_allowed')
+          ? coerced : 'unknown';
+        if (worst == null || (RANK[cls] ?? 0) > (RANK[worst] ?? 0)) worst = cls;
+      }
+    }
+    if (!worst) return '';
+    return `<div class="amenity-time-row">
+              <span class="amenity-time-pill rule-${worst}">
+                <span class="amenity-time-icon">🏖️</span>
+                <span>All day</span>
+              </span>
+            </div>`;
+  }
   const toMin = s => { const [h, m] = String(s).split(':').map(Number); return (h||0)*60 + (m||0); };
   const roundHour = s => {
     const [h, m] = String(s).split(':').map(Number);

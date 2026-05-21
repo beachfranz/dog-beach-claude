@@ -38,7 +38,7 @@
   }
   @media (min-width: 900px) {
     .body-grid {
-      grid-template-columns: minmax(260px, 30%) 1fr;  /* 30% left rail / 70% main */
+      grid-template-columns: minmax(280px, 34%) 1fr;  /* 34% left rail / 66% main */
       gap: 16px;
       padding: 0 16px;
     }
@@ -223,16 +223,17 @@
    * pill = umbrella + near-hour range, tinted by leash policy. Same
    * font-size/weight as .amenity-label so the rows feel related. */
   .amenity-time-row {
-    display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;
+    display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px;
   }
   .amenity-time-pill {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 4px 8px; border-radius: 999px;
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 3px 7px; border-radius: 999px;
     border: 1px solid var(--border);
     background: var(--card);
-    font-size: 12px; line-height: 1.2;
+    font-size: 11px; line-height: 1.2;
+    white-space: nowrap;
   }
-  .amenity-time-icon { font-size: 14px; flex-shrink: 0; }
+  .amenity-time-icon { font-size: 12px; flex-shrink: 0; }
   .amenity-time-pill.rule-off_leash   { background: rgba(34,197,94,0.45);  border-color: rgba(21,128,61,0.42); }
   .amenity-time-pill.rule-on_leash    { background: rgba(251,191,36,0.53); border-color: rgba(180,83,9,0.42); }
   .amenity-time-pill.rule-not_allowed { background: rgba(239,68,68,0.45);  border-color: rgba(153,27,27,0.42); }
@@ -1510,7 +1511,28 @@ function _amenityTimePillsHtml(reg) {
       w.counts[cls] = (w.counts[cls] || 0) + 1;
     }
   }
-  if (wins.size === 0) return '';
+  // No time windows — emit ONE "All day" pill colored by the most-
+  // restrictive section rule in this region (so Avila / Fisherman's
+  // beaches still show their not_allowed status now that the bare
+  // section tile is gone).
+  if (wins.size === 0) {
+    const RANK = { not_allowed: 3, on_leash: 2, off_leash: 1, unknown: 0 };
+    let worst = null;
+    for (const sec of Object.values(secs)) {
+      if (!sec?.rule) continue;
+      const coerced = RULE_COERCE[sec.rule] || sec.rule;
+      const cls = (coerced === 'off_leash' || coerced === 'on_leash' || coerced === 'not_allowed')
+        ? coerced : 'unknown';
+      if (worst == null || (RANK[cls] ?? 0) > (RANK[worst] ?? 0)) worst = cls;
+    }
+    if (!worst) return '';
+    return `<div class="amenity-time-row">
+              <span class="amenity-time-pill rule-${worst}">
+                <span class="amenity-time-icon">🏖️</span>
+                <span>All day</span>
+              </span>
+            </div>`;
+  }
   const toMin = s => { const [h, m] = String(s).split(':').map(Number); return (h||0)*60 + (m||0); };
   const roundHour = s => {
     const [h, m] = String(s).split(':').map(Number);
@@ -1602,17 +1624,12 @@ function buildAmenitiesSection(amenities, dogPolicy) {
         .find(([sec, key]) => key === t.key)?.[0];
       if (matchingSection && secs[matchingSection]) tilesForRegion.push(t);
     }
-    for (const [name] of secEntries) {
-      if (_SECTION_TO_AMENITY[name]) continue;
-      const t = _SECTION_TILE[name];
-      if (!t) continue;
-      tilesForRegion.push({
-        key: `section:${name}`, icon: t.icon, label: t.label,
-        sectionName: name,
-        _i: 100 + Object.keys(_SECTION_TILE).indexOf(name),
-      });
-    }
-    if (!tilesForRegion.length) continue;
+    // Bare section tiles (Sand, Water, etc.) intentionally NOT added —
+    // the per-region time-pill row below carries the same info (Franz
+    // 2026-05-21). Only zone-tied amenity tiles (parking/restrooms/
+    // showers/picnic) remain in this grid.
+    const timePills = _amenityTimePillsHtml(reg);
+    if (!tilesForRegion.length && !timePills) continue;
     const zoneName = reg.name || 'Whole beach';
     const ruleFor = d => {
       if (d.sectionName) return ruleHere(d.sectionName);
@@ -1620,10 +1637,12 @@ function buildAmenitiesSection(amenities, dogPolicy) {
         .find(([sec, key]) => key === d.key)?.[0];
       return matching ? ruleHere(matching) : null;
     };
-    const timePills = _amenityTimePillsHtml(reg);
+    const tileGrid = tilesForRegion.length
+      ? `<div class="amenity-grid">${_renderTileSet(tilesForRegion, amenities, ruleFor)}</div>`
+      : '';
     blocks.push(`
       <div class="amenity-zone-header">${escHtml(zoneName)}</div>
-      <div class="amenity-grid">${_renderTileSet(tilesForRegion, amenities, ruleFor)}</div>
+      ${tileGrid}
       ${timePills}`);
   }
 

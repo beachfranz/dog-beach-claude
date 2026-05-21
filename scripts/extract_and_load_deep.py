@@ -307,24 +307,37 @@ def write_rows(conn, beach_fid: int, policy_source_id: int, subtype: str,
                     if not consistent:
                         pass  # skip; downstream consensus will note absence
                     else:
-                        cur.execute("""
-                          INSERT INTO beach_policy_source_temporal
-                            (beach_fid, policy_source_id, bps_id, section,
-                             exception_rule, window_kind,
-                             effective_from_md, effective_to_md,
-                             anchor_start, anchor_end,
-                             daily_start, daily_end,
-                             season_label, extracted_via, extractor_confidence,
-                             created_at, updated_at)
-                          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                                  %s::time, %s::time, %s, 'deep_v1', %s, now(), now())
-                        """, (beach_fid, policy_source_id, bps_id, section,
-                              rule, window_kind,
-                              fs_md, ts_md, anchor_start, anchor_end,
-                              ds_t, de_t,
-                              (season.get('description') or daily.get('description')),
-                              0.85))
-                        counts['temporal_inserted'] += 1
+                        # ux_temporal_unique_window is an INDEX (md5 of
+                        # window fields) scoped to (beach, source, section,
+                        # kind) — does NOT include bps_id. Pre-existing
+                        # rows from earlier extractors will block. ON
+                        # CONFLICT against index expressions is awkward;
+                        # use savepoint + catch IntegrityError as the
+                        # "DO NOTHING" equivalent.
+                        cur.execute('SAVEPOINT sp_temp_ins')
+                        try:
+                            cur.execute("""
+                              INSERT INTO beach_policy_source_temporal
+                                (beach_fid, policy_source_id, bps_id, section,
+                                 exception_rule, window_kind,
+                                 effective_from_md, effective_to_md,
+                                 anchor_start, anchor_end,
+                                 daily_start, daily_end,
+                                 season_label, extracted_via, extractor_confidence,
+                                 created_at, updated_at)
+                              VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                      %s::time, %s::time, %s, 'deep_v1', %s, now(), now())
+                            """, (beach_fid, policy_source_id, bps_id, section,
+                                  rule, window_kind,
+                                  fs_md, ts_md, anchor_start, anchor_end,
+                                  ds_t, de_t,
+                                  (season.get('description') or daily.get('description')),
+                                  0.85))
+                            counts['temporal_inserted'] += 1
+                            cur.execute('RELEASE SAVEPOINT sp_temp_ins')
+                        except psycopg2.IntegrityError:
+                            cur.execute('ROLLBACK TO SAVEPOINT sp_temp_ins')
+                            # existing row wins (older extractor data preserved)
 
         # ── vocab review queue ──
         if (rule_is_new or section_is_new) and not dry_run:

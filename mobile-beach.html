@@ -3242,12 +3242,26 @@ function _flatTopAmenities(amenities, dogPolicy, limit) {
       }
     }
   }
+  // Section has any window with rule != base rule → variation → chips cover it.
+  const _coerce = (r) => {
+    const c = ({off_leash_voice_control:'off_leash', on_leash_or_voice:'on_leash'})[r] || r;
+    return ['off_leash','on_leash','not_allowed'].includes(c) ? c : 'unknown';
+  };
+  const allRegs = (dogPolicy?.zone_rules?.regions || []);
+  const sectionHasVariation = {};
+  for (const reg of allRegs) {
+    for (const [sn, sd] of Object.entries(reg?.sections || {})) {
+      const baseC = _coerce(sd?.rule);
+      if ((sd?.time_windows || []).some(tw => _coerce(tw.rule || sd?.rule) !== baseC)) {
+        sectionHasVariation[sn] = true;
+      }
+    }
+  }
   for (const [secName, rule] of Object.entries(ruleMap)) {
     if (rule === 'unknown') continue;
     if (_SECTION_TO_AMENITY[secName]) continue;
     if (_AMENITY_DEDUP_SECTIONS.has(secName)) continue;
-    // Bare tile renders for every section with a base rule (Franz 2026-05-21).
-    // Chips only emit for time-varied minutes, so tile + chips coexist.
+    if (sectionHasVariation[secName]) continue;  // chips cover this
     const sec = _SECTION_TILE[secName]; if (!sec) continue;
     out.push({
       kind: 'section', sectionName: secName, icon: sec.icon, rule,
@@ -3442,16 +3456,20 @@ function _amenityTimePillsHtml(zoneRules, beach) {
           intervals.push({ sMin, eMin, cls });
         }
       }
-      // Only set window minutes when rule differs from base (Franz 2026-05-21).
+      // Skip chip rendering when no rule variation; bare tile carries
+      // the constant rule. Otherwise chips cover the full day (vars +
+      // base-fill). Franz 2026-05-21.
       const winMinutes = new Array(24 * 60).fill(null);
+      let hasVariation = false;
       for (const iv of intervals) {
-        if (iv.cls === baseCls) continue;
+        if (iv.cls !== baseCls) hasVariation = true;
         for (let mm = Math.max(0, iv.sMin); mm < Math.min(24 * 60, iv.eMin); mm++) {
           const cur = winMinutes[mm];
           if (cur == null || (RANK[iv.cls] ?? 0) > (RANK[cur] ?? 0)) winMinutes[mm] = iv.cls;
         }
       }
-      const minutes = winMinutes;  // null runs skipped → no all-day chips
+      if (!hasVariation) continue;
+      const minutes = winMinutes.map(c => c != null ? c : baseCls);
       let runStart = null, runCls = null;
       for (let mm = 0; mm < 24 * 60; mm++) {
         const c = minutes[mm];

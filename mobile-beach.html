@@ -3383,11 +3383,31 @@ function _amenityTimePillsHtml(zoneRules, beach) {
   };
   const isTimeAnchor = (a) => a === 'dawn' || a === 'dusk' || a === 'sunrise' || a === 'sunset';
 
+  // Amenity-class sections render as amenity tiles, not chips (Franz 2026-05-21).
+  const AMENITY_SECTIONS_FOR_CHIPS = new Set([
+    'parking_lot','walkway','restrooms','showers','restrooms_showers',
+    'picnic_area','fire_pits','playground','campground'
+  ]);
+  // Operating hours for clipping chip ranges.
+  const _toMin = (t) => {
+    if (!t) return null;
+    const [h, m] = String(t).slice(0,5).split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
+  let openMin = _toMin(beach?.open_time);
+  let closeMin = _toMin(beach?.close_time);
+  const isPlaceholder = (openMin === 5*60 && closeMin === 22*60);
+  if ((openMin == null || closeMin == null || isPlaceholder) && sun) {
+    if (sun.sunriseMin != null) openMin = sun.sunriseMin;
+    if (sun.sunsetMin  != null) closeMin = sun.sunsetMin;
+  }
+
   const items = [];
   for (const reg of regions) {
     for (const [sn, sd] of Object.entries(reg?.sections || {})) {
-      // Skip 'global' — meta-section, not a place. Franz 2026-05-21.
+      // Skip 'global' — meta-section. Skip amenity-class — amenity tile carries rule.
       if (sn === 'global') continue;
+      if (AMENITY_SECTIONS_FOR_CHIPS.has(sn)) continue;
       const baseRawRule = sd?.rule || 'unknown';
       const baseCoerced = RULE_COERCE[baseRawRule] || baseRawRule;
       const baseCls = (baseCoerced === 'off_leash' || baseCoerced === 'on_leash' || baseCoerced === 'not_allowed')
@@ -3460,13 +3480,15 @@ function _amenityTimePillsHtml(zoneRules, beach) {
     );
   };
   return items.map(it => {
-    // Skip degenerate windows post-substitution (< 30 min after dawn/dusk shift)
+    // Substitute sentinel endpoints + clip to operating hours.
     let dispStart = it.sMin;
     let dispEnd   = it.eMin;
     if (sun) {
       if (dispStart === 0     && sun.sunriseMin != null) dispStart = sun.sunriseMin;
       if (dispEnd   === 24*60 && sun.sunsetMin  != null) dispEnd   = sun.sunsetMin;
     }
+    if (openMin  != null && dispStart < openMin)  dispStart = openMin;
+    if (closeMin != null && dispEnd   > closeMin) dispEnd   = closeMin;
     if (dispEnd - dispStart < 30) return '';
     const sl = SECTION_LABEL[it.section] || it.section;
     const parts = sl.split(' ');

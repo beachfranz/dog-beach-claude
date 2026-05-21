@@ -1620,9 +1620,12 @@ function _regionTimeBucketTiles(reg, beach) {
   let openMin = _toMin(beach?.open_time);
   let closeMin = _toMin(beach?.close_time);
   const isPlaceholder = (openMin === 5*60 && closeMin === 22*60);
+  // Sunrise/sunset fallback for beaches with no explicit hours.
+  // Round to nearest hour for a clean display (Franz 2026-05-21).
+  const _roundHour = (min) => Math.round(min / 60) * 60;
   if ((openMin == null || closeMin == null || isPlaceholder) && sun) {
-    if (sun.sunriseMin != null) openMin = sun.sunriseMin;
-    if (sun.sunsetMin  != null) closeMin = sun.sunsetMin;
+    if (sun.sunriseMin != null) openMin = _roundHour(sun.sunriseMin);
+    if (sun.sunsetMin  != null) closeMin = _roundHour(sun.sunsetMin);
   }
 
   const merged = [];

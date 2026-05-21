@@ -177,13 +177,14 @@ def ask_llm(cli: Anthropic, beach: dict, rows: list[dict]) -> dict:
 def apply(cur, match_ids: list[int], non_match_ids: list[int],
           all_rows: list[dict], dry_run: bool) -> dict:
     """match_ids / non_match_ids are bps.id values. Non-matches get
-    DELETED (with their temporals). Matches that have a non-null
-    region_name get NULL'd, with conflict-aware DELETE-losers if
-    another keeper exists at the same canonical key."""
-    counts = {'deletes_non_match': 0, 'null_match': 0,
-              'temporal_orphans_deleted': 0, 'collapse_deletes': 0}
+    DELETED (with their temporals). Matches are PRESERVED AS-IS —
+    named regions stay named (legitimate sub-zones like Powerhouse-29th
+    on Del Mar Beach 8992 must not be flattened to NULL). The render-
+    time substring collapse handles the 'region IS the beach' case for
+    single-zone beaches. Per Franz 2026-05-21 patch."""
+    counts = {'deletes_non_match': 0,
+              'temporal_orphans_deleted': 0}
 
-    # 1. DELETE non-match rows + their temporals.
     if non_match_ids and not dry_run:
         cur.execute("DELETE FROM beach_policy_source_temporal WHERE bps_id = ANY(%s)",
                     (non_match_ids,))
@@ -192,47 +193,6 @@ def apply(cur, match_ids: list[int], non_match_ids: list[int],
         counts['deletes_non_match'] = cur.rowcount
     elif non_match_ids:
         counts['deletes_non_match'] = len(non_match_ids)
-
-    # 2. NULL region_name on matches that have one. Conflict-aware:
-    # if multiple matches collide at the same (section, rule) when NULL'd,
-    # keep one (prefer existing NULL, else min id), delete others +
-    # move temporals to keeper.
-    matches_with_region = [r for r in all_rows
-                            if r['id'] in match_ids and r['region_name'] is not None]
-    if matches_with_region and not dry_run:
-        # Re-fetch the full set including any existing NULL-region rows
-        # at this beach+source, to group correctly.
-        fid = None; ps_id = None
-        for r in all_rows:
-            if r['id'] in match_ids:
-                # We need fid+ps_id; derive from one of the rows. They're all
-                # from the same (fid, ps_id) by construction (caller).
-                # Easier: caller passes them in main(). For now, look up.
-                break
-        # All match rows + existing NULL rows
-        match_set = set(match_ids)
-        relevant = [r for r in all_rows
-                    if r['id'] in match_set or r['region_name'] is None]
-        buckets: dict[tuple, list[dict]] = {}
-        for r in relevant:
-            buckets.setdefault((r['section'], r['rule']), []).append(r)
-        for (section, rule), bucket in buckets.items():
-            keeper = sorted(bucket, key=lambda r: (r['region_name'] is not None, r['id']))[0]
-            keeper_id = keeper['id']
-            loser_ids = [r['id'] for r in bucket if r['id'] != keeper_id]
-            for lid in loser_ids:
-                cur.execute("""UPDATE beach_policy_source_temporal SET bps_id = %s
-                                WHERE bps_id = %s""", (keeper_id, lid))
-            if loser_ids:
-                cur.execute("DELETE FROM beach_policy_source WHERE id = ANY(%s)",
-                            (loser_ids,))
-                counts['collapse_deletes'] += len(loser_ids)
-            if keeper['region_name'] is not None:
-                cur.execute("UPDATE beach_policy_source SET region_name = NULL WHERE id = %s",
-                            (keeper_id,))
-                counts['null_match'] += 1
-    elif matches_with_region:
-        counts['null_match'] = len(matches_with_region)
     return counts
 
 
@@ -309,8 +269,6 @@ def main() -> int:
 
         counts = apply(cur, match_ids, non_match_ids, rows, args.dry_run)
         totals['deletes_non_match'] += counts['deletes_non_match']
-        totals['null_match']        += counts['null_match']
-        totals['collapse_deletes']  += counts['collapse_deletes']
         totals['temporal_orphans']  += counts['temporal_orphans_deleted']
         totals['affected_fids'].add(fid)
         totals['pairs']             += 1
@@ -324,9 +282,8 @@ def main() -> int:
                 conn.rollback()
                 print(f'    re-cascade fail: {e}')
 
-        print(f'    → match={len(match_ids)} non={len(non_match_ids)}'
-              f' (deleted={counts["deletes_non_match"]} null\'d={counts["null_match"]}'
-              f' collapse={counts["collapse_deletes"]})')
+        print(f'    → match={len(match_ids)} kept-as-is, non={len(non_match_ids)}'
+              f' deleted (temporals dropped={counts["temporal_orphans_deleted"]})')
 
     cost = totals['in_tokens']*3e-6 + totals['out_tokens']*15e-6
     print()

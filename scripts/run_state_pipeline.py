@@ -1575,8 +1575,7 @@ def action_state_photo_galleries(state: str) -> int:
       - CDPR (CA only) — California State Parks gallery
       - CCC (CA only) — California Coastal Commission
       - WSPRC (WA only) — Washington State Parks
-      - OPRD (OR only) — NOT BUILT YET, flagged in log
-        (see project_state_parks_dept_baseline_photo_source memory)
+      - OPRD (OR only) — Oregon Parks and Recreation Department
     """
     runs: list[tuple[str, list[str], int]] = [
         ('NPS', ['scripts/load_nps_photos.py', '--state', state, '--full'], 1800),
@@ -1587,7 +1586,7 @@ def action_state_photo_galleries(state: str) -> int:
     elif state == 'WA':
         runs.append(('WSPRC', ['scripts/load_wsprc_photos.py', '--full'], 1800))
     elif state == 'OR':
-        log(f'    OPRD loader not built yet — OR state-parks photos GAP. See pin.')
+        runs.append(('OPRD', ['scripts/load_oprd_photos.py', '--full'], 1800))
 
     total = 0
     for name, cmd, timeout in runs:

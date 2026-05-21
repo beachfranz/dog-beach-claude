@@ -1377,8 +1377,15 @@ const _SECTION_TILE = {
 // Walk zone_rules and return a map of {sectionName -> mostRestrictiveRule}.
 // "Most restrictive" priority: not_allowed > on_leash > off_leash > unknown.
 // Multi-region beaches collapse to one rule per section using this priority.
+//
+// Extended rule values (off_leash_voice_control, on_leash_or_voice) collapse
+// to their visual class before ranking. Per Franz 2026-05-21.
 function _ruleMapFromZoneRules(zr) {
   const RANK = { not_allowed: 3, on_leash: 2, off_leash: 1, unknown: 0 };
+  const COERCE = {
+    off_leash_voice_control: 'off_leash',
+    on_leash_or_voice:       'on_leash',
+  };
   const out = {};
   const seasons = (Array.isArray(zr?.seasons) && zr.seasons.length)
     ? zr.seasons
@@ -1388,7 +1395,8 @@ function _ruleMapFromZoneRules(zr) {
     for (const r of regs) {
       const secs = r?.sections || {};
       for (const [name, sec] of Object.entries(secs)) {
-        const rule = sec?.rule || 'unknown';
+        const raw = sec?.rule || 'unknown';
+        const rule = COERCE[raw] || raw;
         if (!out[name] || (RANK[rule] ?? 0) > (RANK[out[name]] ?? 0)) {
           out[name] = rule;
         }

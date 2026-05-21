@@ -3480,15 +3480,11 @@ function _amenityTimePillsHtml(zoneRules, beach) {
     );
   };
   return items.map(it => {
-    // Substitute sentinel endpoints + clip to operating hours.
-    let dispStart = it.sMin;
-    let dispEnd   = it.eMin;
-    if (sun) {
-      if (dispStart === 0     && sun.sunriseMin != null) dispStart = sun.sunriseMin;
-      if (dispEnd   === 24*60 && sun.sunsetMin  != null) dispEnd   = sun.sunsetMin;
-    }
-    if (openMin  != null && dispStart < openMin)  dispStart = openMin;
-    if (closeMin != null && dispEnd   > closeMin) dispEnd   = closeMin;
+    // Sentinel endpoints → operating hours; non-sentinel clipped.
+    let dispStart = (it.sMin === 0)     ? (openMin  ?? 0)
+                                        : Math.max(it.sMin, openMin  ?? 0);
+    let dispEnd   = (it.eMin === 24*60) ? (closeMin ?? 24*60)
+                                        : Math.min(it.eMin, closeMin ?? 24*60);
     if (dispEnd - dispStart < 30) return '';
     const sl = SECTION_LABEL[it.section] || it.section;
     const parts = sl.split(' ');

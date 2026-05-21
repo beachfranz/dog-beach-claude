@@ -384,24 +384,8 @@
   .amenity.rule-not_allowed { background: rgba(239,68,68,0.45); border-color: rgba(153,27,27,0.42); }
   .amenity.rule-unknown     { background: rgba(0,0,0,0.04); }
 
-  /* Per-region time-window pills inside the Amenities card (Franz
-   * 2026-05-21). Umbrella icon + near-hour range, tinted by leash. */
-  .amenity-time-row {
-    display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px;
-  }
-  .amenity-time-pill {
-    display: inline-flex; align-items: center; gap: 3px;
-    padding: 3px 7px; border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--card);
-    font-size: 11px; line-height: 1.2;
-    white-space: nowrap;
-  }
-  .amenity-time-icon { font-size: 12px; flex-shrink: 0; }
-  .amenity-time-pill.rule-off_leash   { background: rgba(34,197,94,0.45);  border-color: rgba(21,128,61,0.42); }
-  .amenity-time-pill.rule-on_leash    { background: rgba(251,191,36,0.53); border-color: rgba(180,83,9,0.42); }
-  .amenity-time-pill.rule-not_allowed { background: rgba(239,68,68,0.45);  border-color: rgba(153,27,27,0.42); }
-  .amenity-time-pill.rule-unknown     { background: rgba(0,0,0,0.04); }
+  /* Time buckets render as combo-chips (with rule color + time sub-label)
+   * inside the Amenities row of the combo card (Franz 2026-05-20). */
 
   /* Zone-name sub-header inside the unified Amenities card (multi-zone beaches). */
   .amenity-zone-header {
@@ -1261,7 +1245,9 @@ function _sunTimes(lat, lng, dateObj, timezone) {
     } catch { return -lng * 4; } // fallback: longitude → minutes east of UTC
   })();
   // Solar noon (local minutes after midnight)
-  const noonMin = 12 * 60 - eot + tzMinutes + 4 * lng;
+  // Sign on 4*lng was wrong (Franz 2026-05-20) — for west-longitude
+  // beaches this produced negative noonMin and wrapped sunset to early-am.
+  const noonMin = 12 * 60 - eot + tzMinutes - 4 * lng;
   return {
     sunriseMin: Math.round(noonMin - haRise),
     sunsetMin:  Math.round(noonMin + haRise),
@@ -1369,8 +1355,11 @@ function buildHoursSection(beach, amenities, dogPolicy, hoursToday) {
   }
   const prohibStart = dogPolicy?.dogs_prohibited_start;
   const prohibEnd   = dogPolicy?.dogs_prohibited_end;
-  const prohibNote  = (prohibStart && prohibEnd)
-    ? `<p class="hours-dogs-prohibited"><strong>Dogs not allowed ${escHtml(prohibStart)}–${escHtml(prohibEnd)}</strong></p>`
+  // Format raw HH:MM(:SS) → "10am" / "5:30pm" (Franz 2026-05-20).
+  const prohibStartFmt = prohibStart ? _hhmmToFmt(String(prohibStart).slice(0,5)) : null;
+  const prohibEndFmt   = prohibEnd   ? _hhmmToFmt(String(prohibEnd  ).slice(0,5)) : null;
+  const prohibNote  = (prohibStartFmt && prohibEndFmt)
+    ? `<p class="hours-dogs-prohibited"><strong>Dogs not allowed ${escHtml(prohibStartFmt)}–${escHtml(prohibEndFmt)}</strong></p>`
       + _suggestPostProhibitionTime(prohibStart, prohibEnd, beach.timezone)
     : '';
   const boxes = [];
@@ -3312,60 +3301,138 @@ function _renderComboChip(it) {
   </div>`;
 }
 
-// Build per-region time-window pills row from zone_rules. Unions windows
-// across all regions; one pill per unique (start,end). Times round to
-// nearest hour. Color = most-favorable rule observed in that window.
-function _amenityTimePillsHtml(zoneRules) {
+// Build per-section per-time-window combo chips from zone_rules. Each
+// chip = section icon + section name + time range + rule color.
+// Includes anchor-based windows (sunrise/sunset). Franz 2026-05-20.
+function _amenityTimePillsHtml(zoneRules, beach) {
   const RULE_COERCE = {
     off_leash_voice_control: 'off_leash',
     on_leash_or_voice:       'on_leash',
   };
+  const sun = beach
+    ? _sunTimes(beach.lat, beach.lng, new Date(), beach.timezone)
+    : null;
+  const anchorToMin = (anchor) => {
+    if (!sun) return null;
+    if (anchor === 'dawn'   ) return sun.dawnMin    ?? sun.sunriseMin;
+    if (anchor === 'dusk'   ) return sun.duskMin    ?? sun.sunsetMin;
+    if (anchor === 'sunrise') return sun.sunriseMin;
+    if (anchor === 'sunset' ) return sun.sunsetMin;
+    return null;
+  };
   const FAVOR = { off_leash: 0, on_leash: 1, unknown: 2, not_allowed: 3 };
+  const SECTION_LABEL = window.ZoneRulesBlock?.SECTION_LABEL || {};
   const regions = (zoneRules?.regions && Array.isArray(zoneRules.regions))
     ? zoneRules.regions
     : (Array.isArray(zoneRules?.seasons) ? zoneRules.seasons.flatMap(s => s.regions || []) : []);
-  const wins = new Map();
+  const minToFmt = (min) => {
+    if (min == null || !Number.isFinite(min)) return '?';
+    const r = (((min / 60) % 24) + 24) % 24;
+    const h = Math.floor(r);
+    const hh = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return `${hh}${h >= 12 ? 'pm' : 'am'}`;
+  };
+  const fmt = (t, anchor) => {
+    if (t) {
+      const [h, m] = String(t).split(':').map(Number);
+      return minToFmt((h || 0) * 60 + (m || 0));
+    }
+    const aMin = anchorToMin(anchor);
+    if (aMin != null) return minToFmt(aMin);
+    if (anchor === 'dawn' || anchor === 'sunrise') return 'sunrise';
+    if (anchor === 'dusk' || anchor === 'sunset' ) return 'sunset';
+    return '?';
+  };
+  const tToMin = (t) => {
+    if (!t) return null;
+    const [h, m] = String(t).split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
+  const RANK = { not_allowed: 3, on_leash: 2, off_leash: 1, unknown: 0 };
+  // Per-section per-minute effective rule (most-restrictive wins),
+  // then RLE to tile intervals (Franz 2026-05-20).
+  const items = [];
   for (const reg of regions) {
-    for (const sec of Object.values(reg?.sections || {})) {
-      for (const tw of (sec?.time_windows || [])) {
-        if (!tw.start || !tw.end) continue;
-        const key = `${tw.start}|${tw.end}`;
-        if (!wins.has(key)) wins.set(key, { start: tw.start, end: tw.end, counts: {} });
-        const w = wins.get(key);
-        const raw = tw.rule || sec?.rule || 'unknown';
+    for (const [sn, sd] of Object.entries(reg?.sections || {})) {
+      const tws = sd?.time_windows || [];
+      if (!tws.length) continue;
+      const intervals = [];
+      for (const tw of tws) {
+        const raw = tw.rule || sd?.rule || 'unknown';
         const coerced = RULE_COERCE[raw] || raw;
         const cls = (coerced === 'off_leash' || coerced === 'on_leash' || coerced === 'not_allowed')
           ? coerced : 'unknown';
-        w.counts[cls] = (w.counts[cls] || 0) + 1;
+        let sMin = tToMin(tw.start);
+        let eMin = tToMin(tw.end);
+        if (sMin == null) sMin = anchorToMin(tw.season_anchor_start);
+        if (eMin == null) eMin = anchorToMin(tw.season_anchor_end);
+        if (eMin === 23 * 60 + 59) eMin = 24 * 60;
+        if (sMin == null && eMin == null) continue;
+        if (sMin == null) sMin = 0;
+        if (eMin == null) eMin = 24 * 60;
+        if (sMin > eMin) {
+          intervals.push({ sMin, eMin: 24 * 60, cls });
+          intervals.push({ sMin: 0,   eMin,        cls });
+        } else {
+          intervals.push({ sMin, eMin, cls });
+        }
       }
+      if (!intervals.length) continue;
+      const minutes = new Array(24 * 60).fill(null);
+      for (const iv of intervals) {
+        for (let mm = Math.max(0, iv.sMin); mm < Math.min(24 * 60, iv.eMin); mm++) {
+          const cur = minutes[mm];
+          if (cur == null || (RANK[iv.cls] ?? 0) > (RANK[cur] ?? 0)) minutes[mm] = iv.cls;
+        }
+      }
+      let runStart = null, runCls = null;
+      for (let mm = 0; mm < 24 * 60; mm++) {
+        const c = minutes[mm];
+        if (c === runCls) continue;
+        if (runCls != null) items.push({ section: sn, cls: runCls, sMin: runStart, eMin: mm });
+        runStart = mm;
+        runCls = c;
+      }
+      if (runCls != null) items.push({ section: sn, cls: runCls, sMin: runStart, eMin: 24 * 60 });
     }
   }
-  // No windows anywhere — no pill row. Section tiles carry constant rules.
-  if (wins.size === 0) return '';
-  const toMin = s => { const [h, m] = String(s).split(':').map(Number); return (h||0)*60 + (m||0); };
-  const roundHour = s => {
-    const [h, m] = String(s).split(':').map(Number);
-    const r = ((h || 0) + Math.round((m || 0) / 60)) % 24;
-    const hh = r === 0 ? 12 : r > 12 ? r - 12 : r;
-    return `${hh}${r >= 12 ? 'pm' : 'am'}`;
+  if (!items.length) return '';
+  items.sort((a, b) => {
+    if (a.sMin !== b.sMin) return a.sMin - b.sMin;
+    return (FAVOR[a.cls] ?? 9) - (FAVOR[b.cls] ?? 9);
+  });
+  const fmtEdge = (min, isStart) => {
+    if (sun) {
+      if (isStart && min === 0 && sun.sunriseMin != null) min = sun.sunriseMin;
+      if (!isStart && min === 24*60 && sun.sunsetMin != null) min = sun.sunsetMin;
+    }
+    return fmt(null, null) === '?' ? `${min}m` : (
+      ((min) => {
+        const r = (((min / 60) % 24) + 24) % 24;
+        const h = Math.floor(r);
+        const hh = h === 0 ? 12 : h > 12 ? h - 12 : h;
+        return `${hh}${h >= 12 ? 'pm' : 'am'}`;
+      })(min)
+    );
   };
-  const arr = Array.from(wins.values()).sort((a, b) => toMin(a.start) - toMin(b.start));
-  const pills = arr.map(w => {
-    const dominant = Object.keys(w.counts).sort((a, b) => (FAVOR[a]??9) - (FAVOR[b]??9))[0] || 'unknown';
-    const range = `${roundHour(w.start)}-${roundHour(w.end)}`;
-    return `<span class="amenity-time-pill rule-${dominant}">
-              <span class="amenity-time-icon">🏖️</span>
-              <span>${escHtml(range)}</span>
-            </span>`;
+  return items.map(it => {
+    const sl = SECTION_LABEL[it.section] || it.section;
+    const parts = sl.split(' ');
+    const icon = parts[0];
+    const label = parts.slice(1).join(' ') || it.section;
+    const range = `${fmtEdge(it.sMin, true)}-${fmtEdge(it.eMin, false)}`;
+    return `<div class="combo-chip rule-${it.cls}" data-tip="${escHtml(label + ' · ' + range)}">
+      <span class="combo-icon">${icon}</span>
+      <div class="combo-label">${escHtml(label)} ${escHtml(range)}</div>
+    </div>`;
   }).join('');
-  return `<div class="amenity-time-row">${pills}</div>`;
 }
 
 function buildAmenitiesAndActivitiesCard(beach, dogPolicy, amenities, hoursToday, today) {
   const amenTiles = _flatTopAmenities(amenities, dogPolicy, 8);
   const actTiles  = _activityIcons(beach, dogPolicy, amenities, hoursToday);
   const cautTiles = _cautionTiles(today, dogPolicy, hoursToday, beach);
-  const timesHtml = _amenityTimePillsHtml(dogPolicy?.zone_rules);
+  const timesHtml = _amenityTimePillsHtml(dogPolicy?.zone_rules, beach);
   if (!amenTiles.length && !actTiles.length && !cautTiles.length && !timesHtml) return '';
   const amenRow = amenTiles.map(_renderComboChip).join('');
   const actRow  = actTiles.map(it => {
@@ -3385,9 +3452,12 @@ function buildAmenitiesAndActivitiesCard(beach, dogPolicy, amenities, hoursToday
       <div class="combo-label">${escHtml(it.short)}</div>
     </div>`;
   }).join('');
+  // Time-window chips go into the Amenities row (Franz 2026-05-20) so
+  // they sit alongside Parking/Restrooms/etc. rather than a separate
+  // section. timesHtml is bare chips (no row wrapper).
+  const amenRowFull = amenRow + (timesHtml || '');
   return `<section class="card combo-card">
-    ${amenTiles.length ? `<div class="combo-row-label">Amenities</div><div class="combo-row">${amenRow}</div>` : ''}
-    ${timesHtml       ? `<div class="combo-row-label">Times</div>${timesHtml}`                                : ''}
+    ${amenRowFull.length ? `<div class="combo-row-label">Amenities</div><div class="combo-row">${amenRowFull}</div>` : ''}
     ${actTiles.length  ? `<div class="combo-row-label">Activities</div><div class="combo-row">${actRow}</div>`  : ''}
     ${cautTiles.length ? `<div class="combo-row-label">Cautions</div><div class="combo-row">${cautRow}</div>`   : ''}
   </section>`;

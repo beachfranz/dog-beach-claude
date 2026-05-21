@@ -218,26 +218,9 @@
    * filter out at the JS layer until the user-feedback affordance
    * lands (project_amenity_user_feedback.md). */
 
-  /* Per-region time-window pills inside the Amenities card (Franz
-   * 2026-05-21). One row per region beneath the section tiles; each
-   * pill = umbrella + near-hour range, tinted by leash policy. Same
-   * font-size/weight as .amenity-label so the rows feel related. */
-  .amenity-time-row {
-    display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px;
-  }
-  .amenity-time-pill {
-    display: inline-flex; align-items: center; gap: 3px;
-    padding: 3px 7px; border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--card);
-    font-size: 11px; line-height: 1.2;
-    white-space: nowrap;
-  }
-  .amenity-time-icon { font-size: 12px; flex-shrink: 0; }
-  .amenity-time-pill.rule-off_leash   { background: rgba(34,197,94,0.45);  border-color: rgba(21,128,61,0.42); }
-  .amenity-time-pill.rule-on_leash    { background: rgba(251,191,36,0.53); border-color: rgba(180,83,9,0.42); }
-  .amenity-time-pill.rule-not_allowed { background: rgba(239,68,68,0.45);  border-color: rgba(153,27,27,0.42); }
-  .amenity-time-pill.rule-unknown     { background: rgba(0,0,0,0.04); }
+  /* Time-bucket tiles render as standard .amenity tiles in the grid
+   * (Franz 2026-05-20). The existing .amenity.rule-* coloring and
+   * .amenity-sub for the time range do all the work — no extra CSS. */
 
   /* Cautions card — same visual language as amenities (compact tile
    * grid, icon + short label). Click expands a detail panel below
@@ -1145,8 +1128,10 @@ function _sunTimes(lat, lng, dateObj, timezone) {
       return Math.round((local - utc) / 60000);
     } catch { return -lng * 4; } // fallback: longitude → minutes east of UTC
   })();
-  // Solar noon (local minutes after midnight)
-  const noonMin = 12 * 60 - eot + tzMinutes + 4 * lng;
+  // Solar noon (local minutes after midnight). Sign on 4*lng was wrong
+  // (Franz 2026-05-20) — for west-longitude beaches this produced
+  // negative noonMin and wrapped sunset into the early-morning hours.
+  const noonMin = 12 * 60 - eot + tzMinutes - 4 * lng;
   return {
     sunriseMin: Math.round(noonMin - haRise),
     sunsetMin:  Math.round(noonMin + haRise),
@@ -1250,8 +1235,12 @@ function buildHoursSection(beach, amenities, dogPolicy) {
   }
   const prohibStart = dogPolicy?.dogs_prohibited_start;
   const prohibEnd   = dogPolicy?.dogs_prohibited_end;
-  const prohibNote  = (prohibStart && prohibEnd)
-    ? `<p class="hours-dogs-prohibited"><strong>Dogs not allowed ${escHtml(prohibStart)}–${escHtml(prohibEnd)}</strong></p>`
+  // Format raw HH:MM(:SS) → "10am" / "5:30pm" via existing _hhmmToFmt
+  // (Franz 2026-05-20 — was rendering raw "10:00:00–17:00:00").
+  const prohibStartFmt = prohibStart ? _hhmmToFmt(String(prohibStart).slice(0,5)) : null;
+  const prohibEndFmt   = prohibEnd   ? _hhmmToFmt(String(prohibEnd  ).slice(0,5)) : null;
+  const prohibNote  = (prohibStartFmt && prohibEndFmt)
+    ? `<p class="hours-dogs-prohibited"><strong>Dogs not allowed ${escHtml(prohibStartFmt)}–${escHtml(prohibEndFmt)}</strong></p>`
       + _suggestPostProhibitionTime(prohibStart, prohibEnd, beach.timezone)
     : '';
   const rangeHtml = rangeLabel
@@ -1486,15 +1475,190 @@ function _renderTileSet(tiles, amenities, ruleFor) {
   return decorated.map(x => _renderAmenityTileWithRule(x.d, amenities, x.rule)).join('');
 }
 
-// Build the per-region time-window pills row (Franz 2026-05-21). Reads
-// sections[].time_windows for the given region/object-shape, unions the
-// (start,end) keys, picks the most-favorable rule per window, and emits
-// a pill row. Times round to the nearest hour and drop minutes.
-function _amenityTimePillsHtml(reg) {
-  const RULE_COERCE = {
-    off_leash_voice_control: 'off_leash',
-    on_leash_or_voice:       'on_leash',
+// Per-section per-time-window tiles. One tile per unique time bucket,
+// rendered in the same .amenity-grid as other amenity tiles (Franz
+// 2026-05-20). Includes anchor-based windows (sunrise/sunset) that the
+// old pills helper dropped.
+const _TW_RULE_COERCE = {
+  off_leash_voice_control: 'off_leash',
+  on_leash_or_voice:       'on_leash',
+};
+// Anchor → minutes-after-midnight using _sunTimes for today at this beach
+// (Franz 2026-05-20). Replaces literal "sunrise"/"sunset" labels with
+// actual local times so the tile reads "5pm-8pm" not "5pm-sunset".
+function _anchorToMin(anchor, sun) {
+  if (!sun) return null;
+  if (anchor === 'dawn'  ) return sun.dawnMin    ?? sun.sunriseMin;
+  if (anchor === 'dusk'  ) return sun.duskMin    ?? sun.sunsetMin;
+  if (anchor === 'sunrise') return sun.sunriseMin;
+  if (anchor === 'sunset' ) return sun.sunsetMin;
+  return null;
+}
+
+function _formatWindowRange(tw, sun) {
+  const minToFmt = (min) => {
+    if (min == null || !Number.isFinite(min)) return '?';
+    const r = (((min / 60) % 24) + 24) % 24;
+    const h = Math.floor(r);
+    const hh = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return `${hh}${h >= 12 ? 'pm' : 'am'}`;
   };
+  const fmt = (t, anchor) => {
+    if (t) {
+      const [h, m] = String(t).split(':').map(Number);
+      return minToFmt((h || 0) * 60 + (m || 0));
+    }
+    const anchorMin = _anchorToMin(anchor, sun);
+    if (anchorMin != null) return minToFmt(anchorMin);
+    // No sun data — fall back to symbolic label.
+    if (anchor === 'dawn' || anchor === 'sunrise') return 'sunrise';
+    if (anchor === 'dusk' || anchor === 'sunset' ) return 'sunset';
+    return '?';
+  };
+  return `${fmt(tw.start, tw.season_anchor_start)}-${fmt(tw.end, tw.season_anchor_end)}`;
+}
+
+function _renderTimeBucketTile(sectionName, tw, sectionRuleFallback, sun) {
+  const sectionLabel = (window.ZoneRulesBlock?.SECTION_LABEL || {})[sectionName] || sectionName;
+  const parts = sectionLabel.split(' ');
+  const icon = parts[0];
+  const label = parts.slice(1).join(' ') || sectionName;
+  const rawRule = tw.rule || sectionRuleFallback || 'unknown';
+  const coerced = _TW_RULE_COERCE[rawRule] || rawRule;
+  const rule = (coerced === 'off_leash' || coerced === 'on_leash' || coerced === 'not_allowed')
+    ? coerced : 'unknown';
+  const range = _formatWindowRange(tw, sun);
+  const ruleLabel = ({off_leash:'Off-leash', on_leash:'On-leash', not_allowed:'Not allowed'})[rule] || rule;
+  const tip = `${label} · ${ruleLabel} · ${range}`;
+  return `<div class="amenity rule-${rule}" data-tip="${escHtml(tip)}">
+            <span class="amenity-icon">${icon}</span>
+            <span class="amenity-text">
+              <span class="amenity-label">${escHtml(label)}</span>
+              <span class="amenity-sub">${escHtml(range)}</span>
+            </span>
+          </div>`;
+}
+
+// For a region: convert all time_windows to (startMin, endMin, rule)
+// using sun-time substitution, then merge overlapping intervals per
+// (section, rule). One tile per merged bucket. Avila example collapses
+// 8 raw windows to 3 buckets (dawn-10am, 10am-5pm, 5pm-dusk).
+// Franz 2026-05-20.
+function _regionTimeBucketTiles(reg, beach) {
+  const sun = beach
+    ? _sunTimes(beach.lat, beach.lng, new Date(), beach.timezone)
+    : null;
+  // Anchor → minutes via existing sun helper; missing data returns null.
+  const anchorMin = (a) => _anchorToMin(a, sun);
+  const tToMin = (t) => {
+    if (!t) return null;
+    const [h, m] = String(t).split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
+
+  // Build per-minute effective rule per section using
+  // most-restrictive-wins. For Avila: off_leash dawn-dusk + not_allowed
+  // 10am-5pm collapses to 3 runs: off_leash 0-10am, not_allowed 10am-5pm,
+  // off_leash 5pm-end. Then run-length encode to tile intervals.
+  const RANK = { not_allowed: 3, on_leash: 2, off_leash: 1, unknown: 0 };
+  const merged = [];
+  for (const [sn, sd] of Object.entries(reg?.sections || {})) {
+    const tws = sd?.time_windows || [];
+    if (!tws.length) continue;
+    const intervals = [];
+    for (const tw of tws) {
+      const rawRule = tw.rule || sd.rule || 'unknown';
+      const coerced = _TW_RULE_COERCE[rawRule] || rawRule;
+      const cls = (coerced === 'off_leash' || coerced === 'on_leash' || coerced === 'not_allowed')
+        ? coerced : 'unknown';
+      let sMin = tToMin(tw.start);
+      let eMin = tToMin(tw.end);
+      if (sMin == null) sMin = anchorMin(tw.season_anchor_start);
+      if (eMin == null) eMin = anchorMin(tw.season_anchor_end);
+      if (eMin === 23 * 60 + 59) eMin = 24 * 60;
+      if (sMin == null && eMin == null) continue;
+      if (sMin == null) sMin = 0;
+      if (eMin == null) eMin = 24 * 60;
+      // Handle overnight (sMin > eMin) by splitting into two intervals.
+      if (sMin > eMin) {
+        intervals.push({ sMin, eMin: 24 * 60, cls });
+        intervals.push({ sMin: 0,   eMin,        cls });
+      } else {
+        intervals.push({ sMin, eMin, cls });
+      }
+    }
+    if (!intervals.length) continue;
+    // Build minute-level effective rule (most-restrictive wins).
+    const minutes = new Array(24 * 60).fill(null);
+    for (const iv of intervals) {
+      for (let m = Math.max(0, iv.sMin); m < Math.min(24 * 60, iv.eMin); m++) {
+        const cur = minutes[m];
+        if (cur == null || (RANK[iv.cls] ?? 0) > (RANK[cur] ?? 0)) {
+          minutes[m] = iv.cls;
+        }
+      }
+    }
+    // Run-length encode contiguous same-rule spans.
+    let runStart = null, runCls = null;
+    for (let m = 0; m < 24 * 60; m++) {
+      const c = minutes[m];
+      if (c === runCls) continue;
+      if (runCls != null) merged.push({ section: sn, cls: runCls, sMin: runStart, eMin: m });
+      runStart = m;
+      runCls = c;
+    }
+    if (runCls != null) merged.push({ section: sn, cls: runCls, sMin: runStart, eMin: 24 * 60 });
+  }
+  // Sort tiles: earliest start first; off-leash before not_allowed on tie.
+  const FAVOR = { off_leash: 0, on_leash: 1, unknown: 2, not_allowed: 3 };
+  merged.sort((a, b) => {
+    if (a.sMin !== b.sMin) return a.sMin - b.sMin;
+    return (FAVOR[a.cls] ?? 9) - (FAVOR[b.cls] ?? 9);
+  });
+
+  // Format a merged interval. If endpoints coincide with dawn/dusk, use
+  // those labels (e.g. "sunrise-10am" instead of "12am-10am") since the
+  // operator's intent was daylight-only.
+  const minToFmt = (min) => {
+    if (min == null) return '?';
+    const r = (((min / 60) % 24) + 24) % 24;
+    const h = Math.floor(r);
+    const hh = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return `${hh}${h >= 12 ? 'pm' : 'am'}`;
+  };
+  const fmtEdge = (min, isStart) => {
+    // Substitute sentinel endpoints (0 / 1440) with dawn/dusk when
+    // sun data available — captures the operator's "open hours" intent.
+    if (sun) {
+      if (isStart && min === 0 && sun.sunriseMin != null) min = sun.sunriseMin;
+      if (!isStart && min === 24*60 && sun.sunsetMin != null) min = sun.sunsetMin;
+    }
+    return minToFmt(min);
+  };
+
+  return merged.map(it => {
+    const tw = { _mergedStart: it.sMin, _mergedEnd: it.eMin };
+    const range = `${fmtEdge(it.sMin, true)}-${fmtEdge(it.eMin, false)}`;
+    const sectionLabel = (window.ZoneRulesBlock?.SECTION_LABEL || {})[it.section] || it.section;
+    const parts = sectionLabel.split(' ');
+    const icon = parts[0];
+    const label = parts.slice(1).join(' ') || it.section;
+    const ruleLabel = ({off_leash:'Off-leash', on_leash:'On-leash', not_allowed:'Not allowed'})[it.cls] || it.cls;
+    const tip = `${label} · ${ruleLabel} · ${range}`;
+    return `<div class="amenity rule-${it.cls}" data-tip="${escHtml(tip)}">
+              <span class="amenity-icon">${icon}</span>
+              <span class="amenity-text">
+                <span class="amenity-label">${escHtml(label)}</span>
+                <span class="amenity-sub">${escHtml(range)}</span>
+              </span>
+            </div>`;
+  }).join('');
+}
+
+// (legacy pill helper kept as no-op shim — callers updated to use the
+// tile path above. Remove once detail.html is updated.)
+function _amenityTimePillsHtml(reg) {
+  const RULE_COERCE = _TW_RULE_COERCE;
   const FAVOR = { off_leash: 0, on_leash: 1, unknown: 2, not_allowed: 3 };
   const secs = reg?.sections || {};
   const wins = new Map();
@@ -1535,15 +1699,17 @@ function _amenityTimePillsHtml(reg) {
   return `<div class="amenity-time-row">${pills}</div>`;
 }
 
-// Collapse named regions whose name matches this beach's display name
-// into the unnamed/default region (Franz 2026-05-20). After Class A
-// cleanup, the only remaining same-beach named regions are redundant
-// duplicates of the default. Sub-features (Bluebird Park on Fisherman's
-// Cove, Duncan's Cove on Sonoma Coast) don't match and stay separate.
+// Collapse named regions that describe THIS beach (region name contains
+// the beach's display name, case-insensitive) into the unnamed default
+// (Franz 2026-05-20). Substring match catches Rosie's variants like
+// "Rosie's Dog Beach Dog Zone" / "Rosie's Dog Beach off-leash zone" /
+// "Rosie's Dog Beach — between Granada Avenue and Roycroft Avenue".
+// Sub-features like "Bluebird Park" on Fisherman's Cove don't contain
+// the beach name and stay as separate regions.
 function _collapseSelfNamedRegions(regions, beachName) {
   if (!beachName || !Array.isArray(regions) || regions.length < 2) return regions;
   const nameLower = String(beachName).toLowerCase().trim();
-  const selfRegex = new RegExp('^\\s*' + nameLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$', 'i');
+  if (nameLower.length < 4) return regions;  // too short — would false-positive
   const out = [];
   let defaultReg = null;
   for (const r of regions) {
@@ -1551,14 +1717,28 @@ function _collapseSelfNamedRegions(regions, beachName) {
     if (r.name == null) {
       defaultReg = { ...r, sections: { ...(r.sections || {}) } };
       out.push(defaultReg);
-    } else if (selfRegex.test(r.name.trim())) {
-      // Merge this region's sections into default
+    } else if (r.name.toLowerCase().includes(nameLower)) {
+      // Merge this region's sections (and time_windows) into default.
+      // Concat time_windows so the merged region carries the union;
+      // _regionTimeBucketTiles will then dedupe + merge intervals.
       if (!defaultReg) {
         defaultReg = { name: null, sections: { ...(r.sections || {}) } };
         out.push(defaultReg);
       } else {
         for (const [sn, sd] of Object.entries(r.sections || {})) {
-          if (!defaultReg.sections[sn]) defaultReg.sections[sn] = sd;
+          if (!defaultReg.sections[sn]) {
+            defaultReg.sections[sn] = sd;
+          } else {
+            const existing = defaultReg.sections[sn];
+            const mergedTws = [
+              ...(existing.time_windows || []),
+              ...(sd.time_windows || []),
+            ];
+            defaultReg.sections[sn] = {
+              ...existing,
+              time_windows: mergedTws.length ? mergedTws : undefined,
+            };
+          }
         }
       }
     } else {
@@ -1616,12 +1796,12 @@ function buildAmenitiesSection(amenities, dogPolicy, beach) {
         .find(([sec, key]) => key === d.key)?.[0];
       return matching ? ruleMap[matching] : null;
     };
+    const timeBuckets = regions.length === 1 ? _regionTimeBucketTiles(regions[0], beach) : '';
+    if (!all.length && !timeBuckets) return '';
     const cells = _renderTileSet(all, amenities, ruleFor);
-    const timePills = regions.length === 1 ? _amenityTimePillsHtml(regions[0]) : '';
     return `<section class="card amenities-card">
       <h2>Amenities</h2>
-      <div class="amenity-grid">${cells}</div>
-      ${timePills}
+      <div class="amenity-grid">${cells}${timeBuckets}</div>
     </section>`;
   }
 
@@ -1667,8 +1847,8 @@ function buildAmenitiesSection(amenities, dogPolicy, beach) {
         _i: 100 + Object.keys(_SECTION_TILE).indexOf(name),
       });
     }
-    const timePills = _amenityTimePillsHtml(reg);
-    if (!tilesForRegion.length && !timePills) continue;
+    const hasAnyTimeWindow = Object.values(secs).some(s => Array.isArray(s?.time_windows) && s.time_windows.length > 0);
+    if (!tilesForRegion.length && !hasAnyTimeWindow) continue;
     const zoneName = reg.name || 'Whole beach';
     const ruleFor = d => {
       if (d.sectionName) return ruleHere(d.sectionName);
@@ -1676,13 +1856,14 @@ function buildAmenitiesSection(amenities, dogPolicy, beach) {
         .find(([sec, key]) => key === d.key)?.[0];
       return matching ? ruleHere(matching) : null;
     };
-    const tileGrid = tilesForRegion.length
-      ? `<div class="amenity-grid">${_renderTileSet(tilesForRegion, amenities, ruleFor)}</div>`
+    const tileCells = _renderTileSet(tilesForRegion, amenities, ruleFor);
+    const timeBuckets = _regionTimeBucketTiles(reg, beach);
+    const tileGrid = (tileCells || timeBuckets)
+      ? `<div class="amenity-grid">${tileCells}${timeBuckets}</div>`
       : '';
     blocks.push(`
       <div class="amenity-zone-header">${escHtml(zoneName)}</div>
-      ${tileGrid}
-      ${timePills}`);
+      ${tileGrid}`);
   }
 
   if (!blocks.length) return '';

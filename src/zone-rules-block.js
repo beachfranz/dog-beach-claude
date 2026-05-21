@@ -114,8 +114,23 @@
     not_allowed: 'No dogs',  unknown: '—',
   };
 
+  // Rule → render class. Mirrors codify_vocab.py CANONICAL_RULES.render_as.
+  // off_leash_voice_control should color like off_leash (Franz 2026-05-21).
+  // on_leash_or_voice colors like on_leash. Meta-rules collapse to unknown
+  // (they don't render as section pills; live in global_notes footer).
+  const RULE_RENDER_CLASS = {
+    off_leash:               'off_leash',
+    off_leash_voice_control: 'off_leash',
+    on_leash:                'on_leash',
+    on_leash_or_voice:       'on_leash',
+    not_allowed:             'not_allowed',
+  };
+  function ruleClass(rule) {
+    return RULE_RENDER_CLASS[rule] || 'unknown';
+  }
+
   function sectionPill(name, rule, sec) {
-    const safeRule = ['off_leash','on_leash','not_allowed'].includes(rule) ? rule : 'unknown';
+    const safeRule = ruleClass(rule);
     const ruleShort = ZR_RULE_SHORT[safeRule];
     const evidence = sec?.evidence?.quote
       ? `<div class="zr-section-evidence">${escHtml(sec.evidence.quote)}</div>` : '';
@@ -146,7 +161,10 @@
   // sequence stays stable across time-window tabs.
   const RULE_RANK = { off_leash: 0, on_leash: 1, not_allowed: 2, unknown: 3 };
   function _rankRule(r) {
-    return r in RULE_RANK ? RULE_RANK[r] : 4;
+    // Coerce extended rule values to canonical class first
+    // (off_leash_voice_control → off_leash, etc.)
+    const cls = ruleClass(r);
+    return cls in RULE_RANK ? RULE_RANK[cls] : 4;
   }
 
   function renderZoneCard(reg, ctx, beachName, seasonName, sIdx, rIdx) {

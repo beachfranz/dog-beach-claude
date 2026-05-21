@@ -1556,30 +1556,94 @@ function _regionTimeBucketTiles(reg, beach) {
     return (h || 0) * 60 + (m || 0);
   };
 
-  // Build per-minute effective rule per section using
-  // most-restrictive-wins. For Avila: off_leash dawn-dusk + not_allowed
-  // 10am-5pm collapses to 3 runs: off_leash 0-10am, not_allowed 10am-5pm,
-  // off_leash 5pm-end. Then run-length encode to tile intervals.
+  // Build per-minute effective rule per section. Two key semantics
+  // (Franz 2026-05-21 supersedes_baseline fix):
+  //   1. WINDOWS OVERRIDE BASE: a time_window is a carve-out from the
+  //      section's default rule. At any minute covered by a window, the
+  //      window WINS regardless of restrictiveness. Base rule applies
+  //      only to minutes with NO window.
+  //   2. MULTIPLE WINDOWS AT SAME MINUTE: most-restrictive among the
+  //      windows wins (binding restrictions take precedence).
+  //   3. SEASONAL FILTERING: windows with season constraints (anchors
+  //      like labor_day_after, or eff_from/eff_to MM-DD bounds) are
+  //      skipped if today is not in season.
   const RANK = { not_allowed: 3, on_leash: 2, off_leash: 1, unknown: 0 };
+  // Compute named-anchor dates for today's year. Returns MM-DD strings.
+  const today = new Date();
+  const _firstMondayOfSep = (y) => {
+    const d = new Date(y, 8, 1);
+    return new Date(y, 8, 1 + ((1 - d.getDay() + 7) % 7));
+  };
+  const _lastMondayOfMay = (y) => {
+    const d = new Date(y, 4, 31);
+    return new Date(y, 4, 31 - ((d.getDay() - 1 + 7) % 7));
+  };
+  const _mdStr = (d) => `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const todayMd = _mdStr(today);
+  const y = today.getFullYear();
+  const ANCHOR_MD = {
+    labor_day:        _mdStr(_firstMondayOfSep(y)),
+    labor_day_after:  _mdStr(new Date(y, 8, _firstMondayOfSep(y).getDate() + 1)),
+    memorial_day:     _mdStr(_lastMondayOfMay(y)),
+    memorial_day_after: _mdStr(new Date(y, 4, _lastMondayOfMay(y).getDate() + 1)),
+  };
+  const _resolveSeasonMd = (val) => {
+    if (!val) return null;
+    const s = String(val).toLowerCase();
+    if (s.match(/^\d{2}-\d{2}$/)) return s;
+    return ANCHOR_MD[s] || null;
+  };
+  // Is `md` in the inclusive range [startMd, endMd]? Wraps around year-end.
+  const _inSeason = (md, startMd, endMd) => {
+    if (!startMd && !endMd) return true;
+    if (!startMd) return md <= endMd;
+    if (!endMd)   return md >= startMd;
+    if (startMd <= endMd) return md >= startMd && md <= endMd;
+    return md >= startMd || md <= endMd;  // wraps year-end (e.g. Sep→Jun)
+  };
+
   const merged = [];
   for (const [sn, sd] of Object.entries(reg?.sections || {})) {
+    const baseRawRule = sd.rule || 'unknown';
+    const baseCoerced = _TW_RULE_COERCE[baseRawRule] || baseRawRule;
+    const baseCls = (baseCoerced === 'off_leash' || baseCoerced === 'on_leash' || baseCoerced === 'not_allowed')
+      ? baseCoerced : (baseCoerced === 'unknown' ? null : null);
+
     const tws = sd?.time_windows || [];
-    if (!tws.length) continue;
+    // Filter windows by season (today-in-season check).
+    const activeTws = tws.filter(tw => {
+      const startMd = _resolveSeasonMd(tw.effective_from_md) || _resolveSeasonMd(tw.season_anchor_start);
+      const endMd   = _resolveSeasonMd(tw.effective_to_md)   || _resolveSeasonMd(tw.season_anchor_end);
+      // If anchors look like time-of-day (dawn/dusk) rather than season,
+      // they don't constrain season — keep the window.
+      const isTimeAnchor = (a) => a === 'dawn' || a === 'dusk' || a === 'sunrise' || a === 'sunset';
+      const startEff = isTimeAnchor(tw.season_anchor_start) ? null : startMd;
+      const endEff   = isTimeAnchor(tw.season_anchor_end)   ? null : endMd;
+      return _inSeason(todayMd, startEff, endEff);
+    });
+
+    if (!activeTws.length && !baseCls) continue;
     const intervals = [];
-    for (const tw of tws) {
+    for (const tw of activeTws) {
       const rawRule = tw.rule || sd.rule || 'unknown';
       const coerced = _TW_RULE_COERCE[rawRule] || rawRule;
       const cls = (coerced === 'off_leash' || coerced === 'on_leash' || coerced === 'not_allowed')
         ? coerced : 'unknown';
+      // Daily-time bounds for this minute-window (ignore season anchors here).
+      const isTimeAnchor = (a) => a === 'dawn' || a === 'dusk' || a === 'sunrise' || a === 'sunset';
       let sMin = tToMin(tw.start);
       let eMin = tToMin(tw.end);
-      if (sMin == null) sMin = anchorMin(tw.season_anchor_start);
-      if (eMin == null) eMin = anchorMin(tw.season_anchor_end);
+      if (sMin == null && isTimeAnchor(tw.season_anchor_start)) sMin = anchorMin(tw.season_anchor_start);
+      if (eMin == null && isTimeAnchor(tw.season_anchor_end))   eMin = anchorMin(tw.season_anchor_end);
       if (eMin === 23 * 60 + 59) eMin = 24 * 60;
-      if (sMin == null && eMin == null) continue;
-      if (sMin == null) sMin = 0;
-      if (eMin == null) eMin = 24 * 60;
-      // Handle overnight (sMin > eMin) by splitting into two intervals.
+      // For seasonal-only windows (no daily time), the window covers
+      // the whole day during its season.
+      if (sMin == null && eMin == null) {
+        sMin = 0; eMin = 24 * 60;
+      } else {
+        if (sMin == null) sMin = 0;
+        if (eMin == null) eMin = 24 * 60;
+      }
       if (sMin > eMin) {
         intervals.push({ sMin, eMin: 24 * 60, cls });
         intervals.push({ sMin: 0,   eMin,        cls });
@@ -1587,18 +1651,19 @@ function _regionTimeBucketTiles(reg, beach) {
         intervals.push({ sMin, eMin, cls });
       }
     }
-    if (!intervals.length) continue;
-    // Build minute-level effective rule (most-restrictive wins).
-    const minutes = new Array(24 * 60).fill(null);
+    // Minute layer: undefined means no window covers this minute → use base.
+    const winMinutes = new Array(24 * 60).fill(null);
     for (const iv of intervals) {
       for (let m = Math.max(0, iv.sMin); m < Math.min(24 * 60, iv.eMin); m++) {
-        const cur = minutes[m];
+        const cur = winMinutes[m];
         if (cur == null || (RANK[iv.cls] ?? 0) > (RANK[cur] ?? 0)) {
-          minutes[m] = iv.cls;
+          winMinutes[m] = iv.cls;
         }
       }
     }
-    // Run-length encode contiguous same-rule spans.
+    // Final minute layer = window if any, else base. Base may be null.
+    const minutes = winMinutes.map(c => c != null ? c : baseCls);
+    // RLE.
     let runStart = null, runCls = null;
     for (let m = 0; m < 24 * 60; m++) {
       const c = minutes[m];

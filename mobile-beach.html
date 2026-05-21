@@ -3349,27 +3349,69 @@ function _amenityTimePillsHtml(zoneRules, beach) {
     return (h || 0) * 60 + (m || 0);
   };
   const RANK = { not_allowed: 3, on_leash: 2, off_leash: 1, unknown: 0 };
-  // Per-section per-minute effective rule (most-restrictive wins),
-  // then RLE to tile intervals (Franz 2026-05-20).
+  // Per-section per-minute effective rule (Franz 2026-05-21 supersedes_baseline):
+  //   1. WINDOWS OVERRIDE BASE: at any minute covered by a window, the
+  //      window wins. Base rule applies only to minutes with NO window.
+  //   2. MULTIPLE WINDOWS AT SAME MINUTE: most-restrictive wins.
+  //   3. SEASONAL FILTERING: skip windows where today is not in season.
+  const today = new Date();
+  const firstMondayOfSep = (y) => { const d = new Date(y, 8, 1);
+    return new Date(y, 8, 1 + ((1 - d.getDay() + 7) % 7)); };
+  const lastMondayOfMay = (y) => { const d = new Date(y, 4, 31);
+    return new Date(y, 4, 31 - ((d.getDay() - 1 + 7) % 7)); };
+  const mdStr = (d) => `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const todayMd = mdStr(today);
+  const yr = today.getFullYear();
+  const ANCHOR_MD = {
+    labor_day:        mdStr(firstMondayOfSep(yr)),
+    labor_day_after:  mdStr(new Date(yr, 8, firstMondayOfSep(yr).getDate() + 1)),
+    memorial_day:     mdStr(lastMondayOfMay(yr)),
+    memorial_day_after: mdStr(new Date(yr, 4, lastMondayOfMay(yr).getDate() + 1)),
+  };
+  const resolveSeasonMd = (val) => {
+    if (!val) return null;
+    const s = String(val).toLowerCase();
+    if (s.match(/^\d{2}-\d{2}$/)) return s;
+    return ANCHOR_MD[s] || null;
+  };
+  const inSeason = (md, startMd, endMd) => {
+    if (!startMd && !endMd) return true;
+    if (!startMd) return md <= endMd;
+    if (!endMd)   return md >= startMd;
+    if (startMd <= endMd) return md >= startMd && md <= endMd;
+    return md >= startMd || md <= endMd;
+  };
+  const isTimeAnchor = (a) => a === 'dawn' || a === 'dusk' || a === 'sunrise' || a === 'sunset';
+
   const items = [];
   for (const reg of regions) {
     for (const [sn, sd] of Object.entries(reg?.sections || {})) {
+      const baseRawRule = sd?.rule || 'unknown';
+      const baseCoerced = RULE_COERCE[baseRawRule] || baseRawRule;
+      const baseCls = (baseCoerced === 'off_leash' || baseCoerced === 'on_leash' || baseCoerced === 'not_allowed')
+        ? baseCoerced : null;
       const tws = sd?.time_windows || [];
-      if (!tws.length) continue;
+      const activeTws = tws.filter(tw => {
+        const startMd = resolveSeasonMd(tw.effective_from_md) || resolveSeasonMd(tw.season_anchor_start);
+        const endMd   = resolveSeasonMd(tw.effective_to_md)   || resolveSeasonMd(tw.season_anchor_end);
+        const startEff = isTimeAnchor(tw.season_anchor_start) ? null : startMd;
+        const endEff   = isTimeAnchor(tw.season_anchor_end)   ? null : endMd;
+        return inSeason(todayMd, startEff, endEff);
+      });
+      if (!activeTws.length && !baseCls) continue;
       const intervals = [];
-      for (const tw of tws) {
+      for (const tw of activeTws) {
         const raw = tw.rule || sd?.rule || 'unknown';
         const coerced = RULE_COERCE[raw] || raw;
         const cls = (coerced === 'off_leash' || coerced === 'on_leash' || coerced === 'not_allowed')
           ? coerced : 'unknown';
         let sMin = tToMin(tw.start);
         let eMin = tToMin(tw.end);
-        if (sMin == null) sMin = anchorToMin(tw.season_anchor_start);
-        if (eMin == null) eMin = anchorToMin(tw.season_anchor_end);
+        if (sMin == null && isTimeAnchor(tw.season_anchor_start)) sMin = anchorToMin(tw.season_anchor_start);
+        if (eMin == null && isTimeAnchor(tw.season_anchor_end))   eMin = anchorToMin(tw.season_anchor_end);
         if (eMin === 23 * 60 + 59) eMin = 24 * 60;
-        if (sMin == null && eMin == null) continue;
-        if (sMin == null) sMin = 0;
-        if (eMin == null) eMin = 24 * 60;
+        if (sMin == null && eMin == null) { sMin = 0; eMin = 24 * 60; }
+        else { if (sMin == null) sMin = 0; if (eMin == null) eMin = 24 * 60; }
         if (sMin > eMin) {
           intervals.push({ sMin, eMin: 24 * 60, cls });
           intervals.push({ sMin: 0,   eMin,        cls });
@@ -3377,14 +3419,14 @@ function _amenityTimePillsHtml(zoneRules, beach) {
           intervals.push({ sMin, eMin, cls });
         }
       }
-      if (!intervals.length) continue;
-      const minutes = new Array(24 * 60).fill(null);
+      const winMinutes = new Array(24 * 60).fill(null);
       for (const iv of intervals) {
         for (let mm = Math.max(0, iv.sMin); mm < Math.min(24 * 60, iv.eMin); mm++) {
-          const cur = minutes[mm];
-          if (cur == null || (RANK[iv.cls] ?? 0) > (RANK[cur] ?? 0)) minutes[mm] = iv.cls;
+          const cur = winMinutes[mm];
+          if (cur == null || (RANK[iv.cls] ?? 0) > (RANK[cur] ?? 0)) winMinutes[mm] = iv.cls;
         }
       }
+      const minutes = winMinutes.map(c => c != null ? c : baseCls);
       let runStart = null, runCls = null;
       for (let mm = 0; mm < 24 * 60; mm++) {
         const c = minutes[mm];

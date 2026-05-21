@@ -91,6 +91,41 @@ ALLOWED_TEMPORAL_RULES = {'not_allowed', 'on_leash', 'off_leash', 'off_leash_voi
 ALLOWED_OPERATIVE_STATUS = {'operative', 'non_enforced', 'superseded_by_lower_tier', 'inactive'}
 
 
+# ── region_name contamination guards (Franz 2026-05-20, Phase 5) ──────
+# When the LLM emits a region_name that names a DIFFERENT beach in
+# beaches_gold, skip the insert under THIS beach_fid — the row will land
+# under the named beach's own extraction pass. Prevents the Avila ↔
+# Fisherman's ↔ Olde Port cross-contamination class.
+_BEACH_NAMES_CACHE: dict[str, int] | None = None
+def _beach_name_index(cur) -> dict[str, int]:
+    global _BEACH_NAMES_CACHE
+    if _BEACH_NAMES_CACHE is None:
+        cur.execute("SELECT lower(trim(name)), fid FROM beaches_gold")
+        _BEACH_NAMES_CACHE = {n: fid for n, fid in cur.fetchall() if n}
+    return _BEACH_NAMES_CACHE
+
+# Class B: jurisdictional baseline region_names that add no per-beach
+# value (citywide rules, "all X parks", generic carve-out clauses). Skip
+# entirely. Patterns mirror the Phase 5 cleanup migration's denylist.
+import re as _re
+_CLASS_B_REGEX = _re.compile(
+    r'^(all\s+.*\s+(beaches|parks|public places|state parks|city beaches|county beaches|ocean beaches|public beaches|public streets|other)|'
+    r'all\s+(public places|santa barbara|pacifica|malibu|la county|long beach|other|port of|ocean beaches|public beaches|public streets)|'
+    r'los angeles city\s|long beach city\s|'
+    r'city of\s+\S.*\s[-—–]\s*all|'
+    r'citywide|.*\bcitywide\b|.*\(citywide\)|'
+    r'designated\s+(off-leash|off leash|dog\s+\w*areas|dog play|nesting|nature|picnic|swimming|areas)|'
+    r'formally designated|off-leash/no-leash|'
+    r'.*\(general\)|.*\s\(default\)|'
+    r'jurisdiction|.*\bjurisdiction\b|'
+    r'seattle city parks|monterey city parks|laguna beach public beaches|.*state-park-wide)',
+    _re.IGNORECASE,
+)
+def _region_is_jurisdictional_baseline(region_name: str | None) -> bool:
+    if not region_name: return False
+    return bool(_CLASS_B_REGEX.match(region_name.strip()))
+
+
 def _norm_anchor(v: str | None) -> str | None:
     """Map raw anchor text to canonical enum value, or None if not mappable.
     Returns None for unrecognized strings (caller should drop the temporal row)."""
@@ -223,6 +258,22 @@ def write_rows(conn, beach_fid: int, policy_source_id: int, subtype: str,
         evidence = (raw_row.get('evidence_verbatim') or '')[:1500]
         region_name = raw_row.get('region')      # None/null → __default__ via index
         region_anchor = raw_row.get('region_anchor')
+
+        # Phase 5 contamination guards (Franz 2026-05-20).
+        if region_name:
+            # Class B: jurisdictional baselines add no per-beach value.
+            if _region_is_jurisdictional_baseline(region_name):
+                counts['bps_skipped'] += 1
+                print(f'    skip (Class B baseline): region={region_name!r}')
+                continue
+            # Class A: region_name names a DIFFERENT beach — let that
+            # beach's own extraction pass attach the row.
+            name_idx = _beach_name_index(cur)
+            other_fid = name_idx.get(region_name.strip().lower())
+            if other_fid and other_fid != beach_fid:
+                counts['bps_skipped'] += 1
+                print(f'    skip (Class A cross-beach): region={region_name!r} → fid={other_fid}')
+                continue
         # rule_modifier is JSONB — wrap string into {"modifier": "..."} when given
         rm_raw = raw_row.get('rule_modifier')
         rule_modifier_json = (json.dumps({'modifier': rm_raw}) if rm_raw else None)

@@ -3238,10 +3238,20 @@ function _flatTopAmenities(amenities, dogPolicy, limit) {
       _amen: amenities,
     });
   }
-  // Bare section tiles (Sand, Water, etc.) intentionally NOT added —
-  // the Times row in the combo card carries the same info (Franz
-  // 2026-05-21). Section tiles for zone-tied amenities like restrooms
-  // are emitted via the first loop above.
+  // Bare section tiles (Sand, Water, Trails, etc.) restored 2026-05-20
+  // — the Times row only emits when time_windows exist, so multi-section
+  // beaches with constant rules need these tiles to show their rule color.
+  for (const [secName, rule] of Object.entries(ruleMap)) {
+    if (rule === 'unknown') continue;
+    if (_SECTION_TO_AMENITY[secName]) continue;
+    if (_AMENITY_DEDUP_SECTIONS.has(secName)) continue;
+    const sec = _SECTION_TILE[secName]; if (!sec) continue;
+    out.push({
+      kind: 'section', sectionName: secName, icon: sec.icon, rule,
+      short: _SECTION_SHORT[secName] || sec.label,
+      tip: `${sec.label} · ${({off_leash:'Off-leash',on_leash:'On-leash',not_allowed:'Not allowed'})[rule] || rule}`,
+    });
+  }
   // Sort: dog-favorability first (off_leash > on_leash > neutral > not_allowed),
   // then by the explicit _AMENITY_PRIORITY map. Amenities without a rule
   // (parking, water, restrooms…) live in the middle "neutral" bucket so
@@ -3317,28 +3327,8 @@ function _amenityTimePillsHtml(zoneRules) {
       }
     }
   }
-  // No windows anywhere — fall back to ONE "All day" pill colored by
-  // the most-restrictive section rule across all regions.
-  if (wins.size === 0) {
-    const RANK = { not_allowed: 3, on_leash: 2, off_leash: 1, unknown: 0 };
-    let worst = null;
-    for (const reg of regions) {
-      for (const sec of Object.values(reg?.sections || {})) {
-        if (!sec?.rule) continue;
-        const coerced = RULE_COERCE[sec.rule] || sec.rule;
-        const cls = (coerced === 'off_leash' || coerced === 'on_leash' || coerced === 'not_allowed')
-          ? coerced : 'unknown';
-        if (worst == null || (RANK[cls] ?? 0) > (RANK[worst] ?? 0)) worst = cls;
-      }
-    }
-    if (!worst) return '';
-    return `<div class="amenity-time-row">
-              <span class="amenity-time-pill rule-${worst}">
-                <span class="amenity-time-icon">🏖️</span>
-                <span>All day</span>
-              </span>
-            </div>`;
-  }
+  // No windows anywhere — no pill row. Section tiles carry constant rules.
+  if (wins.size === 0) return '';
   const toMin = s => { const [h, m] = String(s).split(':').map(Number); return (h||0)*60 + (m||0); };
   const roundHour = s => {
     const [h, m] = String(s).split(':').map(Number);

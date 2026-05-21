@@ -1511,28 +1511,11 @@ function _amenityTimePillsHtml(reg) {
       w.counts[cls] = (w.counts[cls] || 0) + 1;
     }
   }
-  // No time windows — emit ONE "All day" pill colored by the most-
-  // restrictive section rule in this region (so Avila / Fisherman's
-  // beaches still show their not_allowed status now that the bare
-  // section tile is gone).
-  if (wins.size === 0) {
-    const RANK = { not_allowed: 3, on_leash: 2, off_leash: 1, unknown: 0 };
-    let worst = null;
-    for (const sec of Object.values(secs)) {
-      if (!sec?.rule) continue;
-      const coerced = RULE_COERCE[sec.rule] || sec.rule;
-      const cls = (coerced === 'off_leash' || coerced === 'on_leash' || coerced === 'not_allowed')
-        ? coerced : 'unknown';
-      if (worst == null || (RANK[cls] ?? 0) > (RANK[worst] ?? 0)) worst = cls;
-    }
-    if (!worst) return '';
-    return `<div class="amenity-time-row">
-              <span class="amenity-time-pill rule-${worst}">
-                <span class="amenity-time-icon">🏖️</span>
-                <span>All day</span>
-              </span>
-            </div>`;
-  }
+  // No time windows — no pill row (section tiles carry the constant rule).
+  // The "All day" fallback was dropped 2026-05-20 because multi-section
+  // regions like Kayak Point (sand=on_leash, water=not_allowed, …) can't
+  // be honestly summarized by one pill.
+  if (wins.size === 0) return '';
   const toMin = s => { const [h, m] = String(s).split(':').map(Number); return (h||0)*60 + (m||0); };
   const roundHour = s => {
     const [h, m] = String(s).split(':').map(Number);
@@ -1624,10 +1607,20 @@ function buildAmenitiesSection(amenities, dogPolicy) {
         .find(([sec, key]) => key === t.key)?.[0];
       if (matchingSection && secs[matchingSection]) tilesForRegion.push(t);
     }
-    // Bare section tiles (Sand, Water, etc.) intentionally NOT added —
-    // the per-region time-pill row below carries the same info (Franz
-    // 2026-05-21). Only zone-tied amenity tiles (parking/restrooms/
-    // showers/picnic) remain in this grid.
+    // Bare section tiles (Sand, Water, Trails, etc.) restored 2026-05-20
+    // — the time-pill row only renders when actual time_windows exist,
+    // so without these tiles, multi-section regions like Kayak Point
+    // would show nothing at all.
+    for (const [name] of secEntries) {
+      if (_SECTION_TO_AMENITY[name]) continue;
+      const t = _SECTION_TILE[name];
+      if (!t) continue;
+      tilesForRegion.push({
+        key: `section:${name}`, icon: t.icon, label: t.label,
+        sectionName: name,
+        _i: 100 + Object.keys(_SECTION_TILE).indexOf(name),
+      });
+    }
     const timePills = _amenityTimePillsHtml(reg);
     if (!tilesForRegion.length && !timePills) continue;
     const zoneName = reg.name || 'Whole beach';

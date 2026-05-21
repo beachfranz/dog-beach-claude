@@ -1955,24 +1955,58 @@ function buildAmenitiesSection(amenities, dogPolicy, beach) {
         .find(([sec, key]) => key === t.key)?.[0];
       if (matchingSection && secs[matchingSection]) tilesForRegion.push(t);
     }
-    // Bare tile only when section has NO time variation (or no
-    // windows). When variation exists, chips cover the full day.
+    // Bare tile only when section has NO time variation TODAY (i.e.
+    // among in-season windows). Match the chip path's season filter so
+    // chip/tile decisions align — out-of-season windows mustn't cause
+    // the tile to be hidden when their rule won't render today.
     const _coerce = (r) => {
       const c = ({off_leash_voice_control:'off_leash', on_leash_or_voice:'on_leash'})[r] || r;
       return ['off_leash','on_leash','not_allowed'].includes(c) ? c : 'unknown';
     };
+    const _todayDate = new Date();
+    const _todayMd = `${String(_todayDate.getMonth()+1).padStart(2,'0')}-${String(_todayDate.getDate()).padStart(2,'0')}`;
+    const _firstMonSep = (y) => { const d=new Date(y,8,1); return new Date(y,8,1+((1-d.getDay()+7)%7)); };
+    const _lastMonMay  = (y) => { const d=new Date(y,4,31); return new Date(y,4,31-((d.getDay()-1+7)%7)); };
+    const _mdStr = (d) => `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const _yr = _todayDate.getFullYear();
+    const _ANCH = {
+      labor_day: _mdStr(_firstMonSep(_yr)),
+      labor_day_after: _mdStr(new Date(_yr, 8, _firstMonSep(_yr).getDate()+1)),
+      memorial_day: _mdStr(_lastMonMay(_yr)),
+      memorial_day_after: _mdStr(new Date(_yr, 4, _lastMonMay(_yr).getDate()+1)),
+    };
+    const _resolveMd = (v) => {
+      if (!v) return null;
+      const s = String(v).toLowerCase();
+      if (s.match(/^\d{2}-\d{2}$/)) return s;
+      return _ANCH[s] || null;
+    };
+    const _inSeason = (md, startMd, endMd) => {
+      if (!startMd && !endMd) return true;
+      if (!startMd) return md <= endMd;
+      if (!endMd)   return md >= startMd;
+      if (startMd <= endMd) return md >= startMd && md <= endMd;
+      return md >= startMd || md <= endMd;
+    };
+    const _isTimeAnchor = (a) => a === 'dawn' || a === 'dusk' || a === 'sunrise' || a === 'sunset';
+    const _activeToday = (tws) => (tws || []).filter(tw => {
+      const sMd = _resolveMd(tw.effective_from_md) || _resolveMd(tw.season_anchor_start);
+      const eMd = _resolveMd(tw.effective_to_md)   || _resolveMd(tw.season_anchor_end);
+      const sEff = _isTimeAnchor(tw.season_anchor_start) ? null : sMd;
+      const eEff = _isTimeAnchor(tw.season_anchor_end)   ? null : eMd;
+      return _inSeason(_todayMd, sEff, eEff);
+    });
+
     const isNamedReg = (reg?.name != null);
     for (const [name, sec] of secEntries) {
       if (_SECTION_TO_AMENITY[name]) continue;
-      // For 'global' in a named region, render an "Area" tile so the
-      // region's overarching rule is visible. Skip in default region
-      // (handled by other section tiles + global_notes).
       const isGlobalInNamed = (name === 'global' && isNamedReg);
       const t = isGlobalInNamed ? { icon: '⛳', label: 'Area' } : _SECTION_TILE[name];
       if (!t) continue;
       const baseC = _coerce(sec?.rule);
-      const hasVar = (sec?.time_windows || []).some(tw => _coerce(tw.rule || sec?.rule) !== baseC);
-      if (hasVar) continue;  // chips cover this
+      const activeTws = _activeToday(sec?.time_windows || []);
+      const hasVar = activeTws.some(tw => _coerce(tw.rule || sec?.rule) !== baseC);
+      if (hasVar) continue;
       tilesForRegion.push({
         key: `section:${name}`, icon: t.icon, label: t.label,
         sectionName: name,

@@ -29,6 +29,15 @@ CANONICAL_RULES: dict[str, dict] = {
     'collar_tag_required':        {'is_global_note': True},
     'local_stricter_authorized':  {'is_global_note': True},
     'no_policy_published':        {'is_global_note': True},
+
+    # Promoted from vocab_review_queue 2026-05-21 bulk MVP+ run.
+    # All meta-rules (don't fit section-pill rendering).
+    'adult_supervision_required':         {'is_global_note': True},
+    'service_animal_access':              {'is_global_note': True},
+    'leash_exemption':                    {'is_global_note': True},
+    'horses_permitted':                   {'is_global_note': True},
+    'concurrent_enforcement_jurisdiction': {'is_global_note': True},
+    'professional_trainer_prohibited':    {'is_global_note': True},
 }
 
 # Aliases: writer-side normalization.
@@ -62,12 +71,30 @@ CANONICAL_SECTIONS: set[str] = {
     # Global catch-all (for source covering whole jurisdiction with no
     # section sub-structure)
     'global',
+
+    # Promoted from vocab_review_queue 2026-05-21 bulk MVP+ run.
+    'road',           # paved roads in state/federal parks where dogs OK
+    'park_building',  # visitor centers, ranger stations, indoor facilities
+    'dog_park',       # designated off-leash zones outside the beach itself
+    'beach_access',   # access stairways / paths to the sand
+    'athletic_field', # ball fields where dogs prohibited
+    'harbor',         # marina / harbor district areas
+    'visitor_center', # specific sub-section of park_building when called out
 }
 
 SECTION_ALIASES: dict[str, str] = {
     'restroom':  'restrooms',
     'tide_pool': 'tide_pools',
     'water':     'water_swim',
+    # Promoted from vocab_review_queue 2026-05-21 — plural/synonym fixes.
+    'trail':              'trails',
+    'backcountry_trail':  'trails',
+    'multiuse_trail':     'trails',
+    'overnight_camping':  'campground',
+    'roadway':            'road',
+    'building':           'park_building',
+    'public_building':    'park_building',
+    'indoor_building':    'park_building',
 }
 
 

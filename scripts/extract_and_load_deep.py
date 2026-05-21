@@ -84,6 +84,12 @@ ANCHOR_ALIASES = {
 }
 ALLOWED_TEMPORAL_RULES = {'not_allowed', 'on_leash', 'off_leash', 'off_leash_voice_control'}
 
+# operative_status enum allowed values. Pilot sometimes emits non-enum
+# values (e.g. 'seasonal', 'proposed') — coerce to 'operative' since the
+# temporal layer already encodes seasonality and 'operative' is the
+# default-active state.
+ALLOWED_OPERATIVE_STATUS = {'operative', 'non_enforced', 'superseded_by_lower_tier', 'inactive'}
+
 
 def _norm_anchor(v: str | None) -> str | None:
     """Map raw anchor text to canonical enum value, or None if not mappable.
@@ -106,7 +112,10 @@ def _connect():
 # ── Target selection ──────────────────────────────────────────────────
 def select_targets(conn, args) -> list[tuple[int, int]]:
     """Returns list of (beach_fid, policy_source_id) pairs to process.
-    Only includes pairs where policy_source.full_text is non-trivial."""
+    Used for per-beach modes (--fid, --fids, --policy-source-id).
+    For --all-mvp, use select_sources_for_bulk() instead — many sources
+    are jurisdiction-level and link to N beaches, so a per-source loop
+    collapses API calls (~250 sources vs ~2,250 pairs)."""
     cur = conn.cursor()
     where_parts = ['ps.full_text is not null', 'length(ps.full_text) > 100']
     params: tuple = ()
@@ -120,11 +129,8 @@ def select_targets(conn, args) -> list[tuple[int, int]]:
         fid_list = [int(x) for x in args.fids.split(',') if x.strip()]
         where_parts.append('bps.beach_fid = any(%s)')
         params = (fid_list,)
-    elif args.all_mvp:
-        where_parts.append("g.state in ('CA','OR','WA')")
-        where_parts.append('g.is_active')
     else:
-        raise SystemExit('Specify --fid, --fids, --policy-source-id, or --all-mvp')
+        raise SystemExit('select_targets called without per-beach scope')
 
     sql = (
         'select distinct bps.beach_fid, bps.policy_source_id '
@@ -136,6 +142,38 @@ def select_targets(conn, args) -> list[tuple[int, int]]:
     )
     cur.execute(sql, params)
     return [(r[0], r[1]) for r in cur.fetchall()]
+
+
+def select_sources_for_bulk(conn) -> list[int]:
+    """For --all-mvp: return unique policy_source IDs that any MVP+ beach
+    references. Codified text is jurisdiction-level so we extract ONCE
+    per source and apply to all linked beaches."""
+    cur = conn.cursor()
+    cur.execute("""
+      SELECT DISTINCT ps.id
+        FROM policy_source ps
+        JOIN beach_policy_source bps ON bps.policy_source_id = ps.id
+        JOIN beaches_gold g ON g.fid = bps.beach_fid
+       WHERE ps.full_text IS NOT NULL
+         AND length(ps.full_text) > 100
+         AND g.state IN ('CA','OR','WA')
+         AND g.is_active
+       ORDER BY ps.id
+    """)
+    return [r[0] for r in cur.fetchall()]
+
+
+def beaches_for_source(conn, policy_source_id: int) -> list[int]:
+    cur = conn.cursor()
+    cur.execute("""
+      SELECT DISTINCT bps.beach_fid
+        FROM beach_policy_source bps
+        JOIN beaches_gold g ON g.fid = bps.beach_fid
+       WHERE bps.policy_source_id = %s
+         AND g.state IN ('CA','OR','WA')
+         AND g.is_active
+    """, (policy_source_id,))
+    return [r[0] for r in cur.fetchall()]
 
 
 # ── Anthropic extraction ──────────────────────────────────────────────
@@ -188,7 +226,8 @@ def write_rows(conn, beach_fid: int, policy_source_id: int, subtype: str,
         # rule_modifier is JSONB — wrap string into {"modifier": "..."} when given
         rm_raw = raw_row.get('rule_modifier')
         rule_modifier_json = (json.dumps({'modifier': rm_raw}) if rm_raw else None)
-        operative = raw_row.get('operative_status', 'operative')
+        operative_raw = raw_row.get('operative_status', 'operative')
+        operative = operative_raw if operative_raw in ALLOWED_OPERATIVE_STATUS else 'operative'
 
         # ── INSERT into beach_policy_source with ON CONFLICT DO NOTHING ──
         # Use RETURNING id; if no row returned (conflict), fetch existing id.
@@ -381,6 +420,8 @@ def main() -> int:
     grp.add_argument('--fid', type=int)
     grp.add_argument('--fids', type=str)
     grp.add_argument('--policy-source-id', type=int)
+    grp.add_argument('--ps-ids', type=str,
+                     help='Comma-separated policy_source IDs (per-source loop; for parallel slicing)')
     grp.add_argument('--all-mvp', action='store_true')
     ap.add_argument('--dry-run', action='store_true', help='plan + extract, no DB writes')
     ap.add_argument('--purge', action='store_true',
@@ -390,12 +431,6 @@ def main() -> int:
     args = ap.parse_args()
 
     conn = _connect()
-    pairs = select_targets(conn, args)
-    if not pairs:
-        print('no targets'); return 1
-    print(f'Targets: {len(pairs)} (beach_fid, policy_source_id) pairs')
-
-    # Pre-fetch metadata for the loop
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cli = Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
 
@@ -403,54 +438,97 @@ def main() -> int:
               'vocab_queued':0, 'in':0, 'out':0, 'n_pairs':0}
     t0 = time.time()
 
-    for i, (fid, ps_id) in enumerate(pairs, 1):
-        # Fetch context for this pair
-        cur.execute("""
-          SELECT g.name AS beach_name, g.state, g.county_name,
-                 ps.subtype, ps.citation, ps.source_url, ps.full_text
-            FROM beach_policy_source bps
-            JOIN beaches_gold g ON g.fid = bps.beach_fid
-            JOIN policy_source ps ON ps.id = bps.policy_source_id
-           WHERE bps.beach_fid = %s AND bps.policy_source_id = %s LIMIT 1
-        """, (fid, ps_id))
-        r = cur.fetchone()
-        if not r: continue
+    # ── Per-source iteration when --all-mvp or --ps-ids (extract ONCE
+    # per source, write to all linked beaches). Otherwise per-pair.
+    if args.all_mvp or args.ps_ids:
+        if args.ps_ids:
+            sources = [int(x) for x in args.ps_ids.split(',') if x.strip()]
+            print(f'Targets: {len(sources)} policy_source IDs (explicit slice)')
+        else:
+            sources = select_sources_for_bulk(conn)
+            print(f'Targets: {len(sources)} unique policy_source rows')
+        for i, ps_id in enumerate(sources, 1):
+            cur.execute("SELECT subtype, citation, source_url, full_text FROM policy_source WHERE id = %s", (ps_id,))
+            r = cur.fetchone()
+            beaches = beaches_for_source(conn, ps_id)
+            if not beaches: continue
 
-        if args.purge and not args.dry_run:
-            n_deleted = purge_prior(conn, fid, ps_id)
-            print(f'  [{i}/{len(pairs)}] fid={fid} ps={ps_id} purged {n_deleted} prior rows')
+            try:
+                parsed, in_tok, out_tok = extract_one(
+                    cli, '(applies to multiple MVP+ beaches)',
+                    '(jurisdiction per citation)',
+                    r['subtype'], r['citation'], r['source_url'], r['full_text'])
+            except Exception as e:
+                print(f'  [{i}/{len(sources)}] ps={ps_id} EXTRACT FAIL: {e}')
+                continue
 
-        # Extract
-        try:
-            parsed, in_tok, out_tok = extract_one(
-                cli, r['beach_name'], f"{r['county_name']}, {r['state']}",
-                r['subtype'], r['citation'], r['source_url'], r['full_text'])
-        except Exception as e:
-            print(f'  [{i}/{len(pairs)}] fid={fid} ps={ps_id} EXTRACT FAIL: {e}')
-            continue
+            totals['in']  += in_tok; totals['out'] += out_tok
+            est_cost = totals['in']*COST_IN + totals['out']*COST_OUT
+            if est_cost > args.budget_usd:
+                print(f'BUDGET EXCEEDED (${est_cost:.2f} > ${args.budget_usd}); abort'); break
 
-        totals['in']  += in_tok
-        totals['out'] += out_tok
-        est_cost = totals['in']*COST_IN + totals['out']*COST_OUT
-        if est_cost > args.budget_usd:
-            print(f'BUDGET EXCEEDED (${est_cost:.2f} > ${args.budget_usd}); abort')
-            break
+            per_source_counts = {'bps_inserted':0, 'bps_skipped':0,
+                                  'temporal_inserted':0, 'vocab_queued':0}
+            for fid in beaches:
+                cc = write_rows(conn, fid, ps_id, r['subtype'], parsed, dry_run=args.dry_run)
+                for k in per_source_counts: per_source_counts[k] += cc[k]
+            for k in per_source_counts: totals[k] += per_source_counts[k]
+            totals['n_pairs'] += len(beaches)
 
-        # Write
-        counts = write_rows(conn, fid, ps_id, r['subtype'], parsed, dry_run=args.dry_run)
-        for k in ('bps_inserted','bps_skipped','temporal_inserted','vocab_queued'):
-            totals[k] += counts[k]
-        totals['n_pairs'] += 1
+            print(f"  [{i}/{len(sources)}] ps={ps_id} {r['subtype'][:18]:<18} "
+                  f"→ {len(beaches):>3} beaches  "
+                  f"bps+{per_source_counts['bps_inserted']}/"
+                  f"skip{per_source_counts['bps_skipped']} "
+                  f"temp+{per_source_counts['temporal_inserted']} "
+                  f"vocab+{per_source_counts['vocab_queued']} "
+                  f"(${est_cost:.3f})")
+    else:
+        pairs = select_targets(conn, args)
+        if not pairs:
+            print('no targets'); return 1
+        print(f'Targets: {len(pairs)} (beach_fid, policy_source_id) pairs')
+        for i, (fid, ps_id) in enumerate(pairs, 1):
+            cur.execute("""
+              SELECT g.name AS beach_name, g.state, g.county_name,
+                     ps.subtype, ps.citation, ps.source_url, ps.full_text
+                FROM beach_policy_source bps
+                JOIN beaches_gold g ON g.fid = bps.beach_fid
+                JOIN policy_source ps ON ps.id = bps.policy_source_id
+               WHERE bps.beach_fid = %s AND bps.policy_source_id = %s LIMIT 1
+            """, (fid, ps_id))
+            r = cur.fetchone()
+            if not r: continue
 
-        print(f"  [{i}/{len(pairs)}] fid={fid} ps={ps_id} {r['subtype'][:18]:<18} "
-              f"bps+{counts['bps_inserted']}/skip{counts['bps_skipped']} "
-              f"temp+{counts['temporal_inserted']} vocab+{counts['vocab_queued']} "
-              f"(${est_cost:.3f})")
+            if args.purge and not args.dry_run:
+                n_deleted = purge_prior(conn, fid, ps_id)
+                print(f'  [{i}/{len(pairs)}] fid={fid} ps={ps_id} purged {n_deleted} prior rows')
+
+            try:
+                parsed, in_tok, out_tok = extract_one(
+                    cli, r['beach_name'], f"{r['county_name']}, {r['state']}",
+                    r['subtype'], r['citation'], r['source_url'], r['full_text'])
+            except Exception as e:
+                print(f'  [{i}/{len(pairs)}] fid={fid} ps={ps_id} EXTRACT FAIL: {e}'); continue
+
+            totals['in']  += in_tok; totals['out'] += out_tok
+            est_cost = totals['in']*COST_IN + totals['out']*COST_OUT
+            if est_cost > args.budget_usd:
+                print(f'BUDGET EXCEEDED (${est_cost:.2f} > ${args.budget_usd}); abort'); break
+
+            counts = write_rows(conn, fid, ps_id, r['subtype'], parsed, dry_run=args.dry_run)
+            for k in ('bps_inserted','bps_skipped','temporal_inserted','vocab_queued'):
+                totals[k] += counts[k]
+            totals['n_pairs'] += 1
+
+            print(f"  [{i}/{len(pairs)}] fid={fid} ps={ps_id} {r['subtype'][:18]:<18} "
+                  f"bps+{counts['bps_inserted']}/skip{counts['bps_skipped']} "
+                  f"temp+{counts['temporal_inserted']} vocab+{counts['vocab_queued']} "
+                  f"(${est_cost:.3f})")
 
     elapsed = time.time() - t0
     print()
     print('=== SUMMARY ===')
-    print(f'  pairs processed:    {totals["n_pairs"]}/{len(pairs)}')
+    print(f'  pairs processed:    {totals["n_pairs"]}')
     print(f'  bps inserted:       {totals["bps_inserted"]}')
     print(f'  bps skipped (dup):  {totals["bps_skipped"]}')
     print(f'  temporal inserted:  {totals["temporal_inserted"]}')

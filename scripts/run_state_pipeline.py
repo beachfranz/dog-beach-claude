@@ -568,6 +568,34 @@ PHASES = [
             "select d.n done, t.n total from d, t",
     },
     {
+        # 2026-05-22: canonical operating hours per beach (task #118).
+        # Populates beaches_gold.operating_hours via populate_operating_hours()
+        # priority chain (manual_curator > operator > osm > agency > legacy
+        # open/close > sunrise-sunset). Runs BEFORE hourly_status_refresh
+        # which uses the hours to clip status materialization.
+        #
+        # Idempotent. Per-state scope. Criterion: every active beach has
+        # a populated operating_hours (the inferred fallback guarantees
+        # this on first run).
+        'key': 'operating_hours_refresh',
+        'kind': 'sql',
+        'action':
+            "select public.refresh_operating_hours_for_state($STATE)",
+        'criterion':
+            "select (count(*) filter (where operating_hours is not null) "
+            "        = count(*))::boolean "
+            "from public.beaches_gold where state=$STATE and is_active",
+        'criterion_text':
+            'every active beach in state has populated operating_hours',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beaches_gold "
+            "             where state=$STATE and is_active), "
+            "     d as (select count(*)::int n from public.beaches_gold "
+            "             where state=$STATE and is_active "
+            "               and operating_hours is not null) "
+            "select d.n done, t.n total from d, t",
+    },
+    {
         # 2026-05-21: materialize beach_section_hour_status. Walks
         # zone_rules per-minute (most-restrictive-wins) with seasonal
         # filter + operating-hours clip, sampling at :30 of each hour.
@@ -576,8 +604,9 @@ PHASES = [
         # (beach_fid, valid_date) slice per fid.
         #
         # Must run AFTER zone_rules_v2_refresh (depends on freshly
-        # extracted zone_rules) and BEFORE descriptions (so generated
-        # copy can reference the rendered chip state).
+        # extracted zone_rules), AFTER operating_hours_refresh (uses
+        # canonical hours), and BEFORE descriptions (so generated copy
+        # can reference the rendered chip state).
         'key': 'hourly_status_refresh',
         'kind': 'python',
         'action': 'hourly_status_refresh',

@@ -133,4 +133,4 @@ SELECT 17006526, ps.id, 'sand', 'on_leash', 'operative'::operative_status,
        NULL
 FROM public.policy_source ps
 WHERE ps.citation LIKE 'Worcester County Code, Title PS2%§ PS 2-101%'
-ON CONFLICT (beach_fid, policy_source_id, section) DO NOTHING;
+ON CONFLICT (beach_fid, policy_source_id, section, (COALESCE(region_name, '__default__'::text)), rule) DO NOTHING;

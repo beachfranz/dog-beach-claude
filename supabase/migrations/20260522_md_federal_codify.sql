@@ -154,7 +154,7 @@ FROM (VALUES (14485::bigint)  /* Sycamore Beach    — GWMP contained, dist=0 */
              (14949::bigint)  /* Purplehorse Beach — GWMP contained, dist=0 */) AS v(fid)
 CROSS JOIN public.policy_source ps
 WHERE ps.source_url = 'https://www.nps.gov/gwmp/learn/management/superintendent-s-compendium.htm'
-ON CONFLICT (beach_fid, policy_source_id, section) DO NOTHING;
+ON CONFLICT (beach_fid, policy_source_id, section, (COALESCE(region_name, '__default__'::text)), rule) DO NOTHING;
 
 -- ============================================================================
 -- 2. Eastern Neck National Wildlife Refuge — Pet Policy (USFWS, agency id=308)
@@ -222,6 +222,6 @@ SELECT v.fid, ps.id, 'sand', 'on_leash',
 FROM (VALUES (12951::bigint)  /* Wickes Beach — Eastern Neck NWR, dist=8.4m */) AS v(fid)
 CROSS JOIN public.policy_source ps
 WHERE ps.source_url = 'https://www.fws.gov/refuge/eastern-neck/visit-us/rules-policies'
-ON CONFLICT (beach_fid, policy_source_id, section) DO NOTHING;
+ON CONFLICT (beach_fid, policy_source_id, section, (COALESCE(region_name, '__default__'::text)), rule) DO NOTHING;
 
 COMMIT;

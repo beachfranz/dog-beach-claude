@@ -144,7 +144,7 @@ SELECT v.fid, ps.id, 'sand', 'on_leash', 'operative'::operative_status,
 FROM (values (3672326),(5262464),(12962),(1479467),(12963),(12957),(12958),(12964),(18174945),(14308733),(4055277)) AS v(fid)
 CROSS JOIN public.policy_source ps
 WHERE ps.citation LIKE 'St. Mary''s County Code of Ordinances%§ 212-8%'
-ON CONFLICT (beach_fid, policy_source_id, section) DO NOTHING;
+ON CONFLICT (beach_fid, policy_source_id, section, (COALESCE(region_name, '__default__'::text)), rule) DO NOTHING;
 
 -- ─── 4. Sanner's Lake — county code applies; flag operator overlay ──
 
@@ -158,4 +158,4 @@ SELECT 19004779, ps.id, 'sand', 'on_leash', 'operative'::operative_status,
        NULL
 FROM public.policy_source ps
 WHERE ps.citation LIKE 'St. Mary''s County Code of Ordinances%§ 212-8%'
-ON CONFLICT (beach_fid, policy_source_id, section) DO NOTHING;
+ON CONFLICT (beach_fid, policy_source_id, section, (COALESCE(region_name, '__default__'::text)), rule) DO NOTHING;

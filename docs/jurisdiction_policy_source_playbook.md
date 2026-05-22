@@ -145,7 +145,7 @@ python scripts/derive_policy_source_for_jurisdiction.py --state-agency-rule \
 
 What it does: looks up agency_id → spatial-joins `beach_relevant_pad_us` × `beaches_gold` with your `--pad-mng-type/--pad-mng-name/--pad-des-tp/--pad-unit-name-ilike` filter → emits `supabase/migrations/<date>_<label>.sql` with idempotent ps + bps inserts. Does NOT apply (per §9 explicit-go discipline).
 
-Use ONE invocation per (rule, PAD-US-filter) cohort. Multiple invocations against the same `source_url` are safely idempotent — the policy_source insert is gated by `WHERE NOT EXISTS` on source_url; bps inserts are gated by `ON CONFLICT (beach_fid, policy_source_id, section)`.
+Use ONE invocation per (rule, PAD-US-filter) cohort. Multiple invocations against the same `source_url` are safely idempotent — the policy_source insert is gated by `WHERE NOT EXISTS` on source_url; bps inserts are gated by `ON CONFLICT (beach_fid, policy_source_id, section, (COALESCE(region_name, '__default__'::text)), rule)` — the canonical 5-column form matching `beach_policy_source_dedupe_idx` (introduced by the 2026-05-20 pk_swap). The legacy 3-column form fails plan-time with "no unique or exclusion constraint matching the ON CONFLICT specification".
 
 **Sub-area carve-outs** (Del Mar seasonal, LB §6.16.310 dog-exercise-area, Coronado Sand Pebble): encode via `beach_policy_source.region_name` column. ONE bps row per zone; `region_name` is the human-friendly zone label (e.g., 'Sand Pebble Off-Leash Area', 'North Beach (north of 29th Street)'). NULL region_name = default region. Multiple rows with same section but distinct region_name → injector emits multi-region zone_rules.regions[] automatically.
 
@@ -196,7 +196,10 @@ SELECT v.fid, ps.id, 'sand', '<rule>', 'operative'::operative_status,
 FROM (values (<fid1>),(<fid2>),...) AS v(fid)
 CROSS JOIN public.policy_source ps
 WHERE ps.citation LIKE '<canonical prefix>%'
-ON CONFLICT (beach_fid, policy_source_id, section) DO NOTHING;
+ON CONFLICT (beach_fid, policy_source_id, section, (COALESCE(region_name, '__default__'::text)), rule) DO NOTHING;
+-- MUST match the 5-col beach_policy_source_dedupe_idx exactly (created 2026-05-20).
+-- The legacy 3-col form fails plan-time: "no unique or exclusion constraint
+-- matching the ON CONFLICT specification."
 ```
 
 Valid `subtype`:

@@ -163,7 +163,7 @@ FROM (values
      ) AS v(fid)
 CROSS JOIN public.policy_source ps
 WHERE ps.citation LIKE 'Ocean City, MD Code of Ordinances §6-34%'
-ON CONFLICT (beach_fid, policy_source_id, section, COALESCE(region_name, '__default__'), rule)
+ON CONFLICT (beach_fid, policy_source_id, section, (COALESCE(region_name, '__default__'::text)), rule)
 DO NOTHING;
 
 commit;

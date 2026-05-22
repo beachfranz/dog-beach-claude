@@ -33,13 +33,6 @@ Usage:
 
 from __future__ import annotations
 
-# Truststore for AV-MITM Windows SSL (same idiom as extract_temporal_from_policy_source.py).
-try:
-    import truststore
-    truststore.inject_into_ssl()
-except ImportError:
-    pass
-
 import sys
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -57,16 +50,17 @@ import urllib.request
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-from dotenv import load_dotenv
+# scripts.common loads .env + injects truststore at package init.
+from scripts.common.llm import SONNET
+from scripts.common.supa import supa
 
-ROOT = Path(__file__).resolve().parent.parent
-ENV = ROOT / "scripts" / "pipeline" / ".env"
-load_dotenv(ENV)
+ROOT = Path(__file__).resolve().parent.parent  # for the Playwright fetcher sys.path tweak below
 
-SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
-SERVICE_KEY  = os.environ["SUPABASE_SERVICE_KEY"]
+# ANTHROPIC_KEY is still read directly because this script's LLM call has
+# the web_search tool — not currently covered by common.llm.call(). Keep
+# the local urllib.request block until call() grows tool support.
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-MODEL = "claude-sonnet-4-5-20250929"
+MODEL = SONNET
 
 # Wire in the existing Playwright fetcher (scripts/fetch/fetch_html.py)
 # for JS-rendered platforms. Lazy import so the script still runs if
@@ -80,27 +74,6 @@ except ImportError:
     PLAYWRIGHT_AVAILABLE = False
 
 # ─── HTTP helpers ──────────────────────────────────────────────────────
-
-def supa(path: str, *, params: dict | None = None, method: str = "GET",
-         body: dict | list | None = None, upsert: bool = False) -> list:
-    """PostgREST client. Mirrors extract_temporal_from_policy_source.py."""
-    url = f"{SUPABASE_URL}{path}"
-    if params:
-        url = url + "?" + urllib.parse.urlencode(params, safe=",.()*")
-    req = urllib.request.Request(url, method=method)
-    req.add_header("apikey", SERVICE_KEY)
-    req.add_header("Authorization", f"Bearer {SERVICE_KEY}")
-    if body is not None:
-        req.add_header("Content-Type", "application/json")
-        req.data = json.dumps(body).encode("utf-8")
-        prefers = ["return=representation"]
-        if upsert:
-            prefers.append("resolution=merge-duplicates")
-        req.add_header("Prefer", ",".join(prefers))
-    with urllib.request.urlopen(req, timeout=60) as r:
-        text = r.read().decode("utf-8")
-        return json.loads(text) if text else []
-
 
 # ─── Step 0 — Classify jurisdiction ────────────────────────────────────
 

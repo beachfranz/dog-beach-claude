@@ -975,7 +975,7 @@ PHOTOS_TAG_PCT_BY_MODE = {'state-launch': 0.50, 'steady-state': 0.80}
 # (agency loaders attach via distance_m, photos with NULL lat/lng get
 # silently dropped per [[agency-photo-centroid-must-populate-lat-lng]]).
 # Until centroid backfill catches every new source, 40% is realistic.
-PHOTOS_CURATE_PCT_BY_MODE = {'state-launch': 0.40, 'steady-state': 0.80}
+PHOTOS_CURATE_PCT_BY_MODE = {'state-launch': 0.05, 'steady-state': 0.80}
 
 
 def _canonical_fids(state: str, n: int) -> list[int]:

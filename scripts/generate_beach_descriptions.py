@@ -66,8 +66,12 @@ REQUIRED:
    **Multi-region.** When `zones` has 2+ entries with different `zone` names AND different rules, name each region and its rule ("The undeveloped beach + dunes are off-leash; the designated swim beach bans dogs; developed lawns require leash"). Paraphrase jargon ("Director-designated off-leash areas" → "the designated off-leash zone"). Skip if all zones share the same rule.
 2. From `verified_physical_features`, drop AT MOST TWO features naturally ("backed by coastal bluffs", "at the mouth of Aliso Creek"). Two only when they read as one connected thought. Never enumerate three.
 3. **`source_pages` = authoritative grounding** for named features, locations, specific facts. Paraphrase in Scout's voice; never verbatim. **Scope guard:** if the page describes a CONTAINING area (park / preserve), use ONLY for geographic context ("inside [Park]"). Don't attribute its size, mileage, or named features to THIS beach. If source contradicts `zones`, TRUST `zones`.
+3b. **`photo_descriptions` = visual feature mine** (top-3 curated photos' AI-generated prose). EXTRACT durable VISUAL CHARACTER only: NAMED off-site landmarks ("Golden Gate Bridge in the distance"), distinctive vegetation (**named** species or types: "sea grass", "palm trees", "eucalyptus", "ice plant"), specific geological character ("white chalk cliffs", "basalt sea stacks"), geographic context ("hills across the water"), and descriptive color for amenities that are ALREADY in `amenities.present` ("fire pits in brick enclosures" only if `has_fire_pits=true`).
+   **Specificity threshold — HARD:** generic descriptors are filler, not character. SKIP "green vegetation", "trees", "plants", "shrubs", "bushes", "groundcover", "structure", "buildings", "a bridge" (unnamed), "rocks" (without "basalt" / "granite" / "sandstone"). If the photo prose doesn't name what it sees, neither do you.
+   **Fixed-features vs services boundary:** photos MAY confirm durable on-site FIXED FEATURES even when our amenities schema doesn't carry them — playgrounds, gazebos, BBQ pits, picnic shelters, observation decks, fishing piers, named monuments, kayak racks. Our amenities catalog is incomplete and photos are evidence. But photos do NOT confirm STATEFUL services (lifeguards on duty, water-quality status, dog-bag dispensers stocked, restroom open/closed) — those need operational confirmation. So: photo of a playground → mention it; photo of a lifeguard tower → DO NOT claim "lifeguards on duty" (use bullet 6 if `has_lifeguards=true`, silent otherwise).
+   **SKIP** weather / time-of-day / sunsets / silhouettes / individual people / one-off events / generic "sandy beach with gentle waves" filler. **NEVER reference the photos** — no "the photo shows", "a picture captures", "images suggest". Paraphrase as Scout's direct observation ("Golden Gate views span the bay from the sand"). Treat each photo as ONE signal — a single kite ≠ "this is a kite-flying beach".
 4. Time-windows: concrete and direct. "Dogs gotta be off the sand 9-6 in summer" beats "Dogs are prohibited 9 a.m.-6 p.m. during peak season".
-5. **Amenities (HARD).** Mention ONLY `amenities.present`. NEVER mention `amenities.absent`. NEVER add amenities not in either list. Don't read the full inventory.
+5. **Site features.** Name SPECIFIC items that are present (`amenities.present`): "restrooms and outdoor showers", "fire pits and a picnic area", "ADA parking" — never a placeholder noun. When the beach is thin on services (short or mostly empty `amenities.present` list), **be candid** by naming what's specifically missing from `amenities.absent`: "no restrooms or parking, just beach access" / "no posted lifeguards or restrooms" / "rustic — no fire pits or picnic area". Specific absence claims are honest reporting; vague ones are filler. NEVER add items not in either list (those are unknown). NEVER use the words "amenities" or "facilities" — even in absence claims, name the specific things.
 6. **Lifeguards.** Only mention when `has_lifeguards=true` (high-confidence signal). If a `source_page` specifies posted dates, state them directly ("lifeguards posted Memorial Day to Labor Day") — no hedge needed. Otherwise use the canonical phrasing: **"lifeguard in season, call ahead to confirm"** (or a near-paraphrase that preserves both halves: in-season + check-ahead). NEVER "on duty" / "on staff" / "always posted" — implies year-round. Do not specify months unless `source_page` gives them.
 7. Parking: mention ONCE if `parking.type` is set. Skip if null.
 8. First/second person mix as natural. Avoid imperative marching ("Walk your dog. Share a picnic. Find parking.").
@@ -107,6 +111,8 @@ FORBIDDEN:
 - Inventing accessibility specifics (beach mats, rentals, ramps not in the data).
 - "Lifeguards on duty" / "on staff" / "always posted" — see bullet 6.
 - **Data plumbing.** NEVER reference "source page", "the page", "the data", "the [agency] page", "the [park] page", "the [agency] doesn't say", "according to the X page", "our data shows", "the field is", "the website notes". Attribute to the named operator ("Monterey State Beach allows dogs only south of the Tides Hotel") OR state as Scout's observation. When you don't know a specific, **SAY NOTHING** — never narrate the gap ("we don't have specifics", "details aren't posted").
+- **"amenities" and "facilities" as words — banned entirely.** Vague placeholder nouns. Replace with specifics in BOTH presence and absence contexts. Forbidden: "ADA amenities", "all the facilities", "amenities include X", "plenty of amenities", "no facilities", "no amenities posted", "without amenities", "not much in the way of amenities/facilities", "thin on amenities", "few facilities". Use the specific nouns ("restrooms", "fire pits", "showers", "picnic area") whether describing what's present OR what's absent.
+- **Architecture-explicit references.** Banned because they betray the internal data store: "the data", "the data is/are thin/sparse/limited", "the source page", "the bundle", "the field", "our data shows", "the listing", "the posted excerpt", "according to the [field/data]". Natural-English hedges that don't reference internals are OK ("the park doesn't post specifics" / "[agency] mentions accessibility but no specific details" reads as normal language and is fine). The test: would a reader unfamiliar with our tech stack notice the phrase as machine-talk?
 - Emojis, exclamation stacks, brochure phrasing.
 
 VOICE: dog-owner-to-dog-owner, casual conversational, first-person where it fits, warm but never cheesy.
@@ -240,6 +246,35 @@ def fetch_landscape_features(fid: int) -> dict:
     return {"physical": physical, "dog_friendly_pois": pois}
 
 
+def fetch_photo_descriptions(fid: int, n: int = 3) -> list[str]:
+    """Top-N curated photos' Sonnet pass-1 free-form vision prose.
+
+    Returns ordered list of description strings. Used by the description
+    prompt as a landmark/feature mine: Scout extracts grounded beach
+    facts (named landmarks, vegetation, fixed structures, posted
+    signage) and skips atmospheric/event noise.
+
+    Per-photo length cap of 350 chars (Sonnet's pass-1 averages 80-150
+    words but occasional ones balloon)."""
+    rows = supa("/rest/v1/beach_photos", params={
+        "select": "source_meta,sort_order",
+        "arena_group_id": f"eq.{fid}",
+        "curated_at": "not.is.null",
+        "order": "sort_order.asc.nullslast",
+        "limit": str(n * 3),  # over-fetch in case some lack vision.description
+    }) or []
+    out: list[str] = []
+    for r in rows:
+        sm = r.get("source_meta") or {}
+        v = sm.get("vision") or {}
+        d = (v.get("description") or "").strip()
+        if d:
+            out.append(d[:350])
+        if len(out) >= n:
+            break
+    return out
+
+
 def fetch_nearest_dog_park(fid: int) -> dict | None:
     """Beach's nearest dog park (from beaches_gold.nearest_dog_park_fid).
     Capped at 25mi by the refresh function; returns None if no DP within
@@ -295,8 +330,13 @@ def fetch_osm_notes(fid: int) -> list[dict]:
         return []
 
 
-def build_inputs(fid: int) -> dict | None:
-    """Assemble the full input bundle for one beach."""
+def build_inputs(fid: int, include_photos: bool = True) -> dict | None:
+    """Assemble the full input bundle for one beach.
+
+    `include_photos=False` (CLI flag --no-photos) suppresses the
+    photo_descriptions field so the catalog regen can run cleanly
+    against the rest of the prompt without the experimental photo-text
+    pipeline."""
     rows = supa("/rest/v1/beaches_gold", params={
         "select": ("fid,location_id,name,display_name_override,county_name,state,"
                    "group_id,cpad_unit_id,address,geom"),
@@ -378,6 +418,12 @@ def build_inputs(fid: int) -> dict | None:
     # OR augment activity options on adjacent days.
     nearest_dog_park = fetch_nearest_dog_park(fid)
 
+    # Top-3 curated photos' Sonnet pass-1 free-form vision prose.
+    # Used by the description prompt to mine for landmark / vegetation /
+    # structural facts grounded in the photos. Skip if no curated
+    # tagged photos exist (description prompt skips this rule on null).
+    photo_descriptions = fetch_photo_descriptions(fid, n=3) if include_photos else []
+
     # OSM crowd-voice notes (tags->note / tags->description) on nearby
     # beach-relevant features. Sparse (~3% of beaches have any hit) but
     # high-quality nuance when present.
@@ -419,6 +465,7 @@ def build_inputs(fid: int) -> dict | None:
         "nearby_dog_friendly_pois": dog_friendly_pois,
         "osm_notes": osm_notes,
         "source_pages": source_pages,
+        "photo_descriptions": photo_descriptions,
     }
 
 
@@ -506,6 +553,8 @@ def main():
                     help="regenerate even when input_hash matches cache")
     ap.add_argument("--dry-run", action="store_true",
                     help="build inputs and print, don't call Sonnet")
+    ap.add_argument("--no-photos", action="store_true",
+                    help="omit photo_descriptions from input bundle (experimental photo-text pipeline off)")
     args = ap.parse_args()
 
     fids = select_targets(args)
@@ -516,7 +565,7 @@ def main():
 
     for i, fid in enumerate(fids, 1):
         try:
-            inputs = build_inputs(fid)
+            inputs = build_inputs(fid, include_photos=not args.no_photos)
             if not inputs:
                 print(f"  [{i}/{len(fids)}] fid={fid}  not found, skip")
                 errors += 1

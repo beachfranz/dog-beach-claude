@@ -36,7 +36,9 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -259,7 +261,7 @@ DISPATCH_OUTCOMES = {
 
 
 def run_phase(state: str, *, do_precheck_jurisdictions: bool = True,
-              verbose: bool = True) -> PhaseReport:
+              verbose: bool = True, workers: int = 10) -> PhaseReport:
     report = PhaseReport(state=state, timestamp=datetime.now(timezone.utc).isoformat())
 
     with _connect_pg() as conn:
@@ -292,17 +294,33 @@ def run_phase(state: str, *, do_precheck_jurisdictions: bool = True,
                     "suggested_cmd": _suggest_federal_cmd(state, u),
                 })
 
-        # ── Counties + Cities ──────────────────────────────────────────
+        # ── Counties + Cities (parallel precheck) ──────────────────────
+        # Each precheck spawns a derive_policy_source subprocess (~30-90s,
+        # IO-bound). ThreadPoolExecutor is the right shape: per-thread
+        # subprocess wait + the inner script holds its own DB conn so
+        # we don't share `conn`. Worker cap is the pgbouncer ceiling
+        # (15 in session mode; we leave headroom + cap at 10).
         if do_precheck_jurisdictions:
             for kind, enumerator, key in [
                 ("county", enumerate_counties, "counties"),
                 ("city",   enumerate_cities,   "cities"),
             ]:
                 units = enumerator(conn, state)
+                n_total = len(units)
                 if verbose:
-                    print(f"\n[{key}] precheck-ing {len(units)} jurisdictions...", flush=True)
-                for u in units:
-                    precheck_jurisdiction(u, state)
+                    print(f"\n[{key}] precheck-ing {n_total} jurisdictions "
+                          f"(parallel, {min(workers, n_total)} workers)...",
+                          flush=True)
+                if n_total > 0:
+                    done = [0]
+                    t0 = time.time()
+                    with ThreadPoolExecutor(max_workers=min(workers, n_total)) as ex:
+                        futures = [ex.submit(precheck_jurisdiction, u, state) for u in units]
+                        for f in as_completed(futures):
+                            done[0] += 1
+                            if verbose and (done[0] % 5 == 0 or done[0] == n_total):
+                                print(f"  ... {done[0]}/{n_total} done "
+                                      f"({time.time()-t0:.0f}s)", flush=True)
                 bucket = {
                     "total": len(units),
                     "deferred_state_baseline": [],
@@ -393,6 +411,9 @@ def main() -> int:
     ap.add_argument("--verify-only", action="store_true",
                     help="Just print the count_uncovered_scoreable_beaches gate metric")
     ap.add_argument("--out-dir", default="tmp", help="Where to write the manifest JSON")
+    ap.add_argument("--workers", type=int, default=10,
+                    help="Parallel jurisdiction precheck workers (default 10; "
+                         "pgbouncer session-mode pool ceiling is 15)")
     args = ap.parse_args()
 
     state = args.state.upper()
@@ -407,6 +428,7 @@ def main() -> int:
         state,
         do_precheck_jurisdictions=not args.no_jurisdictions,
         verbose=not args.json_only,
+        workers=args.workers,
     )
 
     # Emit manifest

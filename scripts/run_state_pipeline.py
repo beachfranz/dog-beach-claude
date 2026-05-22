@@ -898,6 +898,96 @@ def _state_operator_ids(state: str) -> list[int]:
 # phases (operator_llm_extract / operator_merge) still run at full state
 # scope — operator-level filtering is harder and the LLM cost is bounded.
 COUNTIES_FILTER: list[str] | None = None
+LIMIT_N: int | None = None  # if set, beach-fid-scoped phases cap to first N fids
+CANONICAL_N: int | None = None  # if set, beach-fid-scoped phases use the class-diverse picker
+
+
+def _canonical_fids(state: str, n: int) -> list[int]:
+    """Pick up to N beaches representing distinct jurisdictional classes.
+
+    For state-launch walkthrough: one representative per class so the full
+    pipeline exercises every cascade path (state-park codify, federal
+    codify, city codify, county codify, private/HOA fallback) before
+    committing the broad wave.
+
+    Classes (mutually exclusive, evaluated in order):
+      1. state_park    — beach inside a PAD-US unit with mng_type='STAT'
+      2. federal       — beach inside a PAD-US unit with mng_type='FED'
+      3. city_municipal— beach inside a c1_city (TIGER incorporated place)
+      4. public_other  — beach in some other public polygon (county, cpad)
+      5. residual      — beach in NO government polygon (private / HOA / unincorporated)
+
+    Allocation: ceil(N/5) per class, ordered by fid for determinism.
+    If a class has fewer than ceil(N/5) beaches, the remainder isn't
+    backfilled from other classes — keeps the diversity intent.
+    """
+    per_class = max(1, (n + 4) // 5)
+    sql = """
+      WITH state_fids AS (
+        SELECT g.fid FROM public.beaches_gold g
+         WHERE g.is_active AND g.state = %s
+           AND g.scoring_tier IN ('daily','hourly')
+      ),
+      classes AS (
+        SELECT s.fid,
+          COALESCE(bool_or(m.polygon_kind = 'c1_city'),         false) AS in_city,
+          COALESCE(bool_or(m.polygon_kind IN ('pad_us_unit','cpad_unit','military_base','county')), false) AS in_any_public
+        FROM state_fids s
+        LEFT JOIN public.beach_polygon_membership m ON m.gold_fid = s.fid
+        GROUP BY s.fid
+      ),
+      fed_lookup AS (
+        SELECT DISTINCT m.gold_fid AS fid
+        FROM public.beach_polygon_membership m
+        JOIN public.pad_us_units p ON p.unit_id::text = m.polygon_id::text
+        WHERE m.polygon_kind = 'pad_us_unit' AND p.mng_type = 'FED'
+      ),
+      state_park_lookup AS (
+        SELECT DISTINCT m.gold_fid AS fid
+        FROM public.beach_polygon_membership m
+        JOIN public.pad_us_units p ON p.unit_id::text = m.polygon_id::text
+        WHERE m.polygon_kind = 'pad_us_unit' AND p.mng_type = 'STAT'
+      ),
+      typed AS (
+        SELECT c.fid,
+          CASE
+            WHEN sp.fid IS NOT NULL              THEN 'state_park'
+            WHEN fl.fid IS NOT NULL              THEN 'federal'
+            WHEN c.in_city                       THEN 'city_municipal'
+            WHEN c.in_any_public                 THEN 'public_other'
+            ELSE                                       'residual'
+          END AS class
+        FROM classes c
+        LEFT JOIN state_park_lookup sp ON sp.fid = c.fid
+        LEFT JOIN fed_lookup fl ON fl.fid = c.fid
+      ),
+      ranked AS (
+        SELECT fid, class,
+          ROW_NUMBER() OVER (PARTITION BY class ORDER BY fid) AS rn
+        FROM typed
+      )
+      SELECT fid, class
+        FROM ranked
+       WHERE rn <= %s
+       ORDER BY
+         CASE class
+           WHEN 'state_park'     THEN 1
+           WHEN 'federal'        THEN 2
+           WHEN 'city_municipal' THEN 3
+           WHEN 'public_other'   THEN 4
+           WHEN 'residual'       THEN 5
+         END,
+         fid
+       LIMIT %s
+    """
+    with open_conn() as c, c.cursor() as cur:
+        cur.execute(sql, (state, per_class, n))
+        rows = cur.fetchall()
+    if rows:
+        log(f'    canonical picker: {len(rows)} beaches across '
+            f'{len(set(r[1] for r in rows))} class(es): '
+            f'{", ".join(f"{r[1]}#{r[0]}" for r in rows)}')
+    return [r[0] for r in rows]
 
 
 def _state_tier12_fids(state: str) -> list[int]:
@@ -941,10 +1031,30 @@ def _state_tier12_fids(state: str) -> list[int]:
         sql += "  and g.county_fips = any(%s) "
         args = args + (COUNTIES_FILTER,)
     sql += "order by g.fid"
+    if LIMIT_N is not None and LIMIT_N > 0:
+        sql += f" limit {int(LIMIT_N)}"
 
     with open_conn() as c, c.cursor() as cur:
         cur.execute(sql, args)
-        return [r[0] for r in cur.fetchall()]
+        fids = [r[0] for r in cur.fetchall()]
+
+    # CANONICAL mode: intersect with the class-diverse picker so we run
+    # representatives of each jurisdictional class instead of the first N
+    # by fid. Applied AFTER the tier filter so canonical fids still respect
+    # the tier-1+2 universe (or the bootstrap "all scoreable" fallback).
+    if CANONICAL_N is not None and CANONICAL_N > 0:
+        canonical = _canonical_fids(state, CANONICAL_N)
+        in_tier = set(fids)
+        # Keep canonical fids that are in the tier set; if too few, top up
+        # with non-canonical first-by-fid up to CANONICAL_N. Preserves
+        # diversity but doesn't strand the pipeline on a too-small set.
+        picked = [f for f in canonical if f in in_tier]
+        if len(picked) < CANONICAL_N:
+            extras = [f for f in fids if f not in set(picked)]
+            picked.extend(extras[:CANONICAL_N - len(picked)])
+        return picked[:CANONICAL_N]
+
+    return fids
 
 
 def _run_subprocess(cmd: list[str], timeout: int = 14400) -> tuple[int, str, str]:
@@ -1951,17 +2061,36 @@ def main():
     ap.add_argument('--phase-from', help='Start at a specific phase (skip prior)')
     ap.add_argument('--counties', help='CSV of county_fips to scope beach phases (test mode). '
                                        'State-wide criteria are downgraded to warnings.')
+    ap.add_argument('--limit', type=int, help='Cap beach-fid-scoped phases to first N fids '
+                                              '(pilot mode; state-wide loaders still run full)')
+    ap.add_argument('--canonical', type=int, metavar='N',
+                    help='Walkthrough mode: pick N beaches representing distinct '
+                         'jurisdictional classes (state_park / federal / city / public_other / '
+                         'residual) for full-pipeline validation before broad sweep. '
+                         'Default N=5. Surfaces cascade gaps and migration-template issues '
+                         'on a small canonical set before committing the broad wave.')
     args = ap.parse_args()
 
     state = args.state.upper()
 
     # Apply county filter mode if requested
-    global COUNTIES_FILTER
+    global COUNTIES_FILTER, LIMIT_N, CANONICAL_N
     if args.counties:
         COUNTIES_FILTER = [c.strip() for c in args.counties.split(',') if c.strip()]
         log(f'COUNTY-FILTERED MODE: restricting beach phases to {len(COUNTIES_FILTER)} counties: '
             f'{",".join(COUNTIES_FILTER)}')
         log('  state-wide criteria will be downgraded to warnings (no halt on failure)')
+    if args.limit and args.limit > 0 and args.canonical and args.canonical > 0:
+        raise SystemExit('--limit and --canonical are mutually exclusive')
+    if args.limit and args.limit > 0:
+        LIMIT_N = args.limit
+        log(f'LIMIT MODE: beach-fid-scoped phases capped to first {LIMIT_N} fids')
+    if args.canonical and args.canonical > 0:
+        CANONICAL_N = args.canonical
+        log(f'CANONICAL MODE: beach-fid-scoped phases scoped to {CANONICAL_N} '
+            f'class-diverse representatives (state_park / federal / city / public_other / residual)')
+        log('  surfaces cascade gaps + migration-template issues before broad wave;')
+        log('  remove --canonical and re-run for the full state.')
 
     if args.dry_run:
         print(f'Plan for state={state}, {len(PHASES)} phases:')

@@ -41,6 +41,17 @@ Usage:
 from __future__ import annotations
 import argparse, ast, json, os, re, subprocess, sys, threading, time, urllib.parse
 from pathlib import Path
+
+# Windows AV-MITM cert verification blocks default httpx/urllib SSL on
+# Franz's env. Inject truststore before importing httpx so the system
+# trust store (Windows cert store) is used. Same pivot pattern as
+# merge_operator_dogs_policy + Mapillary loader.
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except ImportError:
+    pass
+
 import httpx
 import psycopg2, psycopg2.extras
 from dotenv import load_dotenv

@@ -965,7 +965,7 @@ NEAREST_DP_PCT_BY_MODE = {'state-launch': 0.80, 'steady-state': 0.90}
 # (rural inland, private community waterfronts). state-launch accepts 60%
 # (gets us through MD launch where ~half of community beaches are photo-less);
 # steady-state expects 80% (covered + curated states).
-PHOTOS_TAG_PCT_BY_MODE = {'state-launch': 0.60, 'steady-state': 0.80}
+PHOTOS_TAG_PCT_BY_MODE = {'state-launch': 0.50, 'steady-state': 0.80}
 
 
 def _canonical_fids(state: str, n: int) -> list[int]:

@@ -50,13 +50,114 @@ def normalize(s: str) -> str:
     return re.sub(r'\s+', ' ', s).strip()
 
 
+_TLS = threading.local()
+
+def _thread_conn():
+    """Per-thread cached DB connection."""
+    c = getattr(_TLS, 'conn', None)
+    if c is None or c.closed:
+        c = _connect()
+        _TLS.conn = c
+    return c
+
+
+def process_url(src: str, url: str, beaches: list[dict], apply: bool) -> dict:
+    """Process one URL on a thread-local connection. Returns counts."""
+    import math
+    conn = _thread_conn()
+    cur = conn.cursor()
+    result = {'centroid_hit': 0, 'centroid_miss': 0, 'region_match': 0,
+              'dist_updates': 0, 'region_updates': 0}
+
+    title = normalize(beaches[0]['filename'] + ' ' + beaches[0]['vd'])
+
+    # ----- Centroid distance (fanout only) -----
+    if len(beaches) >= 2:
+        fid_list = [b['fid'] for b in beaches]
+        # Only park-class polygons (pad_us_unit + cpad_unit + military_base).
+        # county/c1_city are too coarse to read as a "park centroid".
+        cur.execute("""
+          SELECT m.polygon_kind, m.polygon_id, m.polygon_name, m.area_m2
+            FROM beach_polygon_membership m
+           WHERE m.gold_fid = ANY(%s)
+             AND m.polygon_kind IN ('pad_us_unit','cpad_unit','military_base')
+           GROUP BY m.polygon_kind, m.polygon_id, m.polygon_name, m.area_m2
+          HAVING COUNT(DISTINCT m.gold_fid) = %s
+           ORDER BY area_m2 ASC NULLS LAST
+           LIMIT 1
+        """, (fid_list, len(fid_list)))
+        poly = cur.fetchone()
+        if poly:
+            pkind, pid, _pname, _area = poly
+            # Dispatch centroid lookup by polygon_kind
+            if pkind == 'pad_us_unit':
+                cur.execute("SELECT ST_Y(ST_Centroid(geom)::geometry), ST_X(ST_Centroid(geom)::geometry) FROM pad_us_units WHERE unit_id::text = %s", (str(pid),))
+            elif pkind == 'cpad_unit':
+                cur.execute("SELECT ST_Y(ST_Centroid(geom)::geometry), ST_X(ST_Centroid(geom)::geometry) FROM cpad_units WHERE unit_id::text = %s", (str(pid),))
+            elif pkind == 'military_base':
+                cur.execute("SELECT ST_Y(ST_Centroid(geom)::geometry), ST_X(ST_Centroid(geom)::geometry) FROM military_bases WHERE unit_id::text = %s", (str(pid),))
+            else:
+                cur.execute("SELECT NULL::float, NULL::float")
+            pc = cur.fetchone()
+            if pc and pc[0] is not None:
+                c_lat, c_lon = float(pc[0]), float(pc[1])
+                for b in beaches:
+                    dlat = math.radians(b['lat'] - c_lat); dlon = math.radians(b['lon'] - c_lon)
+                    h = math.sin(dlat/2)**2 + math.cos(math.radians(c_lat))*math.cos(math.radians(b['lat']))*math.sin(dlon/2)**2
+                    b['dist_m'] = round(2 * 6371000.0 * math.asin(math.sqrt(h)), 0)
+                result['centroid_hit'] = 1
+                if apply:
+                    for b in beaches:
+                        cur.execute("""
+                          UPDATE beach_photos SET distance_m = %s
+                           WHERE source = %s AND image_url = %s AND arena_group_id = %s
+                        """, (b['dist_m'], src, url, b['fid']))
+                        result['dist_updates'] += 1
+            else:
+                result['centroid_miss'] = 1
+        else:
+            result['centroid_miss'] = 1
+
+    # ----- Region-name match (all URLs) -----
+    for b in beaches:
+        cur.execute("""
+          SELECT jsonb_path_query_array(zone_rules, '$.regions[*].name')
+            FROM beach_dog_policy WHERE arena_group_id = %s
+        """, (b['fid'],))
+        rn_row = cur.fetchone()
+        region_names = [n for n in (rn_row[0] if rn_row else []) if n] if rn_row else []
+        for rn in region_names:
+            rn_norm = normalize(rn)
+            if not rn_norm or len(rn_norm) < 6: continue
+            distinct_toks = [t for t in rn_norm.split() if len(t) >= 5]
+            if not distinct_toks: continue
+            if all(re.search(r'\b' + re.escape(t) + r'\b', title) for t in distinct_toks):
+                result['region_match'] += 1
+                if apply:
+                    cur.execute("""
+                      UPDATE beach_photos
+                         SET source_meta = jsonb_set(coalesce(source_meta, '{}'::jsonb),
+                                                      '{matched_region}', to_jsonb(%s::text))
+                       WHERE source = %s AND image_url = %s AND arena_group_id = %s
+                    """, (rn, src, url, b['fid']))
+                    result['region_updates'] += 1
+                break
+
+    if apply:
+        conn.commit()
+    return result
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument('--apply', action='store_true', help='write changes; default is dry-run')
     ap.add_argument('--sources', default=','.join(AGENCY_SOURCES))
+    ap.add_argument('--workers', type=int, default=16, help='thread-pool size (default 16)')
+    ap.add_argument('--limit', type=int, default=0,
+                     help='if >0, sample N URLs total across sources (for pilot runs)')
     args = ap.parse_args()
     sources = [s.strip() for s in args.sources.split(',') if s.strip()]
-    print(f'Sources: {sources}  mode: {"APPLY" if args.apply else "DRY-RUN"}')
+    print(f'Sources: {sources}  mode: {"APPLY" if args.apply else "DRY-RUN"}  workers: {args.workers}')
 
     conn = _connect()
     cur = conn.cursor()
@@ -100,91 +201,47 @@ def main() -> int:
         urls_single = [u for u, b in urls if len(b) == 1]
         urls_fanout = [u for u, b in urls if len(b) >= 2]
         print(f'  unique URLs: {len(urls)}  ({len(urls_single)} single-beach + {len(urls_fanout)} fanout)')
+        if args.limit > 0:
+            # Per-source proportional cap. Prefer fanout URLs (more interesting).
+            per_src_cap = max(1, args.limit // max(1, len(sources)))
+            # Take all fanout up to cap, fill with single
+            fanout_sample = [(u, b) for u, b in urls if len(b) >= 2][:per_src_cap]
+            single_sample = [(u, b) for u, b in urls if len(b) == 1][:max(0, per_src_cap - len(fanout_sample))]
+            urls = fanout_sample + single_sample
+            print(f'  --limit applied: {len(urls)} URLs sampled (cap {per_src_cap}/source, prefer fanout)')
 
         n_centroid_hit = 0
         n_centroid_miss = 0
         n_region_match = 0
+        src_dist_updates = 0
+        src_region_updates = 0
 
-        import time as _t
         _t0 = _t.time()
-        for _i, (url, beaches) in enumerate(urls, 1):
-            if _i % 50 == 0:
-                print(f'  ... {_i}/{len(urls)} URLs processed ({_t.time()-_t0:.0f}s)', flush=True)
-            title = normalize(beaches[0]['filename'] + ' ' + beaches[0]['vd'])
+        done_count = [0]
+        done_lock = threading.Lock()
 
-            # ----- Centroid distance (fanout only) -----
-            if len(beaches) >= 2:
-                fid_list = [b['fid'] for b in beaches]
-                # Find polygon(s) in beach_polygon_membership that contain ALL these fids
-                cur.execute("""
-                  SELECT m.polygon_kind, m.polygon_id, m.polygon_name, m.area_m2
-                    FROM beach_polygon_membership m
-                   WHERE m.gold_fid = ANY(%s)
-                   GROUP BY m.polygon_kind, m.polygon_id, m.polygon_name, m.area_m2
-                  HAVING COUNT(DISTINCT m.gold_fid) = %s
-                   ORDER BY area_m2 ASC NULLS LAST  -- smallest polygon wins (most specific)
-                   LIMIT 1
-                """, (fid_list, len(fid_list)))
-                poly = cur.fetchone()
-                if poly:
-                    pkind, pid, pname, _area = poly
-                    # Get the polygon centroid (from pad_us_units if pad_us, else compute)
-                    cur.execute("""
-                      SELECT ST_Y(ST_Centroid(geom)::geometry) AS lat,
-                             ST_X(ST_Centroid(geom)::geometry) AS lon
-                        FROM pad_us_units WHERE unit_id::text = %s
-                    """, (str(pid),))
-                    pc = cur.fetchone()
-                    if pc and pc[0] is not None:
-                        c_lat, c_lon = float(pc[0]), float(pc[1])
-                        import math
-                        for b in beaches:
-                            dlat = math.radians(b['lat'] - c_lat); dlon = math.radians(b['lon'] - c_lon)
-                            h = math.sin(dlat/2)**2 + math.cos(math.radians(c_lat))*math.cos(math.radians(b['lat']))*math.sin(dlon/2)**2
-                            dist = 2 * 6371000.0 * math.asin(math.sqrt(h))
-                            b['dist_m'] = round(dist, 0)
-                        n_centroid_hit += 1
-                        if args.apply:
-                            for b in beaches:
-                                cur.execute("""
-                                  UPDATE beach_photos SET distance_m = %s
-                                   WHERE source = %s AND image_url = %s AND arena_group_id = %s
-                                """, (b['dist_m'], src, url, b['fid']))
-                                total_dist_updates += 1
-                    else:
-                        n_centroid_miss += 1
-                else:
-                    n_centroid_miss += 1
+        def _wrapped(args_tuple):
+            url_, beaches_ = args_tuple
+            res = process_url(src, url_, beaches_, args.apply)
+            with done_lock:
+                done_count[0] += 1
+                if done_count[0] % 100 == 0:
+                    print(f'  ... {done_count[0]}/{len(urls)} URLs ({_t.time()-_t0:.0f}s)', flush=True)
+            return res
 
-            # ----- Region-name match (all URLs) -----
-            for b in beaches:
-                cur.execute("""
-                  SELECT jsonb_path_query_array(zone_rules, '$.regions[*].name')
-                    FROM beach_dog_policy WHERE arena_group_id = %s
-                """, (b['fid'],))
-                rn_row = cur.fetchone()
-                region_names = [n for n in (rn_row[0] if rn_row else []) if n] if rn_row else []
-                for rn in region_names:
-                    rn_norm = normalize(rn)
-                    if not rn_norm or len(rn_norm) < 6: continue
-                    distinct_toks = [t for t in rn_norm.split() if len(t) >= 5]
-                    if not distinct_toks: continue
-                    if all(re.search(r'\b' + re.escape(t) + r'\b', title) for t in distinct_toks):
-                        n_region_match += 1
-                        if args.apply:
-                            cur.execute("""
-                              UPDATE beach_photos
-                                 SET source_meta = jsonb_set(coalesce(source_meta, '{}'::jsonb),
-                                                              '{matched_region}', to_jsonb(%s::text))
-                               WHERE source = %s AND image_url = %s AND arena_group_id = %s
-                            """, (rn, src, url, b['fid']))
-                            total_region_updates += 1
-                        break
+        with ThreadPoolExecutor(max_workers=args.workers) as ex:
+            for res in ex.map(_wrapped, urls):
+                n_centroid_hit += res['centroid_hit']
+                n_centroid_miss += res['centroid_miss']
+                n_region_match += res['region_match']
+                src_dist_updates += res['dist_updates']
+                src_region_updates += res['region_updates']
 
-        if args.apply:
-            conn.commit()
+        total_dist_updates += src_dist_updates
+        total_region_updates += src_region_updates
         print(f'  centroid distance hit: {n_centroid_hit} fanout URLs (miss: {n_centroid_miss})')
         print(f'  region-name matches:   {n_region_match}')
+        print(f'  source elapsed:        {_t.time()-_t0:.0f}s @ {args.workers} workers')
 
     print()
     print('=== TOTALS ===')

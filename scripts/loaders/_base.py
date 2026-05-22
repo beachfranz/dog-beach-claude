@@ -69,6 +69,8 @@ import psycopg2.extras
 import requests
 from dotenv import load_dotenv
 
+from scripts.common import normalize_place_name, PLACE_NAME_SUFFIXES
+
 # ─── Env / DB ────────────────────────────────────────────────────────
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -94,17 +96,11 @@ BROWSER_HEADERS = {
     "Accept-Encoding": "gzip, deflate, br",
 }
 
-# Default park-name suffixes to strip during normalization.
-# Subclasses may extend via `extra_name_suffixes` class attribute.
-DEFAULT_NAME_SUFFIXES = (
-    " state recreation site", " state recreation area",
-    " state scenic viewpoint", " state scenic corridor",
-    " state natural area", " state natural site",
-    " state heritage site", " state historical site",
-    " state historic site", " state wayside",
-    " state park", " state trail", " state beach",
-    " marine state park", " historical state park",
-)
+# Default suffixes used by normalize_park_name() — pulled from the
+# canonical PLACE_NAME_SUFFIXES tuple in scripts.common.text_cleaning
+# so all loaders share the same baseline. Subclass-specific extras go
+# in the subclass's extra_name_suffixes class attribute.
+DEFAULT_NAME_SUFFIXES = PLACE_NAME_SUFFIXES
 
 # ─── Dataclasses ─────────────────────────────────────────────────────
 
@@ -187,15 +183,12 @@ class StateParksLoader(ABC):
 
     def normalize_park_name(self, name: str) -> str:
         """Lowercase + strip CMS suffixes + collapse non-alnum.
-        Used for polygon-name matching."""
-        s = name.lower()
-        suffixes = self.extra_name_suffixes + DEFAULT_NAME_SUFFIXES
-        # Longest-first so the strip is greedy
-        for sfx in sorted(suffixes, key=len, reverse=True):
-            if s.endswith(sfx):
-                s = s[:-len(sfx)]
-                break
-        return re.sub(r"[^a-z0-9 ]+", " ", s).strip()
+        Used for polygon-name matching.
+
+        Delegates to scripts.common.text_cleaning.normalize_place_name()
+        which carries the canonical implementation + suffix tuple
+        (consolidated 2026-05-22 from 4 duplicate impls)."""
+        return normalize_place_name(name, extra_suffixes=self.extra_name_suffixes)
 
     def should_skip_park(self, park: ParkInfo) -> bool:
         """Filter hook (e.g., CDPR's umbrella-page filter). Default = no skip."""

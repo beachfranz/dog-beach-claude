@@ -31,6 +31,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import psycopg2
 from dotenv import load_dotenv
 
+# Canonical text-cleaning helper (2026-05-22 consolidation):
+# replaces the local normalize() that was duplicated across loaders.
+from scripts.common import normalize_text
+
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
 
@@ -45,9 +49,10 @@ def _connect():
 
 
 def normalize(s: str) -> str:
-    s = urllib.parse.unquote(s or '').lower()
-    s = re.sub(r'[^a-z0-9 ]+', ' ', s)
-    return re.sub(r'\s+', ' ', s).strip()
+    """Local alias for scripts.common.normalize_text.
+    Kept as a thin shim to minimize call-site churn; new code should
+    import normalize_text directly from scripts.common."""
+    return normalize_text(s or "")
 
 
 _TLS = threading.local()
@@ -107,11 +112,19 @@ def process_url(src: str, url: str, beaches: list[dict], apply: bool) -> dict:
                     b['dist_m'] = round(2 * 6371000.0 * math.asin(math.sqrt(h)), 0)
                 result['centroid_hit'] = 1
                 if apply:
+                    # HARD pin agency-photo-centroid-must-populate-lat-lng:
+                    # also set lat/lng to centroid coords. The curate selector
+                    # get_beach_photos_diverse gates on (lat IS NOT NULL OR
+                    # curated_at IS NOT NULL); leaving lat NULL silently drops
+                    # these photos from candidates.
                     for b in beaches:
                         cur.execute("""
-                          UPDATE beach_photos SET distance_m = %s
+                          UPDATE beach_photos
+                             SET distance_m = %s,
+                                 lat = %s,
+                                 lng = %s
                            WHERE source = %s AND image_url = %s AND arena_group_id = %s
-                        """, (b['dist_m'], src, url, b['fid']))
+                        """, (b['dist_m'], c_lat, c_lon, src, url, b['fid']))
                         result['dist_updates'] += 1
             else:
                 result['centroid_miss'] = 1

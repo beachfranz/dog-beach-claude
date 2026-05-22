@@ -27,6 +27,16 @@ from __future__ import annotations
 import json, os, subprocess
 from collections import defaultdict
 from pathlib import Path
+
+# Windows AV-MITM cert verification blocks httpx default SSL. Use the
+# system trust store (Windows certificate store) via truststore.
+# Per [[wikimedia-integration-sharp-edges]] + earlier session pivots.
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except ImportError:
+    pass
+
 import httpx
 from dotenv import load_dotenv
 

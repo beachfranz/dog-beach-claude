@@ -752,20 +752,23 @@ PHASES = [
         'kind': 'python',
         'action': 'photos_tag',
         'criterion':
-            # Pass: at least 80% of MVP+ beaches have at least one tagged
-            # photo (source_meta->'vision' present).
+            # Pass: at least $PHOTOS_TAG_PCT of MVP+ beaches have at least
+            # one tagged photo. Launch-mode gate (state-launch 60% /
+            # steady-state 80%) — rural/private beaches legitimately have
+            # no Flickr photos; hard 80% halts every new state on day 1.
             "select (count(*) filter (where exists ("
             "          select 1 from public.beach_photos bp "
             "           where bp.arena_group_id = g.fid "
             "             and (bp.source_meta ? 'vision' "
             "                  or bp.source_meta->'vision' is not null))) "
-            "        >= floor(count(*) * 0.8))::boolean "
+            "        >= floor(count(*) * $PHOTOS_TAG_PCT))::boolean "
             "from public.beaches_gold g "
             "join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
             "where g.state=$STATE and g.is_active "
             "  and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
             "      in ('1_off-leash','2_on-leash')",
-        'criterion_text': 'at least 80% of MVP+ beaches have at least one vision-tagged photo',
+        'criterion_text': 'at least 80% (steady-state) / 60% (state-launch) of MVP+ beaches '
+                          'have at least one vision-tagged photo',
         'progress_sql':
             "with t as (select count(*)::int n from public.beaches_gold g "
             "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
@@ -958,6 +961,11 @@ GATE_PCT_BY_MODE      = {'state-launch': 80.0, 'steady-state': 95.0}
 # Structural fix (task #158): add a sentinel for "no DP within cap" so
 # those beaches count as covered.
 NEAREST_DP_PCT_BY_MODE = {'state-launch': 0.80, 'steady-state': 0.90}
+# photos_tag gate: many beaches in any state legitimately have no Flickr photos
+# (rural inland, private community waterfronts). state-launch accepts 60%
+# (gets us through MD launch where ~half of community beaches are photo-less);
+# steady-state expects 80% (covered + curated states).
+PHOTOS_TAG_PCT_BY_MODE = {'state-launch': 0.60, 'steady-state': 0.80}
 
 
 def _canonical_fids(state: str, n: int) -> list[int]:
@@ -1853,17 +1861,22 @@ def action_photo_centroid_backfill(state: str) -> int:
     photos_curate (so get_beach_photos_diverse can use the new
     distance_m signal). Single-shot subprocess, ~30-60 min for full
     backfill across ~4700 NULL-distance agency photos."""
+    # --workers 10 caps below the pgbouncer session-mode pool ceiling (15).
+    # The backfill script's default of 16 exhausts the pool (EMAXCONNSESSION).
     cmd = [sys.executable, 'scripts/backfill_agency_photo_centroid.py',
-           '--apply']
-    log(f'    photo_centroid_backfill (catalog-wide, --apply)')
+           '--apply', '--workers', '10']
+    log(f'    photo_centroid_backfill (catalog-wide, --apply, workers=10)')
     try:
         rc, out, err = _run_subprocess(cmd, timeout=5400)  # 90 min cap
     except subprocess.TimeoutExpired:
-        log(f'    backfill TIMEOUT after 5400s')
-        return 0
+        raise RuntimeError('photo_centroid_backfill TIMEOUT after 5400s')
     if rc != 0:
-        log(f'    backfill exit {rc}: {err[-300:] if err else ""}')
-        return 0
+        # Don't silently mask failure (was returning 0 = success-with-no-rows).
+        # The phase criterion would still see whatever distance_m rows pre-exist
+        # and pass, hiding the regression.
+        raise RuntimeError(
+            f'photo_centroid_backfill exit {rc}: {err[-500:] if err else ""}'
+        )
     # Parse "distance_m updates: N" line
     m = re.search(r'distance_m updates:\s+(\d+)', out or '')
     return int(m.group(1)) if m else 0
@@ -2205,14 +2218,16 @@ def main():
         criterion = (ph['criterion']
                      .replace('$STATE', f"'{state}'")
                      .replace('$UNCOVER_DIVISOR', str(GATE_DIVISOR_BY_MODE[LAUNCH_MODE]))
-                     .replace('$NEAREST_DP_PCT', str(NEAREST_DP_PCT_BY_MODE[LAUNCH_MODE])))
+                     .replace('$NEAREST_DP_PCT', str(NEAREST_DP_PCT_BY_MODE[LAUNCH_MODE]))
+                     .replace('$PHOTOS_TAG_PCT', str(PHOTOS_TAG_PCT_BY_MODE[LAUNCH_MODE])))
         kind = ph.get('kind', 'sql')
         progress_sql = ph.get('progress_sql')
         if progress_sql:
             progress_sql = (progress_sql
                             .replace('$STATE', f"'{state}'")
                             .replace('$UNCOVER_DIVISOR', str(GATE_DIVISOR_BY_MODE[LAUNCH_MODE]))
-                            .replace('$NEAREST_DP_PCT', str(NEAREST_DP_PCT_BY_MODE[LAUNCH_MODE])))
+                            .replace('$NEAREST_DP_PCT', str(NEAREST_DP_PCT_BY_MODE[LAUNCH_MODE]))
+                            .replace('$PHOTOS_TAG_PCT', str(PHOTOS_TAG_PCT_BY_MODE[LAUNCH_MODE])))
         phase_num = PHASES.index(ph) + 1
         log(f'  RUN  [{phase_num}/{len(PHASES)}] {ph["key"]:<22} ...')
         t0 = time.time()

@@ -422,8 +422,22 @@ def build_inputs(fid: int) -> dict | None:
     }
 
 
+_PROMPT_SHA = hashlib.sha256(PROMPT.encode()).hexdigest()[:8]
+
+
 def input_hash(inputs: dict) -> str:
-    return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()[:16]
+    """Prompt-aware cache key. Hashes inputs AND prompt+model so that
+    description regen fires automatically when the PROMPT or MODEL
+    changes — not only when the input bundle changes. On a one-shot
+    prompt edit, this triggers a full-catalog regen on next pipeline
+    run (1045 MVP+ beaches × ~$0.018 = ~$19); subsequent runs cache
+    normally."""
+    payload = {
+        "inputs":     inputs,
+        "prompt_sha": _PROMPT_SHA,
+        "model":      MODEL,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
 
 
 # ─── Sonnet call ──────────────────────────────────────────────────────────

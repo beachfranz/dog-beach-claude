@@ -157,6 +157,7 @@ Deno.serve(async (req: Request) => {
   let tideWindowDays = 7;       // default: refresh fetches up to 7 days
   let forceTideRefresh = false; // default: skip NOAA when buffer is fresh
   let skipRecentHours: number | null = null;  // skip beaches refreshed within N hours
+  let skipBesttime = false;     // default: include BestTime (legacy behavior)
   try {
     const body = await req.json().catch(() => ({}));
     if (Array.isArray(body?.location_ids) && body.location_ids.length > 0) {
@@ -166,6 +167,7 @@ Deno.serve(async (req: Request) => {
       tideWindowDays = Math.min(body.tide_window_days, 30);
     }
     if (body?.force_tide_refresh === true) forceTideRefresh = true;
+    if (body?.skip_besttime === true) skipBesttime = true;
     if (typeof body?.skip_recent_hours === "number" && body.skip_recent_hours > 0) {
       skipRecentHours = Math.min(body.skip_recent_hours, 168);  // cap at 1 week
     }
@@ -310,7 +312,7 @@ Deno.serve(async (req: Request) => {
     for (const beach of beaches as Beach[]) {
       const result = await processBeach(
         beach, config, supabase, runAt,
-        { tideWindowDays, forceTideRefresh },
+        { tideWindowDays, forceTideRefresh, skipBesttime },
       );
       results.push(result);
     }
@@ -343,6 +345,7 @@ interface RefreshResult {
 interface RefreshOpts {
   tideWindowDays: number;
   forceTideRefresh: boolean;
+  skipBesttime?: boolean;
 }
 
 async function processBeach(
@@ -405,27 +408,30 @@ async function processBeach(
     }
   }
 
-  // c. Crowds (non-fatal)
+  // c. Crowds (non-fatal). Skipped via opts.skipBesttime (BestTime to be
+  // phased out / replaced; default off as of 2026-05-22).
   let crowdResult: Awaited<ReturnType<typeof fetchCrowds>>;
-  try {
-    crowdResult = await fetchCrowds(beach, BESTTIME_KEY_PRIVATE, BESTTIME_KEY_PUBLIC);
-    phases.besttime = "ok";
-    console.log(`[${beach.location_id}] Crowds OK — ${crowdResult.busynessMap.size} slots`);
-    if (crowdResult.isNewVenue) {
-      // Write the discovered venue back to the spine (beaches_gold). The
-      // legacy public.beaches column is now derived/optional and gets
-      // mirrored on next sync rather than directly written here.
-      await supabase
-        .from("beaches_gold")
-        .update({ besttime_venue_id: crowdResult.venueId })
-        .eq("fid", beach.arena_group_id);
-      console.log(`[${beach.location_id}] Persisted venue_id: ${crowdResult.venueId}`);
-    }
-  } catch (err) {
-    await logError(supabase, beach.location_id, "besttime", err);
-    phases.besttime = "error";
+  if (opts.skipBesttime) {
+    phases.besttime = "skipped";
     crowdResult = { busynessMap: new Map(), venueId: "", isNewVenue: false };
-    console.warn(`[${beach.location_id}] BestTime failed — proceeding without crowd data`);
+  } else {
+    try {
+      crowdResult = await fetchCrowds(beach, BESTTIME_KEY_PRIVATE, BESTTIME_KEY_PUBLIC);
+      phases.besttime = "ok";
+      console.log(`[${beach.location_id}] Crowds OK — ${crowdResult.busynessMap.size} slots`);
+      if (crowdResult.isNewVenue) {
+        await supabase
+          .from("beaches_gold")
+          .update({ besttime_venue_id: crowdResult.venueId })
+          .eq("fid", beach.arena_group_id);
+        console.log(`[${beach.location_id}] Persisted venue_id: ${crowdResult.venueId}`);
+      }
+    } catch (err) {
+      await logError(supabase, beach.location_id, "besttime", err);
+      phases.besttime = "error";
+      crowdResult = { busynessMap: new Map(), venueId: "", isNewVenue: false };
+      console.warn(`[${beach.location_id}] BestTime failed — proceeding without crowd data`);
+    }
   }
 
   // d. Merge raw hours

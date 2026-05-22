@@ -14,21 +14,19 @@ Usage:
   python scripts/extract_agency_master.py --skip-recent 0   # force re-extract
 """
 from __future__ import annotations
-import truststore; truststore.inject_into_ssl()
 import argparse, json, os, re, sys, time
 from datetime import datetime, timezone
 from pathlib import Path
 import httpx
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parent / "pipeline" / ".env")
+# scripts.common loads .env + injects truststore at package init.
+from scripts.common.llm import HAIKU
 
 SUPABASE_URL  = os.environ["SUPABASE_URL"]
 SERVICE_KEY   = os.environ["SUPABASE_SERVICE_KEY"]
 ANTHROPIC_KEY = os.environ["ANTHROPIC_API_KEY"]
 TAVILY_KEY    = os.environ.get("TAVILY_API_KEY")
-HAIKU = "claude-haiku-4-5-20251001"
 CHROME_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 

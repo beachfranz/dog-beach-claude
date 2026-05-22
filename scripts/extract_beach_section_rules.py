@@ -22,19 +22,14 @@ from __future__ import annotations
 import argparse, json, os, sys, time, urllib.parse
 from pathlib import Path
 import httpx
-import psycopg2, psycopg2.extras
-from dotenv import load_dotenv
+import psycopg2.extras  # for DictCursor / RealDictCursor usage downstream
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
-POOLER = (ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip()
-_p = urllib.parse.urlparse(POOLER)
-PG = dict(host=_p.hostname, port=_p.port or 5432, user=_p.username,
-          password=os.environ['SUPABASE_DB_PASSWORD'],
-          dbname=(_p.path or '/postgres').lstrip('/'), sslmode='require')
+# scripts.common loads .env + injects truststore at package init.
+from scripts.common.db import connect
+from scripts.common.llm import HAIKU
 
 ANTHROPIC_KEY = os.environ['ANTHROPIC_API_KEY']
-MODEL = 'claude-haiku-4-5-20251001'
+MODEL = HAIKU
 
 # Cacheable fixed instructions (system block).
 SYSTEM_INSTRUCTIONS = """You map operator-level dog policies onto beach sections.
@@ -85,7 +80,7 @@ Return:
 
 
 def q(sql, args=None, fetch=True):
-    with psycopg2.connect(**PG) as c:
+    with connect() as c:
         c.autocommit = True
         with c.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, args)

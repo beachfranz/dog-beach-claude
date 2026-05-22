@@ -15,14 +15,14 @@ from __future__ import annotations
 import argparse, json, os, re, sys, time
 from pathlib import Path
 import httpx
-from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent / "pipeline" / ".env")
+# scripts.common loads .env + injects truststore at package init.
+from scripts.common.llm import SONNET
+
 SUPABASE_URL      = os.environ["SUPABASE_URL"]
 SERVICE_KEY       = os.environ["SUPABASE_SERVICE_KEY"]
 TAVILY_API_KEY    = os.environ["TAVILY_API_KEY"]
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
-SONNET            = "claude-sonnet-4-6"
 SLEEP_S           = 1.5
 
 

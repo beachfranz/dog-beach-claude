@@ -17,26 +17,21 @@ Usage:
 """
 
 from __future__ import annotations
-# 2026-05-13: truststore injection MUST happen before httpx imports its TLS
-# context. Without this, Tavily/Anthropic calls fail with
-# CERTIFICATE_VERIFY_FAILED on Windows. See project_python_ssl_truststore.md.
-import truststore; truststore.inject_into_ssl()
 import argparse, json, os, re, sys, time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 import httpx
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent / "pipeline" / ".env")
+# scripts.common loads .env + injects truststore at package init —
+# importing anything from it (here, the model constants) is enough.
+from scripts.common.llm import HAIKU, SONNET
+
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 TAVILY_API_KEY    = os.environ["TAVILY_API_KEY"]
 SUPABASE_URL      = os.environ["SUPABASE_URL"]
 SERVICE_KEY       = os.environ["SUPABASE_SERVICE_KEY"]
-
-HAIKU  = "claude-haiku-4-5-20251001"
-SONNET = "claude-sonnet-4-6"
 
 CHROME_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
              "AppleWebKit/537.36 (KHTML, like Gecko) "

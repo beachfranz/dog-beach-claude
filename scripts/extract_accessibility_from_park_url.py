@@ -26,21 +26,16 @@ Usage:
 """
 from __future__ import annotations
 import argparse, json, os, sys, time, urllib.parse, urllib.request
-from pathlib import Path
 
-import psycopg2
-from dotenv import load_dotenv
-
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
-POOLER = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-_p = urllib.parse.urlparse(POOLER)
-PG = dict(host=_p.hostname, port=_p.port or 5432, user=_p.username,
-          password=os.environ["SUPABASE_DB_PASSWORD"],
-          dbname=(_p.path or "/postgres").lstrip("/"), sslmode="require")
+# scripts.common loads .env + injects truststore at package init.
+# This script previously had NO truststore inject — Anthropic calls
+# would fail with CERTIFICATE_VERIFY_FAILED on Windows AV-MITM. Side
+# effect of common's __init__ fixes that latent bug.
+from scripts.common.db import connect
+from scripts.common.llm import HAIKU
 
 ANTHROPIC_KEY = os.environ["ANTHROPIC_API_KEY"]
-MODEL = "claude-haiku-4-5-20251001"
+MODEL = HAIKU
 
 PROMPT = """Extract accessibility (ADA / wheelchair) signals from this park/beach website text.
 
@@ -76,7 +71,7 @@ ADA_KEYWORDS = r"\m(wheelchair|ADA|accessible|accessibility|mobi.?mat|handicap|d
 
 def fetch_targets(states: list[str] | None, fids: list[int] | None):
     """Return list of (fid, concatenated_text) for ADA-keyword-rich park_url_extractions."""
-    with psycopg2.connect(**PG) as c, c.cursor() as cur:
+    with connect() as c, c.cursor() as cur:
         clauses = []
         params = []
         if fids:
@@ -139,7 +134,7 @@ def upsert_bep(fid: int, parsed: dict):
     cleaned = {k: v for k, v in parsed.items() if v is not None}
     if not cleaned:
         return False
-    with psycopg2.connect(**PG) as c, c.cursor() as cur:
+    with connect() as c, c.cursor() as cur:
         cur.execute("""
           insert into public.beach_enrichment_provenance
             (gold_fid, field_group, source, source_url, claimed_values, confidence,

@@ -15,17 +15,13 @@ Environment:
 """
 
 from __future__ import annotations
-import argparse, json, os, sys, time, urllib.parse, urllib.request
-from pathlib import Path
-from dotenv import load_dotenv
+import argparse, json, os, sys, time, urllib.parse, urllib.request, urllib.error
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
+# scripts.common loads .env + injects truststore at package init.
+from scripts.common.supa import supa
 
-SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
-SERVICE_KEY  = os.environ["SUPABASE_SERVICE_KEY"]
-PIXABAY_KEY  = (os.environ.get("PIXABAY_API_KEY")
-                or os.environ.get("PIXABAY_KEY"))
+PIXABAY_KEY = (os.environ.get("PIXABAY_API_KEY")
+               or os.environ.get("PIXABAY_KEY"))
 if not PIXABAY_KEY:
     print("ERROR: set PIXABAY_API_KEY in scripts/pipeline/.env", file=sys.stderr)
     print("  Get a free key at https://pixabay.com/api/docs/", file=sys.stderr)
@@ -33,26 +29,6 @@ if not PIXABAY_KEY:
 
 PER_BEACH  = 3
 THROTTLE_S = 0.5  # Pixabay rate-limits at 100 req/60s; we're well under
-
-
-def supa(path, *, method="GET", body=None, params=None, prefer=None):
-    qs = ("?" + urllib.parse.urlencode(params)) if params else ""
-    headers = {
-        "apikey": SERVICE_KEY,
-        "Authorization": f"Bearer {SERVICE_KEY}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-    if prefer: headers["Prefer"] = prefer
-    req = urllib.request.Request(f"{SUPABASE_URL}{path}{qs}", method=method,
-        data=(json.dumps(body).encode() if body is not None else None), headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            raw = r.read()
-            return json.loads(raw) if raw else None
-    except urllib.error.HTTPError as e:
-        body_txt = e.read().decode("utf-8", "ignore")[:300]
-        raise RuntimeError(f"Supabase {method} {path} -> HTTP {e.code}: {body_txt}") from None
 
 
 def select_targets(args):

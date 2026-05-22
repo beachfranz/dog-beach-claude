@@ -35,8 +35,6 @@ Environment:
 from __future__ import annotations
 import sys
 sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-import truststore                          # Win Python 3.14 OS-cert store
-truststore.inject_into_ssl()
 
 import argparse
 import json
@@ -47,15 +45,12 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from dotenv import load_dotenv
+# scripts.common loads .env + injects truststore at package init.
+from scripts.common.supa import supa
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
-
-SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
-SERVICE_KEY  = os.environ["SUPABASE_SERVICE_KEY"]
-FLICKR_KEY   = (os.environ.get("FLICKR_API_KEY")
-                or os.environ.get("FLICKR_KEY"))
+ROOT = Path(__file__).resolve().parent.parent  # for data-file lookups
+FLICKR_KEY = (os.environ.get("FLICKR_API_KEY")
+              or os.environ.get("FLICKR_KEY"))
 if not FLICKR_KEY:
     print("ERROR: set FLICKR_API_KEY in scripts/pipeline/.env", file=sys.stderr)
     print("  Get a free key at https://www.flickr.com/services/apps/create/", file=sys.stderr)
@@ -174,29 +169,6 @@ def _relevance_score(title: str, description: str = "") -> float:
 
 
 # ─── Supabase REST helpers ────────────────────────────────────────────────
-
-def supa(path, *, method="GET", body=None, params=None, prefer=None):
-    qs = ("?" + urllib.parse.urlencode(params)) if params else ""
-    headers = {
-        "apikey": SERVICE_KEY,
-        "Authorization": f"Bearer {SERVICE_KEY}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-    if prefer: headers["Prefer"] = prefer
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}{path}{qs}", method=method,
-        data=(json.dumps(body).encode() if body is not None else None),
-        headers=headers,
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            raw = r.read()
-            return json.loads(raw) if raw else None
-    except urllib.error.HTTPError as e:
-        body_txt = e.read().decode("utf-8", "ignore")[:300]
-        raise RuntimeError(f"Supabase {method} {path} -> HTTP {e.code}: {body_txt}") from None
-
 
 def select_targets(args):
     if args.fids:

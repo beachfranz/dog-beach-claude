@@ -26,25 +26,16 @@ Environment:
 from __future__ import annotations
 import sys
 sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-import truststore                          # Win Python 3.14 OS-cert store
-truststore.inject_into_ssl()
 
 import argparse
 import json
-import os
 import time
 import urllib.parse
 import urllib.request
 import urllib.error
-from pathlib import Path
 
-from dotenv import load_dotenv
-
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
-
-SUPABASE_URL  = os.environ["SUPABASE_URL"].rstrip("/")
-SERVICE_KEY   = os.environ["SUPABASE_SERVICE_KEY"]
+# scripts.common loads .env + injects truststore at package init.
+from scripts.common.supa import supa
 
 USER_AGENT    = "DogBeachScout/1.0 (https://dogbeachscout.app; data@dogbeachscout.app) commons-loader"
 COMMONS_API   = "https://commons.wikimedia.org/w/api.php"
@@ -57,31 +48,6 @@ SKIP_EXTS     = {"svg", "pdf", "ogv", "ogg", "webm", "mp3", "wav"}
 
 
 # ─── Supabase REST helpers ────────────────────────────────────────────────
-
-def supa(path: str, *, method: str = "GET", body=None, params=None, prefer=None):
-    qs = ("?" + urllib.parse.urlencode(params)) if params else ""
-    headers = {
-        "apikey": SERVICE_KEY,
-        "Authorization": f"Bearer {SERVICE_KEY}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-    if prefer:
-        headers["Prefer"] = prefer
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}{path}{qs}", method=method,
-        data=(json.dumps(body).encode() if body is not None else None),
-        headers=headers,
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            raw = r.read()
-            if not raw: return None
-            return json.loads(raw)
-    except urllib.error.HTTPError as e:
-        body_txt = e.read().decode("utf-8", "ignore")[:300]
-        raise RuntimeError(f"Supabase {method} {path} -> HTTP {e.code}: {body_txt}") from None
-
 
 def select_targets(args) -> list[dict]:
     if args.fids:

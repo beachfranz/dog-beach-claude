@@ -18,19 +18,13 @@ Environment:
 """
 
 from __future__ import annotations
-import argparse, json, os, sys, time, urllib.parse, urllib.request
+import argparse, json, os, sys, time, urllib.parse, urllib.request, urllib.error
 from datetime import datetime, timezone
-from pathlib import Path
-from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
-from _photo_filters import beach_name_tokens, is_wrong_beach, haversine_m  # noqa: E402
+# scripts.common loads .env + injects truststore at package init.
+from scripts.common.supa import supa
+from scripts._photo_filters import beach_name_tokens, is_wrong_beach, haversine_m
 
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
-
-SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
-SERVICE_KEY  = os.environ["SUPABASE_SERVICE_KEY"]
 UNSPLASH_KEY = (os.environ.get("UNSPLASH_ACCESS_KEY")
                 or os.environ.get("UNSPLASH_KEY"))
 if not UNSPLASH_KEY:
@@ -41,26 +35,6 @@ if not UNSPLASH_KEY:
 PER_BEACH = 3
 THROTTLE_S = 1.0  # demo tier: 50/hr — keep us safely under
 GEOFENCE_KM = 25  # If Unsplash photo has location data, must be within this many km
-
-
-def supa(path, *, method="GET", body=None, params=None, prefer=None):
-    qs = ("?" + urllib.parse.urlencode(params)) if params else ""
-    headers = {
-        "apikey": SERVICE_KEY,
-        "Authorization": f"Bearer {SERVICE_KEY}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-    if prefer: headers["Prefer"] = prefer
-    req = urllib.request.Request(f"{SUPABASE_URL}{path}{qs}", method=method,
-        data=(json.dumps(body).encode() if body is not None else None), headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            raw = r.read()
-            return json.loads(raw) if raw else None
-    except urllib.error.HTTPError as e:
-        body_txt = e.read().decode("utf-8", "ignore")[:300]
-        raise RuntimeError(f"Supabase {method} {path} -> HTTP {e.code}: {body_txt}") from None
 
 
 def select_targets(args):

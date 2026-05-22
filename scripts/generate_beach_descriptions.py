@@ -23,35 +23,19 @@ Cost: ~$0.003/beach via Sonnet 4.5. ~$2.40 to backfill ~800 active beaches.
 
 from __future__ import annotations
 
-# Use the OS-native trust store when available so Python's SSL handshake
-# accepts AV-injected MITM root certs on Windows. No-op if truststore is
-# unavailable (Linux/CI/etc. fall back to certifi).
-try:
-    import truststore
-    truststore.inject_into_ssl()
-except ImportError:
-    pass
-
 import argparse
 import hashlib
 import json
-import os
 import sys
 import time
 import urllib.parse
 import urllib.request
-from pathlib import Path
 
-from dotenv import load_dotenv
+# scripts.common loads .env + injects truststore at package init.
+from scripts.common.llm import SONNET, call_user_only
+from scripts.common.supa import supa
 
-ROOT = Path(__file__).resolve().parent.parent
-ENV  = ROOT / "scripts" / "pipeline" / ".env"
-load_dotenv(ENV)
-
-SUPABASE_URL    = os.environ["SUPABASE_URL"].rstrip("/")
-SERVICE_KEY     = os.environ["SUPABASE_SERVICE_KEY"]
-ANTHROPIC_KEY   = os.environ["ANTHROPIC_API_KEY"]
-MODEL           = "claude-sonnet-4-5-20250929"
+MODEL           = SONNET
 OVERPASS_URL    = "https://overpass-api.de/api/interpreter"
 OVERPASS_DELAY  = 3.0     # seconds between Overpass requests (be polite)
 OVERPASS_RADIUS = 300     # meters around beach centroid
@@ -137,27 +121,6 @@ INPUTS
 
 
 # ─── Supabase REST helpers ────────────────────────────────────────────────
-
-def supa(path: str, *, method: str = "GET", body: dict | None = None,
-         params: dict | None = None) -> object:
-    """Hit Supabase REST/RPC with the service key."""
-    qs = ("?" + urllib.parse.urlencode(params)) if params else ""
-    req = urllib.request.Request(
-        f"{SUPABASE_URL}{path}{qs}", method=method,
-        data=(json.dumps(body).encode() if body is not None else None),
-        headers={
-            "apikey": SERVICE_KEY,
-            "Authorization": f"Bearer {SERVICE_KEY}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=30) as r:
-        raw = r.read()
-        if not raw:
-            return None
-        return json.loads(raw)
-
 
 def select_targets(args) -> list[int]:
     if args.fids:
@@ -496,20 +459,12 @@ def input_hash(inputs: dict) -> str:
 # ─── Sonnet call ──────────────────────────────────────────────────────────
 
 def call_sonnet(inputs: dict) -> tuple[str, dict]:
-    body = {
-        "model": MODEL, "max_tokens": 600,
-        "messages": [{"role": "user",
-                      "content": PROMPT % json.dumps(inputs, indent=2)}],
-    }
-    req = urllib.request.Request("https://api.anthropic.com/v1/messages",
-        data=json.dumps(body).encode(), method="POST",
-        headers={"x-api-key": ANTHROPIC_KEY,
-                 "anthropic-version": "2023-06-01",
-                 "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        resp = json.loads(r.read())
-    text = "".join(p["text"] for p in resp["content"] if p["type"] == "text").strip()
-    return text, resp.get("usage", {})
+    """Bake the inputs JSON into the existing user-message prompt and call
+    Sonnet. Returns (text, usage). The prompt-in-user-message shape is
+    intentional here — moving it to a system block would change behavior
+    + enable caching we haven't validated for this use case."""
+    return call_user_only(PROMPT % json.dumps(inputs, indent=2),
+                          model=MODEL, max_tokens=600)
 
 
 # ─── Cache + write ────────────────────────────────────────────────────────

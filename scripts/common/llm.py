@@ -110,6 +110,45 @@ def call(
     }
 
 
+# ─── User-only call (no system block) ────────────────────────────────
+
+def call_user_only(
+    user_message: str | dict,
+    *,
+    model: str = SONNET,
+    max_tokens: int = 600,
+    timeout: int = 60,
+) -> tuple[str, dict[str, Any]]:
+    """Send a single user message with no system block. Returns `(text, usage)`.
+
+    For scripts that bake their entire prompt into the user message (e.g.
+    `generate_beach_descriptions.call_sonnet`). Prefer `call()` /
+    `call_json()` for new code — system-block caching saves ~$2 per 1k
+    requests when the system text is stable.
+    """
+    if isinstance(user_message, (dict, list)):
+        user_content = json.dumps(user_message, ensure_ascii=False)
+    else:
+        user_content = user_message
+    body = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": user_content}],
+    }
+    req = urllib.request.Request(
+        ANTHROPIC_API,
+        data=json.dumps(body).encode("utf-8"),
+        method="POST",
+    )
+    req.add_header("x-api-key", os.environ["ANTHROPIC_API_KEY"])
+    req.add_header("anthropic-version", ANTHROPIC_VERSION)
+    req.add_header("content-type", "application/json")
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        resp = json.loads(r.read().decode("utf-8"))
+    text = "".join(p.get("text", "") for p in resp.get("content", []) if p.get("type") == "text").strip()
+    return text, resp.get("usage", {})
+
+
 # ─── JSON-output helper ──────────────────────────────────────────────
 
 def call_json(

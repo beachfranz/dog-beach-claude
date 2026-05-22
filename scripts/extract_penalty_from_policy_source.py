@@ -30,30 +30,17 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-try:
-    import truststore
-    truststore.inject_into_ssl()
-except ImportError:
-    pass
-
 import argparse
 import json
-import os
 import time
 import urllib.error
 import urllib.parse
-import urllib.request
-from pathlib import Path
 
-from dotenv import load_dotenv
+# scripts.common loads .env + injects truststore at package init.
+from scripts.common.llm import SONNET, call_json
+from scripts.common.supa import supa
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
-
-SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
-SERVICE_KEY  = os.environ["SUPABASE_SERVICE_KEY"]
-ANTHROPIC_KEY = os.environ["ANTHROPIC_API_KEY"]
-MODEL = "claude-sonnet-4-5-20250929"
+MODEL = SONNET
 
 PENALTY_PROMPT = """You are a legal-citation parser. Given a policy_source row's verbatim text + citation, extract the ENFORCEMENT CLAUSE for violating the rule.
 
@@ -100,59 +87,14 @@ RULES:
 """
 
 
-def supa(path: str, *, params: dict | None = None, method: str = "GET",
-         body: dict | list | None = None) -> list:
-    url = f"{SUPABASE_URL}{path}"
-    if params:
-        url = url + "?" + urllib.parse.urlencode(params, safe=",.()*")
-    req = urllib.request.Request(url, method=method)
-    req.add_header("apikey", SERVICE_KEY)
-    req.add_header("Authorization", f"Bearer {SERVICE_KEY}")
-    if body is not None:
-        req.add_header("Content-Type", "application/json")
-        req.data = json.dumps(body).encode("utf-8")
-        req.add_header("Prefer", "return=representation")
-    with urllib.request.urlopen(req, timeout=60) as r:
-        text = r.read().decode("utf-8")
-        return json.loads(text) if text else []
-
-
 def anthropic_call(prompt: str, blob: dict) -> dict:
-    body = {
-        "model": MODEL,
-        "max_tokens": 600,
-        "system": [
-            {"type": "text", "text": prompt, "cache_control": {"type": "ephemeral"}},
-        ],
-        "messages": [
-            {"role": "user", "content": json.dumps(blob, ensure_ascii=False)},
-        ],
-    }
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=json.dumps(body).encode("utf-8"), method="POST",
-    )
-    req.add_header("x-api-key", ANTHROPIC_KEY)
-    req.add_header("anthropic-version", "2023-06-01")
-    req.add_header("content-type", "application/json")
-    with urllib.request.urlopen(req, timeout=120) as r:
-        resp = json.loads(r.read().decode("utf-8"))
-    text = "".join(b.get("text", "") for b in resp.get("content", []))
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        parts = stripped.split("```", 2)
-        if len(parts) >= 2:
-            inner = parts[1]
-            if inner.lower().startswith("json"):
-                inner = inner[4:].lstrip()
-            stripped = inner.rsplit("```", 1)[0].strip()
-    parsed = json.loads(stripped)
-    usage = resp.get("usage", {})
-    in_t  = usage.get("input_tokens", 0)
-    out_t = usage.get("output_tokens", 0)
-    cache_r = usage.get("cache_read_input_tokens", 0)
+    """Thin wrapper around common.llm.call_json. Preserves this script's
+    callers' contract: returns dict with `parsed` + abbreviated usage keys
+    (`in_t`, `out_t`, `cache_r`, `cost`)."""
+    r = call_json(prompt, blob, model=MODEL, max_tokens=600)
+    in_t, out_t, cache_r = r["input_tokens"], r["output_tokens"], r["cache_read_input_tokens"]
     cost = (in_t * 3.0 + out_t * 15.0 + cache_r * 0.30) / 1_000_000
-    return {"parsed": parsed, "in_t": in_t, "out_t": out_t,
+    return {"parsed": r["parsed"], "in_t": in_t, "out_t": out_t,
             "cache_r": cache_r, "cost": cost}
 
 

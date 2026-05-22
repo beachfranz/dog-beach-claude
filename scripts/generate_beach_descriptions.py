@@ -166,7 +166,7 @@ def select_targets(args) -> list[int]:
         rows = supa("/rest/v1/beaches_gold",
                     params={"select": "fid",
                             "is_active": "eq.true",
-                            "is_scoreable": "eq.true",
+                            "scoring_tier": "in.(daily,hourly)",
                             "order": "fid.asc",
                             "limit": str(int(args.pilot))})
         return [r["fid"] for r in rows]
@@ -174,7 +174,7 @@ def select_targets(args) -> list[int]:
         rows = supa("/rest/v1/beaches_gold",
                     params={"select": "fid",
                             "is_active": "eq.true",
-                            "is_scoreable": "eq.true",
+                            "scoring_tier": "in.(daily,hourly)",
                             "state": f"eq.{args.state}",
                             "county_name": f"eq.{args.county}",
                             "order": "fid.asc"})
@@ -183,7 +183,7 @@ def select_targets(args) -> list[int]:
         rows = supa("/rest/v1/beaches_gold",
                     params={"select": "fid",
                             "is_active": "eq.true",
-                            "is_scoreable": "eq.true",
+                            "scoring_tier": "in.(daily,hourly)",
                             "state": f"eq.{args.state}",
                             "order": "fid.asc"})
         return [r["fid"] for r in rows]

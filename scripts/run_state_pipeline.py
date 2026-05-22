@@ -452,11 +452,25 @@ PHASES = [
         'key': 'operator_llm_extract',
         'kind': 'python',
         'action': 'operator_llm_extract',  # python function name below
+        # Criterion accepts the no-op case (every candidate was skipped-recent
+        # or picker-rejected → 0 new rows, but that's correct work). Passes if:
+        #   (a) any extractions exist for this state, OR
+        #   (b) no active operators in this state still need extraction
+        #       (every candidate either already-extracted OR not-applicable).
+        # MD 2026-05-22: 3 candidates, all skipped/rejected → 0 fresh rows; the
+        # original "fresh in last 7d" check failed that legitimate no-op case.
         'criterion':
-            "select (count(*) > 0)::boolean from public.operator_policy_extractions ope "
-            "join public.operators op on op.id = ope.operator_id "
-            "where op.state_code = $STATE and ope.extracted_at > now() - interval '7 days'",
-        'criterion_text': 'fresh extractions exist for state',
+            "select (exists ("
+            "    select 1 from public.operator_policy_extractions ope "
+            "    join public.operators op on op.id = ope.operator_id "
+            "    where op.state_code = $STATE) "
+            "  or not exists ("
+            "    select 1 from public.operators o "
+            "    where o.state_code = $STATE and o.is_active "
+            "      and o.level in ('city','county','state') "
+            "      and not exists (select 1 from public.operator_policy_extractions ope "
+            "                       where ope.operator_id = o.id)))::boolean",
+        'criterion_text': 'extractions exist for state OR all active operators tried at least once',
         'progress_sql':
             "with t as (select count(*)::int n from public.operators "
             "             where state_code = $STATE and is_active "

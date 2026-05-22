@@ -28,6 +28,15 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+# Windows AV-MITM cert verification blocks urllib's default SSL context.
+# Use the system trust store (Windows certificate store) via truststore.
+# Same pivot pattern as merge_operator_dogs_policy + Wikimedia loaders.
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except ImportError:
+    pass
+
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent

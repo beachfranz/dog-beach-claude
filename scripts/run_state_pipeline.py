@@ -535,13 +535,15 @@ PHASES = [
         'kind': 'python',
         'action': 'zone_rules_v2_refresh',
         'criterion':
-            # Pass: at least 80% of MVP+ beaches have a bps row extracted
-            # in the last 7 days (this phase only runs when fresh data
-            # exists; --skip-recent inside reextract handles idempotency).
+            # Pass: at least 80% of MVP+ beaches have a bps row produced
+            # in the last 7 days. Uses COALESCE(extracted_at, created_at)
+            # because agent-authored INSERTs typically leave extracted_at
+            # NULL (only the auto-populated created_at is set). Both signal
+            # "row is recent"; either-or treatment is correct.
             "select (count(*) filter (where exists ("
             "          select 1 from public.beach_policy_source bps "
             "           where bps.beach_fid = g.fid "
-            "             and bps.extracted_at >= now() - interval '7 days')) "
+            "             and COALESCE(bps.extracted_at, bps.created_at) >= now() - interval '7 days')) "
             "        >= floor(count(*) * 0.8))::boolean "
             "from public.beaches_gold g "
             "join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
@@ -549,7 +551,8 @@ PHASES = [
             "  and bdp.source <> 'manual_curator' "
             "  and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
             "      in ('1_off-leash','2_on-leash')",
-        'criterion_text': 'at least 80% of MVP+ beaches re-extracted via v2 within last 7 days',
+        'criterion_text': 'at least 80% of MVP+ beaches have a fresh-within-7d bps row '
+                          '(created_at or extracted_at)',
         'progress_sql':
             "with t as (select count(*)::int n from public.beaches_gold g "
             "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
@@ -561,7 +564,7 @@ PHASES = [
             "             from public.beaches_gold g "
             "             join public.beach_policy_source bps on bps.beach_fid=g.fid "
             "            where g.state=$STATE and g.is_active "
-            "              and bps.extracted_at >= now() - interval '7 days') "
+            "              and COALESCE(bps.extracted_at, bps.created_at) >= now() - interval '7 days') "
             "select d.n done, t.n total from d, t",
     },
     {

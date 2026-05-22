@@ -2024,6 +2024,7 @@ PYTHON_ACTIONS = {
     'codify_cascade':          action_codify_cascade,
     'operator_llm_extract':    action_operator_llm_extract,
     'operator_merge':          action_operator_merge,
+    'operators_chunked':       action_operators_chunked,
     'bep_refire':              action_bep_refire,
     'section_extract':         action_section_extract,
     'zone_rules_v2_refresh':   action_zone_rules_v2_refresh,

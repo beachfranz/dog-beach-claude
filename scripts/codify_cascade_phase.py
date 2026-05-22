@@ -219,7 +219,7 @@ def precheck_jurisdiction(unit: JurisdictionUnit, state: str) -> JurisdictionUni
 
 # ─── Step 5: verify ───────────────────────────────────────────────────
 
-def verify_state(conn, state: str) -> dict[str, Any]:
+def verify_state(conn, state: str, gate_pct: float = 95.0) -> dict[str, Any]:
     with conn.cursor() as cur:
         cur.execute("SELECT public.count_uncovered_scoreable_beaches(%s)", (state,))
         uncovered = cur.fetchone()[0]
@@ -235,9 +235,12 @@ def verify_state(conn, state: str) -> dict[str, Any]:
         "scoreable_total": scoreable_total,
         "scoreable_uncovered": uncovered,
         "coverage_pct": coverage_pct,
-        # Phase gate: pass if ≥95% coverage (matches the existing
-        # MVP+ "covered" criterion threshold used elsewhere in the pipeline).
-        "passes_gate": coverage_pct >= 95.0,
+        "gate_pct": gate_pct,
+        # Phase gate: pass if coverage ≥ gate_pct. Default 95% (steady-state /
+        # MVP+ readiness). For state-launch mode use 80% — long-tail
+        # jurisdictions take multiple passes to discover, so a hard 95% gate
+        # halts every new state launch on day 1.
+        "passes_gate": coverage_pct >= gate_pct,
     }
 
 
@@ -261,7 +264,8 @@ DISPATCH_OUTCOMES = {
 
 
 def run_phase(state: str, *, do_precheck_jurisdictions: bool = True,
-              verbose: bool = True, workers: int = 10) -> PhaseReport:
+              verbose: bool = True, workers: int = 10,
+              gate_pct: float = 95.0) -> PhaseReport:
     report = PhaseReport(state=state, timestamp=datetime.now(timezone.utc).isoformat())
 
     with _connect_pg() as conn:
@@ -349,12 +353,13 @@ def run_phase(state: str, *, do_precheck_jurisdictions: bool = True,
                     print(f"  other:                       {len(bucket['other_outcomes'])}", flush=True)
 
         # ── Verify ─────────────────────────────────────────────────────
-        report.verification = verify_state(conn, state)
+        report.verification = verify_state(conn, state, gate_pct=gate_pct)
         if verbose:
             v = report.verification
             print(f"\n[verify] scoreable_total={v['scoreable_total']}  "
                   f"uncovered={v['scoreable_uncovered']}  "
                   f"coverage={v['coverage_pct']}%  "
+                  f"gate={v['gate_pct']}%  "
                   f"passes_gate={v['passes_gate']}", flush=True)
 
         # ── Summary ────────────────────────────────────────────────────
@@ -414,13 +419,18 @@ def main() -> int:
     ap.add_argument("--workers", type=int, default=10,
                     help="Parallel jurisdiction precheck workers (default 10; "
                          "pgbouncer session-mode pool ceiling is 15)")
+    ap.add_argument("--gate-pct", type=float, default=95.0,
+                    help="Coverage percentage required to pass the gate. "
+                         "Default 95.0 (steady-state / MVP+ readiness). "
+                         "Use 80.0 for state-launch mode (long-tail jurisdictions "
+                         "take multiple passes; hard 95% halts every new state).")
     args = ap.parse_args()
 
     state = args.state.upper()
 
     if args.verify_only:
         with _connect_pg() as conn:
-            v = verify_state(conn, state)
+            v = verify_state(conn, state, gate_pct=args.gate_pct)
         print(json.dumps(v, indent=2))
         return 0 if v["passes_gate"] else 1
 
@@ -429,6 +439,7 @@ def main() -> int:
         do_precheck_jurisdictions=not args.no_jurisdictions,
         verbose=not args.json_only,
         workers=args.workers,
+        gate_pct=args.gate_pct,
     )
 
     # Emit manifest

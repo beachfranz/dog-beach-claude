@@ -241,9 +241,9 @@ PHASES = [
             "        <= greatest(1, (select count(*) from public.beaches_gold "
             "                          where state=$STATE and is_active "
             "                            and scoring_tier in ('daily','hourly')) "
-            "                         / 20))::boolean",
+            "                         / $UNCOVER_DIVISOR))::boolean",
         'criterion_text':
-            'at most 5% of scoreable beaches lack a beach_policy_source link',
+            'coverage ≥ launch-mode gate (state-launch 80% / steady-state 95%)',
         'progress_sql':
             "with t as (select count(*)::int n from public.beaches_gold "
             "             where state=$STATE and is_active and scoring_tier in ('daily','hourly')), "
@@ -900,6 +900,11 @@ def _state_operator_ids(state: str) -> list[int]:
 COUNTIES_FILTER: list[str] | None = None
 LIMIT_N: int | None = None  # if set, beach-fid-scoped phases cap to first N fids
 CANONICAL_N: int | None = None  # if set, beach-fid-scoped phases use the class-diverse picker
+LAUNCH_MODE: str = 'steady-state'  # 'state-launch' | 'steady-state'
+# Coverage gate divisor used in the codify_cascade criterion SQL.
+# steady-state = 5% allowance (divisor 20); state-launch = 20% allowance (divisor 5).
+GATE_DIVISOR_BY_MODE = {'state-launch': 5, 'steady-state': 20}
+GATE_PCT_BY_MODE      = {'state-launch': 80.0, 'steady-state': 95.0}
 
 
 def _canonical_fids(state: str, n: int) -> list[int]:
@@ -1570,7 +1575,8 @@ def action_codify_cascade(state: str) -> int:
     See docs/codify_cascade_phase_spec.md.
     """
     rc, out, err = _run_subprocess(
-        [sys.executable, 'scripts/codify_cascade_phase.py', '--state', state],
+        [sys.executable, 'scripts/codify_cascade_phase.py', '--state', state,
+         '--gate-pct', str(GATE_PCT_BY_MODE[LAUNCH_MODE])],
         timeout=900,  # OR full run was ~3 min; WA federal-only sub-second; 15min cap
     )
     # rc=0 = gate passes; rc=1 = gate fails (informational here — the phase
@@ -2069,12 +2075,22 @@ def main():
                          'residual) for full-pipeline validation before broad sweep. '
                          'Default N=5. Surfaces cascade gaps and migration-template issues '
                          'on a small canonical set before committing the broad wave.')
+    ap.add_argument('--launch-mode', choices=['state-launch','steady-state'],
+                    default='steady-state',
+                    help='Codify coverage gate. state-launch=80%% (allows long-tail '
+                         'jurisdictions to land across multiple passes; right for new '
+                         'state launches like MD/NJ/FL); steady-state=95%% (right for '
+                         'MVP+-ready states like CA/OR/WA). Default steady-state.')
     args = ap.parse_args()
 
     state = args.state.upper()
 
     # Apply county filter mode if requested
-    global COUNTIES_FILTER, LIMIT_N, CANONICAL_N
+    global COUNTIES_FILTER, LIMIT_N, CANONICAL_N, LAUNCH_MODE
+    LAUNCH_MODE = args.launch_mode
+    if LAUNCH_MODE != 'steady-state':
+        log(f'LAUNCH MODE: {LAUNCH_MODE} '
+            f'(codify gate = {GATE_PCT_BY_MODE[LAUNCH_MODE]}%)')
     if args.counties:
         COUNTIES_FILTER = [c.strip() for c in args.counties.split(',') if c.strip()]
         log(f'COUNTY-FILTERED MODE: restricting beach phases to {len(COUNTIES_FILTER)} counties: '
@@ -2132,11 +2148,15 @@ def main():
                     log(f'  SKIP {ph["key"]} (already ok for run_id={run_id})')
                     continue
 
-        criterion = ph['criterion'].replace('$STATE', f"'{state}'")
+        criterion = (ph['criterion']
+                     .replace('$STATE', f"'{state}'")
+                     .replace('$UNCOVER_DIVISOR', str(GATE_DIVISOR_BY_MODE[LAUNCH_MODE])))
         kind = ph.get('kind', 'sql')
         progress_sql = ph.get('progress_sql')
         if progress_sql:
-            progress_sql = progress_sql.replace('$STATE', f"'{state}'")
+            progress_sql = (progress_sql
+                            .replace('$STATE', f"'{state}'")
+                            .replace('$UNCOVER_DIVISOR', str(GATE_DIVISOR_BY_MODE[LAUNCH_MODE])))
         phase_num = PHASES.index(ph) + 1
         log(f'  RUN  [{phase_num}/{len(PHASES)}] {ph["key"]:<22} ...')
         t0 = time.time()

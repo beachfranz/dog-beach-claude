@@ -96,13 +96,14 @@ begin;
 -- ─── 1. Ensure Ocean City agency row (canonical bare name) ────────────
 
 INSERT INTO public.agency (name, type, short_name, web_url)
-VALUES (
-  'Ocean City',
-  'city',
-  'OC MD',
-  'https://oceancitymd.gov/'
-)
-ON CONFLICT (name, type) DO NOTHING;
+SELECT 'Ocean City',
+       'city'::agency_type,
+       'OC MD',
+       'https://oceancitymd.gov/'
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.agency
+   WHERE name = 'Ocean City' AND type = 'city'::agency_type
+);
 
 -- ─── 2. Insert codified policy_source for OC Code §6-34 ───────────────
 

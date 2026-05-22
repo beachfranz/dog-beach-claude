@@ -75,13 +75,15 @@ begin;
 -- ─── 1. Ensure MD DNR agency row (canonical bare name) ─────────────
 
 INSERT INTO public.agency (name, type, short_name, web_url)
-VALUES (
-  'Maryland Department of Natural Resources',
-  'state_department',
-  'MD DNR',
-  'https://dnr.maryland.gov/'
-)
-ON CONFLICT (name, type) DO NOTHING;
+SELECT 'Maryland Department of Natural Resources',
+       'state_department'::agency_type,
+       'MD DNR',
+       'https://dnr.maryland.gov/'
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.agency
+   WHERE name = 'Maryland Department of Natural Resources'
+     AND type = 'state_department'::agency_type
+);
 
 -- ─── 2. Insert codified policy_source for COMAR 08.07.06.17 ────────
 
@@ -154,6 +156,16 @@ ON CONFLICT (beach_fid, policy_source_id, section, (COALESCE(region_name, '__def
 -- Beach Bill or California's Coastal Act creating a statewide
 -- access regime, so the fallback is "unknown / mixed."
 
+-- NOTE: state_dogs_policy has NO primary key / unique constraint on prod
+-- (the 20260508 entity migration declared `state_code text primary key`
+-- but it didn't survive — verified 2026-05-22 via pg_indexes query).
+-- Using DELETE+INSERT instead of ON CONFLICT. Idempotent: the DELETE
+-- is a no-op if no MD row exists; the INSERT always adds the corrected
+-- row. Missing-PK + accumulated-dupes (OR has 2 rows in prod) is tracked
+-- as a separate data-integrity follow-up.
+
+DELETE FROM public.state_dogs_policy WHERE state_code = 'MD';
+
 INSERT INTO public.state_dogs_policy
   (state_code, state_name, dogs_allowed, default_rule,
    has_on_leash, has_off_leash,
@@ -167,18 +179,7 @@ VALUES
    '(no statewide leash law; state-park rule at COMAR 08.07.06.17)',
    'Last-resort fallback only. MD beaches inside state-park polygons get the COMAR 08.07.06.17 rule via explicit BPS rows (Sandy Point, Greenwell, etc. — see Part 3 of this migration). Municipal/county beaches via local codify (Anne Arundel, Cecil, St Mary''s, Calvert, Worcester, Ocean City migrations this same date). Federal-land beaches via federal codify. This row fires only for MD beaches not covered by any per-jurisdiction codify.',
    0.30,
-   now())
-ON CONFLICT (state_code) DO UPDATE
-  SET dogs_allowed  = excluded.dogs_allowed,
-      default_rule  = excluded.default_rule,
-      has_on_leash  = excluded.has_on_leash,
-      has_off_leash = excluded.has_off_leash,
-      source_quote  = excluded.source_quote,
-      source_url    = excluded.source_url,
-      ordinance_ref = excluded.ordinance_ref,
-      scope_notes   = excluded.scope_notes,
-      confidence    = excluded.confidence,
-      scraped_at    = now();
+   now());
 
 commit;
 

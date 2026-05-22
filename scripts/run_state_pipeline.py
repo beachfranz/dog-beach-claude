@@ -795,6 +795,19 @@ PHASES = [
             "select d.n done, t.n total from d, t",
     },
     {
+        # 2026-05-22: soft regression check on freshly-generated descriptions
+        # (per Franz). Runs the leak-pattern audit (amenities/facilities
+        # filler, lifeguards-on-duty, crowd-timing fluff, safety hedging,
+        # architecture-explicit leaks) + multi-region surfacing rate on
+        # descriptions updated in the last 2 hours. Prints the report;
+        # phase always passes (audit is informational, not gating).
+        'key': 'descriptions_audit',
+        'kind': 'python',
+        'action': 'descriptions_audit',
+        'criterion': "select true",  # informational; never gates
+        'criterion_text': 'description leak-pattern audit (informational; warnings printed)',
+    },
+    {
         'key': 'daily_refresh_fire',
         'kind': 'python',
         'action': 'daily_refresh_fire',
@@ -1730,6 +1743,30 @@ def action_photos_curate(state: str) -> int:
     )
 
 
+def action_descriptions_audit(state: str) -> int:
+    """Soft regression check on freshly-generated descriptions.
+
+    Per Franz 2026-05-22. Runs after action_descriptions and checks the
+    leak patterns (amenities/facilities filler, lifeguards-on-duty,
+    crowd-timing fluff, safety hedging, architecture-explicit leaks,
+    multi-region surfacing rate). Soft: prints a report; doesn't fail
+    the phase (no --strict).
+
+    Scope: descriptions updated in the last 2 hours for the state.
+    Returns the number of FAILED thresholds (informational only)."""
+    cmd = [sys.executable, 'scripts/audit_beach_descriptions.py',
+           '--hours', '2', '--states', state]
+    log(f'    descriptions_audit --hours 2 --states {state}')
+    rc, out, err = _run_subprocess(cmd, timeout=300)
+    # Print the audit output to the pipeline log (it's already terse)
+    for line in (out or '').splitlines():
+        log(f'      {line}')
+    # Parse "FAIL" occurrences from output as the "rows_affected" count
+    import re as _re
+    n_failures = len(_re.findall(r'\bFAIL\b', out or ''))
+    return n_failures
+
+
 def action_daily_refresh_fire(state: str) -> int:
     """Fire daily-beach-refresh with state's scoreable location_ids in batches.
     Honors COUNTIES_FILTER if set."""
@@ -1882,6 +1919,7 @@ PYTHON_ACTIONS = {
     'photos_tag':              action_photos_tag,
     'photos_curate':           action_photos_curate,
     'descriptions':            action_descriptions,
+    'descriptions_audit':      action_descriptions_audit,
     'daily_refresh_fire':      action_daily_refresh_fire,
     'field_population_check':  action_field_population_check,
 }

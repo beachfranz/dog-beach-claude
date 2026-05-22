@@ -42,31 +42,19 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
 
-try:
-    import truststore
-    truststore.inject_into_ssl()
-except ImportError:
-    pass
-
 import argparse
 import hashlib
 import json
-import os
 import time
 import urllib.error
 import urllib.parse
-import urllib.request
-from pathlib import Path
 
-from dotenv import load_dotenv
+# Importing from scripts.common triggers load_dotenv + truststore injection
+# at package init (see scripts/common/__init__.py).
+from scripts.common.llm import SONNET, call_json
+from scripts.common.supa import supa
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
-
-SUPABASE_URL  = os.environ["SUPABASE_URL"].rstrip("/")
-SERVICE_KEY   = os.environ["SUPABASE_SERVICE_KEY"]
-ANTHROPIC_KEY = os.environ["ANTHROPIC_API_KEY"]
-MODEL = "claude-sonnet-4-5-20250929"
+MODEL = SONNET
 
 # ─── Prompt ──────────────────────────────────────────────────────────
 
@@ -181,65 +169,18 @@ RULES:
 _PROMPT_SHA = hashlib.sha256(PROMPT.encode()).hexdigest()[:8]
 CACHE_KEY = f"oh:{MODEL}:{_PROMPT_SHA}"
 
-# ─── HTTP helpers ────────────────────────────────────────────────────
-
-def supa(path: str, *, params: dict | None = None, method: str = "GET",
-         body: dict | list | None = None) -> list:
-    url = f"{SUPABASE_URL}{path}"
-    if params:
-        url = url + "?" + urllib.parse.urlencode(params, safe=",.()*=:")
-    req = urllib.request.Request(url, method=method)
-    req.add_header("apikey", SERVICE_KEY)
-    req.add_header("Authorization", f"Bearer {SERVICE_KEY}")
-    if body is not None:
-        req.add_header("Content-Type", "application/json")
-        req.data = json.dumps(body).encode("utf-8")
-        req.add_header("Prefer", "return=representation")
-    with urllib.request.urlopen(req, timeout=60) as r:
-        text = r.read().decode("utf-8")
-        return json.loads(text) if text else []
-
+# ─── LLM wrapper ─────────────────────────────────────────────────────
 
 def anthropic_call(input_blob: dict) -> dict:
-    body = {
-        "model": MODEL,
-        "max_tokens": 1024,
-        "system": [
-            {"type": "text", "text": PROMPT, "cache_control": {"type": "ephemeral"}},
-        ],
-        "messages": [
-            {"role": "user", "content": json.dumps(input_blob, ensure_ascii=False)},
-        ],
-    }
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=json.dumps(body).encode("utf-8"),
-        method="POST",
-    )
-    req.add_header("x-api-key", ANTHROPIC_KEY)
-    req.add_header("anthropic-version", "2023-06-01")
-    req.add_header("content-type", "application/json")
-    with urllib.request.urlopen(req, timeout=120) as r:
-        resp = json.loads(r.read().decode("utf-8"))
-    text = "".join(b.get("text", "") for b in resp.get("content", []))
-    usage = resp.get("usage", {})
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        parts = stripped.split("```", 2)
-        if len(parts) >= 2:
-            inner = parts[1]
-            if inner.lower().startswith("json"):
-                inner = inner[4:].lstrip()
-            stripped = inner.rsplit("```", 1)[0].strip()
-    try:
-        parsed = json.loads(stripped)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Sonnet returned non-JSON: {text[:400]!r}") from e
+    """Thin wrapper around common.llm.call_json that flattens to this
+    script's expected dict shape."""
+    r = call_json(PROMPT, input_blob, model=MODEL, max_tokens=1024)
+    parsed = r["parsed"]
     return {
         "operating_hours": parsed.get("operating_hours"),
-        "input_tokens":  usage.get("input_tokens", 0),
-        "output_tokens": usage.get("output_tokens", 0),
-        "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0),
+        "input_tokens":  r["input_tokens"],
+        "output_tokens": r["output_tokens"],
+        "cache_read_input_tokens": r["cache_read_input_tokens"],
     }
 
 

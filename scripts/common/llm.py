@@ -26,9 +26,9 @@ from typing import Any
 # Update when bumping. Every consumer that imports SONNET/HAIKU/OPUS
 # moves with one edit.
 
-SONNET = "claude-sonnet-4-7"             # canonical Sonnet (Sonnet 4.7)
+SONNET = "claude-sonnet-4-6"             # canonical Sonnet (Sonnet 4.6 — latest)
 HAIKU  = "claude-haiku-4-5-20251001"     # canonical Haiku
-OPUS   = "claude-opus-4-7"               # canonical Opus
+OPUS   = "claude-opus-4-7"               # canonical Opus (Opus 4.7 — latest)
 
 # ─── SDK client (lazy) ───────────────────────────────────────────────
 

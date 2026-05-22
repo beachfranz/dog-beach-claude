@@ -22,9 +22,14 @@ Build the canonical version here first, then migrate existing duplicate
 implementations to import from this module. Don't add helpers nobody
 uses — extract from real call sites.
 """
-# Windows AV-MITM cert verification blocks default SSL. Inject truststore
-# so any urllib/httpx/requests call in any script that touches `common`
-# uses the system trust store. Side-effect at import time is intentional.
+# Side effects at package import: (1) load .env so submodules can read
+# os.environ[...] at their own module-load time; (2) inject truststore so
+# urllib/httpx/requests calls use the system trust store (Windows AV-MITM).
+# Both are intentional — centralizes the boilerplate every script used to carry.
+from pathlib import Path as _Path
+from dotenv import load_dotenv as _load_dotenv
+_load_dotenv(_Path(__file__).resolve().parent.parent / "pipeline" / ".env")
+
 try:
     import truststore
     truststore.inject_into_ssl()

@@ -1,0 +1,30 @@
+{
+  "_comment": "Per-state state-park listing URLs. Pipeline checks this on state bootstrap and prompts Franz if missing. Required for state-parks photo loader + codify-cascade enumeration. Each entry should be the authoritative state-parks-listing or parkmap page maintained by the state's DNR / Parks Dept.",
+
+  "CA": {
+    "agency": "California Department of Parks and Recreation (CDPR)",
+    "url": "https://www.parks.ca.gov/",
+    "loader": "scripts/load_cdpr_park_gallery.py",
+    "added": "2026-05 (CDPR loader era)"
+  },
+  "OR": {
+    "agency": "Oregon Parks and Recreation Department (OPRD)",
+    "url": "https://stateparks.oregon.gov/",
+    "loader": "scripts/load_oprd_photos.py",
+    "added": "2026-05-21"
+  },
+  "WA": {
+    "agency": "Washington State Parks and Recreation Commission (WSPRC)",
+    "url": "https://parks.wa.gov/",
+    "loader": "scripts/load_wsprc_photos.py",
+    "added": "2026-05-21"
+  },
+  "MD": {
+    "agency": "Maryland Department of Natural Resources (DNR)",
+    "url": "https://dnr.maryland.gov/publiclands/Pages/parkmap.aspx",
+    "loader": "scripts/loaders/md_dnr.py",
+    "loader_class": "MdDnrLoader",
+    "pattern": "sharepoint_static",
+    "added": "2026-05-22"
+  }
+}

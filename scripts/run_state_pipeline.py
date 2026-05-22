@@ -790,19 +790,23 @@ PHASES = [
         'kind': 'python',
         'action': 'photos_curate',
         'criterion':
-            # Pass: at least 80% of MVP+ beaches have at least one
-            # curated photo (curated_at NOT NULL).
+            # Pass: at least $PHOTOS_CURATE_PCT of MVP+ beaches have at
+            # least one curated photo. Launch-mode aware (state-launch
+            # 40% / steady-state 80%) — agency loaders attach photos
+            # without lat/lng and the curate selector silently drops
+            # them until centroid backfill catches up.
             "select (count(*) filter (where exists ("
             "          select 1 from public.beach_photos bp "
             "           where bp.arena_group_id = g.fid "
             "             and bp.curated_at is not null)) "
-            "        >= floor(count(*) * 0.8))::boolean "
+            "        >= floor(count(*) * $PHOTOS_CURATE_PCT))::boolean "
             "from public.beaches_gold g "
             "join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
             "where g.state=$STATE and g.is_active "
             "  and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
             "      in ('1_off-leash','2_on-leash')",
-        'criterion_text': 'at least 80% of MVP+ beaches have at least one curated photo',
+        'criterion_text': 'at least 80% (steady-state) / 40% (state-launch) of MVP+ '
+                          'beaches have at least one curated photo',
         'progress_sql':
             "with t as (select count(*)::int n from public.beaches_gold g "
             "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
@@ -966,6 +970,12 @@ NEAREST_DP_PCT_BY_MODE = {'state-launch': 0.80, 'steady-state': 0.90}
 # (gets us through MD launch where ~half of community beaches are photo-less);
 # steady-state expects 80% (covered + curated states).
 PHOTOS_TAG_PCT_BY_MODE = {'state-launch': 0.50, 'steady-state': 0.80}
+# photos_curate gate: same launch-mode pattern. State-launch beaches often
+# have photos but they don't all pass the curate selector's lat/lng gate
+# (agency loaders attach via distance_m, photos with NULL lat/lng get
+# silently dropped per [[agency-photo-centroid-must-populate-lat-lng]]).
+# Until centroid backfill catches every new source, 40% is realistic.
+PHOTOS_CURATE_PCT_BY_MODE = {'state-launch': 0.40, 'steady-state': 0.80}
 
 
 def _canonical_fids(state: str, n: int) -> list[int]:
@@ -2219,7 +2229,8 @@ def main():
                      .replace('$STATE', f"'{state}'")
                      .replace('$UNCOVER_DIVISOR', str(GATE_DIVISOR_BY_MODE[LAUNCH_MODE]))
                      .replace('$NEAREST_DP_PCT', str(NEAREST_DP_PCT_BY_MODE[LAUNCH_MODE]))
-                     .replace('$PHOTOS_TAG_PCT', str(PHOTOS_TAG_PCT_BY_MODE[LAUNCH_MODE])))
+                     .replace('$PHOTOS_TAG_PCT', str(PHOTOS_TAG_PCT_BY_MODE[LAUNCH_MODE]))
+                     .replace('$PHOTOS_CURATE_PCT', str(PHOTOS_CURATE_PCT_BY_MODE[LAUNCH_MODE])))
         kind = ph.get('kind', 'sql')
         progress_sql = ph.get('progress_sql')
         if progress_sql:
@@ -2227,7 +2238,8 @@ def main():
                             .replace('$STATE', f"'{state}'")
                             .replace('$UNCOVER_DIVISOR', str(GATE_DIVISOR_BY_MODE[LAUNCH_MODE]))
                             .replace('$NEAREST_DP_PCT', str(NEAREST_DP_PCT_BY_MODE[LAUNCH_MODE]))
-                            .replace('$PHOTOS_TAG_PCT', str(PHOTOS_TAG_PCT_BY_MODE[LAUNCH_MODE])))
+                            .replace('$PHOTOS_TAG_PCT', str(PHOTOS_TAG_PCT_BY_MODE[LAUNCH_MODE]))
+                            .replace('$PHOTOS_CURATE_PCT', str(PHOTOS_CURATE_PCT_BY_MODE[LAUNCH_MODE])))
         phase_num = PHASES.index(ph) + 1
         log(f'  RUN  [{phase_num}/{len(PHASES)}] {ph["key"]:<22} ...')
         t0 = time.time()

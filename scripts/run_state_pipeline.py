@@ -667,6 +667,37 @@ PHASES = [
             "select d.n done, t.n total from d, t",
     },
     {
+        # 2026-05-22: populate distance_m for agency-gallery fanout photos
+        # via park-centroid backfill (polygon-via-membership). Runs before
+        # photos_curate so get_beach_photos_diverse can use the new
+        # distance_m signal. Catalog-wide, idempotent.
+        'key': 'photo_centroid_backfill',
+        'kind': 'python',
+        'action': 'photo_centroid_backfill',
+        'criterion':
+            # Pass: at least 90% of MVP+ beaches' agency photos (CDPR/WSPRC/
+            # NPS/OPRD) have distance_m populated.
+            "select coalesce("
+            "  (select count(*) filter (where distance_m is not null)::float / "
+            "          nullif(count(*), 0) >= 0.9 "
+            "     from public.beach_photos bp "
+            "     join public.beaches_gold g on g.fid=bp.arena_group_id "
+            "    where g.state=$STATE and g.is_active "
+            "      and bp.source in ('cdpr','wsprc','nps','oprd')), true)::boolean",
+        'criterion_text': 'at least 90% of MVP+ state agency photos have distance_m populated',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beach_photos bp "
+            "             join public.beaches_gold g on g.fid=bp.arena_group_id "
+            "             where g.state=$STATE and g.is_active "
+            "               and bp.source in ('cdpr','wsprc','nps','oprd')), "
+            "     d as (select count(*)::int n from public.beach_photos bp "
+            "             join public.beaches_gold g on g.fid=bp.arena_group_id "
+            "            where g.state=$STATE and g.is_active "
+            "              and bp.source in ('cdpr','wsprc','nps','oprd') "
+            "              and bp.distance_m is not null) "
+            "select d.n done, t.n total from d, t",
+    },
+    {
         # 2026-05-21: vision-tag photos so the description generator and
         # the auto-curator can use scene/subject/landscape tags. Tagger
         # is idempotent (skips photos already at current model id).
@@ -1516,13 +1547,23 @@ def action_hourly_status_refresh(state: str) -> int:
 
 def action_descriptions(state: str) -> int:
     """Generate descriptions for state's tier-1+2 fids. Chunked into
-    groups of 30 fids (~5min each)."""
+    groups of 30 fids (~5min each).
+
+    --no-photos: omits the experimental photo_descriptions input from
+    the description prompt (per Franz 2026-05-22 — photo-text pipeline
+    works but needs more catalog-wide audit before defaulting on).
+    Flip back when ready.
+
+    The prompt-aware input_hash in generate_beach_descriptions.py
+    means any prompt or MODEL change auto-invalidates the cache; this
+    phase will regen all stored descriptions where the hash differs."""
     fids = _state_tier12_fids(state)
     if not fids:
         return 0
     return _chunked_subprocess(
         'scripts/generate_beach_descriptions.py', fids,
         flag_name='--fids', chunk_size=30, per_chunk_timeout=900,
+        extra_args=['--no-photos'],
         parse_fn=_parse_descriptions_generated,
     )
 
@@ -1606,6 +1647,44 @@ def action_state_photo_galleries(state: str) -> int:
         total += rows
         log(f'      {name}: ok ({elapsed:.0f}s; saved={rows})')
     return total
+
+
+def action_photo_centroid_backfill(state: str) -> int:
+    """Populate beach_photos.distance_m for agency-gallery fanout photos.
+
+    Per Franz 2026-05-22. Agency loaders (WSPRC/CDPR/NPS/OPRD) set
+    distance_m=NULL because gallery photos lack per-photo coords; the
+    fanout-via-PIP gives the same photo to every beach in the park
+    polygon. This phase computes each park's centroid (via the
+    polygon-via-membership lookup — the polygon that contains ALL
+    fanout beach_fids = the park) and sets distance_m per beach.
+
+    Bonus: region-name match. If photo title (filename + vision-desc
+    heading) contains any name from beach's zone_rules.regions[*], the
+    name is stamped into source_meta.matched_region.
+
+    Catalog-wide (state-agnostic): runs once per pipeline invocation,
+    not per-state. Idempotent: re-running just rewrites distance_m to
+    the same value when nothing has changed.
+
+    Runs AFTER state_photo_galleries (photos loaded) and BEFORE
+    photos_curate (so get_beach_photos_diverse can use the new
+    distance_m signal). Single-shot subprocess, ~30-60 min for full
+    backfill across ~4700 NULL-distance agency photos."""
+    cmd = [sys.executable, 'scripts/backfill_agency_photo_centroid.py',
+           '--apply']
+    log(f'    photo_centroid_backfill (catalog-wide, --apply)')
+    try:
+        rc, out, err = _run_subprocess(cmd, timeout=5400)  # 90 min cap
+    except subprocess.TimeoutExpired:
+        log(f'    backfill TIMEOUT after 5400s')
+        return 0
+    if rc != 0:
+        log(f'    backfill exit {rc}: {err[-300:] if err else ""}')
+        return 0
+    # Parse "distance_m updates: N" line
+    m = re.search(r'distance_m updates:\s+(\d+)', out or '')
+    return int(m.group(1)) if m else 0
 
 
 def action_photos_tag(state: str) -> int:
@@ -1799,6 +1878,7 @@ PYTHON_ACTIONS = {
     'photos_wikimedia':        action_photos_wikimedia,
     'photos_flickr':           action_photos_flickr,
     'state_photo_galleries':   action_state_photo_galleries,
+    'photo_centroid_backfill': action_photo_centroid_backfill,
     'photos_tag':              action_photos_tag,
     'photos_curate':           action_photos_curate,
     'descriptions':            action_descriptions,

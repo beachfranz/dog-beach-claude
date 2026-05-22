@@ -23,10 +23,11 @@ Usage:
   python scripts/backfill_agency_photo_centroid.py --sources wsprc   # one source
 """
 from __future__ import annotations
-import sys, os, re, urllib.parse, argparse, json
+import sys, os, re, urllib.parse, argparse, json, threading, time as _t
 sys.stdout.reconfigure(encoding='utf-8', errors='replace', line_buffering=True)  # type: ignore[attr-defined]
 from pathlib import Path
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import psycopg2
 from dotenv import load_dotenv
 

@@ -37,11 +37,12 @@ from typing import Any, Optional
 
 import httpx
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 from tqdm import tqdm
 
-load_dotenv(Path(__file__).parent / ".env")
+# scripts.common loads .env + injects truststore at package init —
+# importing anything from it (here, the model constant) is enough.
+from scripts.common.llm import HAIKU
 
 SUPABASE_URL          = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY  = os.environ["SUPABASE_SERVICE_KEY"]
@@ -51,7 +52,7 @@ FETCH_CHAR_LIMIT = 20_000
 FETCH_TIMEOUT    = 30.0
 WORKERS          = 3
 CHECKPOINT_EVERY = 10
-MODEL            = "claude-haiku-4-5-20251001"
+MODEL            = HAIKU
 
 USER_AGENT = "dog-beach-scout/1.0 (contact: franz@franzfunk.com)"
 

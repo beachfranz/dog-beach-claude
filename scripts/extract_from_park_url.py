@@ -34,7 +34,10 @@ from typing import Any, Optional
 
 import httpx
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv
+
+# scripts.common loads .env + injects truststore at package init —
+# importing anything from it (here, the model constant) is enough.
+from scripts.common.llm import HAIKU
 
 # Playwright is optional — only loaded when an httpx fetch hits a 403/429/connect
 # error and we want to retry with a real browser. Failure to import is non-fatal
@@ -46,13 +49,11 @@ except ImportError:
     PLAYWRIGHT_AVAILABLE = False
     PlaywrightBrowser = None
 
-load_dotenv(Path(__file__).parent / "pipeline" / ".env")
-
 SUPABASE_URL          = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY  = os.environ["SUPABASE_SERVICE_KEY"]
 ANTHROPIC_API_KEY     = os.environ["ANTHROPIC_API_KEY"]
 
-MODEL                 = "claude-haiku-4-5-20251001"
+MODEL                 = HAIKU
 WORKERS               = 3
 FETCH_CHAR_LIMIT      = 25_000
 FETCH_TIMEOUT         = 30.0

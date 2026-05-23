@@ -237,6 +237,33 @@ PHASES = [
             "  and status in ('ok','skipped')",
         'criterion_text': 'all 4 required sources status in (ok, skipped) + noaa_stations(global) loaded',
     },
+    # beach_inventory_check — explicit gate on the implicit prereq that
+    # beach ingestion (GNIS, manual loaders, etc.) has happened BEFORE
+    # the state-launch pipeline runs.
+    #
+    # Without this gate, a fresh state with no beaches in beaches_gold
+    # silently flows through every downstream phase as a no-op:
+    #   - codify_cascade trivially passes (0 uncovered <= max(1, 0/5))
+    #   - arena_seed finds no candidate landing rows for the state
+    #   - cluster/promote produce no gold rows
+    #   - …the whole pipeline runs green with zero meaningful work
+    # Producing a misleading "all green" signal — exactly the worst
+    # failure mode (silent + masking).
+    #
+    # Per HARD memory rule beach-catalog-prereq-for-codify: beach
+    # ingestion is a PREREQUISITE for codify (and the rest of the
+    # pipeline), not a follow-up. This phase makes that explicit.
+    # First-contact failure mode on the upcoming MA/FL/MI bootstrap.
+    {
+        'key': 'beach_inventory_check',
+        'action': "select count(*)::int from public.beaches_gold "
+                  "where state=$STATE and is_active",
+        'criterion':
+            "select (count(*) > 0)::boolean from public.beaches_gold "
+            "where state=$STATE and is_active",
+        'criterion_text': 'beaches_gold has ≥1 active beach for state '
+                          '(if 0: run beach ingestion first — GNIS or manual loader)',
+    },
     {
         # Codify-cascade phase — per docs/codify_cascade_phase_spec.md
         # (Franz 2026-05-19). Enumerates federal / county / city

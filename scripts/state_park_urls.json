@@ -34,5 +34,13 @@
     "loader_class": "DnrecDeLoader",
     "pattern": "wordpress_slug",
     "added": "2026-05-23"
+  },
+  "NH": {
+    "agency": "New Hampshire Division of Parks and Recreation (NH State Parks)",
+    "url": "https://www.nhstateparks.org/find-parks-trails",
+    "loader": "scripts/loaders/nhsp.py",
+    "loader_class": "NhspLoader",
+    "pattern": "kentico_cms",
+    "added": "2026-05-23"
   }
 }

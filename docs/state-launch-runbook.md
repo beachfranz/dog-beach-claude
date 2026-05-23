@@ -268,7 +268,7 @@ Every ad-hoc thing we ran tonight at the SQL prompt or as a `python -c "..."` sn
 | `delete from beach_enrichment_provenance where source in ('operator_*', 'section_research_v1')` | `public.purge_bogus_operator_bep(state)` SQL fn |
 | Inline CASE deriving policy tier (used in 6+ scripts) | `public.beach_location_tier(...)` canonical SQL fn |
 | `update beach_dog_policy set dogs_prohibited_start='03-15', source='manual' where ... plover beaches` | `20260509_plover_seed_source_manual.sql` migration |
-| Backfill `external_source_status` from existing pad_us / osm_amenities / etc rows | `scripts/one_off/_backfill_external_source_status.py` |
+| Backfill `external_source_status` from existing pad_us / osm_amenities / etc rows | `scripts/archive_2026_05_22/one_off/_backfill_external_source_status.py` (archived 2026-05-22 LATE; one-shot bootstrap, already-run) |
 | Cross-state pollution domain heuristic | `_DOMAIN_STATE_HINTS` table in `extract_operator_dogs_policy.py` + `domain_state_hint(url)` helper |
 | Per-fid `_emit_evidence_from_osm_amenities` invocation | wired into `promote_to_gold` + `refire_bep_cascade` |
 | Per-fid POI address propagation | `_enrich_address_from_poi_for_state(state)` SQL fn |

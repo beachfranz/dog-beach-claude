@@ -1690,6 +1690,21 @@ def _parse_photos_saved(out: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+def _parse_photos_tagged(out: str) -> int:
+    """Parse `Done in Ns. ok=N err=N` line from load_photo_vision_tags.py.
+    Counts ok'd photos (skips err count). Added 2026-05-23 LATE for gap #21
+    (photos_tag was reporting rows=0 → soft-warn → masked real work)."""
+    m = re.search(r'Done in\s+\d+s\.\s+ok=(\d+)\s+err=\d+', out)
+    return int(m.group(1)) if m else 0
+
+
+def _parse_auto_curated(out: str) -> int:
+    """Parse `selected (auto-curated): N` line from auto_curate.py.
+    Counts beaches whose photos got curated (0 = hollow run on subset)."""
+    m = re.search(r'selected \(auto-curated\):\s+(\d+)', out)
+    return int(m.group(1)) if m else 0
+
+
 def action_operator_llm_extract(state: str) -> int:
     """Invoke extract_operator_dogs_policy.py for state's operator IDs.
     Chunked into groups of 5 ops (~3min/chunk) to bound subprocess timeout
@@ -2174,7 +2189,7 @@ def action_photos_tag(state: str) -> int:
     return _chunked_subprocess(
         'scripts/load_photo_vision_tags.py', fids,
         flag_name='--fids', chunk_size=30, per_chunk_timeout=1800,
-        parse_fn=None,
+        parse_fn=_parse_photos_tagged,
     )
 
 
@@ -2196,7 +2211,7 @@ def action_photos_curate(state: str) -> int:
         'scripts/auto_curate.py', fids,
         flag_name='--fids', chunk_size=100, per_chunk_timeout=600,
         extra_args=['--skip-if-fresh-within', '7'],
-        parse_fn=None,
+        parse_fn=_parse_auto_curated,
     )
 
 
@@ -2648,13 +2663,18 @@ def main():
                     # County-filtered, --limit, or --canonical mode: criteria
                     # are state-wide thresholds that won't be met when we
                     # only processed a subset. Record as 'skipped'
-                    # (criterion_met=false) and continue rather than halting.
+                    # (criterion_met=false) and continue rather than halting —
+                    # BUT only if the action did some meaningful work
+                    # (rows > 0). If rows == 0 AND criterion failed, the
+                    # subset is hollow (e.g. --limit 5 picked beaches with
+                    # no photos for photos_curate). Tightened 2026-05-23:
+                    # the soft-warn was hiding hollow-subset bugs (gap #20).
                     subset_mode = (
                         COUNTIES_FILTER is not None
                         or (LIMIT_N is not None and LIMIT_N > 0)
                         or (CANONICAL_N is not None and CANONICAL_N > 0)
                     )
-                    if subset_mode:
+                    if subset_mode and (rows or 0) > 0:
                         mode_tag = ('county-mode' if COUNTIES_FILTER is not None
                                     else f'limit-{LIMIT_N}-mode' if LIMIT_N
                                     else f'canonical-{CANONICAL_N}-mode')
@@ -2670,7 +2690,27 @@ def main():
                                   f'{mode_tag} soft-warn: {err}',
                                   run_id, state, ph['key']))
                         log(f'    WARN [{phase_num}/{len(PHASES)}] {ph["key"]:<22} '
-                            f'state-wide criterion failed but {mode_tag} continues')
+                            f'state-wide criterion failed but {mode_tag} continues (rows={rows})')
+                    elif subset_mode and (rows or 0) == 0:
+                        # Hollow subset — log a sharper error then fall through
+                        # to the real-halt path. The operator should pick a
+                        # different --limit / --canonical set, OR the phase
+                        # genuinely has nothing to do (in which case the
+                        # criterion itself is wrong for this kind of state).
+                        log(f'    HOLLOW [{phase_num}/{len(PHASES)}] {ph["key"]:<22} '
+                            f'rows=0 + criterion failed — subset misalignment or genuine no-op. '
+                            f'Halting (subset-mode does NOT auto-warn when zero work was done).')
+                        with open_conn() as c, c.cursor() as cur:
+                            cur.execute("""
+                              update public.pipeline_phase_status
+                                 set status='failed', finished_at=now(),
+                                     rows_affected=%s, criterion_met=false,
+                                     criterion_text=%s, error_message=%s
+                               where run_id=%s and state_code=%s and phase=%s
+                            """, (rows, ph['criterion_text'],
+                                  f'hollow-subset: rows=0 and {err}',
+                                  run_id, state, ph['key']))
+                        raise RuntimeError(f'hollow-subset: rows=0 and {err}')
                     else:
                         with open_conn() as c, c.cursor() as cur:
                             cur.execute("""

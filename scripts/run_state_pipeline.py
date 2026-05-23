@@ -267,23 +267,10 @@ PHASES = [
             "     + coalesce((select arena_rows_updated from public.refresh_arena_names_from_osm_landing()), 0)::int",
         'criterion':
             # State has at least one arena row whose county_fips maps to it.
-            # State FIPS is derived inline because we don't have a SQL helper that takes a 2-letter state.
+            # Uses public.state_code_to_fips() helper (gap #31, 2026-05-23 LATE).
             "select (count(*) > 0)::boolean from public.arena a "
             "join public.counties c on c.geoid = a.county_fips "
-            "where a.is_active and c.state_fp = (select case $STATE "
-            "  when 'AL' then '01' when 'AK' then '02' when 'AZ' then '04' when 'AR' then '05' "
-            "  when 'CA' then '06' when 'CO' then '08' when 'CT' then '09' when 'DE' then '10' "
-            "  when 'FL' then '12' when 'GA' then '13' when 'HI' then '15' when 'ID' then '16' "
-            "  when 'IL' then '17' when 'IN' then '18' when 'IA' then '19' when 'KS' then '20' "
-            "  when 'KY' then '21' when 'LA' then '22' when 'ME' then '23' when 'MD' then '24' "
-            "  when 'MA' then '25' when 'MI' then '26' when 'MN' then '27' when 'MS' then '28' "
-            "  when 'MO' then '29' when 'MT' then '30' when 'NE' then '31' when 'NV' then '32' "
-            "  when 'NH' then '33' when 'NJ' then '34' when 'NM' then '35' when 'NY' then '36' "
-            "  when 'NC' then '37' when 'ND' then '38' when 'OH' then '39' when 'OK' then '40' "
-            "  when 'OR' then '41' when 'PA' then '42' when 'RI' then '44' when 'SC' then '45' "
-            "  when 'SD' then '46' when 'TN' then '47' when 'TX' then '48' when 'UT' then '49' "
-            "  when 'VT' then '50' when 'VA' then '51' when 'WA' then '53' when 'WV' then '54' "
-            "  when 'WI' then '55' when 'WY' then '56' end)",
+            "where a.is_active and c.state_fp = public.state_code_to_fips($STATE)",
         'criterion_text': 'at least one arena row with county_fips in this state',
     },
     {
@@ -306,22 +293,10 @@ PHASES = [
     {
         'key': 'promote',
         'action':
+            # Uses public.state_code_to_fips() helper (gap #31, 2026-05-23 LATE).
             "with f as (select array_agg(a.fid) fids from public.arena a "
             "  join public.counties c on c.geoid = a.county_fips "
-            "  where a.is_active and c.state_fp = (select case $STATE "
-            "    when 'AL' then '01' when 'AK' then '02' when 'AZ' then '04' when 'AR' then '05' "
-            "    when 'CA' then '06' when 'CO' then '08' when 'CT' then '09' when 'DE' then '10' "
-            "    when 'FL' then '12' when 'GA' then '13' when 'HI' then '15' when 'ID' then '16' "
-            "    when 'IL' then '17' when 'IN' then '18' when 'IA' then '19' when 'KS' then '20' "
-            "    when 'KY' then '21' when 'LA' then '22' when 'ME' then '23' when 'MD' then '24' "
-            "    when 'MA' then '25' when 'MI' then '26' when 'MN' then '27' when 'MS' then '28' "
-            "    when 'MO' then '29' when 'MT' then '30' when 'NE' then '31' when 'NV' then '32' "
-            "    when 'NH' then '33' when 'NJ' then '34' when 'NM' then '35' when 'NY' then '36' "
-            "    when 'NC' then '37' when 'ND' then '38' when 'OH' then '39' when 'OK' then '40' "
-            "    when 'OR' then '41' when 'PA' then '42' when 'RI' then '44' when 'SC' then '45' "
-            "    when 'SD' then '46' when 'TN' then '47' when 'TX' then '48' when 'UT' then '49' "
-            "    when 'VT' then '50' when 'VA' then '51' when 'WA' then '53' when 'WV' then '54' "
-            "    when 'WI' then '55' when 'WY' then '56' end) ) "
+            "  where a.is_active and c.state_fp = public.state_code_to_fips($STATE)) "
             "select coalesce((select rows_promoted + rows_already_in_gold "
             "                   from public.promote_to_gold((select fids from f)::bigint[], false::boolean, true::boolean)), 0)::int",
         'criterion':
@@ -673,11 +648,21 @@ PHASES = [
         'key': 'operator_merge',
         'kind': 'python',
         'action': 'operator_merge',
+        # Criterion accepts the no-op case (state has zero candidate operators):
+        # mirrors operator_llm_extract's tolerance (gap #28, 2026-05-23 LATE).
+        # Without this, states with a sparse-operator profile (RI/MS-style)
+        # perma-halt here even though "0 operators" is a legitimate state shape.
         'criterion':
-            "select (count(*) > 0)::boolean from public.operator_dogs_policy odp "
-            "join public.operators op on op.id = odp.operator_id "
-            "where op.state_code = $STATE",
-        'criterion_text': 'merged operator policies exist for state',
+            "select (exists ("
+            "    select 1 from public.operator_dogs_policy odp "
+            "    join public.operators op on op.id = odp.operator_id "
+            "    where op.state_code = $STATE) "
+            "  or not exists ("
+            "    select 1 from public.operators o "
+            "    where o.state_code = $STATE and o.is_active "
+            "      and o.level in ('city','county','state')))::boolean",
+        'criterion_text':
+            'merged operator policies exist for state OR no active operators in state',
     },
     {
         'key': 'bep_refire',
@@ -1362,11 +1347,20 @@ def _state_tier12_fids_ranked_by_photos(state: str) -> list[int]:
         has_dog_policy = cur.fetchone()[0]
 
     args: tuple
+    # Scope the photo-count subquery to this state's fids. Without the
+    # WHERE clause, this scans the entire beach_photos table just to
+    # rank fids in one state (gap #29, 2026-05-23 LATE). Cheap-but-real
+    # perf win on a global table that grows monotonically.
     base_join = (
-        "left join (select arena_group_id, count(*) n "
-        "             from public.beach_photos group by arena_group_id) p "
+        "left join (select bp.arena_group_id, count(*) n "
+        "             from public.beach_photos bp "
+        "             where bp.arena_group_id in "
+        "                   (select fid from public.beaches_gold where state = %s) "
+        "             group by bp.arena_group_id) p "
         "  on p.arena_group_id = g.fid "
     )
+    # base_join binds `state` once (the photo-count subquery scope).
+    # Outer where binds it a second time. Order: subquery first, then outer.
     if has_dog_policy:
         sql = ("select g.fid from public.beaches_gold g "
                "join public.beach_dog_policy bdp on bdp.arena_group_id = g.fid "
@@ -1374,12 +1368,12 @@ def _state_tier12_fids_ranked_by_photos(state: str) -> list[int]:
                "where g.is_active and g.state = %s "
                "  and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
                "      in ('1_off-leash','2_on-leash') ")
-        args = (state,)
+        args = (state, state)
     else:
         sql = ("select g.fid from public.beaches_gold g "
                + base_join +
                "where g.is_active and g.scoring_tier in ('daily','hourly') and g.state = %s ")
-        args = (state,)
+        args = (state, state)
 
     if COUNTIES_FILTER:
         sql += "  and g.county_fips = any(%s) "

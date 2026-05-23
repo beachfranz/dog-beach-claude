@@ -30,6 +30,8 @@ import psycopg2.extras
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from scripts.common.ssl_compat import get_ssl_context  # noqa: E402
 load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
 
 POOLER = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
@@ -173,9 +175,7 @@ def load_pore(conn) -> int:
 # Used by both --wsp (USFWS Critical Habitat) and --lt (CDFW Least Tern).
 # Replaces the dead `ecos.fws.gov/docs/crithab/CRITHAB.zip` download path.
 
-import ssl as _ssl
-
-_SSL_CTX = _ssl.create_default_context()
+_SSL_CTX = get_ssl_context()  # Py 3.13+ strictness; see scripts/common/ssl_compat.py
 
 
 def fetch_rest_features(endpoint: str, where: str, page_size: int = 1000) -> list[dict]:

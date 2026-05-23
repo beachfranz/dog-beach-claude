@@ -41,10 +41,30 @@ from scripts.common.db import connect, thread_conn
 
 # Agency-photo sources that need centroid backfill. These are the loaders
 # whose images are attributed by polygon-fanout (one photo → N beach_fids)
-# and thus need centroid-based distance_m. Should match the agency-tier
-# entries in photo_source_type (source_kind='agency').
-# 2026-05-23: added md_dnr + destateparks for state expansion.
-AGENCY_SOURCES = ['wsprc', 'cdpr', 'nps', 'oprd', 'md_dnr', 'destateparks']
+# and thus need centroid-based distance_m. Single source of truth:
+# public.photo_source_type WHERE source_kind='agency'. CCC ('ccc') is
+# excluded because per-access-point loaders set distance_m directly.
+#
+# Was hardcoded ['wsprc','cdpr','nps','oprd','md_dnr','destateparks'] —
+# every new agency loader needed a code edit here (gap #32, 2026-05-23
+# LATE: agent audit flagged as the "promote ad-hoc to process" debt).
+# Now derives from DB so adding a state-parks loader + photo_source_type
+# row auto-wires this backfill.
+def _load_agency_sources() -> list[str]:
+    c = connect()
+    c.set_session(autocommit=True)
+    try:
+        with c.cursor() as cur:
+            cur.execute(
+                "select id from public.photo_source_type "
+                " where source_kind='agency' and id <> 'ccc' "
+                " order by id"
+            )
+            return [r[0] for r in cur.fetchall()]
+    finally:
+        c.close()
+
+AGENCY_SOURCES = _load_agency_sources()
 
 
 def normalize(s: str) -> str:

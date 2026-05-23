@@ -2182,6 +2182,13 @@ def action_state_photo_galleries(state: str) -> int:
         runs.append(('CCC', ['scripts/load_ccc_photos.py', '--full'], 1800))
 
     total = 0
+    # Track silent-failure signals across loader runs. If ANY discovered
+    # work but inserted nothing (FK errors, schema mismatches, etc.), the
+    # phase raises at the end — even though individual subprocesses
+    # returned rc=0. Pre-2026-05-23, gap #16 (destateparks FK) returned
+    # rc=0 with rows=0 and was silently waved through; the registry-
+    # registration fix took 3 round-trips because each run looked "ok".
+    silent_failures = []
     for name, cmd, timeout in runs:
         log(f'    state_photo_galleries → {name} ...')
         full_cmd = [sys.executable] + cmd
@@ -2196,8 +2203,36 @@ def action_state_photo_galleries(state: str) -> int:
             log(f'      {name}: FAIL rc={rc} ({elapsed:.0f}s): {err[-200:] if err else ""}')
             continue
         rows = _parse_photos_saved(out) if out else 0
+
+        # Silent-failure detection (gap #22, 2026-05-23 LATE): subprocess
+        # returned rc=0 but the output reveals real errors. Two signals:
+        #   (1) "[INSERT FAIL]" or "FAIL:" patterns — explicit per-row errors
+        #   (2) "unique photos found: N" with N>0 AND "rows inserted: 0" —
+        #       discover/insert mismatch (FK violation, schema drift, etc.)
+        out_for_scan = out or ''
+        insert_fail_count = out_for_scan.count('[INSERT FAIL]') + out_for_scan.count('INSERT FAIL]')
+        m_found    = re.search(r'unique photos found:\s+(\d+)', out_for_scan)
+        m_inserted = re.search(r'rows inserted:\s+(\d+)', out_for_scan)
+        n_found    = int(m_found.group(1))    if m_found    else 0
+        n_inserted = int(m_inserted.group(1)) if m_inserted else 0
+        if insert_fail_count > 0:
+            silent_failures.append(f'{name}: {insert_fail_count} INSERT FAILs in stdout '
+                                   f'(rc=0 but loader explicitly logged failures)')
+        if n_found > 0 and n_inserted == 0:
+            silent_failures.append(f'{name}: found {n_found} photos but inserted 0 '
+                                   f'(discover/insert mismatch — likely FK or schema)')
+
         total += rows
-        log(f'      {name}: ok ({elapsed:.0f}s; saved={rows})')
+        log(f'      {name}: ok ({elapsed:.0f}s; saved={rows}; found={n_found}; inserted={n_inserted})')
+
+    if silent_failures:
+        raise RuntimeError(
+            f'state_photo_galleries: rc=0 from {len(silent_failures)} '
+            f'subprocess(es) but stdout revealed silent failures:\n  - '
+            + '\n  - '.join(silent_failures) +
+            '\nLoader exit code does not match observed behavior. Fix the loader '
+            '(missing photo_source_type row? FK violation? schema drift?) and re-run.'
+        )
     return total
 
 

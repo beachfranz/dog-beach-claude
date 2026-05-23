@@ -674,14 +674,14 @@ PHASES = [
             "  or not exists ("
             "    select 1 from public.operators o "
             "    where o.state_code = $STATE and o.is_active "
-            "      and o.level in ('city','county','state') "
+            "      and o.level in ('city','town','county','state') "
             "      and not exists (select 1 from public.operator_policy_extractions ope "
             "                       where ope.operator_id = o.id)))::boolean",
         'criterion_text': 'extractions exist for state OR all active operators tried at least once',
         'progress_sql':
             "with t as (select count(*)::int n from public.operators "
             "             where state_code = $STATE and is_active "
-            "               and level in ('city','county','state')), "
+            "               and level in ('city','town','county','state')), "
             "     d as (select count(distinct ope.operator_id)::int n "
             "             from public.operator_policy_extractions ope "
             "             join public.operators op on op.id = ope.operator_id "
@@ -728,7 +728,7 @@ PHASES = [
             "  or not exists ("
             "    select 1 from public.operators o "
             "    where o.state_code = $STATE and o.is_active "
-            "      and o.level in ('city','county','state')))::boolean",
+            "      and o.level in ('city','town','county','state')))::boolean",
         'criterion_text':
             'merged operator policies exist for state OR no active operators in state',
     },
@@ -1286,7 +1286,7 @@ def _state_operator_ids(state: str) -> list[int]:
         if ids:
             cur.execute(
                 "select count(*) from public.operators "
-                " where state_code = %s and is_active and level in ('city','county','state')",
+                " where state_code = %s and is_active and level in ('city','town','county','state')",
                 (state,)
             )
             total = cur.fetchone()[0]
@@ -1297,7 +1297,7 @@ def _state_operator_ids(state: str) -> list[int]:
         log(f'    operator filter empty for {state} — falling back to all ops')
         cur.execute(
             "select id from public.operators "
-            " where state_code = %s and is_active and level in ('city','county','state') "
+            " where state_code = %s and is_active and level in ('city','town','county','state') "
             " order by id",
             (state,)
         )

@@ -1,29 +1,18 @@
-"""Helper: upsert into public.external_source_status from bulk loaders."""
-from __future__ import annotations
-import psycopg2
+"""Backward-compat shim — _external_source_status moved to
+scripts/loaders/_external_source_status.py on 2026-05-22 LATE
+during the clean-pipeline-v2 promotion sweep.
 
+Re-exports the public symbols so the 2 remaining sibling-import callers
+in this directory (bulk_load_census_tracts.py, bulk_load_dog_amenities.py)
+keep working until they're either promoted or archived.
 
-def record_status(pg_kwargs: dict, source: str, state: str,
-                  status: str, row_count: int | None = None,
-                  notes: str | None = None) -> None:
-    """Upsert a (source, state) row. Caller passes a psycopg2 connection
-    config dict (same shape as PG in the bulk loaders).
+When both dormant callers are archived, this shim file can be deleted too.
+"""
+import sys as _sys
+from pathlib import Path as _Path
 
-    status must be one of 'ok' | 'failed' | 'skipped'.
-    last_loaded_at is bumped to now() on every call.
-    """
-    if status not in ('ok', 'failed', 'skipped'):
-        raise ValueError(f'bad status: {status!r}')
-    with psycopg2.connect(**pg_kwargs) as c:
-        c.autocommit = True
-        with c.cursor() as cur:
-            cur.execute("""
-                insert into public.external_source_status
-                  (source, state, last_loaded_at, row_count, status, notes)
-                values (%s, %s, now(), %s, %s, %s)
-                on conflict (source, state) do update set
-                  last_loaded_at = excluded.last_loaded_at,
-                  row_count      = excluded.row_count,
-                  status         = excluded.status,
-                  notes          = excluded.notes
-            """, (source, state, row_count, status, notes))
+# Add repo root so `from scripts.loaders...` resolves when this file is
+# loaded via the dormant callers' sys.path.insert(parent) trick.
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent))
+
+from scripts.loaders._external_source_status import record_status  # noqa: F401,E402

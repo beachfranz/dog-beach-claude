@@ -18,10 +18,14 @@ schema mapper, TTL. Loader behavior:
 Usage:
   python scripts/external_sources.py list
   python scripts/external_sources.py status
-  python scripts/external_sources.py load pad_us --state CA
-  python scripts/external_sources.py load usfws_critical_habitat
+  python scripts/external_sources.py load osm_amenities --state CA
   python scripts/external_sources.py load --all
-  python scripts/external_sources.py load pad_us --state CA --force
+
+NOTE: PAD-US loading was previously available here but moved to
+scripts/load_pad_us_state.py 2026-05-12 after the deprecated path was
+discovered to write `geom` but not `geom_geog`, leaving downstream
+spatial joins unindexed. Don't try to re-add a `pad_us` entry to
+SOURCES — use scripts/load_pad_us_state.py.
 
 Database connection: same pooler-url + SUPABASE_DB_PASSWORD pattern as
 the rest of scripts/.
@@ -333,28 +337,14 @@ out tags center;
 """.strip()
 
 SOURCES: dict[str, Source] = {
-    # DEPRECATED 2026-05-12 — DO NOT USE for PAD-US loads.
-    # This loader writes `geom` only, NOT `geom_geog`. Downstream Method A
-    # and Method B containment populators spatial-join on `geom_geog`, so
-    # loads through this path leave the spatial index unusable. Use
-    # `scripts/load_pad_us_state.py` instead — it writes both columns.
-    # The entry is retained for completeness of the SOURCES registry but
-    # should not be invoked. action_ensure_pad_us in run_state_pipeline.py
-    # was rewired to call load_pad_us_state.py directly.
-    "pad_us": Source(
-        name="pad_us",
-        description="USGS PAD-US protected-area boundaries (per-state). DEPRECATED — use scripts/load_pad_us_state.py instead.",
-        fetcher_kind="arcgis_rest",
-        endpoint=("https://services.arcgis.com/v01gqwM5QqNysAAi/arcgis/rest/services/"
-                  "Manager_Name/FeatureServer/0"),
-        where_template="State_Nm='{state}'",
-        requires_state=True,
-        target_table="pad_us_units",
-        id_columns=["unit_id"],
-        columns=PAD_US_COLUMNS,
-        mapper=map_pad_us,
-        ttl_days=90,
-    ),
+    # PAD-US entry REMOVED 2026-05-23 LATE. The previous entry wrote `geom`
+    # but not `geom_geog`, leaving the spatial index unusable for any
+    # state loaded through this path (NH/NY/PA/CT/MI/NJ/IL/VA/WI partial
+    # all had geom_geog NULL until backfilled today). The canonical loader
+    # is scripts/load_pad_us_state.py, which writes both columns. Don't
+    # re-add a `pad_us` entry here — pipeline integrity preflight will
+    # halt on geom_geog NULL anyway.
+    #
     # usfws_critical_habitat retired 2026-05-07 (see project_nesting_zones_gis_load.md).
     # Endpoint + mapper preserved in version control; re-add this entry
     # if priorities change. Endpoint:

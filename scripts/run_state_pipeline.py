@@ -180,6 +180,27 @@ PHASES = [
             "                 where source='pad_us' and state=$STATE), false)",
         'criterion_text': "external_source_status['pad_us', state] in (ok, skipped)",
     },
+    # pad_us_geom_geog_check — gap #43, 2026-05-23 LATE. Catches the silent
+    # data-integrity regression where pad_us_units rows have `geom` populated
+    # but `geom_geog` NULL. refresh_beach_polygon_membership spatial-joins on
+    # geom_geog, so NULL leaves the state's PAD-US units invisible to the
+    # entire BEP cascade — beaches stay at policy_tier=3 silently. NH was the
+    # canary (0/8321 geom_geog, 0 pad_us_unit memberships); cross-state survey
+    # showed NY/PA/CT/MI/NJ/IL/VA all hit the same gap. Root cause: deprecated
+    # external_sources.py PAD-US loader (removed 2026-05-23 LATE) wrote `geom`
+    # only. Backfilled and loader removed — preflight ensures the regression
+    # can't silently return.
+    {
+        'key': 'pad_us_geom_geog_check',
+        'kind': 'python',
+        'action': 'pad_us_geom_geog_check',
+        'criterion': "select true",
+        'criterion_text':
+            'every pad_us_units row in $STATE with non-NULL geom has non-NULL '
+            'geom_geog (required for spatial joins in refresh_beach_polygon_'
+            'membership). Halts with backfill UPDATE template if any rows '
+            'fail.',
+    },
     # pad_us_manager_class_preflight — third member of the preflight family
     # (alongside state_policy_seed + state_park_url_check). Added 2026-05-23
     # LATE after NH virgin-state test surfaced gap #41: 6 PAD-US mng_names
@@ -2722,6 +2743,65 @@ def action_state_park_url_check(state: str) -> int:
     )
 
 
+def action_pad_us_geom_geog_check(state: str) -> int:
+    """Validate that every pad_us_units row for $STATE with non-NULL `geom`
+    also has non-NULL `geom_geog`.
+
+    Per gap #43 (2026-05-23 LATE). refresh_beach_polygon_membership's PAD-US
+    block joins on `ST_DWithin(pu.geom_geog, b.geog, 2000)`. If geom_geog is
+    NULL the join produces ZERO rows, and the state's beaches get no
+    pad_us_unit memberships in beach_polygon_membership — the BEP cascade
+    then has nothing to inherit from, so all of the state's beaches stay at
+    policy_tier=3. NH was the canary: 0/8321 geom_geog populated, 0
+    pad_us_unit memberships, 250/250 active beaches at tier-3.
+
+    Root cause (now fixed): the deprecated external_sources.py PAD-US loader
+    wrote `geom` but not `geom_geog`. Replaced 2026-05-12 by
+    load_pad_us_state.py which writes both, but historical data loaded
+    before then was never backfilled until 2026-05-23 LATE. This preflight
+    catches the regression class going forward.
+    """
+    with open_conn() as c, c.cursor() as cur:
+        cur.execute("""
+            SELECT COUNT(*) FILTER (WHERE geom IS NOT NULL AND geom_geog IS NULL)
+                     AS n_null_geog,
+                   COUNT(*) FILTER (WHERE geom IS NOT NULL) AS n_with_geom
+              FROM public.pad_us_units
+             WHERE state = %s
+        """, (state,))
+        n_null_geog, n_with_geom = cur.fetchone()
+
+    if n_null_geog == 0:
+        log(f'    pad_us_units geom_geog: {n_with_geom}/{n_with_geom} populated '
+            f'for {state}; ok')
+        return 0
+
+    pct = (100.0 * n_null_geog / max(n_with_geom, 1))
+    raise RuntimeError(
+        f'\npad_us_units geom_geog integrity FAILED for {state}:\n'
+        f'  {n_null_geog} / {n_with_geom} rows ({pct:.1f}%) have non-NULL geom '
+        f'but NULL geom_geog.\n\n'
+        f'refresh_beach_polygon_membership spatial-joins on geom_geog. NULL\n'
+        f'means the state\'s PAD-US units are invisible to the entire BEP\n'
+        f'cascade — beaches stay at policy_tier=3 silently. This is the gap\n'
+        f'class that caused the NH virgin-test halt 2026-05-23 LATE.\n\n'
+        f'TO RESOLVE — backfill from geom:\n\n'
+        f'  UPDATE public.pad_us_units\n'
+        f'     SET geom_geog = geom::geography\n'
+        f"   WHERE state = '{state}'\n"
+        f'     AND geom IS NOT NULL\n'
+        f'     AND geom_geog IS NULL;\n\n'
+        f'Apply via:\n'
+        f'  echo "<paste above>" | supabase db query --linked\n\n'
+        f'Then re-run pipeline:\n'
+        f'  python scripts/run_state_pipeline.py --state {state} '
+        f'--launch-mode state-launch --resume\n\n'
+        f'Upstream fix: only load PAD-US via scripts/load_pad_us_state.py — '
+        f'it writes both columns. The deprecated external_sources.py PAD-US '
+        f'entry was removed 2026-05-23 LATE.'
+    )
+
+
 def action_pad_us_manager_class_preflight(state: str) -> int:
     """Validate that every high-volume PAD-US mng_name in this state has
     a class-default row in pad_us_unit_dogs_policy (unit_id IS NULL).
@@ -2862,6 +2942,7 @@ PYTHON_ACTIONS = {
     'state_park_url_check':    action_state_park_url_check,
     'ensure_tiger_places':     action_ensure_tiger_places,
     'ensure_pad_us':           action_ensure_pad_us,
+    'pad_us_geom_geog_check':  action_pad_us_geom_geog_check,
     'pad_us_manager_class_preflight': action_pad_us_manager_class_preflight,
     'ensure_overpass':         action_ensure_overpass,
     'ensure_poi_landing':      action_ensure_poi_landing,

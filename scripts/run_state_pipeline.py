@@ -221,6 +221,30 @@ PHASES = [
             '$STATE lacking a class-default row in pad_us_unit_dogs_policy. '
             'Logs the templated backfill block; does not halt.',
     },
+    # ensure_county_subdivisions — gap #46 (2026-05-23 LATE). Town-strong
+    # states need the TIGER COUSUB layer loaded so towns (the dominant
+    # dog-policy authority tier in NE states) become operator candidates.
+    # Function self-skips for county-strong states via the
+    # state_government_strength registry — safe to leave in the phase
+    # list for all launches.
+    {
+        'key': 'ensure_county_subdivisions',
+        'kind': 'python',
+        'action': 'ensure_county_subdivisions',
+        'criterion':
+            "select case "
+            "  when (select dominant_municipal_tier "
+            "          from public.state_government_strength "
+            "         where state_code = $STATE) <> 'town' then true "
+            "  else coalesce((select status in ('ok','skipped') "
+            "                   from public.external_source_status "
+            "                  where source='tiger_county_subdivisions' "
+            "                    and state=$STATE), false) "
+            "end",
+        'criterion_text':
+            "for town-strong states: external_source_status['tiger_county_subdivisions', state] "
+            "in (ok, skipped); for county-strong states: trivially true (no-op)",
+    },
     {
         'key': 'ensure_overpass',
         'kind': 'python',
@@ -1708,6 +1732,7 @@ def action_operators_chunked(state: str) -> int:
     passes = [
         # (label, fn_name, skip_for_ca)
         ('cities',        '_op_pass1_cities',        False),
+        ('towns',         '_op_pass1b_towns',        False),  # gap #46 — gated internally on town-strong states
         ('counties',      '_op_pass2_counties',      False),
         ('federal',       '_op_pass3_federal',       False),
         ('state',         '_op_pass4_state',          True),
@@ -1847,6 +1872,24 @@ def action_ensure_amenities(state: str) -> int:
 
 def action_ensure_tiger_places(state: str) -> int:
     return _ensure_loader(state, 'tiger_places', 'bulk_load_tiger_places.py', timeout=600)
+
+def action_ensure_county_subdivisions(state: str) -> int:
+    """Per gap #46 — load TIGER County Subdivisions (MCD layer) for town-
+    strong states. No-op for county-strong states (the bulk loader's
+    --town-strong-only default + per-state gating skips them).
+    """
+    # Skip non-town-strong states without invoking the loader at all.
+    with open_conn() as c, c.cursor() as cur:
+        cur.execute(
+            "select dominant_municipal_tier from public.state_government_strength "
+            " where state_code = %s", (state,))
+        r = cur.fetchone()
+    if not r or r[0] != 'town':
+        log(f'    state_government_strength.{state}={r[0] if r else "unknown"}: '
+            f'COUSUB load not needed (county-strong); skip')
+        return 0
+    return _ensure_loader(state, 'tiger_county_subdivisions',
+                          'bulk_load_tiger_county_subdivisions.py', timeout=900)
 
 def action_ensure_dog_features(state: str) -> int:
     return _ensure_loader(state, 'osm_dog_features', 'bulk_load_dog_features.py', timeout=600)
@@ -2955,6 +2998,7 @@ PYTHON_ACTIONS = {
     'ensure_tiger_places':     action_ensure_tiger_places,
     'ensure_pad_us':           action_ensure_pad_us,
     'pad_us_geom_geog_check':  action_pad_us_geom_geog_check,
+    'ensure_county_subdivisions': action_ensure_county_subdivisions,
     'pad_us_manager_class_preflight': action_pad_us_manager_class_preflight,
     'ensure_overpass':         action_ensure_overpass,
     'ensure_poi_landing':      action_ensure_poi_landing,

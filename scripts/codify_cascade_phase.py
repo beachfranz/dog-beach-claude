@@ -289,14 +289,14 @@ def run_phase(state: str, *, do_precheck_jurisdictions: bool = True,
                 marker = {"covered": "✓", "partial": "~", "uncovered": "✗"}[u.coverage_status]
                 print(f"  {marker} {u.mng_name:<6} {u.unit_name[:45]:<45} "
                       f"{u.beaches_linked}/{u.beaches_in_unit}  ps={u.ps_ids}", flush=True)
-            for u in report.federal["uncovered"]:
-                report.queue.append({
-                    "kind": "federal_unit",
-                    "mng_name": u["mng_name"],
-                    "unit_name": u["unit_name"],
-                    "beaches": u["beaches_in_unit"],
-                    "suggested_cmd": _suggest_federal_cmd(state, u),
-                })
+        for u in report.federal["uncovered"]:
+            report.queue.append({
+                "kind": "federal_unit",
+                "mng_name": u["mng_name"],
+                "unit_name": u["unit_name"],
+                "beaches": u["beaches_in_unit"],
+                "suggested_cmd": _suggest_federal_cmd(state, u),
+            })
 
         # ── Counties + Cities (parallel precheck) ──────────────────────
         # Each precheck spawns a derive_policy_source subprocess (~30-90s,

@@ -44,9 +44,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 import argparse
 import hashlib
-import json
 import time
-import urllib.error
 import urllib.parse
 
 # Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
@@ -248,11 +246,11 @@ def cache_lookup(ps_id: int) -> dict | None:
     try:
         rows = supa("/rest/v1/policy_source_extraction_cache", params=params)
         return rows[0]["result_json"] if rows else None
-    except urllib.error.HTTPError as e:
-        # Table doesn't exist → no cache available; first-run path
-        if e.code == 404:
-            return None
-        raise
+    except RuntimeError as e:
+        # Table absent (404) or other lookup failure → no cache available;
+        # extraction will re-run. supa() collapses status into the message.
+        print(f"  warn: cache lookup failed; extraction will re-run: {e}", flush=True)
+        return None
 
 
 def cache_write(ps_id: int, result_json: dict) -> None:
@@ -260,19 +258,16 @@ def cache_write(ps_id: int, result_json: dict) -> None:
         supa(
             "/rest/v1/policy_source_extraction_cache",
             method="POST",
+            params={"on_conflict": "policy_source_id,cache_key"},
             body={
                 "policy_source_id": ps_id,
                 "cache_key": CACHE_KEY,
                 "result_json": result_json,
             },
+            upsert=True,
         )
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            print(f"  warn: cache table not present; extraction will re-run next time", flush=True)
-        elif e.code == 409:
-            pass  # conflict = already cached, fine
-        else:
-            raise
+    except RuntimeError as e:
+        print(f"  warn: cache write failed; extraction will re-run next time: {e}", flush=True)
 
 
 def update_beach_operating_hours(beach_fids: list[int], hours: dict,
@@ -285,7 +280,7 @@ def update_beach_operating_hours(beach_fids: list[int], hours: dict,
         return 0
     n_updated = 0
     payload = {
-        "operating_hours": json.dumps(hours),
+        "operating_hours": hours,
         "operating_hours_source": "agency",
         "operating_hours_confidence": round(confidence, 2),
         "operating_hours_last_verified": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -304,8 +299,8 @@ def update_beach_operating_hours(beach_fids: list[int], hours: dict,
                 body=payload,
             )
             n_updated += len(rows)
-        except urllib.error.HTTPError as e:
-            print(f"  warn: fid={fid} update failed: {e.code}", flush=True)
+        except RuntimeError as e:
+            print(f"  warn: fid={fid} update failed: {e}", flush=True)
     return n_updated
 
 

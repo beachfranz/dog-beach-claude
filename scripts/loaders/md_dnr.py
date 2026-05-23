@@ -15,8 +15,15 @@ Per Franz 2026-05-22 — 4th subclass / state-launch for MD.
 """
 from __future__ import annotations
 
+import os
 import re
+import sys
 import urllib.parse
+
+# sys.path bootstrap per HARD pin sys-path-bootstrap-for-common-imports —
+# enables `from scripts.loaders._base import ...` whether invoked as a
+# script (`python scripts/loaders/md_dnr.py`) or imported.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import requests
 

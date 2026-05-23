@@ -159,6 +159,10 @@ Bridge: `operators.canonical_operator_id BIGINT REFERENCES operator(id)` — for
 - `canonical_for_extraction(extraction_id)` → bridge plural → singular via FK
 - `extractions_for_canonical(canonical_id)` → reverse bridge singular → plural
 
+**When adding a NEW operator** (e.g., discovering a nonprofit in a new state):
+- Use `add_canonical_operator(name=…, op_type=…, state_code=…, apply=True)` — atomically inserts into BOTH `operator` and `operators` with the FK pre-set.
+- **Always populate both tables** (Franz decision 2026-05-22 LATE). Don't repeat the 4-orphan pattern that CA accidentally accumulated. The helper handles this for you.
+
 Table-level `COMMENT ON TABLE` also documents the distinction; visible in `\d operator` / `\d operators`.
 
 See HARD memory pin `operate-two-table-finding`.

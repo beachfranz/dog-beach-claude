@@ -137,8 +137,11 @@ def audit(conf_threshold: float):
     conn = _connect_pg()
     try:
         with conn, conn.cursor() as cur:
-            # operator_dogs_policy.operator_id → public.operators (plural)
-            # ALSO probe public.operator (singular) by canonical_name for bridge-match potential
+            # operator_dogs_policy.operator_id → public.operators (plural).
+            # Bridge to public.operator (singular) via the formal FK
+            # operators.canonical_operator_id (added 2026-05-22 LATE by
+            # migration 20260522_operators_canonical_bridge.sql). Replaces
+            # the prior brittle LOWER(name) joins.
             cur.execute("""
                 SELECT
                     o.id AS operator_id, o.canonical_name AS operator_name,
@@ -146,22 +149,17 @@ def audit(conf_threshold: float):
                     odp.source_url, odp.default_rule, odp.leash_required,
                     odp.pass_a_confidence, odp.pass_c_confidence,
                     odp.summary,
-                    -- Bridge-match: does a singular-operator row exist with matching name?
-                    (SELECT op2.id FROM public.operator op2
-                     WHERE LOWER(op2.name) = LOWER(o.canonical_name)
-                     LIMIT 1) AS singular_op_match_id,
+                    -- Bridge match via formal FK (NULL = no singular counterpart)
+                    o.canonical_operator_id AS singular_op_match_id,
                     (SELECT COUNT(*) FROM public.beach_operator bo
-                     JOIN public.operator op2 ON op2.id = bo.operator_id
-                     WHERE LOWER(op2.name) = LOWER(o.canonical_name)) AS n_beach_links,
+                      WHERE bo.operator_id = o.canonical_operator_id) AS n_beach_links,
                     (SELECT COUNT(*) FROM public.policy_source ps
-                     JOIN public.operator op2 ON op2.id = ps.issuing_operator_id
-                     WHERE LOWER(op2.name) = LOWER(o.canonical_name)
-                       AND ps.subtype = 'operator_posted_policy') AS n_op_ps_rows,
+                      WHERE ps.issuing_operator_id = o.canonical_operator_id
+                        AND ps.subtype = 'operator_posted_policy') AS n_op_ps_rows,
                     (SELECT array_agg(ps.id::text || ': ' || COALESCE(ps.source_url,'<no url>'))
-                     FROM public.policy_source ps
-                     JOIN public.operator op2 ON op2.id = ps.issuing_operator_id
-                     WHERE LOWER(op2.name) = LOWER(o.canonical_name)
-                       AND ps.subtype = 'operator_posted_policy') AS existing_op_ps
+                       FROM public.policy_source ps
+                      WHERE ps.issuing_operator_id = o.canonical_operator_id
+                        AND ps.subtype = 'operator_posted_policy') AS existing_op_ps
                 FROM public.operators o
                 JOIN public.operator_dogs_policy odp ON odp.operator_id = o.id
                 WHERE odp.pass_c_confidence IS NOT NULL

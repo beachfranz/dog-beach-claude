@@ -119,10 +119,14 @@ def fetch_bridgable(conn, confidence_threshold: float,
     """Return rows of (operator, best-extraction, beach-link-count).
 
     CORRECTED 2026-05-18: operator_dogs_policy.operator_id FK → public.operators
-    (plural, 9,275 rows) NOT public.operator (singular, 153 rows). Previous
-    version coincidentally cross-joined; this version uses the correct table
-    and also probes for matching singular-operator rows by canonical_name (the
-    bridge match candidate).
+    (plural, 9,275 rows) NOT public.operator (singular, 159 rows). Previous
+    version coincidentally cross-joined; this version uses the correct table.
+
+    UPDATED 2026-05-22 LATE: bridge is now a formal FK
+    (operators.canonical_operator_id, added by migration
+    20260522_operators_canonical_bridge.sql). Replaces the prior brittle
+    `LOWER(op2.name) = LOWER(o.canonical_name)` join. No false negatives
+    on punctuation/case/spacing divergence.
     """
     sql = """
         SELECT
@@ -131,13 +135,10 @@ def fetch_bridgable(conn, confidence_threshold: float,
             odp.source_url, odp.default_rule, odp.leash_required, odp.summary,
             odp.pass_a_quotes, odp.time_windows, odp.seasonal_closures,
             odp.spatial_zones, odp.pass_c_quotes, odp.pass_c_confidence,
-            -- Bridge match: does a singular-operator row exist with same name?
-            (SELECT op2.id FROM public.operator op2
-             WHERE LOWER(op2.name) = LOWER(o.canonical_name)
-             LIMIT 1) AS singular_op_id,
+            -- Bridge match via formal FK (NULL = singular-operator row absent)
+            o.canonical_operator_id AS singular_op_id,
             (SELECT COUNT(*) FROM public.beach_operator bo
-             JOIN public.operator op2 ON op2.id = bo.operator_id
-             WHERE LOWER(op2.name) = LOWER(o.canonical_name)) AS n_beach_links
+              WHERE bo.operator_id = o.canonical_operator_id) AS n_beach_links
         FROM public.operators o
         JOIN public.operator_dogs_policy odp ON odp.operator_id = o.id
         WHERE odp.pass_c_confidence >= %s

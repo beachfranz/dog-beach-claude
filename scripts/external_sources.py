@@ -60,7 +60,10 @@ PG = dict(host=_p.hostname, port=_p.port or 5432, user=_p.username,
           password=os.environ["SUPABASE_DB_PASSWORD"],
           dbname=(_p.path or "/postgres").lstrip("/"), sslmode="require")
 
-SSL_CTX = ssl.create_default_context()
+ROOT_FOR_SSL = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_FOR_SSL))
+from scripts.common.ssl_compat import get_ssl_context  # noqa: E402
+SSL_CTX = get_ssl_context()  # Python 3.13+ strictness; see ssl_compat.py
 
 
 # ============================================================================

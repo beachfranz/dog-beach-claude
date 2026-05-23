@@ -38,6 +38,15 @@ PG = dict(host=_p.hostname, port=_p.port or 5432, user=_p.username,
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _external_source_status import record_status  # noqa: E402
 
+sys.path.insert(0, str(ROOT))
+from scripts.common.ssl_compat import get_ssl_context  # noqa: E402
+
+# httpx defaults to certifi for cert verification, but certifi's bundle
+# doesn't recognize the Overpass API cert chain on Python 3.14 Windows.
+# Use Python's default cert store (more permissive) with VERIFY_X509_STRICT
+# relaxed. Diagnosed 2026-05-22 LATE in DE virgin-state pipeline test.
+_HTTPX_SSL = get_ssl_context()
+
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 OVERPASS_DELAY_S = 30  # be polite — same delay as the CA fetcher
 
@@ -85,6 +94,7 @@ out center tags;
 
 def fetch_overpass(query: str) -> dict:
     r = httpx.post(OVERPASS_URL, data={"data": query}, timeout=180.0,
+                   verify=_HTTPX_SSL,
                    headers={"User-Agent": "dog-beach-scout/1.0 (bulk dog-features)"})
     r.raise_for_status()
     return r.json()

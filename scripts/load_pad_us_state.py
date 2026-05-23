@@ -35,6 +35,8 @@ import psycopg2.extras
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from scripts.common.ssl_compat import get_ssl_context  # noqa: E402
 
 # Force UTF-8 stdout on Windows
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
@@ -50,9 +52,7 @@ ENDPOINT = ("https://services.arcgis.com/v01gqwM5QqNysAAi/arcgis/rest/"
             "services/Manager_Name/FeatureServer/0/query")
 PAGE_SIZE = 2000  # FeatureServer maxRecordCount
 
-# Schannel-friendly SSL context (Windows curl had revocation issues; urllib
-# uses Python's bundled certs and is fine).
-SSL_CTX = ssl.create_default_context()
+SSL_CTX = get_ssl_context()  # see scripts/common/ssl_compat.py
 
 
 def fetch_page(state: str, offset: int) -> dict:

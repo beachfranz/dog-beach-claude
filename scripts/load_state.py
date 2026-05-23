@@ -36,6 +36,12 @@ import psycopg2.extras
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from scripts.common.ssl_compat import get_ssl_context  # noqa: E402
+
+# Python 3.13+ strictness — see scripts/common/ssl_compat.py
+_SSL_CTX = get_ssl_context()
+
 load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
 POOLER = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
 _p = urllib.parse.urlparse(POOLER)
@@ -44,6 +50,20 @@ PG = dict(host=_p.hostname, port=_p.port or 5432, user=_p.username,
           dbname=(_p.path or "/postgres").lstrip("/"), sslmode="require")
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+
+# 2-letter → 2-digit FIPS for all 50 states + DC + PR/GU/VI.
+# Used by fetch_overpass_beaches to clip elements to the state polygon.
+STATE_FIPS = {
+    "AL": "01", "AK": "02", "AZ": "04", "AR": "05", "CA": "06", "CO": "08",
+    "CT": "09", "DE": "10", "DC": "11", "FL": "12", "GA": "13", "HI": "15",
+    "ID": "16", "IL": "17", "IN": "18", "IA": "19", "KS": "20", "KY": "21",
+    "LA": "22", "ME": "23", "MD": "24", "MA": "25", "MI": "26", "MN": "27",
+    "MS": "28", "MO": "29", "MT": "30", "NE": "31", "NV": "32", "NH": "33",
+    "NJ": "34", "NM": "35", "NY": "36", "NC": "37", "ND": "38", "OH": "39",
+    "OK": "40", "OR": "41", "PA": "42", "RI": "44", "SC": "45", "SD": "46",
+    "TN": "47", "TX": "48", "UT": "49", "VT": "50", "VA": "51", "WA": "53",
+    "WV": "54", "WI": "55", "WY": "56", "PR": "72", "GU": "66", "VI": "78",
+}
 
 # State bbox catalog. Expand as needed; OR comes from the existing
 # OR seeds' rough envelope.
@@ -76,7 +96,7 @@ def run_noaa_stations(state: str):
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=120) as resp:
             print(f"  {resp.read().decode()}")
     except urllib.error.HTTPError as e:
         print(f"  NOAA loader failed: {e.code} {e.read().decode()[:200]}")
@@ -118,11 +138,16 @@ out body geom;
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=130) as resp:
+        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=130) as resp:
             payload = json.loads(resp.read())
     except Exception as e:
+        # RE-RAISE (2026-05-22 LATE): formerly swallowed and returned 0,
+        # which made the outer bulk_load_overpass.py write
+        # external_source_status='ok' with rows=0 — masking SSL/network
+        # failures as silent successes. Now the outer loader sees the
+        # exception and correctly records 'failed'.
         print(f"  Overpass error: {e}")
-        return 0
+        raise
 
     elements = payload.get("elements", [])
     if max_records:
@@ -138,7 +163,10 @@ out body geom;
     with psycopg2.connect(**PG) as conn:
         conn.autocommit = True
         # Resolve state geom once. Counties union as fallback when states is missing.
-        state_fp = {"CA": "06", "OR": "41", "WA": "53"}.get(state)
+        # 2026-05-22 LATE: was {CA/OR/WA-only} dict; expanded to all 50 + DC
+        # so polygon clipping works for any state (not silently skipped, which
+        # would cause out-of-state OSM elements to leak into osm_landing).
+        state_fp = STATE_FIPS.get(state)
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
                 select st_union(geom) as geom from public.counties where state_fp = %s
@@ -255,11 +283,12 @@ out body geom;
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=200) as resp:
+        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=200) as resp:
             payload = json.loads(resp.read())
     except Exception as e:
+        # Re-raise per same fix as fetch_overpass_beaches; see comment there.
         print(f"  Overpass error: {e}")
-        return 0
+        raise
 
     elements = payload.get("elements", [])
     if max_records:

@@ -173,6 +173,20 @@ PHASES = [
             "                 where source='osm_landing' and state=$STATE), false)",
         'criterion_text': "external_source_status['osm_landing', state] in (ok, skipped)",
     },
+    # ensure_poi_landing — 2026-05-22 LATE: closes the gap surfaced by DE
+    # virgin-state test. POI data (US_beaches.csv) is load-bearing for most
+    # coastal states — without it, beaches_gold count drops dramatically
+    # (DE: 49 → 6 with OSM-only). State-scoped CSV loader handles this.
+    {
+        'key': 'ensure_poi_landing',
+        'kind': 'python',
+        'action': 'ensure_poi_landing',
+        'criterion':
+            "select coalesce((select status in ('ok','skipped') "
+            "                 from public.external_source_status "
+            "                 where source='poi_landing' and state=$STATE), false)",
+        'criterion_text': "external_source_status['poi_landing', state] in (ok, skipped)",
+    },
     {
         'key': 'ensure_amenities',
         'kind': 'python',
@@ -236,33 +250,6 @@ PHASES = [
             "where state = $STATE and source in ('pad_us','osm_landing','osm_amenities','tiger_places') "
             "  and status in ('ok','skipped')",
         'criterion_text': 'all 4 required sources status in (ok, skipped) + noaa_stations(global) loaded',
-    },
-    # beach_inventory_check — explicit gate on the implicit prereq that
-    # beach ingestion (GNIS, manual loaders, etc.) has happened BEFORE
-    # the state-launch pipeline runs.
-    #
-    # Without this gate, a fresh state with no beaches in beaches_gold
-    # silently flows through every downstream phase as a no-op:
-    #   - codify_cascade trivially passes (0 uncovered <= max(1, 0/5))
-    #   - arena_seed finds no candidate landing rows for the state
-    #   - cluster/promote produce no gold rows
-    #   - …the whole pipeline runs green with zero meaningful work
-    # Producing a misleading "all green" signal — exactly the worst
-    # failure mode (silent + masking).
-    #
-    # Per HARD memory rule beach-catalog-prereq-for-codify: beach
-    # ingestion is a PREREQUISITE for codify (and the rest of the
-    # pipeline), not a follow-up. This phase makes that explicit.
-    # First-contact failure mode on the upcoming MA/FL/MI bootstrap.
-    {
-        'key': 'beach_inventory_check',
-        'action': "select count(*)::int from public.beaches_gold "
-                  "where state=$STATE and is_active",
-        'criterion':
-            "select (count(*) > 0)::boolean from public.beaches_gold "
-            "where state=$STATE and is_active",
-        'criterion_text': 'beaches_gold has ≥1 active beach for state '
-                          '(if 0: run beach ingestion first — GNIS or manual loader)',
     },
     {
         # 2026-05-13 split: each pass runs in its own autocommitted
@@ -348,6 +335,32 @@ PHASES = [
             "select public.assert_promote_complete_for_state($STATE)",
         'criterion_text':
             'every active beach has county_fips and state set (#2/#18 guard)',
+    },
+    # beach_inventory_check — post-promote sanity gate.
+    #
+    # 2026-05-22 LATE: moved from BEFORE arena_seed (where it was at #11)
+    # to HERE (after promote). The old placement was wrong: for a virgin
+    # state (e.g., the DE virgin-state pipeline test), beaches_gold is
+    # legitimately empty until the load → cluster → promote chain runs.
+    # Checking BEFORE that chain just halted the pipeline before it had a
+    # chance to populate. Now this phase serves its actual purpose: "did
+    # the load+promote chain actually produce beaches?" If not, something
+    # in the upstream loaders / arena_seed / promote silently failed and
+    # we should halt before doing useless downstream work.
+    #
+    # Per HARD memory rule beach-catalog-prereq-for-codify: beach
+    # ingestion is a PREREQUISITE for codify. Position guarantees codify
+    # never runs against an empty beaches_gold.
+    {
+        'key': 'beach_inventory_check',
+        'action': "select count(*)::int from public.beaches_gold "
+                  "where state=$STATE and is_active",
+        'criterion':
+            "select (count(*) > 0)::boolean from public.beaches_gold "
+            "where state=$STATE and is_active",
+        'criterion_text': 'beaches_gold has ≥1 active beach for state '
+                          '(if 0 here: load/promote chain produced nothing — '
+                          'check upstream loaders, arena_seed, promote)',
     },
     {
         # validate_state_geom — guard against county_fips/geom mismatch.
@@ -491,17 +504,35 @@ PHASES = [
         'kind': 'python',
         'action': 'codify_cascade',
         'criterion':
-            "select (EXISTS(select 1 from public.beaches_gold "
-            "                where state=$STATE and is_active "
-            "                  and scoring_tier in ('daily','hourly')) "
-            "        AND public.count_uncovered_scoreable_beaches($STATE) "
-            "        <= greatest(1, (select count(*) from public.beaches_gold "
-            "                          where state=$STATE and is_active "
-            "                            and scoring_tier in ('daily','hourly')) "
-            "                         / $UNCOVER_DIVISOR))::boolean",
+            "select ("
+            #  ── Path 1: explicit per-beach coverage meets launch-mode threshold
+            "  (EXISTS(select 1 from public.beaches_gold "
+            "           where state=$STATE and is_active "
+            "             and scoring_tier in ('daily','hourly')) "
+            "   AND public.count_uncovered_scoreable_beaches($STATE) "
+            "   <= greatest(1, (select count(*) from public.beaches_gold "
+            "                     where state=$STATE and is_active "
+            "                       and scoring_tier in ('daily','hourly')) "
+            "                    / $UNCOVER_DIVISOR)) "
+            "  OR "
+            #  ── Path 2 (2026-05-22 LATE): state-baseline-covers gate.
+            #  For DE-like states (small, no federal land, statewide leash
+            #  law via state_dogs_policy covering all beaches), the codify_
+            #  cascade enumerator correctly returns "0 units to dispatch —
+            #  state codify is current". Without this path, the pipeline
+            #  perma-halts at codify_cascade because per-beach policy_source
+            #  rows don't exist for state-baseline-only coverage. Surfaced
+            #  by DE virgin-state test 2026-05-22 LATE.
+            "  (NOT EXISTS(select 1 from public.codify_dispatch_queue "
+            "                where state=$STATE "
+            "                  and status in ('pending','approved','dispatched')) "
+            "   AND EXISTS(select 1 from public.state_dogs_policy "
+            "                where state_code=$STATE)) "
+            ")::boolean",
         'criterion_text':
-            'coverage ≥ launch-mode gate AND ≥1 scoreable beach '
-            '(state-launch 80% / steady-state 95%)',
+            'coverage ≥ launch-mode gate (state-launch 80% / steady-state 95%) '
+            'OR codify_dispatch_queue empty + state_dogs_policy set '
+            '(state-baseline-covers path)',
         'progress_sql':
             "with t as (select count(*)::int n from public.beaches_gold "
             "             where state=$STATE and is_active and scoring_tier in ('daily','hourly')), "
@@ -1330,7 +1361,8 @@ def _ping_or_reconnect(conn):
 
 
 def _ensure_loader(state: str, source: str, script_name: str,
-                    max_age_days: int = 30, timeout: int = 2400) -> int:
+                    max_age_days: int = 30, timeout: int = 2400,
+                    extra_args: list | None = None) -> int:
     """Generic upstream-loader gate: skip if external_source_status for
     (source, state) is 'ok' or 'skipped' and recently loaded; otherwise
     invoke the bulk loader subprocess. Used by phases ensure_pad_us,
@@ -1355,11 +1387,11 @@ def _ensure_loader(state: str, source: str, script_name: str,
             log(f'    {source} already loaded for {state} ({status}, '
                 f'age <{max_age_days}d); skip')
             return 0
-    log(f'    invoking scripts/loaders/{script_name} --states {state}')
-    rc, out, err = _run_subprocess(
-        [sys.executable, f'scripts/loaders/{script_name}', '--states', state],
-        timeout=timeout,
-    )
+    cmd = [sys.executable, f'scripts/loaders/{script_name}', '--states', state]
+    if extra_args:
+        cmd.extend(extra_args)
+    log(f'    invoking {" ".join(cmd[1:])}')
+    rc, out, err = _run_subprocess(cmd, timeout=timeout)
     if rc != 0:
         raise RuntimeError(f'{script_name} exit {rc}: {err[-500:]}')
     return 1
@@ -1496,8 +1528,18 @@ def action_ensure_pad_us(state: str) -> int:
 def action_ensure_overpass(state: str) -> int:
     return _ensure_loader(state, 'osm_landing', 'bulk_load_overpass.py', timeout=1200)
 
+def action_ensure_poi_landing(state: str) -> int:
+    # CSV is local — fast. ~30s max even for biggest states (FL/CA).
+    return _ensure_loader(state, 'poi_landing', 'load_poi_landing_state.py', timeout=120)
+
 def action_ensure_amenities(state: str) -> int:
-    return _ensure_loader(state, 'osm_amenities', 'bulk_load_amenities.py', timeout=1200)
+    # Raise the loader's default 6500 MB storage cap to 8500 MB. The cap
+    # is a defensive ceiling for ad-hoc bulk runs; inside the per-state
+    # pipeline the delta is small (≤20 MB for any single state) so the
+    # original cap was blocking legitimate launches once the DB grew past
+    # the conservative ceiling. DE virgin test surfaced this 2026-05-22 LATE.
+    return _ensure_loader(state, 'osm_amenities', 'bulk_load_amenities.py',
+                          timeout=1200, extra_args=['--storage-cap-mb', '8500'])
 
 def action_ensure_tiger_places(state: str) -> int:
     return _ensure_loader(state, 'tiger_places', 'bulk_load_tiger_places.py', timeout=600)
@@ -2169,8 +2211,14 @@ _STATE_SEED_TEMPLATE = (
 def action_state_policy_seed(state: str) -> int:
     """Ensure state_dogs_policy has a row for state.
 
-    If unseeded, fail loudly with a template INSERT the operator can
-    fill out. Once filled and applied, re-run the canon.
+    2026-05-22 LATE: switched from halt-with-template to AUTO-PULL via
+    scripts/research_state_dogs_policy.py. The LLM produces a baseline
+    row with confidence=0.4 + an 'auto-generated' notes flag so operators
+    know to review it. Closes the preflight gap surfaced by DE virgin
+    test (the seed was a halt-with-message, not an auto-pull).
+
+    If LLM auto-pull fails for any reason, fall through to the original
+    halt-with-template message so the operator can hand-curate.
     """
     with open_conn() as c, c.cursor() as cur:
         cur.execute('select public.unseeded_state_policy_for_state(%s)', (state,))
@@ -2178,11 +2226,23 @@ def action_state_policy_seed(state: str) -> int:
     if unseeded == 0:
         log(f'    state_dogs_policy already seeded for {state}; skip')
         return 0
+
+    log(f'    state_dogs_policy unseeded for {state}; invoking '
+        f'research_state_dogs_policy.py (auto-pull baseline)')
+    rc, out, err = _run_subprocess(
+        [sys.executable, 'scripts/research_state_dogs_policy.py',
+         '--state', state, '--apply'],
+        timeout=180,
+    )
+    if rc == 0:
+        log(f'    auto-pulled state_dogs_policy baseline for {state} '
+            f'(confidence=0.4; needs operator review)')
+        return 1
+    # Fall through to the hand-curated template if auto-pull failed
+    log(f'    auto-pull failed (rc={rc}); err tail: {err[-300:]}')
     raise RuntimeError(
-        f'state_dogs_policy is missing a row for {state}. The canon halts here\n'
-        f'because every active beach in {state} would otherwise resolve to\n'
-        f'dogs_allowed=unknown and produce 0 beach_dog_policy rows (see\n'
-        f'docs/canon-issues-log.md issue #19).\n\n'
+        f'state_dogs_policy is missing a row for {state} AND auto-pull failed.\n'
+        f'Auto-pull error tail:\n{err[-500:]}\n\n'
         f'Remediation: INSERT a row using the template below, then re-run\n'
         f'this phase via:\n'
         f'  python scripts/run_state_pipeline.py --state {state} --resume\n\n'
@@ -2244,6 +2304,7 @@ PYTHON_ACTIONS = {
     'ensure_tiger_places':     action_ensure_tiger_places,
     'ensure_pad_us':           action_ensure_pad_us,
     'ensure_overpass':         action_ensure_overpass,
+    'ensure_poi_landing':      action_ensure_poi_landing,
     'ensure_amenities':        action_ensure_amenities,
     'ensure_dog_features':     action_ensure_dog_features,
     'refresh_nearest_dog_park': action_refresh_nearest_dog_park,
@@ -2293,6 +2354,8 @@ def main():
     ap.add_argument('--skip-precheck', action='store_true', help='Skip precheck phase only')
     ap.add_argument('--dry-run', action='store_true', help='Print phase plan; do not execute')
     ap.add_argument('--phase-from', help='Start at a specific phase (skip prior)')
+    ap.add_argument('--until-phase', help='Stop after this phase completes ok (tier discipline). '
+                                          'Inclusive — given phase WILL run.')
     ap.add_argument('--counties', help='CSV of county_fips to scope beach phases (test mode). '
                                        'State-wide criteria are downgraded to warnings.')
     ap.add_argument('--limit', type=int, help='Cap beach-fid-scoped phases to first N fids '
@@ -2486,6 +2549,13 @@ def main():
             stop_heartbeat.set()
             elapsed = time.time() - t0
             log(f'    OK   [{phase_num}/{len(PHASES)}] {ph["key"]:<22} rows={rows:<6} ({elapsed:.0f}s)')
+
+            # Tier discipline: stop after this phase if --until-phase matches.
+            if args.until_phase and ph['key'] == args.until_phase:
+                log(f'\nSTOPPED at --until-phase={args.until_phase} (tier boundary). '
+                    f'Resume with: python scripts/run_state_pipeline.py --state {state} '
+                    f'--launch-mode {LAUNCH_MODE} --resume --run-id {run_id}')
+                return
 
         except psycopg2.errors.RaiseException as e:
             stop_heartbeat.set()

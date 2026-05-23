@@ -201,24 +201,25 @@ PHASES = [
             'membership). Halts with backfill UPDATE template if any rows '
             'fail.',
     },
-    # pad_us_manager_class_preflight — third member of the preflight family
-    # (alongside state_policy_seed + state_park_url_check). Added 2026-05-23
-    # LATE after NH virgin-state test surfaced gap #41: 6 PAD-US mng_names
-    # (SDNR/SFW/UNKL/OTHS/UNK/RWD) covering 1300+ NH polys had no class-
-    # default row in pad_us_unit_dogs_policy. Without those rows, the
-    # PAD-US emitter can't inherit policy onto state-managed or
-    # local/NGO-managed land, so 250/250 NH active beaches stayed at
-    # policy_tier=3 and the field_population_check failed at phase 49.
-    # Halt-with-templated-INSERT pattern matches the canary discipline.
+    # pad_us_manager_class_preflight — WARNING-ONLY check. Originally added
+    # 2026-05-23 LATE as a hard halt (gap #41) after NH virgin-state test
+    # surfaced 6 missing mng_name class defaults. Relaxed to warning per
+    # gap #45 after data review showed pad_us_dogs_policy_v1 contributed
+    # only 4-18% (avg ~10%) of tier-1+2 coverage across the 9 MVP+ states —
+    # operator-driven extraction is the dominant lever, class defaults a
+    # secondary backstop. Halting the pipeline for missing state-level
+    # class defaults (SDNR/SFW/UNKL etc.) treated them as required
+    # infrastructure when they're optional. Phase remains in the list as
+    # a data-integrity surfacer; halt downgraded to log().
     {
         'key': 'pad_us_manager_class_preflight',
         'kind': 'python',
         'action': 'pad_us_manager_class_preflight',
         'criterion': "select true",
         'criterion_text':
-            'every PAD-US mng_name with >=20 polygons in $STATE has a '
-            'class-default row in pad_us_unit_dogs_policy (unit_id IS NULL); '
-            'halts with templated INSERT block if any missing',
+            'WARNING-ONLY: surfaces any PAD-US mng_name with >=20 polygons in '
+            '$STATE lacking a class-default row in pad_us_unit_dogs_policy. '
+            'Logs the templated backfill block; does not halt.',
     },
     {
         'key': 'ensure_overpass',
@@ -2803,21 +2804,28 @@ def action_pad_us_geom_geog_check(state: str) -> int:
 
 
 def action_pad_us_manager_class_preflight(state: str) -> int:
-    """Validate that every high-volume PAD-US mng_name in this state has
-    a class-default row in pad_us_unit_dogs_policy (unit_id IS NULL).
+    """WARNING-ONLY check that high-volume PAD-US mng_names in this state
+    have class-default rows in pad_us_unit_dogs_policy (unit_id IS NULL).
 
-    Per Franz 2026-05-23 LATE — extension of the state_policy_seed +
-    state_park_url_check preflight discipline. NH was the canary: 6
-    mng_names (SDNR/SFW/UNKL/OTHS/UNK/RWD) covering 1300+ polygons
-    fell through the class-default mechanism because the seed table
-    only had federal-class codes (NPS/USFS/etc.) plus a handful of
-    generic non-federal classes (CITY/CNTY/REG/NGO/SPR). State-level
-    codes (SDNR/SFW) and catch-all codes (UNKL/OTHS/UNK) were missing,
-    so 250/250 NH active beaches stayed at policy_tier=3.
+    Per Franz 2026-05-23 LATE — relaxed from a hard halt to a warning
+    after data review (gap #45). Coverage analysis across the 9 MVP+
+    states (CA/OR/WA/MD/MA/MI/OH/RI/DE) showed pad_us_dogs_policy_v1
+    contributes only 4-18% (avg ~10%) of tier-1+2 canonical dog-policy
+    evidence — operator-driven sources (county_policy, city_policy,
+    park_url, research, state_dogs_policy) dominate. Class defaults are
+    a meaningful backstop, especially for federal-managed land (NPS /
+    USFS / USFWS), but NOT load-bearing. Halting the pipeline for
+    missing state-level class defaults (SDNR/SFW/UNKL etc.) treats them
+    as required infrastructure when the data shows they're optional.
+
+    This function now PRINTS a warning with the templated INSERT for
+    human review and returns 0. Operators who want to backfill class
+    defaults can apply the templated SQL; operators who don't can
+    proceed and rely on operator-driven extraction (the dominant path
+    for MVP+ states).
 
     Threshold: any mng_name with >=20 polygons in the state. Tuned to
-    catch load-bearing managers (NH SDNR=429, SFW=275, UNKL=265) while
-    ignoring rare edge-case codes that don't structurally matter.
+    catch load-bearing managers without false-positive on rare codes.
     """
     with open_conn() as c, c.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("""
@@ -2837,12 +2845,13 @@ def action_pad_us_manager_class_preflight(state: str) -> int:
 
     if not gaps:
         log(f'    all PAD-US mng_names with >=20 polys in {state} have class '
-            f'defaults; skip')
+            f'defaults; ok')
         return 0
 
     lines = []
-    lines.append(f'\npad_us_unit_dogs_policy class-default rows MISSING for '
-                 f'{len(gaps)} mng_name(s) with >=20 polygons in {state}:\n')
+    lines.append(f'\n[WARNING] pad_us_unit_dogs_policy class-default rows '
+                 f'MISSING for {len(gaps)} mng_name(s) with >=20 polygons in '
+                 f'{state}:\n')
     lines.append(f"  {'mng_name':<10} {'mng_type':<10} {'n_polys':>8}  "
                  f'sample loc_mang')
     lines.append(f"  {'-'*10} {'-'*10} {'-'*8}  {'-'*50}")
@@ -2851,14 +2860,17 @@ def action_pad_us_manager_class_preflight(state: str) -> int:
         lines.append(f"  {r['mng_name']:<10} {r['mng_type']:<10} "
                      f"{r['n_polys']:>8}  {sample}")
 
-    lines.append('\nWithout these defaults, the PAD-US emitter cannot inherit '
-                 'policy onto these polygons,')
-    lines.append('which means beaches sitting inside them stay at '
-                 'policy_tier=3 (limited_access) and fall through')
-    lines.append('the consumer scoring scope.\n')
+    lines.append('\nThis is INFORMATIONAL only (no halt). Class defaults are '
+                 'a backstop, not load-bearing — across the 9 MVP+ states,')
+    lines.append('pad_us_dogs_policy_v1 contributed only 4-18% of tier-1+2 '
+                 'coverage (operator-driven extraction dominates).')
+    lines.append('Missing rows mean beaches inside these polygons get nothing '
+                 'from the PAD-US class-default channel; they still inherit')
+    lines.append('from operator extraction, federal class defaults, and other '
+                 'sources.\n')
 
-    lines.append('TO RESOLVE: create a migration with one row per mng_name. '
-                 'Conservative stub template:\n')
+    lines.append('IF YOU WANT TO BACKFILL: create a migration with one row per '
+                 'mng_name. Conservative stub template:\n')
     lines.append(f'-- supabase/migrations/<YYYYMMDD>_pad_us_class_defaults_'
                  f'{state.lower()}.sql')
     lines.append('BEGIN;')
@@ -2875,11 +2887,11 @@ def action_pad_us_manager_class_preflight(state: str) -> int:
                      f"{state}.');")
     lines.append('COMMIT;\n')
 
-    lines.append('After review + apply, resume:')
-    lines.append(f'  python scripts/run_state_pipeline.py --state {state} '
-                 f'--launch-mode state-launch --resume\n')
+    lines.append('Pipeline is proceeding — these gaps are tracked as '
+                 'WARNINGS, not halts.\n')
 
-    raise RuntimeError('\n'.join(lines))
+    log('\n'.join(lines))
+    return 0
 
 
 def action_seasonal_closure_seed(state: str) -> int:

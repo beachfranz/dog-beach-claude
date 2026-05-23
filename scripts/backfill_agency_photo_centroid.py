@@ -23,7 +23,7 @@ Usage:
   python scripts/backfill_agency_photo_centroid.py --sources wsprc   # one source
 """
 from __future__ import annotations
-import sys, argparse, json, time as _t
+import sys, argparse, json, re, threading, time as _t
 sys.stdout.reconfigure(encoding='utf-8', errors='replace', line_buffering=True)  # type: ignore[attr-defined]
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -39,7 +39,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scripts.common import normalize_text
 from scripts.common.db import connect, thread_conn
 
-AGENCY_SOURCES = ['wsprc', 'cdpr', 'nps', 'oprd']
+# Agency-photo sources that need centroid backfill. These are the loaders
+# whose images are attributed by polygon-fanout (one photo → N beach_fids)
+# and thus need centroid-based distance_m. Should match the agency-tier
+# entries in photo_source_type (source_kind='agency').
+# 2026-05-23: added md_dnr + destateparks for state expansion.
+AGENCY_SOURCES = ['wsprc', 'cdpr', 'nps', 'oprd', 'md_dnr', 'destateparks']
 
 
 def normalize(s: str) -> str:

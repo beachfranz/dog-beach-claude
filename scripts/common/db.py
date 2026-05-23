@@ -58,7 +58,8 @@ _TLS = threading.local()
 
 
 def thread_conn(**overrides):
-    """Per-thread cached connection. Auto-reconnects if closed.
+    """Per-thread cached connection. Auto-reconnects if closed OR if a ping
+    fails (pgbouncer-killed-from-other-side detection).
 
     Caller is responsible for commit/rollback. The connection persists for
     the thread's lifetime; let the thread end (or call `close_thread_conn()`)
@@ -66,11 +67,31 @@ def thread_conn(**overrides):
 
     pgbouncer session-mode pool ceiling is 15 — keep ThreadPoolExecutor
     max_workers <= 10 to leave headroom.
+
+    2026-05-23 LATE: added SELECT 1 ping. psycopg2's `conn.closed` is only
+    set when WE explicitly close. If pgbouncer kills the conn from the
+    other side, `closed` stays 0 until the next query — which then fails
+    with OperationalError mid-work. The ping catches this BEFORE work
+    starts. Diagnosed during DE virgin-state pipeline test —
+    backfill_agency_photo_centroid.py died at 72s in a per-thread UPDATE
+    after pgbouncer dropped an idle connection.
     """
     c = getattr(_TLS, "conn", None)
-    if c is None or c.closed:
-        c = connect(**overrides)
-        _TLS.conn = c
+    if c is not None and not c.closed:
+        try:
+            with c.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchone()
+            return c
+        except Exception:
+            # pgbouncer killed it; fall through to reconnect
+            try:
+                c.close()
+            except Exception:
+                pass
+            _TLS.conn = None
+    c = connect(**overrides)
+    _TLS.conn = c
     return c
 
 

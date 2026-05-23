@@ -696,24 +696,40 @@ PHASES = [
         'kind': 'python',
         'action': 'zone_rules_v2_refresh',
         'criterion':
-            # Pass: at least 80% of MVP+ beaches have a bps row produced
+            # Path 1: at least 80% of MVP+ beaches have a bps row produced
             # in the last 7 days. Uses COALESCE(extracted_at, created_at)
             # because agent-authored INSERTs typically leave extracted_at
             # NULL (only the auto-populated created_at is set). Both signal
             # "row is recent"; either-or treatment is correct.
-            "select (count(*) filter (where exists ("
-            "          select 1 from public.beach_policy_source bps "
-            "           where bps.beach_fid = g.fid "
-            "             and COALESCE(bps.extracted_at, bps.created_at) >= now() - interval '7 days')) "
-            "        >= floor(count(*) * 0.8))::boolean "
-            "from public.beaches_gold g "
-            "join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
-            "where g.state=$STATE and g.is_active "
-            "  and bdp.source <> 'manual_curator' "
-            "  and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
-            "      in ('1_off-leash','2_on-leash')",
+            #
+            # Path 2 (2026-05-23 LATE): state-baseline-covers gate. For
+            # DE-like states (statewide leash law via state_dogs_policy
+            # covering all beaches, no per-beach BPS rows because codify
+            # cascade ran with state-baseline-only), the per-beach BPS
+            # threshold can never be met. Same OR-pattern as gap #11 on
+            # codify_cascade. Surfaced by DE virgin test 2026-05-23 LATE.
+            "select ("
+            "  (select (count(*) filter (where exists ("
+            "             select 1 from public.beach_policy_source bps "
+            "              where bps.beach_fid = g.fid "
+            "                and COALESCE(bps.extracted_at, bps.created_at) >= now() - interval '7 days')) "
+            "           >= floor(count(*) * 0.8))::boolean "
+            "   from public.beaches_gold g "
+            "   join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
+            "   where g.state=$STATE and g.is_active "
+            "     and bdp.source <> 'manual_curator' "
+            "     and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "         in ('1_off-leash','2_on-leash')) "
+            "  OR "
+            #  state-baseline-covers: state_dogs_policy is set AND queue is empty
+            "  (NOT EXISTS(select 1 from public.codify_dispatch_queue "
+            "                where state=$STATE "
+            "                  and status in ('pending','approved','dispatched')) "
+            "   AND EXISTS(select 1 from public.state_dogs_policy "
+            "                where state_code=$STATE))"
+            ")::boolean",
         'criterion_text': 'at least 80% of MVP+ beaches have a fresh-within-7d bps row '
-                          '(created_at or extracted_at)',
+                          'OR state-baseline-covers (state_dogs_policy + empty queue)',
         'progress_sql':
             "with t as (select count(*)::int n from public.beaches_gold g "
             "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
@@ -1068,18 +1084,31 @@ PHASES = [
         'key': 'codify_coverage_check',
         'action': "select coalesce(public.count_uncovered_scoreable_beaches($STATE), 0)::int",
         'criterion':
-            "select (EXISTS(select 1 from public.beaches_gold "
-            "                where state=$STATE and is_active "
-            "                  and scoring_tier in ('daily','hourly')) "
-            "        AND public.count_uncovered_scoreable_beaches($STATE) "
-            "        <= greatest(1, (select count(*) from public.beaches_gold "
-            "                          where state=$STATE and is_active "
-            "                            and scoring_tier in ('daily','hourly')) "
-            "                         / $UNCOVER_DIVISOR))::boolean",
+            # Mirrors codify_cascade criterion (gap #11) — both gates
+            # must agree on what counts as "covered" or DE-like
+            # state-baseline-only states perma-halt at EOL.
+            "select ("
+            #  Path 1: explicit per-beach coverage meets launch-mode threshold
+            "  (EXISTS(select 1 from public.beaches_gold "
+            "           where state=$STATE and is_active "
+            "             and scoring_tier in ('daily','hourly')) "
+            "   AND public.count_uncovered_scoreable_beaches($STATE) "
+            "   <= greatest(1, (select count(*) from public.beaches_gold "
+            "                     where state=$STATE and is_active "
+            "                       and scoring_tier in ('daily','hourly')) "
+            "                    / $UNCOVER_DIVISOR)) "
+            "  OR "
+            #  Path 2: state-baseline-covers (queue empty + state_dogs_policy set)
+            "  (NOT EXISTS(select 1 from public.codify_dispatch_queue "
+            "                where state=$STATE "
+            "                  and status in ('pending','approved','dispatched')) "
+            "   AND EXISTS(select 1 from public.state_dogs_policy "
+            "                where state_code=$STATE)) "
+            ")::boolean",
         'criterion_text':
-            'EOL coverage gate met: ≥1 scoreable beach AND uncovered ≤ launch-mode threshold '
-            '(if 0 scoreable: catchment did not score any beach; if uncovered>threshold: '
-            'dispatch codify agents per the early codify_cascade manifest)',
+            'EOL coverage gate met: per-beach coverage OR state-baseline-covers '
+            '(if neither: catchment did not score any beach, or uncovered > threshold and '
+            'state_dogs_policy not set — dispatch codify agents per the early manifest)',
     },
     {
         # End-of-pipeline drift/coverage check. Runs the per-state audit
@@ -2489,6 +2518,7 @@ def main():
     if args.limit and args.limit > 0:
         LIMIT_N = args.limit
         log(f'LIMIT MODE: beach-fid-scoped phases capped to first {LIMIT_N} fids')
+        log(f'  state-wide criteria will be downgraded to warnings (no halt on partial coverage)')
     if args.canonical and args.canonical > 0:
         CANONICAL_N = args.canonical
         log(f'CANONICAL MODE: beach-fid-scoped phases scoped to {CANONICAL_N} '
@@ -2615,10 +2645,19 @@ def main():
                         """, (rows, ph['criterion_text'], run_id, state, ph['key']))
                 else:
                     err = f"criterion failed: {ph['criterion_text']}"
-                    # County-filtered mode: criteria are state-wide thresholds that
-                    # won't be met when we only ran 3 counties. Record as 'skipped'
+                    # County-filtered, --limit, or --canonical mode: criteria
+                    # are state-wide thresholds that won't be met when we
+                    # only processed a subset. Record as 'skipped'
                     # (criterion_met=false) and continue rather than halting.
-                    if COUNTIES_FILTER is not None:
+                    subset_mode = (
+                        COUNTIES_FILTER is not None
+                        or (LIMIT_N is not None and LIMIT_N > 0)
+                        or (CANONICAL_N is not None and CANONICAL_N > 0)
+                    )
+                    if subset_mode:
+                        mode_tag = ('county-mode' if COUNTIES_FILTER is not None
+                                    else f'limit-{LIMIT_N}-mode' if LIMIT_N
+                                    else f'canonical-{CANONICAL_N}-mode')
                         with open_conn() as c, c.cursor() as cur:
                             cur.execute("""
                               update public.pipeline_phase_status
@@ -2628,10 +2667,10 @@ def main():
                                      error_message=%s
                                where run_id=%s and state_code=%s and phase=%s
                             """, (rows, ph['criterion_text'],
-                                  f'county-mode soft-warn: {err}',
+                                  f'{mode_tag} soft-warn: {err}',
                                   run_id, state, ph['key']))
                         log(f'    WARN [{phase_num}/{len(PHASES)}] {ph["key"]:<22} '
-                            f'state-wide criterion failed but county-mode continues')
+                            f'state-wide criterion failed but {mode_tag} continues')
                     else:
                         with open_conn() as c, c.cursor() as cur:
                             cur.execute("""

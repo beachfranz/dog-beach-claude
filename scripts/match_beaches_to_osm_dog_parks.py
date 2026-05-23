@@ -33,27 +33,11 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-
 
 import argparse
 import json
-import os
 import re
-import urllib.parse
-from pathlib import Path
 
-import psycopg2
 import psycopg2.extras
-from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
-
-
-def _connect():
-    pooler = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-    pp = urllib.parse.urlparse(pooler)
-    return psycopg2.connect(
-        host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ["SUPABASE_DB_PASSWORD"],
-        dbname=(pp.path or "/postgres").lstrip("/"), sslmode="require",
-    )
+from scripts.common.db import connect
 
 
 # Common words that don't help discriminate beach ↔ dog-park identity.
@@ -185,7 +169,7 @@ def main() -> int:
     args = ap.parse_args()
     apply_mode = args.apply and not args.dry_run
 
-    conn = _connect()
+    conn = connect()
     try:
         matches = discover(conn, state=args.state, fid=args.fid)
         print(f"Tight matches: {len(matches)}\n")

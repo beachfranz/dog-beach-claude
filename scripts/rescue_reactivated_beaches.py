@@ -32,29 +32,16 @@ import sys
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
 
 import argparse
-import os
 import subprocess
 import time
-import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
-import psycopg2
 import psycopg2.extras
-from dotenv import load_dotenv
+
+from scripts.common.db import connect
 
 ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
-
-
-def _connect():
-    pooler = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-    pp = urllib.parse.urlparse(pooler)
-    return psycopg2.connect(
-        host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ["SUPABASE_DB_PASSWORD"],
-        dbname=(pp.path or "/postgres").lstrip("/"), sslmode="require",
-    )
 
 
 def log(msg: str) -> None:
@@ -73,7 +60,7 @@ def _ping_or_reconnect(conn):
     except Exception:
         try: conn.close()
         except Exception: pass
-        return _connect()
+        return connect()
 
 
 def run_sub(cmd: list[str], halt_on_error: bool, label: str) -> int:
@@ -202,7 +189,7 @@ def main() -> int:
         raise SystemExit(f"batch too large: {len(fids)} > --batch-size {args.batch_size}. "
                          f"Use --batch-size {len(fids)} to override.")
 
-    conn = _connect()
+    conn = connect()
     try:
         info = resolve_fids(conn, args)
         if len(info) != len(fids):

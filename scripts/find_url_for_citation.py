@@ -14,18 +14,13 @@ Usage:
 from __future__ import annotations
 import sys
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
-import truststore
-truststore.inject_into_ssl()
 
-import argparse, json, os, time, urllib.parse, urllib.request
-from pathlib import Path
+import argparse, json, os, time, urllib.request
 
-import psycopg2, psycopg2.extras
+import psycopg2.extras
 from anthropic import Anthropic
-from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
+from scripts.common.db import connect
 
 SYSTEM = """You resolve the canonical, fetchable URL for a codified policy
 source given its citation text. Return ONLY a JSON object:
@@ -46,14 +41,6 @@ URL hints by subtype:
 """
 
 
-def _connect():
-    pooler = (ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip()
-    pp = urllib.parse.urlparse(pooler)
-    return psycopg2.connect(
-        host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ['SUPABASE_DB_PASSWORD'],
-        dbname=(pp.path or '/postgres').lstrip('/'), sslmode='require',
-    )
 
 
 def verify_url(url: str, timeout: int = 8) -> tuple[bool, int | None]:
@@ -87,7 +74,7 @@ def main() -> int:
     ap.add_argument('--dry-run', action='store_true')
     args = ap.parse_args()
 
-    conn = _connect()
+    conn = connect()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     if args.ps_id:
         cur.execute("SELECT id, subtype, citation FROM policy_source WHERE id = %s", (args.ps_id,))

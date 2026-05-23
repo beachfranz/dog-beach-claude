@@ -30,18 +30,13 @@ Usage:
   python scripts/region_semantic_merge.py --all --dry-run
 """
 from __future__ import annotations
-import sys, os, json, time, argparse, urllib.parse
+import sys, os, json, time, argparse
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
-import truststore
-truststore.inject_into_ssl()
 
-from pathlib import Path
-import psycopg2, psycopg2.extras
+import psycopg2.extras
 from anthropic import Anthropic
-from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
+from scripts.common.db import connect
 
 
 SYSTEM = """You group region descriptions from a beach's policy data.
@@ -74,11 +69,6 @@ Rules:
 - Conservative bias: when uncertain, KEEP regions in separate groups."""
 
 
-def _connect():
-    pp = urllib.parse.urlparse((ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip())
-    return psycopg2.connect(host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ['SUPABASE_DB_PASSWORD'],
-        dbname=(pp.path or '/postgres').lstrip('/'), sslmode='require')
 
 
 def fetch_target_beaches(cur) -> list[tuple[int, str]]:
@@ -197,7 +187,7 @@ def main() -> int:
                     help='process only first N target beaches (for testing)')
     args = ap.parse_args()
 
-    conn = _connect()
+    conn = connect()
     cur = conn.cursor()
     cli = Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
 

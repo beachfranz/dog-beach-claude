@@ -28,26 +28,16 @@ Usage:
   python scripts/v2_mvp_plus_runner.py --dry-run      # just report scope
 """
 from __future__ import annotations
-import sys, os, time, argparse, urllib.parse, subprocess
+import sys, time, argparse, subprocess
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
-import truststore; truststore.inject_into_ssl()
 from pathlib import Path
 from datetime import datetime
-import psycopg2
-from dotenv import load_dotenv
+
+from scripts.common.db import connect
 
 ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
-
 LOG_PATH = ROOT / 'share' / 'v2_mvp_plus_runner.log'
 LOG_PATH.parent.mkdir(exist_ok=True)
-
-
-def _connect():
-    pp = urllib.parse.urlparse((ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip())
-    return psycopg2.connect(host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ['SUPABASE_DB_PASSWORD'],
-        dbname=(pp.path or '/postgres').lstrip('/'), sslmode='require')
 
 
 def log(msg: str):
@@ -143,7 +133,7 @@ def main() -> int:
     ap.add_argument('--dry-run', action='store_true')
     args = ap.parse_args()
 
-    conn = _connect(); cur = conn.cursor()
+    conn = connect(); cur = conn.cursor()
     total = remaining_scope(cur)
     log(f'START — total MVP+ scope remaining: {total} beaches')
     if args.dry_run:
@@ -165,7 +155,7 @@ def main() -> int:
         try:
             cur.execute('SELECT 1'); cur.fetchone()
         except Exception:
-            conn.close(); conn = _connect(); cur = conn.cursor()
+            conn.close(); conn = connect(); cur = conn.cursor()
 
         ev = evaluate_batch(cur, fids)
         n = len(fids)

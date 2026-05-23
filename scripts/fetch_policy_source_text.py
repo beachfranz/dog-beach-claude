@@ -17,16 +17,15 @@ Usage:
 from __future__ import annotations
 import sys
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
-import truststore
-truststore.inject_into_ssl()
 
-import argparse, io, os, time, urllib.parse, urllib.request
+import argparse, io, time, urllib.parse, urllib.request
 from pathlib import Path
 
-import psycopg2, psycopg2.extras
+import psycopg2.extras
 import pdfplumber
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv
+
+from scripts.common.db import connect
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'scripts' / 'fetch'))
@@ -35,21 +34,9 @@ try:
 except Exception:
     playwright_fetch = None  # type: ignore
 
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
-
 MIN_TEXT_LEN = 200       # below this we don't trust the extraction
 MAX_TEXT_LEN = 50_000    # cap (typical municipal codes < 5k; cap protects DB)
 UA = 'Mozilla/5.0 (compatible; dog-beach-codify-bot)'
-
-
-def _connect():
-    pooler = (ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip()
-    pp = urllib.parse.urlparse(pooler)
-    return psycopg2.connect(
-        host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ['SUPABASE_DB_PASSWORD'],
-        dbname=(pp.path or '/postgres').lstrip('/'), sslmode='require',
-    )
 
 
 def fetch_pdf(url: str, timeout: int = 30) -> tuple[str | None, str | None]:
@@ -131,7 +118,7 @@ def main() -> int:
     ap.add_argument('--dry-run', action='store_true')
     args = ap.parse_args()
 
-    conn = _connect()
+    conn = connect()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     if args.ps_id:
         cur.execute("SELECT id, subtype, citation, source_url FROM policy_source WHERE id=%s", (args.ps_id,))

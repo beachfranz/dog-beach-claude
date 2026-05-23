@@ -22,16 +22,14 @@ Usage:
   # --dry-run to preview the LLM output without DB writes
 """
 from __future__ import annotations
-import sys, os, json, argparse, urllib.parse
+import sys, os, json, argparse
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
-import truststore; truststore.inject_into_ssl()
 from pathlib import Path
-import psycopg2
 from anthropic import Anthropic
-from dotenv import load_dotenv
+
+from scripts.common.db import connect
 
 ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
 sys.path.insert(0, str(ROOT / 'scripts'))
 from extract_and_load_deep import ANCHOR_ALIASES, _norm_anchor  # type: ignore
 
@@ -115,11 +113,6 @@ Named anchors for temporal:
 START YOUR RESPONSE WITH `{` — no markdown, no preamble."""
 
 
-def _connect():
-    pp = urllib.parse.urlparse((ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip())
-    return psycopg2.connect(host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ['SUPABASE_DB_PASSWORD'],
-        dbname=(pp.path or '/postgres').lstrip('/'), sslmode='require')
 
 
 def build_user(beach: dict, source: dict) -> str:
@@ -315,7 +308,7 @@ def main() -> int:
     ap.add_argument('--dry-run', action='store_true')
     args = ap.parse_args()
 
-    conn = _connect(); cur = conn.cursor()
+    conn = connect(); cur = conn.cursor()
     cli = Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
 
     beach  = fetch_beach(cur, args.fid)

@@ -24,21 +24,10 @@ Patterns checked (per current prompt 2026-05-22):
   - Multi-region surfacing rate (must be >=70% on multi-region beaches)
 """
 from __future__ import annotations
-import sys, os, re, urllib.parse, argparse
+import sys, re, argparse
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
-from pathlib import Path
-import psycopg2
-from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
-
-
-def _connect():
-    pp = urllib.parse.urlparse((ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip())
-    return psycopg2.connect(host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ['SUPABASE_DB_PASSWORD'],
-        dbname=(pp.path or '/postgres').lstrip('/'), sslmode='require')
+from scripts.common.db import connect
 
 
 PATTERNS = [
@@ -66,7 +55,7 @@ def main() -> int:
     args = ap.parse_args()
     states = [s.strip() for s in args.states.split(',') if s.strip()]
 
-    conn = _connect()
+    conn = connect()
     cur = conn.cursor()
 
     # Pull descriptions in scope

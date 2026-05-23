@@ -22,26 +22,16 @@ Usage:
   python scripts/prototype_photo_embeddings.py --reuse        # use cached embeddings
 """
 from __future__ import annotations
-import sys, os, json, argparse, urllib.parse, time, hashlib
+import sys, os, json, argparse, time, hashlib
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
-import truststore; truststore.inject_into_ssl()
 from pathlib import Path
 from collections import defaultdict
-import psycopg2
-from dotenv import load_dotenv
+
+from scripts.common.db import connect
 
 ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
-
 CACHE_PATH = ROOT / 'share' / 'prototype_photo_embeddings.json'
 CACHE_PATH.parent.mkdir(exist_ok=True)
-
-
-def _connect():
-    pp = urllib.parse.urlparse((ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip())
-    return psycopg2.connect(host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ['SUPABASE_DB_PASSWORD'],
-        dbname=(pp.path or '/postgres').lstrip('/'), sslmode='require')
 
 
 def pick_scope(cur) -> list[dict]:
@@ -176,7 +166,7 @@ def main() -> int:
     ap.add_argument('--knn-k', type=int, default=5)
     args = ap.parse_args()
 
-    conn = _connect()
+    conn = connect()
     cur = conn.cursor()
     scope = pick_scope(cur)
     print(f'Scope: {len(scope)} photos across {len(set(p["fid"] for p in scope))} beaches')

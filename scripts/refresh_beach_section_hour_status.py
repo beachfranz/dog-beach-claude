@@ -21,16 +21,12 @@ Usage:
   python scripts/refresh_beach_section_hour_status.py --listen   # NOTIFY consumer
 """
 from __future__ import annotations
-import sys, os, math, argparse, urllib.parse, select, time
+import sys, math, argparse, select, time
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
-import truststore; truststore.inject_into_ssl()
-from pathlib import Path
 from datetime import date, datetime
-import psycopg2, psycopg2.extras
-from dotenv import load_dotenv
+import psycopg2.extras
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
+from scripts.common.db import connect
 
 AMENITY_CLASS = {'parking_lot','walkway','restrooms','showers','restrooms_showers',
                  'picnic_area','fire_pits','playground','campground'}
@@ -47,13 +43,6 @@ def _coerce(r):
     return c if c in ('off_leash', 'on_leash', 'not_allowed') else None
 
 RANK = {'not_allowed': 3, 'on_leash': 2, 'off_leash': 1}
-
-
-def _connect():
-    pp = urllib.parse.urlparse((ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip())
-    return psycopg2.connect(host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ['SUPABASE_DB_PASSWORD'],
-        dbname=(pp.path or '/postgres').lstrip('/'), sslmode='require')
 
 
 # ── Sun-time computation (NOAA-ish, matches beach.html _sunTimes) ────
@@ -276,7 +265,7 @@ def main():
                      help='Listen on NOTIFY zone_rules_changed and refresh per-beach')
     args = ap.parse_args()
 
-    conn = _connect()
+    conn = connect()
     cur = conn.cursor()
 
     if args.fid:

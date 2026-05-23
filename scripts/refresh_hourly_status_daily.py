@@ -18,21 +18,13 @@ Cron registration (Windows Task Scheduler):
   Run daily at 03:00 local. No special args needed.
 """
 from __future__ import annotations
-import sys, os, time, argparse, urllib.parse, subprocess
+import sys, time, argparse, subprocess
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
 from pathlib import Path
-import psycopg2
-from dotenv import load_dotenv
+
+from scripts.common.db import connect
 
 ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
-
-
-def _connect():
-    pp = urllib.parse.urlparse((ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip())
-    return psycopg2.connect(host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ['SUPABASE_DB_PASSWORD'],
-        dbname=(pp.path or '/postgres').lstrip('/'), sslmode='require')
 
 
 def main() -> int:
@@ -42,7 +34,7 @@ def main() -> int:
     args = ap.parse_args()
     states = [s.strip() for s in args.states.split(',') if s.strip()]
 
-    conn = _connect()
+    conn = connect()
     cur = conn.cursor()
     cur.execute("""
       SELECT fid FROM beaches_gold

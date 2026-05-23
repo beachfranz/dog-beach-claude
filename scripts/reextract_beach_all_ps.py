@@ -13,22 +13,13 @@ Usage:
   python scripts/reextract_beach_all_ps.py --fid 8540 --refresh-hourly
 """
 from __future__ import annotations
-import sys, os, argparse, urllib.parse, subprocess
+import sys, argparse, subprocess
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
-import truststore; truststore.inject_into_ssl()
 from pathlib import Path
-import psycopg2
-from dotenv import load_dotenv
+
+from scripts.common.db import connect
 
 ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
-
-
-def _connect():
-    pp = urllib.parse.urlparse((ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip())
-    return psycopg2.connect(host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ['SUPABASE_DB_PASSWORD'],
-        dbname=(pp.path or '/postgres').lstrip('/'), sslmode='require')
 
 
 def fetch_ps_for_fid(cur, fid: int) -> list[int]:
@@ -60,7 +51,7 @@ def main() -> int:
     else:
         fids = [int(l.strip()) for l in Path(args.fids_file).read_text().splitlines() if l.strip()]
 
-    conn = _connect()
+    conn = connect()
     cur = conn.cursor()
 
     totals = {'beach_skip_manual': 0, 'beach_skip_fresh': 0, 'beach_done': 0,

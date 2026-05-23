@@ -23,29 +23,17 @@ Usage:
   python scripts/backfill_agency_photo_centroid.py --sources wsprc   # one source
 """
 from __future__ import annotations
-import sys, os, re, urllib.parse, argparse, json, threading, time as _t
+import sys, argparse, json, time as _t
 sys.stdout.reconfigure(encoding='utf-8', errors='replace', line_buffering=True)  # type: ignore[attr-defined]
-from pathlib import Path
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import psycopg2
-from dotenv import load_dotenv
 
 # Canonical text-cleaning helper (2026-05-22 consolidation):
 # replaces the local normalize() that was duplicated across loaders.
 from scripts.common import normalize_text
-
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
+from scripts.common.db import connect, thread_conn
 
 AGENCY_SOURCES = ['wsprc', 'cdpr', 'nps', 'oprd']
-
-
-def _connect():
-    pp = urllib.parse.urlparse((ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip())
-    return psycopg2.connect(host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ['SUPABASE_DB_PASSWORD'],
-        dbname=(pp.path or '/postgres').lstrip('/'), sslmode='require')
 
 
 def normalize(s: str) -> str:
@@ -55,21 +43,10 @@ def normalize(s: str) -> str:
     return normalize_text(s or "")
 
 
-_TLS = threading.local()
-
-def _thread_conn():
-    """Per-thread cached DB connection."""
-    c = getattr(_TLS, 'conn', None)
-    if c is None or c.closed:
-        c = _connect()
-        _TLS.conn = c
-    return c
-
-
 def process_url(src: str, url: str, beaches: list[dict], apply: bool) -> dict:
     """Process one URL on a thread-local connection. Returns counts."""
     import math
-    conn = _thread_conn()
+    conn = thread_conn()
     cur = conn.cursor()
     result = {'centroid_hit': 0, 'centroid_miss': 0, 'region_match': 0,
               'dist_updates': 0, 'region_updates': 0}
@@ -172,7 +149,7 @@ def main() -> int:
     sources = [s.strip() for s in args.sources.split(',') if s.strip()]
     print(f'Sources: {sources}  mode: {"APPLY" if args.apply else "DRY-RUN"}  workers: {args.workers}')
 
-    conn = _connect()
+    conn = connect()
     cur = conn.cursor()
 
     # Total scope = NULL-distance agency photos

@@ -17,24 +17,12 @@ Usage:
   python scripts/fire_daily_refresh_mvp_plus.py --dry-run                # scope only
 """
 from __future__ import annotations
-import sys, os, time, argparse, urllib.parse
+import sys, os, time, argparse
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
-import truststore; truststore.inject_into_ssl()
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import httpx
-import psycopg2
-from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
-
-
-def _connect():
-    pp = urllib.parse.urlparse((ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip())
-    return psycopg2.connect(host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ['SUPABASE_DB_PASSWORD'],
-        dbname=(pp.path or '/postgres').lstrip('/'), sslmode='require')
+from scripts.common.db import connect
 
 
 def pick_scope(cur, states: list[str]) -> list[str]:
@@ -74,7 +62,7 @@ def main() -> int:
     args = ap.parse_args()
 
     states = [s.strip() for s in args.states.split(',') if s.strip()]
-    conn = _connect()
+    conn = connect()
     cur = conn.cursor()
     ids = pick_scope(cur, states)
     n = len(ids)

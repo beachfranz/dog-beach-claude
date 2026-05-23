@@ -15,28 +15,16 @@ Usage:
   python scripts/audit_agency_photo_exif.py --sources wsprc    # one source
 """
 from __future__ import annotations
-import sys, os, argparse, urllib.parse, time, io
+import sys, argparse, urllib.parse, time, io
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
-import truststore; truststore.inject_into_ssl()
-from pathlib import Path
 from collections import defaultdict
 import httpx
-import psycopg2
-from dotenv import load_dotenv
 from PIL import Image
 from PIL.ExifTags import TAGS, GPSTAGS
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
+from scripts.common.db import connect
 
 UA = 'dog-beach-EXIF-audit/1.0 (franz@franzfunk.com)'
-
-
-def _connect():
-    pp = urllib.parse.urlparse((ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip())
-    return psycopg2.connect(host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ['SUPABASE_DB_PASSWORD'],
-        dbname=(pp.path or '/postgres').lstrip('/'), sslmode='require')
 
 
 def pick_sample(cur, source: str, n: int) -> list[tuple[int, str, str]]:
@@ -126,7 +114,7 @@ def main() -> int:
     args = ap.parse_args()
 
     sources = [s.strip() for s in args.sources.split(',') if s.strip()]
-    conn = _connect()
+    conn = connect()
     cur = conn.cursor()
 
     headers = {'User-Agent': UA}

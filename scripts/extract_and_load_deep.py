@@ -28,15 +28,14 @@ Usage:
 from __future__ import annotations
 import sys
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
-import truststore                # Win Python 3.14 OS-cert store
-truststore.inject_into_ssl()
 
-import argparse, json, os, time, urllib.parse
+import argparse, json, os, time
 from pathlib import Path
 
 import psycopg2, psycopg2.extras
 from anthropic import Anthropic
-from dotenv import load_dotenv
+
+from scripts.common.db import connect
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'scripts'))
@@ -47,8 +46,6 @@ from codify_vocab import (
     authority_tier_for_subtype,
 )
 from pilot_deep_extract_zone_rules import SYSTEM, SCHEMA, FEW_SHOT, build_user
-
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
 
 MODEL = 'claude-sonnet-4-6'
 COST_IN  = 3e-6
@@ -144,16 +141,6 @@ def _norm_anchor(v: str | None) -> str | None:
     if not v: return None
     s = str(v).strip().lower()
     return ANCHOR_ALIASES.get(s)
-
-
-def _connect():
-    pooler = (ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip()
-    pp = urllib.parse.urlparse(pooler)
-    return psycopg2.connect(
-        host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ['SUPABASE_DB_PASSWORD'],
-        dbname=(pp.path or '/postgres').lstrip('/'), sslmode='require',
-    )
 
 
 # ── Target selection ──────────────────────────────────────────────────
@@ -499,7 +486,7 @@ def main() -> int:
                     help='abort if cumulative est cost exceeds this')
     args = ap.parse_args()
 
-    conn = _connect()
+    conn = connect()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cli = Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
 

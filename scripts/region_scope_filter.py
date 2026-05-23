@@ -31,16 +31,11 @@ Usage:
   python scripts/region_scope_filter.py --all --dry-run
 """
 from __future__ import annotations
-import sys, os, json, argparse, urllib.parse
+import sys, os, json, argparse
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
-import truststore; truststore.inject_into_ssl()
-from pathlib import Path
-import psycopg2
 from anthropic import Anthropic
-from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
+from scripts.common.db import connect
 
 
 SYSTEM = """You judge whether each policy rule GEOGRAPHICALLY APPLIES to a
@@ -78,11 +73,6 @@ Rules:
   exempts THIS beach's area."""
 
 
-def _connect():
-    pp = urllib.parse.urlparse((ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip())
-    return psycopg2.connect(host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ['SUPABASE_DB_PASSWORD'],
-        dbname=(pp.path or '/postgres').lstrip('/'), sslmode='require')
 
 
 def fetch_targets(cur, fid: int | None) -> list[tuple]:
@@ -205,7 +195,7 @@ def main() -> int:
     ap.add_argument('--limit', type=int, default=None)
     args = ap.parse_args()
 
-    conn = _connect()
+    conn = connect()
     cur = conn.cursor()
     cli = Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
 
@@ -223,7 +213,7 @@ def main() -> int:
         nonlocal conn, cur
         try: conn.close()
         except Exception: pass
-        conn = _connect(); cur = conn.cursor()
+        conn = connect(); cur = conn.cursor()
 
     for i, (fid, ps_id, _) in enumerate(targets, 1):
         # pgbouncer drops idle connections after the LLM call; ping + reconnect.

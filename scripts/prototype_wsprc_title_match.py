@@ -22,22 +22,11 @@ Usage:
   python scripts/prototype_wsprc_title_match.py
 """
 from __future__ import annotations
-import sys, os, re, urllib.parse
+import sys, re, urllib.parse
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-defined]
-from pathlib import Path
 from collections import defaultdict
-import psycopg2
-from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
-
-
-def _connect():
-    pp = urllib.parse.urlparse((ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip())
-    return psycopg2.connect(host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ['SUPABASE_DB_PASSWORD'],
-        dbname=(pp.path or '/postgres').lstrip('/'), sslmode='require')
+from scripts.common.db import connect
 
 
 def normalize(s: str) -> str:
@@ -60,7 +49,7 @@ def name_to_tokens(name: str) -> list[str]:
 
 
 def main() -> int:
-    conn = _connect()
+    conn = connect()
     cur = conn.cursor()
 
     # 1. Per WSPRC unique image_url, get all (beach_fid, beach_name, park, filename, vision)

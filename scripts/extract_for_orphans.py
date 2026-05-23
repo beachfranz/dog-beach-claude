@@ -29,24 +29,21 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-import psycopg2
 from anthropic import Anthropic
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv
+
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import scripts.common  # noqa: F401 — side-effect: load .env + truststore
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-ROOT = SCRIPT_DIR.parent
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
 
-# Reuse some primitives
+# Reuse some primitives — sibling import works under standalone invocation
+# (`python scripts/extract_for_orphans.py` puts scripts/ on sys.path).
 sys.path.insert(0, str(SCRIPT_DIR))
 from extract_beach_policies import call_llm, parse_response, run_sql, sql_literal  # noqa
-
-POOLER = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-p = urllib.parse.urlparse(POOLER)
-PG = dict(host=p.hostname, port=p.port or 5432, user=p.username,
-          password=os.environ["SUPABASE_DB_PASSWORD"],
-          dbname=(p.path or "/postgres").lstrip("/"), sslmode="require")
 
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")

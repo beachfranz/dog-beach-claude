@@ -40,19 +40,17 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-import psycopg2
 import psycopg2.extras
 from anthropic import Anthropic
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
-POOLER = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-p = urllib.parse.urlparse(POOLER)
-PG = dict(host=p.hostname, port=p.port or 5432, user=p.username,
-          password=os.environ["SUPABASE_DB_PASSWORD"],
-          dbname=(p.path or "/postgres").lstrip("/"), sslmode="require")
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from scripts.common.db import connect
+from scripts.common.llm import HAIKU, SONNET
+
 ANTHROPIC = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -178,8 +176,8 @@ ALL_FIELDS = ENUM_FIELDS + STRUCTURED_FIELDS
 # Models
 # ─────────────────────────────────────────────────────────────────────────
 
-MODEL_HAIKU  = "claude-haiku-4-5-20251001"
-MODEL_SONNET = "claude-sonnet-4-6"
+MODEL_HAIKU  = HAIKU
+MODEL_SONNET = SONNET
 
 
 def model_id(model_label: str) -> str:
@@ -737,7 +735,7 @@ def main() -> int:
                     help="Cap the number of beaches processed (testing).")
     args = ap.parse_args()
 
-    conn = psycopg2.connect(**PG)
+    conn = connect()
     conn.set_client_encoding("UTF8")
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
@@ -782,7 +780,7 @@ def main() -> int:
         if i % 20 == 0:
             try: conn.close()
             except: pass
-            conn = psycopg2.connect(**PG)
+            conn = connect()
             conn.set_client_encoding("UTF8")
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 

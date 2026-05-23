@@ -38,19 +38,17 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-import psycopg2
 import psycopg2.extras
 from anthropic import Anthropic
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
-POOLER = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-p = urllib.parse.urlparse(POOLER)
-PG = dict(host=p.hostname, port=p.port or 5432, user=p.username,
-          password=os.environ["SUPABASE_DB_PASSWORD"],
-          dbname=(p.path or "/postgres").lstrip("/"), sslmode="require")
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from scripts.common.db import connect
+from scripts.common.llm import SONNET
+
 ANTHROPIC = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"
@@ -266,7 +264,7 @@ Return JSON:
   "confidence": "high|medium|low"
 }}"""
     resp = ANTHROPIC.messages.create(
-        model="claude-sonnet-4-6",
+        model=SONNET,
         max_tokens=600,
         system=sys_prompt,
         messages=[{"role": "user", "content": user_prompt}],
@@ -311,7 +309,7 @@ FIELDS = [
 def reconnect():
     """Open a fresh DB connection. Called per-beach to avoid pooler timeouts
     during long LLM-heavy runs."""
-    c = psycopg2.connect(**PG)
+    c = connect()
     c.set_client_encoding("UTF8")
     return c
 
@@ -341,11 +339,11 @@ def main() -> int:
                  active, is_canon, notes)
             values (%s, 'research_v2',
                     'multi-source research extraction with 5 validation gates (cite-required)',
-                    'enum', 'claude-sonnet-4-6',
+                    'enum', %s,
                     false, false,
                     'extract_research_v2.py — modernized research source with multi-URL synthesis + cite gates')
             on conflict (field_name, variant_key) do nothing
-        """, (fname,))
+        """, (fname, SONNET))
     cur.execute("""select field_name, id from public.extraction_prompt_variants
                     where variant_key = 'research_v2'""")
     variant_id_by_field = {r['field_name']: r['id'] for r in cur.fetchall()}
@@ -451,7 +449,7 @@ def main() -> int:
                 "fid": fid, "arena_group_id": fid, "source_id": source_id,
                 "variant_id": variant_id_by_field[fname],
                 "field_name": fname, "variant_key": "research_v2",
-                "model_name": "claude-sonnet-4-6",
+                "model_name": SONNET,
                 "parsed_value": answer if answer else None,
                 "raw_response": resp['raw'], "evidence_quote": parsed.get('quote'),
                 "input_tokens": resp['input_tokens'], "output_tokens": resp['output_tokens'],

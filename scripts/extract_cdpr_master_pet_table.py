@@ -18,9 +18,13 @@ from __future__ import annotations
 import json, os, re, sys, time
 from pathlib import Path
 import httpx
-from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent / "pipeline" / ".env")
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import scripts.common  # noqa: F401 — side-effect: load .env + truststore
+
 SUPABASE_URL      = os.environ["SUPABASE_URL"]
 SERVICE_KEY       = os.environ["SUPABASE_SERVICE_KEY"]
 TAVILY_API_KEY    = os.environ["TAVILY_API_KEY"]

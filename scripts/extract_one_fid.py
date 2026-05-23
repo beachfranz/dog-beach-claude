@@ -36,12 +36,17 @@ import uuid
 from pathlib import Path
 
 from anthropic import Anthropic
-from dotenv import load_dotenv
+
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import scripts.common  # noqa: F401 — side-effect: load .env + truststore
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-ROOT = SCRIPT_DIR.parent
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
 
+# Sibling imports — work under standalone invocation
+# (`python scripts/extract_one_fid.py` puts scripts/ on sys.path).
 sys.path.insert(0, str(SCRIPT_DIR))
 from extract_beach_policies import call_llm, parse_response, run_sql, sql_literal  # noqa
 from extract_for_orphans import (  # noqa

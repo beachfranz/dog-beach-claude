@@ -35,6 +35,12 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import scripts.common  # noqa: F401 — side-effect: load .env + truststore
+
 try:
     from anthropic import Anthropic
 except ImportError:
@@ -44,26 +50,6 @@ except ImportError:
 PROJECT_ROOT = Path(r"C:\Users\beach\Documents\dog-beach-claude")
 TMP_SQL      = PROJECT_ROOT / "supabase" / ".temp" / "extract.sql"
 TMP_SQL.parent.mkdir(parents=True, exist_ok=True)
-
-# Auto-load ANTHROPIC_API_KEY from scripts/pipeline/.env if not already in env
-def _load_env_file():
-    env_path = PROJECT_ROOT / "scripts" / "pipeline" / ".env"
-    if not env_path.exists():
-        return
-    try:
-        for line in env_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, _, v = line.partition("=")
-            k = k.strip()
-            v = v.strip().strip('"').strip("'")
-            if k and v and k not in os.environ:
-                os.environ[k] = v
-    except Exception:
-        pass
-
-_load_env_file()
 
 MAX_CONTENT_CHARS = 24_000  # roughly 6K tokens; caps worst-case pages
 MIN_CONTENT_CHARS = 300

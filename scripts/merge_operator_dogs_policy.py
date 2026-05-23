@@ -24,23 +24,20 @@ Idempotent — UPSERTs by operator_id. Re-run after any new extractions.
 """
 
 from __future__ import annotations
-import json, os, subprocess
+import json, os, subprocess, sys
 from collections import defaultdict
 from pathlib import Path
 
-# Windows AV-MITM cert verification blocks httpx default SSL. Use the
-# system trust store (Windows certificate store) via truststore.
-# Per [[wikimedia-integration-sharp-edges]] + earlier session pivots.
-try:
-    import truststore
-    truststore.inject_into_ssl()
-except ImportError:
-    pass
-
 import httpx
-from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent.parent / "pipeline" / ".env")
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# scripts.common loads .env + injects truststore at package init — no
+# need to do either here.
+import scripts.common  # noqa: F401
+
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SERVICE_KEY  = os.environ["SUPABASE_SERVICE_KEY"]
 

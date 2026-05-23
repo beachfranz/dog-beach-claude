@@ -7,7 +7,7 @@ scripts/extract_operator_dogs_policy.py via SubprocessResource.
 Phase 27 (operator_merge): GLOBAL — merge_operator_dogs_policy.py is
 not state-scoped. Modeled as an unpartitioned asset that runs once and
 serves as a downstream gate for all states' rebuild_beach_evidence phases.
-Wraps scripts/one_off/merge_operator_dogs_policy.py.
+Wraps scripts/merge_operator_dogs_policy.py.
 
 Phase 28 (rebuild_beach_evidence): per-state. Loops calling
 public.build_beach_evidence(fid) for the state's tier-1+2 fids. Each
@@ -304,7 +304,7 @@ def operator_llm_extract_for_state(
     deps=[operator_llm_extract_for_state],
     group_name="phase_26_to_28_operator_llm",
     description=(
-        "GLOBAL operator_merge: scripts/one_off/merge_operator_dogs_policy.py "
+        "GLOBAL operator_merge: scripts/merge_operator_dogs_policy.py "
         "consumes operator_policy_extractions and upserts canonical rows into "
         "operator_dogs_policy. Not state-scoped — merges across all states' "
         "extractions. Idempotent."
@@ -315,7 +315,7 @@ def operator_merge(
     subproc: SubprocessResource,
 ) -> MaterializeResult:
     result = subproc.run(
-        "scripts/one_off/merge_operator_dogs_policy.py",
+        "scripts/merge_operator_dogs_policy.py",
         timeout=600,
     )
     if result.returncode != 0:

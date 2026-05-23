@@ -1216,9 +1216,9 @@ def _ensure_loader(state: str, source: str, script_name: str,
             log(f'    {source} already loaded for {state} ({status}, '
                 f'age <{max_age_days}d); skip')
             return 0
-    log(f'    invoking scripts/one_off/{script_name} --states {state}')
+    log(f'    invoking scripts/loaders/{script_name} --states {state}')
     rc, out, err = _run_subprocess(
-        [sys.executable, f'scripts/one_off/{script_name}', '--states', state],
+        [sys.executable, f'scripts/loaders/{script_name}', '--states', state],
         timeout=timeout,
     )
     if rc != 0:
@@ -1566,7 +1566,7 @@ def _filter_operators_lacking_tier12_coverage(state: str, ids: list[int]) -> lis
 def action_operator_merge(state: str) -> int:
     """merge_operator_dogs_policy.py is global (no state filter)."""
     rc, out, err = _run_subprocess(
-        [sys.executable, 'scripts/one_off/merge_operator_dogs_policy.py'],
+        [sys.executable, 'scripts/merge_operator_dogs_policy.py'],
         timeout=600,
     )
     if rc != 0:

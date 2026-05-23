@@ -3,7 +3,7 @@
 Per docs/codify_deep_extract_full_spec.md §4.
 
 Reads policy_source.full_text via beach_policy_source links, sends to
-Sonnet using the pilot prompt (scripts/one_off/pilot_deep_extract_zone_rules.py),
+Sonnet using the pilot prompt (scripts/pilot_deep_extract_zone_rules.py),
 normalizes vocab via scripts/codify_vocab.py, writes:
 
   - beach_policy_source  (one row per distinct region+section+rule)
@@ -45,7 +45,9 @@ from scripts.common.db import connect
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'scripts'))
-sys.path.insert(0, str(ROOT / 'scripts' / 'one_off'))
+# pilot_deep_extract_zone_rules.py moved from scripts/one_off/ → scripts/
+# on 2026-05-22 LATE during the clean-pipeline-v2 promotion sweep.
+# Sibling import below now resolves directly (both files live in scripts/).
 
 from codify_vocab import (
     normalize_rule, normalize_section, rule_is_global_note,

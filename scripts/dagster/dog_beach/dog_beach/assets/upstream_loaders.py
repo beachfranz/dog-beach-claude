@@ -401,7 +401,7 @@ def ensure_tiger_places(
     return _ensure_loader_helper(
         context, postgres, subproc,
         source="tiger_places",
-        script_path="scripts/one_off/bulk_load_tiger_places.py",
+        script_path="scripts/loaders/bulk_load_tiger_places.py",
         timeout=600,
     )
 
@@ -498,7 +498,7 @@ def ensure_overpass(
     return _ensure_loader_helper(
         context, postgres, subproc,
         source="osm_landing",
-        script_path="scripts/one_off/bulk_load_overpass.py",
+        script_path="scripts/loaders/bulk_load_overpass.py",
         timeout=1200,
     )
 
@@ -517,7 +517,7 @@ def ensure_amenities(
     return _ensure_loader_helper(
         context, postgres, subproc,
         source="osm_amenities",
-        script_path="scripts/one_off/bulk_load_amenities.py",
+        script_path="scripts/loaders/bulk_load_amenities.py",
         timeout=1200,
     )
 
@@ -536,7 +536,7 @@ def ensure_dog_features(
     return _ensure_loader_helper(
         context, postgres, subproc,
         source="osm_dog_features",
-        script_path="scripts/one_off/bulk_load_dog_features.py",
+        script_path="scripts/loaders/bulk_load_dog_features.py",
         timeout=600,
     )
 

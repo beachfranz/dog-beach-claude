@@ -132,6 +132,23 @@ PHASES = [
         'criterion_text':
             'no pending seasonal closures (status=pending) for state',
     },
+    # state_park_url_check — preflight gate per HARD memory pin
+    # "pipeline-must-prompt-for-state-resources" (2026-05-22).
+    # Validates that scripts/state_park_urls.json has an entry for $STATE
+    # before the pipeline proceeds. The state-parks-listing URL is a
+    # human-curated resource (state DNR/Parks portal) that the pipeline
+    # cannot autonomously discover with confidence.
+    # Without this gate, fresh-state launches silently skip the
+    # state-parks photo loader + state-park-system codify enumeration.
+    # Halts with template-style instructions if missing. 2026-05-23 LATE.
+    {
+        'key': 'state_park_url_check',
+        'kind': 'python',
+        'action': 'state_park_url_check',
+        'criterion': "select true",
+        'criterion_text': 'state_park_urls.json has an entry for $STATE '
+                          '(if missing: halts with template — add entry, then resume)',
+    },
     # ─── Upstream bulk-loader phases (Franz, 2026-05-09) ────────────────
     # These wrap the per-state bulk loaders that USED to live in the
     # state-launch runbook as manual commands. With these in canon, a
@@ -2003,24 +2020,50 @@ def action_state_photo_galleries(state: str) -> int:
     """State-conditional agency photo loaders.
 
     These loaders are agency-driven (not beach-fid driven) so they don't
-    chunk via _chunked_subprocess. Each is a single-shot subprocess
-    with a long timeout. Runs:
-      - NPS (always, --state filter) — national parks coastal beaches
-      - CDPR (CA only) — California State Parks gallery
-      - CCC (CA only) — California Coastal Commission
-      - WSPRC (WA only) — Washington State Parks
-      - OPRD (OR only) — Oregon Parks and Recreation Department
+    chunk via _chunked_subprocess. Each is a single-shot subprocess.
+
+    Dispatch is REGISTRY-DRIVEN (2026-05-23 LATE): reads
+    scripts/state_park_urls.json and invokes whatever loader is listed
+    for the state. NPS always runs (not state-park, federal land). CCC
+    runs for CA (Coastal Commission, separate from CDPR state parks).
+
+    Was hardcoded elif chain (CA/OR/WA only) before refactor — MD was
+    silently unreachable despite md_dnr.py existing in the registry. DE
+    virgin test surfaced the gap.
     """
+    import json
+    registry_path = ROOT / 'scripts' / 'state_park_urls.json'
+
     runs: list[tuple[str, list[str], int]] = [
         ('NPS', ['scripts/load_nps_photos.py', '--state', state, '--full'], 1800),
     ]
+
+    # State-parks loader from registry (single source of truth)
+    try:
+        registry = json.loads(registry_path.read_text(encoding='utf-8'))
+        entry = registry.get(state, {})
+        loader_path = entry.get('loader')
+        if loader_path:
+            if (ROOT / loader_path).exists():
+                agency_tag = entry.get('agency', state).split()[0]
+                runs.append((agency_tag, [loader_path, '--full'], 1800))
+            else:
+                log(f'    state_photo_galleries: registry lists '
+                    f'loader={loader_path!r} for {state} but file does not '
+                    f'exist; skipping')
+        elif state in registry:
+            log(f'    state_photo_galleries: registry has {state} entry but '
+                f'loader=null (URL recorded, loader TBD); skipping state parks')
+        # else: state not in registry — state_park_url_check should have
+        # halted earlier; if we're here, treat as no-state-park-loader.
+    except FileNotFoundError:
+        log(f'    state_photo_galleries: registry not found at '
+            f'{registry_path}; skipping state-park loader')
+
+    # CCC is a CA-specific NON-state-park loader (Coastal Commission); not
+    # in the state-parks registry. Keep as a one-off.
     if state == 'CA':
-        runs.append(('CDPR', ['scripts/load_cdpr_park_gallery.py', '--full'], 1800))
-        runs.append(('CCC',  ['scripts/load_ccc_photos.py', '--full'], 1800))
-    elif state == 'WA':
-        runs.append(('WSPRC', ['scripts/load_wsprc_photos.py', '--full'], 1800))
-    elif state == 'OR':
-        runs.append(('OPRD', ['scripts/load_oprd_photos.py', '--full'], 1800))
+        runs.append(('CCC', ['scripts/load_ccc_photos.py', '--full'], 1800))
 
     total = 0
     for name, cmd, timeout in runs:
@@ -2250,6 +2293,59 @@ def action_state_policy_seed(state: str) -> int:
     )
 
 
+def action_state_park_url_check(state: str) -> int:
+    """Validate scripts/state_park_urls.json has an entry for state.
+
+    Per HARD memory pin pipeline-must-prompt-for-state-resources: the
+    state-park-listing URL is a human-curated resource. Pipeline can't
+    discover it autonomously with confidence. This phase halts with a
+    template-style ask if the entry is missing, so the operator adds it
+    once and the pipeline becomes self-serve thereafter.
+
+    Encoded 2026-05-23 LATE after DE virgin-state test discovered the
+    pipeline silently skipped state-parks loading for fresh states.
+    """
+    import json
+    registry_path = ROOT / 'scripts' / 'state_park_urls.json'
+    if not registry_path.exists():
+        raise RuntimeError(
+            f'state_park_urls.json not found at {registry_path}. '
+            f'This registry is the canonical source for state-park-listing '
+            f'URLs; pipeline cannot proceed without it.'
+        )
+    registry = json.loads(registry_path.read_text(encoding='utf-8'))
+    if state in registry and registry[state].get('url'):
+        entry = registry[state]
+        log(f'    state_park_urls registry: {state} → {entry.get("agency", "?")} '
+            f'({entry.get("url", "?")})')
+        return 0
+    raise RuntimeError(
+        f'state_park_urls.json is MISSING an entry for {state}.\n\n'
+        f'The pipeline needs the authoritative state-parks-listing URL '
+        f'(maintained by the state DNR/Parks Dept) to (a) feed the\n'
+        f'state-parks photo loader and (b) enumerate state-park-system\n'
+        f'codify work. This is a human-curated resource — the pipeline\n'
+        f'will not guess.\n\n'
+        f'TO RESOLVE:\n'
+        f'  1. Find the authoritative state-parks-listing page for {state}.\n'
+        f'     Common patterns:\n'
+        f'       - destateparks.com (DE)\n'
+        f'       - nhstateparks.org (NH)\n'
+        f'       - mass.gov/dcr (MA)\n'
+        f'       - floridastateparks.org (FL)\n'
+        f'  2. Add the entry to scripts/state_park_urls.json:\n\n'
+        f'       "{state}": {{\n'
+        f'         "agency": "<full agency name>",\n'
+        f'         "url": "<authoritative listing URL>",\n'
+        f'         "loader": "<scripts/loaders/X.py if a loader exists, else null>",\n'
+        f'         "added": "2026-05-23"\n'
+        f'       }}\n\n'
+        f'  3. Resume pipeline:\n'
+        f'       python scripts/run_state_pipeline.py --state {state} '
+        f'--launch-mode state-launch --resume\n'
+    )
+
+
 def action_seasonal_closure_seed(state: str) -> int:
     """Pending seasonal-closure seed rows for state.
 
@@ -2301,6 +2397,7 @@ def action_field_population_check(state: str) -> int:
 PYTHON_ACTIONS = {
     'state_policy_seed':       action_state_policy_seed,
     'seasonal_closure_seed':   action_seasonal_closure_seed,
+    'state_park_url_check':    action_state_park_url_check,
     'ensure_tiger_places':     action_ensure_tiger_places,
     'ensure_pad_us':           action_ensure_pad_us,
     'ensure_overpass':         action_ensure_overpass,

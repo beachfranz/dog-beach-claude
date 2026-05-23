@@ -26,5 +26,13 @@
     "loader_class": "MdDnrLoader",
     "pattern": "sharepoint_static",
     "added": "2026-05-22"
+  },
+  "DE": {
+    "agency": "Delaware Division of Parks and Recreation (DNREC DPR)",
+    "url": "https://www.destateparks.com/park-finder/",
+    "loader": "scripts/loaders/dnrec_de.py",
+    "loader_class": "DnrecDeLoader",
+    "pattern": "wordpress_slug",
+    "added": "2026-05-23"
   }
 }

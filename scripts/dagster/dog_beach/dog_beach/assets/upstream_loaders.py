@@ -413,7 +413,8 @@ def ensure_tiger_places(
     description=(
         "PAD-US loader — uses canonical scripts/load_pad_us_state.py per Franz "
         "2026-05-12. Writes both geom and geom_geog correctly. DO NOT switch "
-        "to scripts/one_off/bulk_load_pad_us.py or scripts/external_sources.py "
+        "to scripts/archive_2026_05_22/one_off/bulk_load_pad_us.py or "
+        "scripts/external_sources.py "
         "for PAD-US — both write geom only and downstream Methods A+B "
         "containment populators spatial-join on geom_geog (root cause of "
         "OR/WA pre-2026-05-12 zero-containment bug)."

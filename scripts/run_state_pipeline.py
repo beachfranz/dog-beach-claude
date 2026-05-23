@@ -8,7 +8,10 @@ Phases (in order):
    state_policy_seed      — research + seed state_dogs_policy
    seasonal_closure_seed  — research + seed seasonal_closures
    ensure_tiger_places    — bulk_load_tiger_places (per-state, idempotent)
-   ensure_pad_us          — bulk_load_pad_us       (per-state, idempotent)
+   ensure_pad_us          — load_pad_us_state.py   (per-state, idempotent;
+                                                    Franz 2026-05-12 policy:
+                                                    DO NOT use the older
+                                                    archived bulk_load_pad_us.py)
    ensure_overpass        — bulk_load_overpass     (osm_landing, per-state)
    ensure_amenities       — bulk_load_amenities    (osm_amenities, per-state)
    ensure_dog_features    — bulk_load_dog_features (osm_dog_features, per-state)
@@ -1300,8 +1303,9 @@ def action_operators_chunked(state: str) -> int:
 def action_ensure_pad_us(state: str) -> int:
     """Load PAD-US for state via the canonical loader scripts/load_pad_us_state.py.
 
-    Policy 2026-05-12 (Franz): do NOT use scripts/one_off/bulk_load_pad_us.py
-    or scripts/external_sources.py for PAD-US — both write `geom` only and
+    Policy 2026-05-12 (Franz): do NOT use scripts/archive_2026_05_22/one_off/
+    bulk_load_pad_us.py or scripts/external_sources.py for PAD-US — both
+    write `geom` only and
     miss `geom_geog`, which downstream Method A + Method B containment
     populators spatial-join on. load_pad_us_state.py is patched to write
     geom_geog correctly on INSERT + ON CONFLICT UPDATE.

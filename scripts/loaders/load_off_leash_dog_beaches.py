@@ -1,13 +1,15 @@
 """Load the curated off_leash_dog_beaches geojson into Supabase."""
 
-import json, os, sys
+import json, sys
 from pathlib import Path
-import httpx
-from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent.parent / "pipeline" / ".env")
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-KEY          = os.environ["SUPABASE_SERVICE_KEY"]
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from scripts.common.supa import supa
 
 GEOJSON = Path("C:/Users/beach/Downloads/california_off_leash_dog_beaches.geojson")
 
@@ -30,26 +32,19 @@ def main():
             "longitude":          lng,
         })
 
-    # Truncate so re-runs are clean.
-    httpx.post(
-        f"{SUPABASE_URL}/rest/v1/rpc/exec_sql",  # may not exist — fallback below
-        headers={"apikey": KEY, "Authorization": f"Bearer {KEY}"},
-        json={"q": "truncate public.off_leash_dog_beaches restart identity"},
-    )
+    # Truncate so re-runs are clean. RPC may not exist — wrap in try/except.
+    try:
+        supa("/rest/v1/rpc/exec_sql", method="POST",
+             body={"q": "truncate public.off_leash_dog_beaches restart identity"})
+    except RuntimeError as e:
+        print(f"truncate RPC unavailable (continuing): {e}", file=sys.stderr)
 
     # Insert via PostgREST in one batch
-    r = httpx.post(
-        f"{SUPABASE_URL}/rest/v1/off_leash_dog_beaches",
-        headers={
-            "apikey": KEY,
-            "Authorization": f"Bearer {KEY}",
-            "Content-Type": "application/json",
-            "Prefer": "return=minimal",
-        },
-        json=rows, timeout=30,
-    )
-    if not r.is_success:
-        print(f"Insert failed: {r.status_code} {r.text}", file=sys.stderr)
+    try:
+        supa("/rest/v1/off_leash_dog_beaches", method="POST",
+             body=rows, prefer="return=minimal")
+    except RuntimeError as e:
+        print(f"Insert failed: {e}", file=sys.stderr)
         sys.exit(1)
     print(f"Inserted {len(rows)} off-leash dog beach rows.")
 

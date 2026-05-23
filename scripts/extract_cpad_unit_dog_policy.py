@@ -24,9 +24,8 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scripts.common.llm import SONNET
+from scripts.common.supa import supa
 
-SUPABASE_URL      = os.environ["SUPABASE_URL"]
-SERVICE_KEY       = os.environ["SUPABASE_SERVICE_KEY"]
 TAVILY_API_KEY    = os.environ["TAVILY_API_KEY"]
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 SLEEP_S           = 1.5
@@ -259,31 +258,25 @@ def fetch_target_units(counties: list[str] | None = None) -> list[dict]:
 
 
 def db_existing_unit_ids() -> set[int]:
-    headers = {"apikey": SERVICE_KEY, "Authorization": f"Bearer {SERVICE_KEY}",
-               "Range": "0-9999"}
-    r = httpx.get(f"{SUPABASE_URL}/rest/v1/cpad_unit_dogs_policy",
-                  headers=headers, params={"select":"cpad_unit_id"}, timeout=30)
-    r.raise_for_status()
-    return {row["cpad_unit_id"] for row in r.json()}
+    rows = supa("/rest/v1/cpad_unit_dogs_policy",
+                params={"select": "cpad_unit_id"}) or []
+    return {row["cpad_unit_id"] for row in rows}
 
 
 def db_upsert(rows: list[dict]) -> None:
     if not rows: return
-    headers = {"apikey": SERVICE_KEY, "Authorization": f"Bearer {SERVICE_KEY}",
-               "Content-Type": "application/json",
-               "Prefer": "resolution=merge-duplicates"}
-    r = httpx.post(f"{SUPABASE_URL}/rest/v1/cpad_unit_dogs_policy",
-                   headers=headers, json=rows, timeout=60,
-                   params={"on_conflict": "cpad_unit_id"})
-    if r.status_code >= 400:
+    try:
+        supa("/rest/v1/cpad_unit_dogs_policy", method="POST", body=rows,
+             params={"on_conflict": "cpad_unit_id"}, upsert=True)
+    except RuntimeError as e:
         # Fall back to per-row upserts so one bad row doesn't kill batch
-        print(f"    batch upsert {r.status_code} — falling back per-row", file=sys.stderr)
+        print(f"    batch upsert failed — falling back per-row: {e}", file=sys.stderr)
         for row in rows:
-            rr = httpx.post(f"{SUPABASE_URL}/rest/v1/cpad_unit_dogs_policy",
-                           headers=headers, json=[row], timeout=30,
-                           params={"on_conflict": "cpad_unit_id"})
-            if rr.status_code >= 400:
-                print(f"    SKIP unit {row.get('cpad_unit_id')}: {rr.status_code} {rr.text[:200]}", file=sys.stderr)
+            try:
+                supa("/rest/v1/cpad_unit_dogs_policy", method="POST", body=[row],
+                     params={"on_conflict": "cpad_unit_id"}, upsert=True)
+            except RuntimeError as ee:
+                print(f"    SKIP unit {row.get('cpad_unit_id')}: {ee}", file=sys.stderr)
 
 
 def db_upsert_exceptions(unit_id: int, unit_name: str | None, url: str,
@@ -307,14 +300,11 @@ def db_upsert_exceptions(unit_id: int, unit_name: str | None, url: str,
             "source_url":   url,
         })
     if not rows: return 0
-    headers = {"apikey": SERVICE_KEY, "Authorization": f"Bearer {SERVICE_KEY}",
-               "Content-Type": "application/json",
-               "Prefer": "resolution=merge-duplicates"}
-    r = httpx.post(f"{SUPABASE_URL}/rest/v1/cpad_unit_policy_exceptions",
-                   headers=headers, json=rows, timeout=30,
-                   params={"on_conflict": "cpad_unit_id,beach_name"})
-    if r.status_code >= 400:
-        print(f"    EXC upsert {r.status_code}: {r.text[:200]}", file=sys.stderr)
+    try:
+        supa("/rest/v1/cpad_unit_policy_exceptions", method="POST", body=rows,
+             params={"on_conflict": "cpad_unit_id,beach_name"}, upsert=True)
+    except RuntimeError as e:
+        print(f"    EXC upsert failed: {e}", file=sys.stderr)
         return 0
     return len(rows)
 
@@ -346,14 +336,8 @@ def main():
     # Always exclude rows already populated by the CDPR master-table parse —
     # their data is richer (per-area + nuanced source quotes) than what a
     # per-park park_url scrape would produce.
-    headers = {"apikey": SERVICE_KEY, "Authorization": f"Bearer {SERVICE_KEY}",
-               "Range": "0-9999"}
-    r = httpx.get(f"{SUPABASE_URL}/rest/v1/cpad_unit_dogs_policy",
-                  headers=headers,
-                  params={"select":"cpad_unit_id,source_quote,dogs_allowed,extraction_model"},
-                  timeout=30)
-    r.raise_for_status()
-    existing_rows = r.json()
+    existing_rows = supa("/rest/v1/cpad_unit_dogs_policy",
+                         params={"select":"cpad_unit_id,source_quote,dogs_allowed,extraction_model"}) or []
     table_parse_ids = {row["cpad_unit_id"] for row in existing_rows
                        if row.get("extraction_model") == "table_parse"}
     if table_parse_ids:

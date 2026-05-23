@@ -28,9 +28,8 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scripts.common.llm import HAIKU
+from scripts.common.supa import supa
 
-SUPABASE_URL  = os.environ["SUPABASE_URL"]
-SERVICE_KEY   = os.environ["SUPABASE_SERVICE_KEY"]
 ANTHROPIC_KEY = os.environ["ANTHROPIC_API_KEY"]
 TAVILY_KEY    = os.environ.get("TAVILY_API_KEY")
 CHROME_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -287,19 +286,12 @@ Rules:
 def upsert_row(mng_name: str, payload: dict, url: str, cfr: str):
     """Upsert pad_us_unit_dogs_policy where unit_id IS NULL AND mng_name=mng_name."""
     j = payload.get("json") or {}
-    headers = {"apikey": SERVICE_KEY,
-               "Authorization": f"Bearer {SERVICE_KEY}",
-               "Content-Type": "application/json"}
     # PostgREST upsert pattern requires a unique constraint - fall back to
     # check-then-insert/update
-    chk = httpx.get(
-        f"{SUPABASE_URL}/rest/v1/pad_us_unit_dogs_policy",
-        headers=headers,
-        params={"unit_id": "is.null", "mng_name": f"eq.{mng_name}",
-                "select": "id", "limit": "1"},
-        timeout=15,
-    )
-    existing_id = (chk.json() or [None])[0]
+    existing = supa("/rest/v1/pad_us_unit_dogs_policy",
+                    params={"unit_id": "is.null", "mng_name": f"eq.{mng_name}",
+                            "select": "id", "limit": "1"}) or []
+    existing_id = existing[0] if existing else None
     row = {
         "mng_name":              mng_name,
         "unit_id":               None,
@@ -317,30 +309,23 @@ def upsert_row(mng_name: str, payload: dict, url: str, cfr: str):
     }
     if existing_id and isinstance(existing_id, dict):
         rid = existing_id.get("id")
-        httpx.patch(f"{SUPABASE_URL}/rest/v1/pad_us_unit_dogs_policy",
-                    headers=headers, params={"id": f"eq.{rid}"},
-                    json=row, timeout=15).raise_for_status()
+        supa("/rest/v1/pad_us_unit_dogs_policy", method="PATCH", body=row,
+             params={"id": f"eq.{rid}"})
         return "updated"
     else:
-        httpx.post(f"{SUPABASE_URL}/rest/v1/pad_us_unit_dogs_policy",
-                   headers=headers, json=row, timeout=15).raise_for_status()
+        supa("/rest/v1/pad_us_unit_dogs_policy", method="POST", body=row)
         return "inserted"
 
 
 def recently_extracted(mng_name: str, days: int) -> bool:
     if days <= 0:
         return False
-    headers = {"apikey": SERVICE_KEY, "Authorization": f"Bearer {SERVICE_KEY}"}
-    r = httpx.get(
-        f"{SUPABASE_URL}/rest/v1/pad_us_unit_dogs_policy",
-        headers=headers,
-        params={"mng_name": f"eq.{mng_name}", "unit_id": "is.null",
-                "select": "scraped_at", "limit": "1"},
-        timeout=15,
-    )
-    if not r.is_success:
+    try:
+        rows = supa("/rest/v1/pad_us_unit_dogs_policy",
+                    params={"mng_name": f"eq.{mng_name}", "unit_id": "is.null",
+                            "select": "scraped_at", "limit": "1"}) or []
+    except RuntimeError:
         return False
-    rows = r.json() or []
     if not rows:
         return False
     scraped = rows[0].get("scraped_at")

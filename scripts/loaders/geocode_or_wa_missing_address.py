@@ -9,19 +9,17 @@ Usage:
   python scripts/one_off/geocode_or_wa_missing_address.py [--limit N] [--dry-run]
 """
 from __future__ import annotations
-import argparse, os, time, urllib.parse
-from pathlib import Path
+import argparse, sys, time
 import httpx
-import psycopg2, psycopg2.extras
-from dotenv import load_dotenv
+import psycopg2.extras
 
-ROOT = Path(__file__).resolve().parent.parent.parent
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
-POOLER = (ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip()
-_p = urllib.parse.urlparse(POOLER)
-PG = dict(host=_p.hostname, port=_p.port or 5432, user=_p.username,
-          password=os.environ['SUPABASE_DB_PASSWORD'],
-          dbname=(_p.path or '/postgres').lstrip('/'), sslmode='require')
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from scripts.common.db import connect
 
 API_KEY = os.environ['GOOGLE_MAPS_API_KEY']
 URL = 'https://maps.googleapis.com/maps/api/geocode/json'
@@ -80,7 +78,7 @@ def main():
     ap.add_argument('--delay', type=float, default=0.05)
     args = ap.parse_args()
 
-    with psycopg2.connect(**PG) as c:
+    with connect() as c:
         c.autocommit = True
         with c.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
@@ -103,7 +101,7 @@ def main():
         if rg is None:
             fail += 1
         else:
-            with psycopg2.connect(**PG) as c:
+            with connect() as c:
                 c.autocommit = True
                 with c.cursor() as cur:
                     cur.execute("""

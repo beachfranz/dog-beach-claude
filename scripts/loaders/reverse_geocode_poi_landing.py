@@ -22,23 +22,18 @@ Usage:
 
 from __future__ import annotations
 import argparse
-import os
+import sys
 import time
-import urllib.parse
-from pathlib import Path
 import httpx
-import psycopg2
 from psycopg2.extras import RealDictCursor
-from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-POOLER = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-p = urllib.parse.urlparse(POOLER)
-PG = dict(host=p.hostname, port=p.port or 5432,
-          user=p.username, password=os.environ["SUPABASE_DB_PASSWORD"],
-          dbname=(p.path or "/postgres").lstrip("/"), sslmode="require")
+from scripts.common.db import connect
 
 GOOGLE_KEY = os.environ["GOOGLE_MAPS_API_KEY"]
 GOOGLE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
@@ -102,7 +97,7 @@ def main():
         {('limit ' + str(args.limit)) if args.limit else ''}
     """
 
-    with psycopg2.connect(**PG) as conn:
+    with connect() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(sql_select)
             rows = cur.fetchall()

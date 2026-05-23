@@ -33,11 +33,10 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scripts.common.llm import HAIKU, SONNET
+from scripts.common.supa import supa
 
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 TAVILY_API_KEY    = os.environ["TAVILY_API_KEY"]
-SUPABASE_URL      = os.environ["SUPABASE_URL"]
-SERVICE_KEY       = os.environ["SUPABASE_SERVICE_KEY"]
 
 CHROME_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
              "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -89,19 +88,11 @@ def _parse_cli_rows(stdout: str | None) -> list[dict]:
 # ── Operator data ────────────────────────────────────────────────────
 def fetch_top_operators(limit: int, counties: list[str] | None = None) -> list[dict]:
     # 2026-05-13: REST/RPC path (avoids Dagster-nested-subprocess None-stdout bug)
-    headers = {"apikey": SERVICE_KEY,
-               "Authorization": f"Bearer {SERVICE_KEY}",
-               "Content-Type": "application/json"}
     payload = {"p_limit": limit}
     if counties:
         payload["p_counties"] = counties
-    r = httpx.post(
-        f"{SUPABASE_URL}/rest/v1/rpc/fetch_top_operators_for_extraction",
-        json=payload, headers=headers, timeout=60,
-    )
-    if not r.is_success:
-        raise RuntimeError(f"fetch_top_operators RPC failed ({r.status_code}): {r.text[:500]}")
-    return r.json()
+    return supa("/rest/v1/rpc/fetch_top_operators_for_extraction",
+                method="POST", body=payload) or []
 
 
 def fetch_top_operators_LEGACY_CLI(limit: int, counties: list[str] | None = None) -> list[dict]:
@@ -197,19 +188,8 @@ def fetch_operators_by_ids(ids: list[int]) -> list[dict]:
     # subprocess. The CLI returned None stdout when double-nested under
     # Dagster's SubprocessResource (Python 3.14 / Windows stdio quirk).
     # REST/PostgREST has no such issue.
-    headers = {"apikey": SERVICE_KEY,
-               "Authorization": f"Bearer {SERVICE_KEY}",
-               "Content-Type": "application/json"}
-    r = httpx.post(
-        f"{SUPABASE_URL}/rest/v1/rpc/fetch_operators_for_extraction",
-        json={"p_ids": ids},
-        headers=headers,
-        timeout=30,
-    )
-    if not r.is_success:
-        raise RuntimeError(f"fetch_operators_for_extraction RPC failed "
-                           f"({r.status_code}): {r.text[:500]}")
-    return r.json()
+    return supa("/rest/v1/rpc/fetch_operators_for_extraction",
+                method="POST", body={"p_ids": ids}) or []
 
 
 def domain_of(url: str | None) -> str | None:
@@ -758,17 +738,15 @@ def recently_extracted(operator_id: int, days: int = 7) -> bool:
     """True if operator already has a fresh extraction within the last
     `days`. Used to skip re-research on subsequent state launches.
     Saves ~50% on CA re-runs; ~0% on first-state launches."""
-    headers = {"apikey": SERVICE_KEY, "Authorization": f"Bearer {SERVICE_KEY}"}
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    r = httpx.get(f"{SUPABASE_URL}/rest/v1/operator_policy_extractions",
-                  headers=headers,
-                  params={"operator_id": f"eq.{operator_id}",
-                          "extracted_at": f"gte.{cutoff}",
-                          "select": "id", "limit": "1"},
-                  timeout=15)
-    if not r.is_success:
+    try:
+        rows = supa("/rest/v1/operator_policy_extractions",
+                    params={"operator_id": f"eq.{operator_id}",
+                            "extracted_at": f"gte.{cutoff}",
+                            "select": "id", "limit": "1"})
+    except RuntimeError:
         return False
-    return len(r.json() or []) > 0
+    return len(rows or []) > 0
 
 
 # ── Persistence ──────────────────────────────────────────────────────
@@ -815,16 +793,9 @@ def upsert_extraction(operator_id: int, source_kind: str, source_url: str,
         "total_input_tokens":    passes.get("total_input_tokens"),
         "total_output_tokens":   passes.get("total_output_tokens"),
     }
-    headers = {
-        "apikey": SERVICE_KEY,
-        "Authorization": f"Bearer {SERVICE_KEY}",
-        "Content-Type": "application/json",
-        "Prefer": "resolution=merge-duplicates",
-    }
-    r = httpx.post(f"{SUPABASE_URL}/rest/v1/operator_policy_extractions",
-                   headers=headers, json=row, timeout=30,
-                   params={"on_conflict": "operator_id,source_kind,source_url"})
-    r.raise_for_status()
+    supa("/rest/v1/operator_policy_extractions", method="POST", body=row,
+         params={"on_conflict": "operator_id,source_kind,source_url"},
+         upsert=True)
 
 
 # ── Per-operator orchestrator ────────────────────────────────────────
@@ -966,11 +937,9 @@ def main():
     # Skip operators with existing extractions
     skip_ids: set[int] = set()
     if args.skip_existing:
-        headers = {"apikey": SERVICE_KEY, "Authorization": f"Bearer {SERVICE_KEY}"}
-        r = httpx.get(f"{SUPABASE_URL}/rest/v1/operator_policy_extractions",
-                      headers=headers, params={"select": "operator_id"}, timeout=30)
-        r.raise_for_status()
-        skip_ids = {row["operator_id"] for row in r.json()}
+        rows = supa("/rest/v1/operator_policy_extractions",
+                    params={"select": "operator_id"}) or []
+        skip_ids = {row["operator_id"] for row in rows}
         print(f"Skip set: {len(skip_ids)} operators already have rows")
 
     t0 = time.time()

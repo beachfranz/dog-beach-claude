@@ -17,18 +17,15 @@ Usage:
   python scripts/one_off/load_beach_wikipedia.py --state CA --limit 5
 """
 from __future__ import annotations
-import argparse, json, os, time, urllib.parse, urllib.request
-from pathlib import Path
-import psycopg2
-from dotenv import load_dotenv
+import argparse, json, sys, time, urllib.parse, urllib.request
 
-ROOT = Path(__file__).resolve().parent.parent.parent
-load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
-POOLER = (ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip()
-_p = urllib.parse.urlparse(POOLER)
-PG = dict(host=_p.hostname, port=_p.port or 5432, user=_p.username,
-          password=os.environ['SUPABASE_DB_PASSWORD'],
-          dbname=(_p.path or '/postgres').lstrip('/'), sslmode='require')
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from scripts.common.db import connect
 
 UA = 'dog-beach-claude wikipedia-loader (franz@franzfunk.com)'
 WIKIDATA_API = 'https://www.wikidata.org/wiki/Special:EntityData'
@@ -99,7 +96,7 @@ def find_candidates(state: str, limit: int):
         order by name
         limit %s
     """
-    with psycopg2.connect(**PG) as c, c.cursor() as cur:
+    with connect() as c, c.cursor() as cur:
         cur.execute("set statement_timeout = '300s'")
         cur.execute(sql, (state, limit))
         return cur.fetchall()
@@ -117,7 +114,7 @@ def upsert(fid, qid, summary, match_method, dist_m):
     if coords.get('lat') is not None and coords.get('lon') is not None:
         coord_pt = f'({coords["lon"]},{coords["lat"]})'
 
-    with psycopg2.connect(**PG) as c, c.cursor() as cur:
+    with connect() as c, c.cursor() as cur:
         cur.execute("""
           insert into public.beach_wikipedia
             (arena_group_id, qid, title, url, summary, description,

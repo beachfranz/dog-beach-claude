@@ -12,26 +12,19 @@ Usage:
 
 from __future__ import annotations
 import csv
-import os
-import urllib.parse
+import sys
 from pathlib import Path
-import psycopg2
 from psycopg2.extras import execute_values
-from dotenv import load_dotenv
+
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from scripts.common.db import connect
 
 ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
-
-# Build psycopg2 args from .env + supabase pooler-url cache
-POOLER = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-p = urllib.parse.urlparse(POOLER)
-PG = dict(
-    host=p.hostname, port=p.port or 5432,
-    user=p.username, password=os.environ["SUPABASE_DB_PASSWORD"],
-    dbname=(p.path or "/postgres").lstrip("/"),
-    sslmode="require",
-)
-
 CSV_PATH = ROOT / "share" / "Dog_Beaches" / "US_beaches.csv"
 FETCHED_BY = "load_poi_landing"
 
@@ -63,7 +56,7 @@ def main() -> int:
         values %s
         on conflict (fid, fetched_at) do nothing
     """
-    with psycopg2.connect(**PG) as conn, conn.cursor() as cur:
+    with connect() as conn, conn.cursor() as cur:
         execute_values(cur, sql, rows, page_size=500)
         cur.execute("select count(*) from public.poi_landing")
         total = cur.fetchone()[0]

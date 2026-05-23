@@ -10,16 +10,20 @@ but at the agency grain.
 Skips operators that already have area_sand populated. Idempotent.
 """
 from __future__ import annotations
-import argparse, json, os, re, sys, time
-from pathlib import Path
+import argparse, json, re, sys, time
 import httpx
-from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent.parent / "pipeline" / ".env")
-SUPABASE_URL      = os.environ["SUPABASE_URL"]
-SERVICE_KEY       = os.environ["SUPABASE_SERVICE_KEY"]
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from scripts.common.supa import supa
+from scripts.common.llm import HAIKU as _HAIKU
+
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
-HAIKU             = "claude-haiku-4-5-20251001"
+HAIKU             = _HAIKU
 
 
 SYSTEM = """You decompose an agency's blanket dog-policy zone description into per-area rules.
@@ -97,29 +101,24 @@ def call_haiku(operator_name: str, default_rule: str | None,
 
 
 def fetch_target_rows() -> list[dict]:
-    headers = {"apikey": SERVICE_KEY, "Authorization": f"Bearer {SERVICE_KEY}",
-               "Range": "0-9999"}
-    r = httpx.get(f"{SUPABASE_URL}/rest/v1/operator_dogs_policy",
-                  headers=headers,
-                  params={"select":"operator_id,default_rule,spatial_zones,summary,operators(canonical_name)",
-                          "area_sand":"is.null",
-                          "default_rule":"not.is.null"},
-                  timeout=30)
-    r.raise_for_status()
-    return r.json()
+    # Note: original used Range: 0-9999 header for pagination cap; supa()
+    # doesn't surface that, but PostgREST default cap is configurable
+    # server-side. If we need to bump, switch back to httpx for this one
+    # call.
+    return supa("/rest/v1/operator_dogs_policy",
+                params={"select":"operator_id,default_rule,spatial_zones,summary,operators(canonical_name)",
+                        "area_sand":"is.null",
+                        "default_rule":"not.is.null"}) or []
 
 
 def db_update(operator_id: int, fields: dict) -> bool:
-    headers = {"apikey": SERVICE_KEY, "Authorization": f"Bearer {SERVICE_KEY}",
-               "Content-Type": "application/json"}
-    r = httpx.patch(f"{SUPABASE_URL}/rest/v1/operator_dogs_policy",
-                    headers=headers,
-                    params={"operator_id": f"eq.{operator_id}"},
-                    json=fields, timeout=30)
-    if r.status_code >= 400:
-        print(f"    update {operator_id} {r.status_code}: {r.text[:200]}", file=sys.stderr)
+    try:
+        supa("/rest/v1/operator_dogs_policy", method="PATCH",
+             body=fields, params={"operator_id": f"eq.{operator_id}"})
+        return True
+    except RuntimeError as e:
+        print(f"    update {operator_id} failed: {e}", file=sys.stderr)
         return False
-    return True
 
 
 def main():

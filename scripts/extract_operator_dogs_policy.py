@@ -161,16 +161,37 @@ STATE_NAME = {
 
 # Domains that obviously belong to a specific state. If an operator is in state X
 # but the candidate URL is in this map for state Y (Y!=X), that's cross-state pollution.
-_DOMAIN_STATE_HINTS = [
-    ('.ca.gov', 'CA'), ('.ca.us', 'CA'), ('parks.ca.gov', 'CA'),
+#
+# Hardened 2026-05-23 LATE after NH virgin-test surfaced hcfl.gov leaking through
+# (Hillsborough County FL when operator was Hillsborough County NH). Domain map
+# now has two layers: (1) hand-curated special cases; (2) auto-generated
+# canonical `.{xx}.gov` / `.{xx}.us` / `.state.{xx}.us` patterns for every state.
+_SPECIAL_DOMAIN_STATE_HINTS = [
+    ('parks.ca.gov', 'CA'),
     ('cityofpacifica', 'CA'), ('coronado.ca', 'CA'), ('lakeforestca', 'CA'),
     ('carpinteriaca', 'CA'), ('smcgov', 'CA'), ('countyofkingsca', 'CA'),
     ('cityofmyrtlebeach', 'SC'), ('blainemn', 'MN'), ('dsm.city', 'IA'),
     ('raymond.ca', 'XX'),  # raymond.ca is Canada; XX = non-US, treat as wrong-state
-    ('.fl.us', 'FL'), ('.fl.gov', 'FL'),
-    ('.ny.gov', 'NY'), ('.ny.us', 'NY'),
-    ('.tx.us', 'TX'),
+    # Same-named cross-state collisions surfaced in NH virgin-test 2026-05-23:
+    ('hcfl.gov', 'FL'),                # Hillsborough County FL
+    ('hillsboroughcounty.org', 'FL'),  # same — common alt domain
+    ('sullivancountyny.gov', 'NY'),    # Sullivan County NY (collides with Sullivan County NH)
+    ('sullivancountytn.gov', 'TN'),    # Sullivan County TN
+    ('rockinghamcountync.gov', 'NC'),  # Rockingham County NC (vs NH)
 ]
+
+# Auto-generated canonical state-government domain patterns. Covers ~80% of
+# cross-state pollution before the LLM picker is invoked.
+_CANONICAL_DOMAIN_STATE_HINTS = []
+for _xx in STATE_NAME:
+    _xxl = _xx.lower()
+    _CANONICAL_DOMAIN_STATE_HINTS.extend([
+        (f'.{_xxl}.gov', _xx),
+        (f'.{_xxl}.us', _xx),
+        (f'.state.{_xxl}.us', _xx),
+    ])
+
+_DOMAIN_STATE_HINTS = _SPECIAL_DOMAIN_STATE_HINTS + _CANONICAL_DOMAIN_STATE_HINTS
 
 
 def domain_state_hint(url: str) -> str | None:
@@ -482,6 +503,88 @@ def _hit_mentions_operator(operator: dict, hit: dict) -> bool:
     return False
 
 
+def _hit_mentions_state(operator: dict, hit: dict) -> bool:
+    """Returns True if the candidate URL / title / snippet mentions the operator's
+    state — either by 2-letter code (word-boundary match) or full state name.
+
+    Added 2026-05-23 LATE after NH virgin-test surfaced hcfl.gov passing through
+    the pre-LLM filter unchecked. Catches the case where the candidate domain
+    isn't in our DOMAIN_STATE_HINTS map but the page still has zero evidence
+    of being for the operator's state.
+
+    Fail-open: if operator has no state_code, return True.
+    """
+    state_code = (operator.get('state_code') or '').upper()
+    if not state_code:
+        return True
+    state_name = STATE_NAME.get(state_code, '')
+
+    url = (hit.get('url') or '').lower()
+    title = (hit.get('title') or '').lower()
+    snippet = (hit.get('content') or '')[:1000].lower()
+    haystack = url + ' ' + title + ' ' + snippet
+
+    # State code: word-boundary match so 'NH' doesn't false-match 'channel'.
+    if re.search(rf'\b{re.escape(state_code.lower())}\b', haystack):
+        return True
+    # State name: substring (less ambiguous because names are >=4 chars).
+    if state_name and state_name.lower() in haystack:
+        return True
+    return False
+
+
+def _hit_scope_mismatch(operator: dict, hit: dict) -> bool:
+    """Returns True when the candidate is clearly for a DIFFERENT-SCOPE
+    jurisdiction with the same root name (e.g., Town of Grafton when operator
+    is Grafton County).
+
+    Added 2026-05-23 LATE after NH virgin-test surfaced ecode360.com/14805360
+    (Town of Merrimack NH municipal code) being picked when the operator was
+    Merrimack County NH. The picker correctly noted same-state, but the scope
+    is wrong: county vs town.
+
+    Detection rule (conservative — only fires on clear evidence of wrong scope):
+      - operator='X County'  + candidate text contains 'Town of X' or 'City of X'
+        AND does NOT contain 'X County' → reject
+      - operator='City of X' / 'Town of X' + candidate text contains 'X County'
+        AND does NOT contain 'City of X' / 'Town of X' → reject
+    """
+    op_name = (operator.get('canonical_name') or '').lower().strip()
+    if not op_name:
+        return False
+
+    # Extract level + root name. Limited grammar — falls through to False on
+    # unrecognized shapes (no false-positive risk).
+    if ' county' in op_name:
+        op_level = 'county'
+        root = op_name.replace(' county', '').strip()
+    elif op_name.startswith('city of '):
+        op_level = 'city'
+        root = op_name[len('city of '):].strip()
+    elif op_name.startswith('town of '):
+        op_level = 'town'
+        root = op_name[len('town of '):].strip()
+    else:
+        return False
+
+    if not root or len(root) < 3:
+        return False
+
+    url = (hit.get('url') or '').lower()
+    title = (hit.get('title') or '').lower()
+    snippet = (hit.get('content') or '')[:800].lower()
+    combined = url + ' ' + title + ' ' + snippet
+
+    if op_level == 'county':
+        wrong = (f'town of {root}' in combined) or (f'city of {root}' in combined)
+        right = f'{root} county' in combined
+        return wrong and not right
+    # op_level in ('city', 'town')
+    wrong = f'{root} county' in combined
+    right = (f'city of {root}' in combined) or (f'town of {root}' in combined)
+    return wrong and not right
+
+
 def pick_url(operator: dict, hits: list[dict], context: str) -> tuple[str | None, str]:
     """Have Haiku pick the most authoritative dog-policy URL from Tavily hits.
 
@@ -519,6 +622,32 @@ def pick_url(operator: dict, hits: list[dict], context: str) -> tuple[str | None
                 f"tokens={op_concat or '<none>'}, none in URL/title/snippet)")
     filtered = name_filtered
 
+    # Hardening 2026-05-23 LATE — NH virgin-test surfaced two leakage patterns
+    # that bypassed the state-domain + name-token filters:
+    #
+    # (a) State-mention filter: candidate has no state-code or state-name
+    #     evidence anywhere in URL/title/snippet (e.g., hcfl.gov has Hillsborough
+    #     County FL pages with no 'FL' word in the snippet). Catches the
+    #     same-named-cross-state collision class.
+    # (b) Scope-mismatch filter: candidate is for a different-scope same-name
+    #     jurisdiction (Town of Grafton when operator is Grafton County). Catches
+    #     the same-state-but-wrong-level confusion.
+    state_filtered = [h for h in filtered if _hit_mentions_state(operator, h)]
+    if not state_filtered:
+        return (None,
+                f"all_candidates_no_state_mention "
+                f"(operator state={state_code}, none of "
+                f"'{state_code}'/'{state_name}' in URL/title/snippet)")
+    filtered = state_filtered
+
+    scope_filtered = [h for h in filtered if not _hit_scope_mismatch(operator, h)]
+    if not scope_filtered:
+        return (None,
+                f"all_candidates_scope_mismatch "
+                f"(operator='{operator.get('canonical_name')}'; all candidates "
+                f"are for a different-scope same-name jurisdiction)")
+    filtered = scope_filtered
+
     candidates = "\n".join(
         f"{i+1}. {h.get('url')}\n   title: {h.get('title','')[:120]}\n   snippet: {(h.get('content','') or '')[:200]}"
         for i, h in enumerate(filtered[:5])
@@ -526,6 +655,7 @@ def pick_url(operator: dict, hits: list[dict], context: str) -> tuple[str | None
 
     system = f"""You are picking the single most authoritative URL for extracting a {state_name} beach operator's dog policy. Reject:
 - Pages whose URL or content is about a DIFFERENT state's jurisdiction (e.g., a {state_name} city operator's candidates may not be from any other state)
+- Pages for a DIFFERENT-SCOPE same-name jurisdiction in the same state (e.g., "Town of X" when the operator is "X County" — these have separate ordinances)
 - Third-party SEO content ("Top 10 dog-friendly beaches", travel blogs, news aggregators)
 - Generic operator homepages that don't mention dogs/pets in title or snippet
 - 404/error pages
@@ -535,9 +665,13 @@ Prefer:
 - Page title or snippet explicitly mentions {state_name} or the operator's name AND addresses dogs, pets, or beach rules
 - Specific dog-policy/pet-policy pages over generic park/beach landing pages
 
-CRITICAL: This operator is in {state_name} ({state_code}). If a candidate URL or its content is clearly for a different state's similarly-named jurisdiction, reject it. When in doubt about state, reject.
+CRITICAL state-anchoring requirement: every accepted candidate MUST have concrete evidence of being for {state_name} ({state_code}) — either a `.{state_code.lower()}.gov`/`.{state_code.lower()}.us` domain, an explicit "{state_name}" mention in title or snippet, or a clear state-government context. Vibes are not evidence. If you can't point to concrete state evidence, reject.
 
-Return ONLY a single JSON object: {{"chosen_index": <1..{len(filtered)} | null>, "reason": <short text>}}"""
+CRITICAL scope-matching requirement: if the operator is "X County", the candidate must be for the COUNTY (not Town of X / City of X / X School District). If the operator is "City of X" or "Town of X", the candidate must be for that municipality (not X County). When the candidate's level is ambiguous, reject.
+
+In your reason, name the concrete evidence (e.g., "title says 'Town of Hampton, NH' and operator is also Town of Hampton, NH").
+
+Return ONLY a single JSON object: {{"chosen_index": <1..{len(filtered)} | null>, "reason": <short text citing concrete evidence>}}"""
 
     user = f"""Operator: {operator['canonical_name']} ({operator.get('level','unknown')}, manages {state_name} beaches)
 Context: {context}

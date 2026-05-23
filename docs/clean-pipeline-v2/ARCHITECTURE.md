@@ -12,7 +12,7 @@ Three deep audits (table / Python / edge functions) ran 2026-05-22 evening to ma
 
 | Surface | Quantitative reduction |
 |---|---|
-| **Tables** | ~2.74M rows archived; ~30 zombie tables move to `archive_2026_05_22.*` schema |
+| **Tables** | ~46K rows across 26 zombie tables move to `archive_2026_05_22.*` schema (verified live 2026-05-22, see "Tables audit detail" below) |
 | **Python** | ~16K LOC archived (`one_off/` + arena/gold/v3 chain) + 4-5 `common/` modules dedupe ~1K LOC |
 | **Edge functions** | ~5,500 LOC deleted or consolidated (~29% of 19K); 4-5 new `_shared/` modules |
 | **Live bugs to fix** | 4 (admin-delete-beach phantom table, beach_polygons_truth zombie writer, extraction_prompt_variants dead FK, pg_stat stale) |
@@ -38,8 +38,18 @@ Estimate: 2-3 weeks of focused branch work.
 
 ### Day 1-2 — Mass archival (no logic change)
 - **Python**: archive `scripts/one_off/` (81 files) + arena/gold/v3 chain (14 files, ~3.3K LOC) → `scripts/archive_2026_05_22/`
-- **Tables (batch 1, true zombies)**: 11 snapshot/legacy tables (verdict_snapshot_pass6-11, _snap_2026_05_18_*, _cdpr_scrape, truth_snapshot_before_50, beach_enrichment_provenance_legacy_fid_archive, ca_coastline_v3/v4, ca_shoreline_v2) → 22,944 rows archived
-- **Tables (batch 2, 0-row zombies)**: 13 tables with no consumers (beach_polygons_truth, paired_ccc_cpad_200m, dog_amenities, operator_amenity_claims, operator_polygons_cache + by_county_cache, state_park_operators, park_operators, dog_policy_zones, dogs_verdict_override, extraction_calibration, extraction_prompt_variants, beach_geom_change_queue, pipeline_runs, pipeline_sources)
+- **Tables (batch 1, snapshot/legacy zombies)** — 20,382 rows across 10 present tables:
+  - `verdict_snapshot_pass6` (1,588) / `pass7` (1,588) / `pass9` (3,835) / `pass10` (3,835) / `pass11` (3,835)
+  - `pass8` already gone
+  - `truth_snapshot_before_50` (138)
+  - `beach_enrichment_provenance_legacy_fid_archive` (5,532)
+  - `ca_coastline_v3` (1), `ca_coastline_v4` (2), `ca_shoreline_v2` (28)
+- **Tables (batch 2, no-consumer zombies)** — 26,016 rows across 15 tables. NOT all 0-row; the framing is "nothing reads them" not "they're empty":
+  - `dog_amenities` (22,377) — biggest "zombie with data"; nothing on the consumer surface reads it
+  - `extraction_calibration` (1,452), `operator_polygons_cache` (1,219), `paired_ccc_cpad_200m` (471), `operator_polygons_by_county_cache` (285), `extraction_prompt_variants` (141)
+  - `state_park_operators` (10), `park_operators` (10), `operator_amenity_claims` (10), `dogs_verdict_override` (24), `dog_policy_zones` (5), `pipeline_sources` (12)
+  - Truly 0-row: `beach_polygons_truth`, `beach_geom_change_queue`, `pipeline_runs`
+- **Context** — 148 public tables + 38 views + 7 matviews total; the 26 zombies are ~18% of public tables.
 - **Edge functions**: archive v1 jurisdiction pipeline (12 functions, ~2,400 LOC) — all replaced by v2-* per `v2-run-pipeline` orchestrator
 - **Edge functions**: archive 4 per-tier `v2-*-dog-policy` (replaced by `v2-enrich-operational`, self-declared in its own header)
 

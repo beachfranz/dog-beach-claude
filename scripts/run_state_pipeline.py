@@ -534,13 +534,13 @@ PHASES = [
             #  because per-beach policy_source rows don't exist for
             #  state-baseline-only coverage.
             #
-            #  GATED by $STATE_BASELINE_OR (gap #23) — only enabled in
+            #  GATED by $BASELINE_OR_PATH (gap #23) — only enabled in
             #  state-launch mode. For steady-state (MVP+ states like
             #  CA/OR/WA), this OR-path is too permissive — it would
             #  silently rescue regressions that dropped per-beach
             #  policy_source rows. Steady-state demands the strict
             #  per-beach coverage path only.
-            "  ($STATE_BASELINE_OR "
+            "  ($BASELINE_OR_PATH "
             "   AND NOT EXISTS(select 1 from public.codify_dispatch_queue "
             "                    where state=$STATE "
             "                      and status in ('pending','approved','dispatched')) "
@@ -732,10 +732,10 @@ PHASES = [
             "     and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
             "         in ('1_off-leash','2_on-leash')) "
             "  OR "
-            #  state-baseline-covers — gated by $STATE_BASELINE_OR
+            #  state-baseline-covers — gated by $BASELINE_OR_PATH
             #  (gap #23): only fires in state-launch mode. Steady-state
             #  MVP+ states demand the per-beach BPS path.
-            "  ($STATE_BASELINE_OR "
+            "  ($BASELINE_OR_PATH "
             "   AND NOT EXISTS(select 1 from public.codify_dispatch_queue "
             "                    where state=$STATE "
             "                      and status in ('pending','approved','dispatched')) "
@@ -1113,7 +1113,7 @@ PHASES = [
             "                    / $UNCOVER_DIVISOR)) "
             "  OR "
             #  Path 2: state-baseline-covers (state-launch mode only per gap #23)
-            "  ($STATE_BASELINE_OR "
+            "  ($BASELINE_OR_PATH "
             "   AND NOT EXISTS(select 1 from public.codify_dispatch_queue "
             "                    where state=$STATE "
             "                      and status in ('pending','approved','dispatched')) "
@@ -2794,7 +2794,7 @@ def main():
                      .replace('$NEAREST_DP_PCT', str(NEAREST_DP_PCT_BY_MODE[LAUNCH_MODE]))
                      .replace('$PHOTOS_TAG_PCT', str(PHOTOS_TAG_PCT_BY_MODE[LAUNCH_MODE]))
                      .replace('$PHOTOS_CURATE_PCT', str(PHOTOS_CURATE_PCT_BY_MODE[LAUNCH_MODE]))
-                     .replace('$STATE_BASELINE_OR', STATE_BASELINE_OR_PATH_BY_MODE[LAUNCH_MODE]))
+                     .replace('$BASELINE_OR_PATH', STATE_BASELINE_OR_PATH_BY_MODE[LAUNCH_MODE]))
         kind = ph.get('kind', 'sql')
         progress_sql = ph.get('progress_sql')
         if progress_sql:
@@ -2804,7 +2804,7 @@ def main():
                             .replace('$NEAREST_DP_PCT', str(NEAREST_DP_PCT_BY_MODE[LAUNCH_MODE]))
                             .replace('$PHOTOS_TAG_PCT', str(PHOTOS_TAG_PCT_BY_MODE[LAUNCH_MODE]))
                             .replace('$PHOTOS_CURATE_PCT', str(PHOTOS_CURATE_PCT_BY_MODE[LAUNCH_MODE]))
-                            .replace('$STATE_BASELINE_OR', STATE_BASELINE_OR_PATH_BY_MODE[LAUNCH_MODE]))
+                            .replace('$BASELINE_OR_PATH', STATE_BASELINE_OR_PATH_BY_MODE[LAUNCH_MODE]))
         phase_num = PHASES.index(ph) + 1
         log(f'  RUN  [{phase_num}/{len(PHASES)}] {ph["key"]:<22} ...')
         t0 = time.time()

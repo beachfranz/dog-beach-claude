@@ -54,9 +54,18 @@ def states_clause(states: list[str]) -> str:
     return ','.join(f"'{s}'" for s in states)
 
 
-def run(states: list[str], check_mode: bool = False) -> int:
+def run(states: list[str], check_mode: bool = False,
+        launch_mode: str = 'steady-state') -> int:
     """Run the audit. Returns exit code (0=pass, 1=fail). Failure modes
-    only fire in --check mode and require all criteria to pass."""
+    only fire in --check mode and require all criteria to pass.
+
+    launch_mode (gap #37/#38, 2026-05-23 LATE): 'state-launch' uses 85%
+    daily-refresh threshold (fresh-state edge-function long-tail expected);
+    'steady-state' uses 95% (catalog should be settled). Mirrors the
+    pipeline's DAILY_REFRESH_PCT_BY_MODE in run_state_pipeline.py — keep
+    in sync."""
+
+    daily_refresh_threshold = 0.85 if launch_mode == 'state-launch' else 0.95
 
     s_clause = states_clause(states)
     failures: list[str] = []
@@ -155,10 +164,11 @@ def run(states: list[str], check_mode: bool = False) -> int:
         print(f"  {r['state']}: scoreable={r['scoreable']:>4} with_today_rec={r['with_today']:>4}")
         if check_mode and r['scoreable']:
             pct = r['with_today'] / r['scoreable']
-            if pct < 0.95:
+            if pct < daily_refresh_threshold:
                 failures.append(
                     f'{r["state"]}: today rec coverage {r["with_today"]}/{r["scoreable"]} '
-                    f'({pct*100:.0f}%) — must be >= 95%. Run daily-beach-refresh.')
+                    f'({pct*100:.0f}%) - must be >= {daily_refresh_threshold*100:.0f}%. '
+                    f'Run daily-beach-refresh.')
 
     hdr(f'G. OPERATORS — {", ".join(states)} by level + policy coverage')
     for r in fetch(f"""select state_code, level, count(*) ops,
@@ -220,10 +230,10 @@ def run(states: list[str], check_mode: bool = False) -> int:
     if check_mode:
         hdr('CHECK SUMMARY')
         if failures:
-            print(f'  FAIL — {len(failures)} criterion(s) violated:')
-            for f in failures: print(f'    ✗ {f}')
+            print(f'  FAIL - {len(failures)} criterion(s) violated:')
+            for f in failures: print(f'    [X] {f}')
             return 1
-        print('  PASS — all criteria met for: ' + ', '.join(states))
+        print('  PASS - all criteria met for: ' + ', '.join(states))
         return 0
     return 0
 
@@ -233,6 +243,10 @@ if __name__ == '__main__':
     ap.add_argument('--state', help='2-letter state code; default = OR,WA,CA,RI')
     ap.add_argument('--check', action='store_true',
                     help='Return non-zero exit code if criterion violations found')
+    ap.add_argument('--launch-mode', default='steady-state',
+                    choices=['state-launch', 'steady-state'],
+                    help='Gates daily-refresh threshold (85%% launch / 95%% steady). '
+                         'Mirror of run_state_pipeline.py')
     args = ap.parse_args()
     states = [args.state.upper()] if args.state else ['OR','WA','CA','RI']
-    sys.exit(run(states, check_mode=args.check))
+    sys.exit(run(states, check_mode=args.check, launch_mode=args.launch_mode))

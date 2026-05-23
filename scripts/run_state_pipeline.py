@@ -2730,10 +2730,16 @@ def action_seasonal_closure_seed(state: str) -> int:
 
 def action_field_population_check(state: str) -> int:
     """End-of-pipeline drift check: run the per-state audit in --check
-    mode. Prints the full report; raises if any hard threshold fails."""
+    mode. Prints the full report; raises if any hard threshold fails.
+
+    Passes --launch-mode so the audit's internal thresholds (today-rec
+    coverage, etc.) match the pipeline's per-phase gates. Without this,
+    the audit hardcoded 95% would fail any state-launch run where the
+    pipeline's daily_refresh_fire gate (gap #37, 85%) had just passed.
+    """
     rc, out, err = _run_subprocess(
         [sys.executable, 'scripts/audit/state_population_audit.py',
-         '--state', state, '--check'],
+         '--state', state, '--check', '--launch-mode', LAUNCH_MODE],
         timeout=300,
     )
     # Always print the audit output to the orchestrator log

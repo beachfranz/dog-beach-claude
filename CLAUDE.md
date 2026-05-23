@@ -142,6 +142,27 @@ dog-beach-claude/
 - All other tables blocked to anon.
 - Edge functions use the service role key and bypass RLS.
 
+### `operator` vs `operators` — confusingly named, intentionally separate
+
+Two tables. NOT duplicates. Both load-bearing:
+
+| Table | Rows | Role |
+|---|---|---|
+| `public.operator` (singular) | ~159 | **CANONICAL CONSUMER-SURFACE REGISTRY.** Hand-curated. Includes nonprofits + sub-agencies not in TIGER. Cascade-wired via `entity_operator`, `beach_operator`, `policy_source.issuing_operator_id`. **This is what shows up on `beach.html`.** |
+| `public.operators` (plural) | ~9,275 | **JURISDICTION/TIGER EXTRACTION POOL.** Bulk-loaded from TIGER cities, CPAD units, OSM. Used by the operator_llm_extract pipeline (`operator_dogs_policy.operator_id` + `operator_policy_extractions.operator_id` FK here). |
+
+Bridge: `operators.canonical_operator_id BIGINT REFERENCES operator(id)` — formal FK added 2026-05-22 (`20260522_operators_canonical_bridge.sql`). Replaces the brittle `LOWER(name)` joins used previously.
+
+**When writing new code**: prefer the helpers in `scripts/common/operator.py`:
+- `get_canonical_operator(name=… or id=…)` → row from `operator` (singular)
+- `get_extraction_operator(canonical_name=… or id=…)` → row from `operators` (plural)
+- `canonical_for_extraction(extraction_id)` → bridge plural → singular via FK
+- `extractions_for_canonical(canonical_id)` → reverse bridge singular → plural
+
+Table-level `COMMENT ON TABLE` also documents the distinction; visible in `\d operator` / `\d operators`.
+
+See HARD memory pin `operate-two-table-finding`.
+
 ---
 
 ## Supabase CLI

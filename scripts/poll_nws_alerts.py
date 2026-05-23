@@ -17,23 +17,17 @@ Cadence: 15min cron (per spec). API is free, no key.
 from __future__ import annotations
 import sys
 sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-import truststore                          # Win Python 3.14 OS-cert store
-truststore.inject_into_ssl()
 
 import argparse
 import json
 import os
 import time
-import urllib.parse
-from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
 import requests
-from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
+from scripts.common.db import connect
 
 NWS_BASE = "https://api.weather.gov"
 USER_AGENT = "DogBeachScout/1.0 (https://dogbeachscout.com; franz@franzfunk.com) nws-alerts-poller"
@@ -45,16 +39,6 @@ PILOT_FIDS_QUERY = """
      AND catchment_score IS NOT NULL
    ORDER BY catchment_score DESC LIMIT 30
 """
-
-
-def _connect_pg():
-    pooler = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-    pp = urllib.parse.urlparse(pooler)
-    return psycopg2.connect(
-        host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ["SUPABASE_DB_PASSWORD"],
-        dbname=(pp.path or "/postgres").lstrip("/"), sslmode="require",
-    )
 
 
 def fetch_active_alerts(area: str = "CA") -> list[dict]:
@@ -240,7 +224,7 @@ def main() -> int:
                     help="Fetch + PIP, print matches, no writes")
     args = ap.parse_args()
 
-    conn = _connect_pg()
+    conn = connect()
     try:
         # Resolve beach scope
         with conn.cursor() as cur:

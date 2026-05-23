@@ -27,8 +27,6 @@ model id. Re-running after a partial chunk is safe.
 from __future__ import annotations
 import sys
 sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-import truststore                          # Win Python 3.14 OS-cert store
-truststore.inject_into_ssl()
 
 import argparse
 import base64
@@ -40,22 +38,15 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
-from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
-POOLER = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-_p = urllib.parse.urlparse(POOLER)
-PG = dict(host=_p.hostname, port=_p.port or 5432, user=_p.username,
-          password=os.environ["SUPABASE_DB_PASSWORD"],
-          dbname=(_p.path or "/postgres").lstrip("/"), sslmode="require")
+from scripts.common.db import connect
+from scripts.common.llm import HAIKU
 
 # Haiku 4.5 vision — cheapest capable vision model per env description.
-MODEL = "claude-haiku-4-5-20251001"
+MODEL = HAIKU
 # Schema version — bump when the prompt/output shape changes so old rows
 # get re-tagged automatically without manual clearing.
 #   v1: initial schema
@@ -347,7 +338,7 @@ def main():
                          "tagging — e.g. NPS backfill 2026-05-20.")
     args = ap.parse_args()
 
-    conn = psycopg2.connect(**PG)
+    conn = connect()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("set statement_timeout = '120s'")
 
@@ -436,7 +427,7 @@ def main():
         except (psycopg2.OperationalError, psycopg2.InterfaceError):
             try: nonlocal_state["conn"].close()
             except Exception: pass
-            nonlocal_state["conn"] = psycopg2.connect(**PG)
+            nonlocal_state["conn"] = connect()
             nonlocal_state["cur"] = nonlocal_state["conn"].cursor()
             nonlocal_state["cur"].execute(sql, params)
 

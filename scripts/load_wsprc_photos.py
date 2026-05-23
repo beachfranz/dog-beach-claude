@@ -32,9 +32,6 @@ from __future__ import annotations
 import sys
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
 
-import truststore
-truststore.inject_into_ssl()
-
 import argparse
 import json
 import os
@@ -44,20 +41,12 @@ import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
 import requests
-from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
-POOLER = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-_p = urllib.parse.urlparse(POOLER)
-PG = dict(host=_p.hostname, port=_p.port or 5432, user=_p.username,
-          password=os.environ["SUPABASE_DB_PASSWORD"],
-          dbname=(_p.path or "/postgres").lstrip("/"), sslmode="require")
+from scripts.common.db import connect
 
 WSPRC_BASE = "https://parks.wa.gov"
 PARK_PATH  = "/find-parks/state-parks"
@@ -321,7 +310,7 @@ def main() -> int:
         print("ERROR: provide --pilot N, --full, or --park NAME", file=sys.stderr)
         return 2
 
-    pg = psycopg2.connect(**PG)
+    pg = connect()
     pg.autocommit = False
     try:
         parks = get_wsprc_parks_with_beaches(pg)

@@ -17,23 +17,17 @@ Run:
 from __future__ import annotations
 import sys
 sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-import truststore
-truststore.inject_into_ssl()
 
 import argparse
 import os
 import time
-import urllib.parse
 from datetime import datetime, timezone
-from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
 import requests
-from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
+from scripts.common.db import connect
 
 MARINE_BASE = "https://marine-api.open-meteo.com/v1/marine"
 USER_AGENT = "DogBeachScout/1.0 (https://dogbeachscout.com; franz@franzfunk.com) marine-fetch"
@@ -46,16 +40,6 @@ MARINE_VARIABLES = [
 ]
 
 PACING_S = 1.2   # generous rate limits but polite
-
-
-def _connect_pg():
-    pooler = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-    pp = urllib.parse.urlparse(pooler)
-    return psycopg2.connect(
-        host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ["SUPABASE_DB_PASSWORD"],
-        dbname=(pp.path or "/postgres").lstrip("/"), sslmode="require",
-    )
 
 
 def fetch_one(lat: float, lng: float, hours: int = 48) -> dict | None:
@@ -141,7 +125,7 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    conn = _connect_pg()
+    conn = connect()
     try:
         with conn.cursor() as cur:
             if args.state:

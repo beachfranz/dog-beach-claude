@@ -27,32 +27,16 @@ Run:
 from __future__ import annotations
 import sys
 sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-import truststore
-truststore.inject_into_ssl()
 
 import argparse
 import json
 import os
-import urllib.parse
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
-from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
-
-
-def _connect_pg():
-    pooler = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-    pp = urllib.parse.urlparse(pooler)
-    return psycopg2.connect(
-        host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ["SUPABASE_DB_PASSWORD"],
-        dbname=(pp.path or "/postgres").lstrip("/"), sslmode="require",
-    )
+from scripts.common.db import connect
 
 
 # Per-status severity mapping
@@ -90,7 +74,7 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    conn = _connect_pg()
+    conn = connect()
     try:
         with conn.cursor() as cur:
             if args.state:

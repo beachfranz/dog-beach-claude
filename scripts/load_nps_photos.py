@@ -44,29 +44,16 @@ import json
 import os
 import re
 import time
-import urllib.parse
-import urllib.request
 from datetime import datetime, timezone
-from pathlib import Path
-
-import truststore                # use OS cert store (Win Python 3.14 certifi gap)
-truststore.inject_into_ssl()
 
 import psycopg2
 import psycopg2.extras
 import requests
-from dotenv import load_dotenv
+
+from scripts.common.db import connect
 
 _HTTP = requests.Session()
 _HTTP.headers.update({"User-Agent": "DogBeachScout-temp"})
-
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
-POOLER = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-_p = urllib.parse.urlparse(POOLER)
-PG = dict(host=_p.hostname, port=_p.port or 5432, user=_p.username,
-          password=os.environ["SUPABASE_DB_PASSWORD"],
-          dbname=(_p.path or "/postgres").lstrip("/"), sslmode="require")
 
 NPS_API_KEY = os.environ.get("NPS_API_KEY")
 NPS_BASE = "https://developer.nps.gov/api/v1"
@@ -268,7 +255,7 @@ def main():
     if not args.dry_run and not NPS_API_KEY:
         sys.exit("ERROR: NPS_API_KEY not set in env (free signup at developer.nps.gov)")
 
-    conn = psycopg2.connect(**PG)
+    conn = connect()
     by_code = park_codes_from_db(conn)
 
     # If --state, filter to parks that have at least one beach in that state

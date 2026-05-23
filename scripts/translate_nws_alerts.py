@@ -20,21 +20,20 @@ substituted at render time (Phase 4 surface).
 from __future__ import annotations
 import sys
 sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-import truststore
-truststore.inject_into_ssl()
 
 import argparse
 import json
 import os
-import urllib.parse
 from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
-from dotenv import load_dotenv
 
+from scripts.common.db import connect
+from scripts.common.llm import HAIKU
+
+# ROOT is still needed for YAML_PATH (config/nws_dog_impact_map.yaml).
 ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
 
 YAML_PATH = ROOT / "config" / "nws_dog_impact_map.yaml"
 LLM_CONFIDENCE_THRESHOLD = 0.7
@@ -46,16 +45,6 @@ WILDCARD_EVENTS = {
     "Marine Weather Statement",
     "Hazardous Weather Outlook",
 }
-
-
-def _connect_pg():
-    pooler = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-    pp = urllib.parse.urlparse(pooler)
-    return psycopg2.connect(
-        host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ["SUPABASE_DB_PASSWORD"],
-        dbname=(pp.path or "/postgres").lstrip("/"), sslmode="require",
-    )
 
 
 def load_yaml_map() -> dict[str, dict]:
@@ -86,7 +75,7 @@ Return JSON only, no prose, no markdown. Keys:
   confidence: 0.0-1.0 — how sure you are this translation is right for a dog-walker context (low if alert is unclear or not really dog-relevant)
 """
     msg = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model=HAIKU,
         max_tokens=200,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -114,7 +103,7 @@ def main() -> int:
     yaml_map = load_yaml_map()
     print(f"Loaded {len(yaml_map)} YAML translations", flush=True)
 
-    conn = _connect_pg()
+    conn = connect()
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         where = "" if args.rebuild else "AND translation_source IS NULL"

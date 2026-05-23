@@ -1283,6 +1283,30 @@ def _state_operator_ids(state: str) -> list[int]:
             (state,)
         )
         ids = [r[0] for r in cur.fetchall()]
+        # For town-strong states (per state_government_strength), append
+        # all level='town' operators not already in `ids`. The
+        # state_operator_ids_for_scoreable_beaches RPC reads only BEP
+        # operator_id linkage, which on first launch hasn't been written
+        # for town operators yet. Adding them explicitly bootstraps the
+        # extraction. Subsequent runs naturally pick them up via BEP +
+        # the --skip-recent cost gate prevents re-firing.
+        cur.execute(
+            "select 1 from public.state_government_strength "
+            " where state_code = %s and dominant_municipal_tier = 'town'",
+            (state,)
+        )
+        if cur.fetchone():
+            cur.execute(
+                "select id from public.operators "
+                " where state_code = %s and is_active and level = 'town' "
+                "   and id <> all(%s::bigint[])",
+                (state, ids)
+            )
+            town_ids = [r[0] for r in cur.fetchall()]
+            if town_ids:
+                log(f'    + adding {len(town_ids)} town operators '
+                    f'(state is town-strong; bootstrapping picker)')
+                ids.extend(town_ids)
         if ids:
             cur.execute(
                 "select count(*) from public.operators "

@@ -2354,9 +2354,14 @@ def action_photo_centroid_backfill(state: str) -> int:
     backfill across ~4700 NULL-distance agency photos."""
     # --workers 10 caps below the pgbouncer session-mode pool ceiling (15).
     # The backfill script's default of 16 exhausts the pool (EMAXCONNSESSION).
+    # --state $STATE scopes to this state's beaches only (gap #34, 2026-05-23
+    # LATE) — without it the per-state pipeline wastes time processing other
+    # states' photos (full DE run took 243s on 1555 GLOBAL updates when it
+    # should have been ~20s on DE-only). Catalog-wide invocation is still
+    # available by running the script directly without --state.
     cmd = [sys.executable, 'scripts/backfill_agency_photo_centroid.py',
-           '--apply', '--workers', '10']
-    log(f'    photo_centroid_backfill (catalog-wide, --apply, workers=10)')
+           '--apply', '--workers', '10', '--state', state]
+    log(f'    photo_centroid_backfill (--state {state}, --apply, workers=10)')
     try:
         rc, out, err = _run_subprocess(cmd, timeout=5400)  # 90 min cap
     except subprocess.TimeoutExpired:

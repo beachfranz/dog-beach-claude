@@ -176,20 +176,43 @@ def main() -> int:
     ap.add_argument('--workers', type=int, default=16, help='thread-pool size (default 16)')
     ap.add_argument('--limit', type=int, default=0,
                      help='if >0, sample N URLs total across sources (for pilot runs)')
+    ap.add_argument('--state', default=None,
+                     help="State code (e.g. 'DE') to scope to. Default: catalog-wide "
+                          "(all states). When called from the per-state pipeline, "
+                          "ALWAYS pass --state — without it the phase wastes time "
+                          "processing other states' photos (gap #34, 2026-05-23 LATE).")
     args = ap.parse_args()
     sources = [s.strip() for s in args.sources.split(',') if s.strip()]
-    print(f'Sources: {sources}  mode: {"APPLY" if args.apply else "DRY-RUN"}  workers: {args.workers}')
+    state = (args.state or '').upper() or None
+    scope_tag = f'state={state}' if state else 'catalog-wide'
+    print(f'Sources: {sources}  mode: {"APPLY" if args.apply else "DRY-RUN"}  '
+          f'workers: {args.workers}  scope: {scope_tag}')
 
     conn = connect()
     cur = conn.cursor()
 
-    # Total scope = NULL-distance agency photos
-    cur.execute("""
-      SELECT source, COUNT(*) FROM beach_photos
-       WHERE source = ANY(%s) AND distance_m IS NULL
-       GROUP BY source ORDER BY 2 DESC
-    """, (sources,))
-    print(f'\\n=== NULL-distance scope ===')
+    # State-scope filter — applied to every photo-listing query below.
+    # When state is None, the filter degenerates to "1=1" (no-op).
+    state_filter_sql = (
+        "AND bp.arena_group_id IN (SELECT fid FROM beaches_gold WHERE state = %s)"
+        if state else ""
+    )
+
+    # Total scope = NULL-distance agency photos (state-scoped if state set)
+    if state:
+        cur.execute(f"""
+          SELECT bp.source, COUNT(*) FROM beach_photos bp
+           WHERE bp.source = ANY(%s) AND bp.distance_m IS NULL
+             {state_filter_sql}
+           GROUP BY bp.source ORDER BY 2 DESC
+        """, (sources, state))
+    else:
+        cur.execute("""
+          SELECT source, COUNT(*) FROM beach_photos
+           WHERE source = ANY(%s) AND distance_m IS NULL
+           GROUP BY source ORDER BY 2 DESC
+        """, (sources,))
+    print(f'\\n=== NULL-distance scope ({scope_tag}) ===')
     for r in cur.fetchall(): print(f'  {r[0]:<8} {r[1]} photos')
 
     total_dist_updates = 0
@@ -198,7 +221,10 @@ def main() -> int:
     for src in sources:
         print(f'\\n===== Source: {src} =====')
         # Per unique image_url, get all (beach_fid, beach_lat, beach_lon, filename, vision)
-        cur.execute("""
+        per_src_params = [src]
+        if state:
+            per_src_params.append(state)
+        cur.execute(f"""
           SELECT bp.image_url,
                  bp.source_meta->>'filename' AS filename,
                  bp.external_id AS ext_id,
@@ -209,8 +235,9 @@ def main() -> int:
             FROM beach_photos bp
             JOIN beaches_gold g ON g.fid = bp.arena_group_id
            WHERE bp.source = %s AND bp.image_url IS NOT NULL
+             {state_filter_sql}
            ORDER BY bp.image_url
-        """, (src,))
+        """, tuple(per_src_params))
         by_url: dict[str, list[dict]] = defaultdict(list)
         for url, fname, ext_id, vd, fid, lat, lon in cur.fetchall():
             by_url[url].append({

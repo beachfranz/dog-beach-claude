@@ -235,7 +235,7 @@ When you suspect new pollution, run `select * from public.purge_cross_state_extr
 
 ### Plus-code stripping (Google reverse-geocode artifact)
 
-`scripts/one_off/geocode_or_wa_missing_address.py` (Google reverse-geocode for OR/WA gold rows missing a POI address) sometimes returns Plus codes (`XV44+XJ Florence, OR, USA`) for remote beaches without street addresses. Phase 9 (`strip_plus_codes`) regex-strips the leading `XV44+XJ ` to yield clean `Florence, OR, USA`. **Net result:** ~92% of OR/WA addresses are real street addresses, ~8% are city-only, 0% are raw Plus codes.
+`scripts/loaders/geocode_or_wa_missing_address.py` (Google reverse-geocode for OR/WA gold rows missing a POI address) sometimes returns Plus codes (`XV44+XJ Florence, OR, USA`) for remote beaches without street addresses. Phase 9 (`strip_plus_codes`) regex-strips the leading `XV44+XJ ` to yield clean `Florence, OR, USA`. **Net result:** ~92% of OR/WA addresses are real street addresses, ~8% are city-only, 0% are raw Plus codes.
 
 ### Plover season seed: source='manual'
 

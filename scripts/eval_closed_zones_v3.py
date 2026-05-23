@@ -21,25 +21,25 @@ import io
 import json
 import os
 import sys
-import urllib.parse
 from pathlib import Path
 
 import anthropic
 import psycopg2
 import psycopg2.extras
-from dotenv import load_dotenv
+
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from scripts.common.db import connect
+from scripts.common.llm import HAIKU
 
 ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
-
-POOLER = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-p = urllib.parse.urlparse(POOLER)
-PG = dict(host=p.hostname, port=p.port or 5432, user=p.username,
-          password=os.environ["SUPABASE_DB_PASSWORD"],
-          dbname=(p.path or "/postgres").lstrip("/"), sslmode="require")
 
 ANTHROPIC = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-MODEL = "claude-haiku-4-5-20251001"
+MODEL = HAIKU
 
 # Canonical variant pick per fid (from project_zone_rules_design_locked.md)
 CANONICAL_VARIANT = {
@@ -564,7 +564,7 @@ def main():
     fixture = json.loads(
         (ROOT / "tests" / "zone_rules_anchors.json").read_text(encoding="utf-8")
     )
-    conn = psycopg2.connect(**PG)
+    conn = connect()
 
     results = []
     total_in = 0

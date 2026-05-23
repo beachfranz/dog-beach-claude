@@ -49,28 +49,25 @@ import os
 import random
 import sys
 import time
-import urllib.parse
-from pathlib import Path
 
 import anthropic
 import psycopg2
 import psycopg2.extras
-from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from scripts.common.db import connect
+from scripts.common.llm import HAIKU
 
 # Force UTF-8 stdout for Windows
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
 
-POOLER = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-p = urllib.parse.urlparse(POOLER)
-PG = dict(host=p.hostname, port=p.port or 5432, user=p.username,
-          password=os.environ["SUPABASE_DB_PASSWORD"],
-          dbname=(p.path or "/postgres").lstrip("/"), sslmode="require")
-
 ANTHROPIC = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-MODEL = "claude-haiku-4-5-20251001"
+MODEL = HAIKU
 SOURCE = "text_repass_v1"
 
 # Same prompt as eval_closed_zones_v3.py — single source of truth.
@@ -258,7 +255,7 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="build prompts, don't call API")
     args = ap.parse_args()
 
-    conn = psycopg2.connect(**PG)
+    conn = connect()
     targets = select_targets(conn, args)
     print(f"Targets: {len(targets)} beaches")
 

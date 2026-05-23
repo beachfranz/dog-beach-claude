@@ -35,19 +35,23 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Optional
 
 import httpx
-from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent / "pipeline" / ".env")
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from scripts.common.llm import HAIKU
 
 SUPABASE_URL          = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_KEY  = os.environ["SUPABASE_SERVICE_KEY"]
 ANTHROPIC_API_KEY     = os.environ["ANTHROPIC_API_KEY"]
 
-MODEL                 = "claude-haiku-4-5-20251001"
+MODEL                 = HAIKU
 WORKERS               = 5
 TEXT_CHAR_LIMIT       = 25_000
 

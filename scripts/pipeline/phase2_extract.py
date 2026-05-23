@@ -40,6 +40,11 @@ from bs4 import BeautifulSoup
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 from tqdm import tqdm
 
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 # scripts.common loads .env + injects truststore at package init —
 # importing anything from it (here, the model constant) is enough.
 from scripts.common.llm import HAIKU

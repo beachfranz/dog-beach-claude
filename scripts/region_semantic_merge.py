@@ -36,6 +36,12 @@ sys.stdout.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[attr-
 import psycopg2.extras
 from anthropic import Anthropic
 
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from scripts.common.db import connect
 
 

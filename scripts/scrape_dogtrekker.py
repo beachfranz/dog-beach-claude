@@ -24,6 +24,12 @@ import httpx
 
 # scripts.common loads .env + injects truststore at package init —
 # importing anything from it (here, the model constant) is enough.
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from scripts.common.llm import HAIKU
 
 SUPABASE_URL      = os.environ["SUPABASE_URL"]

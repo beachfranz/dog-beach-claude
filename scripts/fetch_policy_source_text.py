@@ -25,6 +25,12 @@ import psycopg2.extras
 import pdfplumber
 from bs4 import BeautifulSoup
 
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from scripts.common.db import connect
 
 ROOT = Path(__file__).resolve().parent.parent

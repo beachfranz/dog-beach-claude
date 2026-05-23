@@ -31,6 +31,12 @@ import argparse, json, os, sys, time, urllib.parse, urllib.request
 # This script previously had NO truststore inject — Anthropic calls
 # would fail with CERTIFICATE_VERIFY_FAILED on Windows AV-MITM. Side
 # effect of common's __init__ fixes that latent bug.
+# Bootstrap repo root into sys.path so `from scripts.common.X import Y` works
+# both when imported (`import scripts.X`) and when invoked as a script
+# (`python scripts/X.py` — what `run_state_pipeline.py` does via subprocess).
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from scripts.common.db import connect
 from scripts.common.llm import HAIKU
 

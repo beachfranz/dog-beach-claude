@@ -925,6 +925,43 @@ PHASES = [
             "select d.n done, t.n total from d, t",
     },
     {
+        # codify_coverage_check — end-of-pipeline drift check.
+        #
+        # Sister to codify_cascade (phase 12). Codify_cascade can trivial-
+        # pass on a fresh state because scoring_tier is computed downstream
+        # at catchment_refresh (phase 22). So 0 scoreable → 0 uncovered →
+        # 0 ≤ max(1, 0/divisor) → true, with no actual codify work done.
+        #
+        # By end-of-pipeline, catchment_refresh has scored beaches and
+        # dedup/purge (phases 24-26) have culled strays — coverage SHOULD
+        # be meaningfully measurable now. This phase re-checks the gate
+        # with an EXISTS(scoreable) precondition. Catches:
+        #   - first-pass bootstrap where codify_cascade trivial-passed
+        #     early, catchment scored beaches mid-pipeline, but codify
+        #     agents were never dispatched
+        #   - post-codify drift where dedup/purge moved beaches between
+        #     tiers after the early codify check, breaking coverage
+        #
+        # Same gate threshold as codify_cascade (state-launch 80% /
+        # steady-state 95%) via $UNCOVER_DIVISOR. Difference: the EXISTS
+        # precondition refuses to trivial-pass on a state with 0 scoreable.
+        'key': 'codify_coverage_check',
+        'action': "select coalesce(public.count_uncovered_scoreable_beaches($STATE), 0)::int",
+        'criterion':
+            "select (EXISTS(select 1 from public.beaches_gold "
+            "                where state=$STATE and is_active "
+            "                  and scoring_tier in ('daily','hourly')) "
+            "        AND public.count_uncovered_scoreable_beaches($STATE) "
+            "        <= greatest(1, (select count(*) from public.beaches_gold "
+            "                          where state=$STATE and is_active "
+            "                            and scoring_tier in ('daily','hourly')) "
+            "                         / $UNCOVER_DIVISOR))::boolean",
+        'criterion_text':
+            'EOL coverage gate met: ≥1 scoreable beach AND uncovered ≤ launch-mode threshold '
+            '(if 0 scoreable: catchment did not score any beach; if uncovered>threshold: '
+            'dispatch codify agents per the early codify_cascade manifest)',
+    },
+    {
         # End-of-pipeline drift/coverage check. Runs the per-state audit
         # in --check mode; non-zero exit if any of the hard thresholds
         # fail (county_fips < 100%, name_source < 100%, today_rec < 95%,

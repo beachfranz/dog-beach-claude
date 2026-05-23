@@ -532,24 +532,32 @@ PHASES = [
             "                       and scoring_tier in ('daily','hourly')) "
             "                    / $UNCOVER_DIVISOR)) "
             "  OR "
-            #  ── Path 2 (2026-05-22 LATE): state-baseline-covers gate.
-            #  For DE-like states (small, no federal land, statewide leash
-            #  law via state_dogs_policy covering all beaches), the codify_
-            #  cascade enumerator correctly returns "0 units to dispatch —
-            #  state codify is current". Without this path, the pipeline
-            #  perma-halts at codify_cascade because per-beach policy_source
-            #  rows don't exist for state-baseline-only coverage. Surfaced
-            #  by DE virgin-state test 2026-05-22 LATE.
-            "  (NOT EXISTS(select 1 from public.codify_dispatch_queue "
-            "                where state=$STATE "
-            "                  and status in ('pending','approved','dispatched')) "
+            #  ── Path 2 (2026-05-22 LATE / refined gap #23 2026-05-23):
+            #  state-baseline-covers gate. For DE-like states (small, no
+            #  federal land, statewide leash law via state_dogs_policy
+            #  covering all beaches), the codify_cascade enumerator
+            #  correctly returns "0 units to dispatch — state codify is
+            #  current". Without this path, the pipeline perma-halts
+            #  because per-beach policy_source rows don't exist for
+            #  state-baseline-only coverage.
+            #
+            #  GATED by $STATE_BASELINE_OR (gap #23) — only enabled in
+            #  state-launch mode. For steady-state (MVP+ states like
+            #  CA/OR/WA), this OR-path is too permissive — it would
+            #  silently rescue regressions that dropped per-beach
+            #  policy_source rows. Steady-state demands the strict
+            #  per-beach coverage path only.
+            "  ($STATE_BASELINE_OR "
+            "   AND NOT EXISTS(select 1 from public.codify_dispatch_queue "
+            "                    where state=$STATE "
+            "                      and status in ('pending','approved','dispatched')) "
             "   AND EXISTS(select 1 from public.state_dogs_policy "
             "                where state_code=$STATE)) "
             ")::boolean",
         'criterion_text':
             'coverage ≥ launch-mode gate (state-launch 80% / steady-state 95%) '
-            'OR codify_dispatch_queue empty + state_dogs_policy set '
-            '(state-baseline-covers path)',
+            'OR (state-launch mode only: codify_dispatch_queue empty + '
+            'state_dogs_policy set — state-baseline-covers path)',
         'progress_sql':
             "with t as (select count(*)::int n from public.beaches_gold "
             "             where state=$STATE and is_active and scoring_tier in ('daily','hourly')), "
@@ -721,15 +729,18 @@ PHASES = [
             "     and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
             "         in ('1_off-leash','2_on-leash')) "
             "  OR "
-            #  state-baseline-covers: state_dogs_policy is set AND queue is empty
-            "  (NOT EXISTS(select 1 from public.codify_dispatch_queue "
-            "                where state=$STATE "
-            "                  and status in ('pending','approved','dispatched')) "
+            #  state-baseline-covers — gated by $STATE_BASELINE_OR
+            #  (gap #23): only fires in state-launch mode. Steady-state
+            #  MVP+ states demand the per-beach BPS path.
+            "  ($STATE_BASELINE_OR "
+            "   AND NOT EXISTS(select 1 from public.codify_dispatch_queue "
+            "                    where state=$STATE "
+            "                      and status in ('pending','approved','dispatched')) "
             "   AND EXISTS(select 1 from public.state_dogs_policy "
             "                where state_code=$STATE))"
             ")::boolean",
         'criterion_text': 'at least 80% of MVP+ beaches have a fresh-within-7d bps row '
-                          'OR state-baseline-covers (state_dogs_policy + empty queue)',
+                          'OR (state-launch mode only: state-baseline-covers)',
         'progress_sql':
             "with t as (select count(*)::int n from public.beaches_gold g "
             "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
@@ -1098,17 +1109,18 @@ PHASES = [
             "                       and scoring_tier in ('daily','hourly')) "
             "                    / $UNCOVER_DIVISOR)) "
             "  OR "
-            #  Path 2: state-baseline-covers (queue empty + state_dogs_policy set)
-            "  (NOT EXISTS(select 1 from public.codify_dispatch_queue "
-            "                where state=$STATE "
-            "                  and status in ('pending','approved','dispatched')) "
+            #  Path 2: state-baseline-covers (state-launch mode only per gap #23)
+            "  ($STATE_BASELINE_OR "
+            "   AND NOT EXISTS(select 1 from public.codify_dispatch_queue "
+            "                    where state=$STATE "
+            "                      and status in ('pending','approved','dispatched')) "
             "   AND EXISTS(select 1 from public.state_dogs_policy "
             "                where state_code=$STATE)) "
             ")::boolean",
         'criterion_text':
-            'EOL coverage gate met: per-beach coverage OR state-baseline-covers '
-            '(if neither: catchment did not score any beach, or uncovered > threshold and '
-            'state_dogs_policy not set — dispatch codify agents per the early manifest)',
+            'EOL coverage gate met: per-beach coverage OR '
+            '(state-launch mode only: state-baseline-covers). '
+            'Steady-state demands the strict per-beach path — no escape via state baseline.',
     },
     {
         # End-of-pipeline drift/coverage check. Runs the per-state audit
@@ -1203,6 +1215,15 @@ PHOTOS_TAG_PCT_BY_MODE = {'state-launch': 0.50, 'steady-state': 0.80}
 # silently dropped per [[agency-photo-centroid-must-populate-lat-lng]]).
 # Until centroid backfill catches every new source, 40% is realistic.
 PHOTOS_CURATE_PCT_BY_MODE = {'state-launch': 0.05, 'steady-state': 0.80}
+# state-baseline-covers OR-path gating (gap #11 / #14, refined gap #23
+# 2026-05-23 LATE). The OR-path lets DE-like states pass the codify
+# coverage gates when state_dogs_policy is set + queue is empty + no
+# per-beach codify exists. For MVP+-tier states (CA/OR/WA/MD) in
+# steady-state mode, that path is too permissive — it would silently
+# rescue a regression that dropped per-beach policy_source rows. So we
+# only enable it in state-launch mode (where new states genuinely don't
+# have per-beach codify yet); steady-state demands the strict path.
+STATE_BASELINE_OR_PATH_BY_MODE = {'state-launch': 'true', 'steady-state': 'false'}
 
 
 def _canonical_fids(state: str, n: int) -> list[int]:
@@ -2699,7 +2720,8 @@ def main():
                      .replace('$UNCOVER_DIVISOR', str(GATE_DIVISOR_BY_MODE[LAUNCH_MODE]))
                      .replace('$NEAREST_DP_PCT', str(NEAREST_DP_PCT_BY_MODE[LAUNCH_MODE]))
                      .replace('$PHOTOS_TAG_PCT', str(PHOTOS_TAG_PCT_BY_MODE[LAUNCH_MODE]))
-                     .replace('$PHOTOS_CURATE_PCT', str(PHOTOS_CURATE_PCT_BY_MODE[LAUNCH_MODE])))
+                     .replace('$PHOTOS_CURATE_PCT', str(PHOTOS_CURATE_PCT_BY_MODE[LAUNCH_MODE]))
+                     .replace('$STATE_BASELINE_OR', STATE_BASELINE_OR_PATH_BY_MODE[LAUNCH_MODE]))
         kind = ph.get('kind', 'sql')
         progress_sql = ph.get('progress_sql')
         if progress_sql:
@@ -2708,7 +2730,8 @@ def main():
                             .replace('$UNCOVER_DIVISOR', str(GATE_DIVISOR_BY_MODE[LAUNCH_MODE]))
                             .replace('$NEAREST_DP_PCT', str(NEAREST_DP_PCT_BY_MODE[LAUNCH_MODE]))
                             .replace('$PHOTOS_TAG_PCT', str(PHOTOS_TAG_PCT_BY_MODE[LAUNCH_MODE]))
-                            .replace('$PHOTOS_CURATE_PCT', str(PHOTOS_CURATE_PCT_BY_MODE[LAUNCH_MODE])))
+                            .replace('$PHOTOS_CURATE_PCT', str(PHOTOS_CURATE_PCT_BY_MODE[LAUNCH_MODE]))
+                            .replace('$STATE_BASELINE_OR', STATE_BASELINE_OR_PATH_BY_MODE[LAUNCH_MODE]))
         phase_num = PHASES.index(ph) + 1
         log(f'  RUN  [{phase_num}/{len(PHASES)}] {ph["key"]:<22} ...')
         t0 = time.time()

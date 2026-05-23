@@ -135,6 +135,33 @@ ACTIVE_DATA_TABLES = {
     "subscribers", "subscriber_locations", "notification_log",
     "chat_rate_limits", "refresh_errors", "admin_audit", "admin_rate_limits",
     "pipeline_runs",
+    # Per-state launch infrastructure (run_state_pipeline.py + populators):
+    "beach_polygon_membership",       # central PIP table; every populator reads
+    "external_source_status",         # per-state loader status (every ensure_* phase)
+    "pipeline_phase_status",          # run_state_pipeline phase tracking
+    "state_dogs_policy",              # phase 2 state_policy_seed input
+    "state_government_strength",      # gap #46 — town-strong-state registry
+    "tiger_county_subdivisions",      # gap #46 — MCD layer for town-strong states
+    "seasonal_closure_seed",          # phase 3 seasonal_closure_seed input
+    "policy_source_extraction_cache", # gap #44 — operating-hours extractor cache
+    "codify_dispatch_queue",          # codify_cascade_phase output
+    "refire_audit",                   # refire_bep_cascade audit trail
+    "discovery_attempts",             # url-discovery audit
+    "dog_amenities",                  # OSM-derived dog amenities (referenced in CLAUDE.md)
+    # Gold-set curator-UI infrastructure (admin/gold-set-curator-v3.html):
+    "gold_set_curation_queue", "gold_set_signoff", "gold_set_membership",
+    "beach_curation_status", "beach_curator_review_log",
+    "gold_set_bypass_audit", "beach_location_curation_status",
+    # Photo pipeline:
+    "beach_photo_rejected", "photo_source_type",
+    # Operator extraction:
+    "operator_policy_extractions",    # extract_operator_dogs_policy.py output
+    "operator_aliases",
+    "park_url_extractions",           # park_url scrape output
+    "beach_extraction_queue",         # SQL extraction queue
+    # Beach metadata (referenced by detail.html and beach-chat):
+    "beach_descriptions", "beach_advisory", "beach_marine_forecast",
+    "beach_wikipedia", "beach_section_hour_status",
 }
 
 # Tables/functions explicitly known to be LEGACY (parity-only or superseded)

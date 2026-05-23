@@ -265,33 +265,6 @@ PHASES = [
                           '(if 0: run beach ingestion first — GNIS or manual loader)',
     },
     {
-        # Codify-cascade phase — per docs/codify_cascade_phase_spec.md
-        # (Franz 2026-05-19). Enumerates federal / county / city
-        # codify universe for the state, pre-checks coverage, emits
-        # a JSON manifest of any units needing agent dispatch. v1
-        # is REPORT-ONLY (doesn't auto-dispatch). Gate: ≤5% of
-        # scoreable beaches may lack a beach_policy_source link.
-        # On new state launches (MA/FL/MI) this will surface real
-        # codify gaps and halt until codify is run. For existing
-        # MVP+ states (CA/OR/WA) the gate passes immediately.
-        'key': 'codify_cascade',
-        'kind': 'python',
-        'action': 'codify_cascade',
-        'criterion':
-            "select (public.count_uncovered_scoreable_beaches($STATE) "
-            "        <= greatest(1, (select count(*) from public.beaches_gold "
-            "                          where state=$STATE and is_active "
-            "                            and scoring_tier in ('daily','hourly')) "
-            "                         / $UNCOVER_DIVISOR))::boolean",
-        'criterion_text':
-            'coverage ≥ launch-mode gate (state-launch 80% / steady-state 95%)',
-        'progress_sql':
-            "with t as (select count(*)::int n from public.beaches_gold "
-            "             where state=$STATE and is_active and scoring_tier in ('daily','hourly')), "
-            "     d as (select t.n - public.count_uncovered_scoreable_beaches($STATE) as n from t) "
-            "select d.n done, t.n total from d, t",
-    },
-    {
         # 2026-05-13 split: each pass runs in its own autocommitted
         # transaction to bound memory. The monolithic SQL FUNCTION used
         # to OOM Supabase on states with heavy PAD-US (OR's max 915K-
@@ -377,6 +350,50 @@ PHASES = [
             'every active beach has county_fips and state set (#2/#18 guard)',
     },
     {
+        # validate_state_geom — guard against county_fips/geom mismatch.
+        #
+        # Promote (above) assigns a beach to a state based on its
+        # county_fips, not its geom. If the upstream landing data has a
+        # wrong county_geoid (e.g., a CA-coast beach tagged with
+        # Miami-Dade '12086'), the beach lands in the wrong state's
+        # catalog with a geom that doesn't belong there. Catches the
+        # mismatch BEFORE downstream phases (address fixups, scoring,
+        # codify) waste effort on a beach that will eventually need to
+        # be killed.
+        #
+        # Action: flip is_active=false on any beach where state=$STATE
+        # but geom is not ST_Within the matching state polygon.
+        # Criterion: zero out-of-state actives remain.
+        #
+        # Tested 2026-05-22: across CA/OR/WA/MD (1,514 active beaches),
+        # 0 out-of-state. Production data is clean today; this gate is
+        # belt-and-suspenders for future bootstraps (MA/FL/MI) where
+        # landing data may be less clean.
+        'key': 'validate_state_geom',
+        'action':
+            "with mismatched as ("
+            "  select g.fid from public.beaches_gold g "
+            "   where g.state=$STATE and g.is_active "
+            "     and not exists (select 1 from public.states s "
+            "                      where s.state_code=$STATE "
+            "                        and st_within(g.geom, s.geom))"
+            "), "
+            "flipped as ("
+            "  update public.beaches_gold set is_active=false, "
+            "         inactive_reason='geom outside state polygon (validate_state_geom)' "
+            "   where fid in (select fid from mismatched) "
+            "   returning fid"
+            ") "
+            "select count(*)::int from flipped",
+        'criterion':
+            "select (not exists (select 1 from public.beaches_gold g "
+            "                     where g.state=$STATE and g.is_active "
+            "                       and not exists (select 1 from public.states s "
+            "                                        where s.state_code=$STATE "
+            "                                          and st_within(g.geom, s.geom))))::boolean",
+        'criterion_text': 'no active beach with state mismatch (geom outside state polygon)',
+    },
+    {
         'key': 'address_poi',
         'action':
             "select public._enrich_address_from_poi_for_state($STATE)",
@@ -453,11 +470,43 @@ PHASES = [
             "select d.n done, t.n total from d, t",
     },
     {
-        'key': 'purge_pollution',
-        'action':
-            "select rows_purged from public.purge_cross_state_extractions($STATE)",
-        'criterion': "select true",
-        'criterion_text': 'cross-state pollution flipped (idempotent)',
+        # Codify-cascade phase — per docs/codify_cascade_phase_spec.md
+        # (Franz 2026-05-19). Enumerates federal / county / city
+        # codify universe for the state, pre-checks coverage, emits
+        # a JSON manifest of any units needing agent dispatch. v1
+        # is REPORT-ONLY (doesn't auto-dispatch).
+        #
+        # MOVED 2026-05-22 LATE from phase #12 to AFTER catchment_refresh.
+        # The old position was BEFORE scoring_tier was computed, so the
+        # criterion would trivial-pass on fresh states (0 scoreable beaches
+        # → 0 uncovered → criterion true with no real work done). Now
+        # positioned after catchment_refresh (and refresh_nearest_dog_park)
+        # so beaches are actually scoreable when the gate fires.
+        #
+        # Criterion now requires EXISTS(scoreable) AS WELL AS coverage gate,
+        # so the only way to pass is to genuinely have scoreable beaches
+        # with codified policy. On new state launches the gate WILL halt
+        # the pipeline here until codify agents run.
+        'key': 'codify_cascade',
+        'kind': 'python',
+        'action': 'codify_cascade',
+        'criterion':
+            "select (EXISTS(select 1 from public.beaches_gold "
+            "                where state=$STATE and is_active "
+            "                  and scoring_tier in ('daily','hourly')) "
+            "        AND public.count_uncovered_scoreable_beaches($STATE) "
+            "        <= greatest(1, (select count(*) from public.beaches_gold "
+            "                          where state=$STATE and is_active "
+            "                            and scoring_tier in ('daily','hourly')) "
+            "                         / $UNCOVER_DIVISOR))::boolean",
+        'criterion_text':
+            'coverage ≥ launch-mode gate AND ≥1 scoreable beach '
+            '(state-launch 80% / steady-state 95%)',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beaches_gold "
+            "             where state=$STATE and is_active and scoring_tier in ('daily','hourly')), "
+            "     d as (select t.n - public.count_uncovered_scoreable_beaches($STATE) as n from t) "
+            "select d.n done, t.n total from d, t",
     },
     {
         'key': 'dedup',
@@ -522,6 +571,29 @@ PHASES = [
             "            where op.state_code = $STATE "
             "              and ope.extracted_at > now() - interval '4 hours') "
             "select d.n done, t.n total from d, t",
+    },
+    {
+        # purge_pollution — flip cross-state operator_policy_extractions
+        # to pass_a_status='cross_state_purged' (idempotent).
+        #
+        # MOVED 2026-05-22 LATE from its old position right after
+        # refresh_nearest_dog_park. Old position only caught extractions
+        # from PRIOR pipeline runs (operator_policy_extractions are
+        # CREATED by operator_llm_extract which runs later); THIS run's
+        # extractions slipped through into operator_merge unpurged.
+        #
+        # New position: right after operator_llm_extract creates the
+        # extractions, right before operator_merge consolidates them.
+        # operator_merge now sees the cleaned data on every pass.
+        #
+        # See purge_cross_state_extractions(p_state) — domain-hint table
+        # (.ca.gov, parks.ca.gov, cityofpacifica, etc.) maps URL substring
+        # to expected state; mismatches get flipped.
+        'key': 'purge_pollution',
+        'action':
+            "select rows_purged from public.purge_cross_state_extractions($STATE)",
+        'criterion': "select true",
+        'criterion_text': 'cross-state pollution flipped (idempotent)',
     },
     {
         'key': 'operator_merge',

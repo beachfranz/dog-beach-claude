@@ -12,7 +12,11 @@ Encodes our 2026-05-22 learnings:
   * BPS uses the 5-col ON CONFLICT matching beach_policy_source_dedupe_idx
     (`(beach_fid, policy_source_id, section, COALESCE(region_name,
     '__default__'::text), rule)`).
-  * state_dogs_policy uses DELETE+INSERT (table has no PK on prod).
+  * state_dogs_policy uses ON CONFLICT (state_code, scope_label) — the
+    composite PK added 2026-05-22 LATE by migration
+    20260522_state_dogs_policy_pk.sql. Default scope_label is 'default'
+    (statewide fallback). Scoped carve-outs like OR's 'coastal' Beach
+    Bill row are preserved on re-seed.
   * full_text uses $$..$$ dollar-quoting (Supabase CLI HTTP endpoint
     rejects adjacent E-string concat).
   * If --has-statewide-law false (the MD case), state_dogs_policy seed is
@@ -256,26 +260,38 @@ ON CONFLICT (beach_fid, policy_source_id, section, (COALESCE(region_name, '__def
     sec4_state_default = f"""
 -- ─── 4. state_dogs_policy seed ({'statewide-law' if args.has_statewide_law else 'honest no-statewide-law'} framing) ─
 --
--- DELETE+INSERT pattern (the prod table has no PRIMARY KEY on state_code;
--- ON CONFLICT (state_code) DO UPDATE fails plan-time on prod — see
--- [[state-dogs-policy-honest-framing]] + task #150).
-
-DELETE FROM public.state_dogs_policy WHERE state_code = '{state}';
+-- ON CONFLICT pattern on (state_code, scope_label) — the PK added by
+-- migration 20260522_state_dogs_policy_pk.sql. scope_label='default' is
+-- the statewide fallback; OR also has scope_label='coastal' for the
+-- Beach Bill carve-out. This INSERT only touches the 'default' scope,
+-- preserving any coastal/inland scoped rows the state may have.
 
 INSERT INTO public.state_dogs_policy
-  (state_code, state_name, dogs_allowed, default_rule,
+  (state_code, scope_label, state_name, dogs_allowed, default_rule,
    has_on_leash, has_off_leash,
    source_quote, source_url, ordinance_ref,
    scope_notes, confidence, scraped_at)
 VALUES
-  ('{state}', '{_sql_str(args.state_name)}', '{sd_dogs_allowed}', '{sd_default_rule}',
+  ('{state}', 'default', '{_sql_str(args.state_name)}', '{sd_dogs_allowed}', '{sd_default_rule}',
    {sd_has_on_leash}, {sd_has_off_leash},
    '{sd_source_quote_lit}',
    '{sd_source_url_lit}',
    '{sd_ordinance_ref_lit}',
    '{sd_scope_notes_lit}',
    {sd_confidence},
-   now());
+   now())
+ON CONFLICT (state_code, scope_label) DO UPDATE SET
+  state_name    = EXCLUDED.state_name,
+  dogs_allowed  = EXCLUDED.dogs_allowed,
+  default_rule  = EXCLUDED.default_rule,
+  has_on_leash  = EXCLUDED.has_on_leash,
+  has_off_leash = EXCLUDED.has_off_leash,
+  source_quote  = EXCLUDED.source_quote,
+  source_url    = EXCLUDED.source_url,
+  ordinance_ref = EXCLUDED.ordinance_ref,
+  scope_notes   = EXCLUDED.scope_notes,
+  confidence    = EXCLUDED.confidence,
+  scraped_at    = EXCLUDED.scraped_at;
 
 commit;
 """

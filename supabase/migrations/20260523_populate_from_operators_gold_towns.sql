@@ -166,14 +166,32 @@ begin
       (gold_fid, field_group, source, source_url, claimed_values, confidence,
        is_canonical, extraction_type, cpad_role, updated_at)
     select gold_fid, 'dogs', 'operator_town', source_url,
+           -- Consensus-aligned claim keys: 'allowed' (not 'dogs_allowed')
+           -- and 'leash_required' (not 'leash_policy'). The peer
+           -- populator populate_from_city_dog_policy_gold uses these
+           -- keys; populate_from_operators_gold's other blocks
+           -- (operator_pad_us/county/city) use the WRONG keys and their
+           -- BEP rows never register in consensus voting. Separate
+           -- followup needed for those — this block fixes it for towns.
            jsonb_strip_nulls(jsonb_build_object(
-             'dogs_allowed', case default_rule when 'yes' then 'yes' when 'no' then 'no'
-                                               when 'mixed' then 'mixed' when 'seasonal' then 'seasonal' end,
-             'leash_policy', case when leash_required is true then 'on_leash'
-                                  when leash_required is false then 'off_leash' end,
+             'allowed', case default_rule
+                          when 'yes' then 'yes' when 'no' then 'no'
+                          when 'mixed' then 'mixed' when 'seasonal' then 'yes'
+                          else null end,
+             'leash_required', case
+                          when leash_required is true then 'on_leash'
+                          when leash_required is false then 'off_leash'
+                          else null end,
              'dogs_policy_notes', summary
            )),
-           0.55, false, 'derived_url_crawl', 'beach_access', now()
+           -- Confidence 0.90: in town-strong states (NH/MA/CT/ME/RI/VT/
+           -- NJ/PA) the town IS the primary dog-policy authority and the
+           -- tcs_town containment is a 1:1 governance fact (every beach
+           -- sits in exactly one town's jurisdiction). Set above the
+           -- 0.85 tier (pad_us per-unit, state_dogs_policy_v1) so town
+           -- ordinance beats state-default RSA citation. Towns are more
+           -- specific authority than state law.
+           0.90, false, 'derived_url_crawl', 'beach_access', now()
       from hits where source_url is not null
     on conflict (gold_fid, field_group, source) do update
       set claimed_values = excluded.claimed_values, updated_at = now()

@@ -39,7 +39,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scripts.common.llm import SONNET, call_user_only
-from scripts.common.supa import supa
+from scripts.common.supa import supa, SUPABASE_URL, SERVICE_KEY
 
 MODEL           = SONNET
 OVERPASS_URL    = "https://overpass-api.de/api/interpreter"

@@ -1293,6 +1293,78 @@ def _canonical_fids(state: str, n: int) -> list[int]:
     return [r[0] for r in rows]
 
 
+def _state_tier12_fids_ranked_by_photos(state: str) -> list[int]:
+    """Tier 1+2 fids in state, ORDERED BY photo_count DESC.
+
+    For photo phases (photos_tag, photos_curate) where --limit N must
+    pick fids that actually have photos. Without this, --limit 5 picks
+    the first 5 by fid — which on DE happen to be fids without any
+    photos (the 240 destateparks photos attach via PIP fanout to a
+    specific ~25-fid subset). Result: photos_curate runs on a hollow
+    subset, gap #21's hollow-halt fires correctly but the test is
+    useless.
+
+    Same tier filter + COUNTIES_FILTER respect + CANONICAL_N intersect
+    + LIMIT_N truncation as _state_tier12_fids, but with the photo-count
+    ranking baked into the SQL. Added 2026-05-23 LATE for gap #20.
+
+    Fallback: if no beach has photos yet (genuinely fresh state, no
+    photo loaders run), returns the same set as _state_tier12_fids
+    (rank-by-photos becomes rank-by-(0, fid) → identical order).
+    """
+    # Detect bootstrap state same as _state_tier12_fids
+    with open_conn() as c, c.cursor() as cur:
+        cur.execute(
+            "select exists(select 1 from public.beach_dog_policy bdp "
+            "  join public.beaches_gold g on g.fid = bdp.arena_group_id "
+            "  where g.state = %s)",
+            (state,)
+        )
+        has_dog_policy = cur.fetchone()[0]
+
+    args: tuple
+    base_join = (
+        "left join (select arena_group_id, count(*) n "
+        "             from public.beach_photos group by arena_group_id) p "
+        "  on p.arena_group_id = g.fid "
+    )
+    if has_dog_policy:
+        sql = ("select g.fid from public.beaches_gold g "
+               "join public.beach_dog_policy bdp on bdp.arena_group_id = g.fid "
+               + base_join +
+               "where g.is_active and g.state = %s "
+               "  and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+               "      in ('1_off-leash','2_on-leash') ")
+        args = (state,)
+    else:
+        sql = ("select g.fid from public.beaches_gold g "
+               + base_join +
+               "where g.is_active and g.scoring_tier in ('daily','hourly') and g.state = %s ")
+        args = (state,)
+
+    if COUNTIES_FILTER:
+        sql += "  and g.county_fips = any(%s) "
+        args = args + (COUNTIES_FILTER,)
+    sql += "order by coalesce(p.n, 0) desc, g.fid"
+    if LIMIT_N is not None and LIMIT_N > 0:
+        sql += f" limit {int(LIMIT_N)}"
+
+    with open_conn() as c, c.cursor() as cur:
+        cur.execute(sql, args)
+        fids = [r[0] for r in cur.fetchall()]
+
+    # Same canonical-mode intersect as _state_tier12_fids
+    if CANONICAL_N is not None and CANONICAL_N > 0:
+        canonical = _canonical_fids(state, CANONICAL_N)
+        in_tier = set(fids)
+        picked = [f for f in canonical if f in in_tier]
+        if len(picked) < CANONICAL_N:
+            extras = [f for f in fids if f not in set(picked)]
+            picked.extend(extras[:CANONICAL_N - len(picked)])
+        fids = picked[:CANONICAL_N]
+    return fids
+
+
 def _state_tier12_fids(state: str) -> list[int]:
     """Tier 1_off-leash + 2_on-leash active fids in state.
 
@@ -2182,8 +2254,11 @@ def action_photos_tag(state: str) -> int:
     model id.
 
     Chunked at 30 fids/subprocess (~5-10 photos/fid × Haiku vision call
-    ≈ $0.001/photo). Per-chunk timeout 30min."""
-    fids = _state_tier12_fids(state)
+    ≈ $0.001/photo). Per-chunk timeout 30min.
+
+    Uses _state_tier12_fids_ranked_by_photos so --limit N picks fids
+    that actually have photos to tag (gap #20)."""
+    fids = _state_tier12_fids_ranked_by_photos(state)
     if not fids:
         return 0
     return _chunked_subprocess(
@@ -2203,8 +2278,11 @@ def action_photos_curate(state: str) -> int:
     auto-curate is safe broad: skipped_human guard prevents stomping
     manual selections.
 
-    Chunked at 100 fids/subprocess (DB-only, no LLM cost)."""
-    fids = _state_tier12_fids(state)
+    Chunked at 100 fids/subprocess (DB-only, no LLM cost).
+
+    Uses _state_tier12_fids_ranked_by_photos so --limit N picks fids
+    that actually have photos to curate (gap #20)."""
+    fids = _state_tier12_fids_ranked_by_photos(state)
     if not fids:
         return 0
     return _chunked_subprocess(

@@ -180,6 +180,25 @@ PHASES = [
             "                 where source='pad_us' and state=$STATE), false)",
         'criterion_text': "external_source_status['pad_us', state] in (ok, skipped)",
     },
+    # pad_us_manager_class_preflight — third member of the preflight family
+    # (alongside state_policy_seed + state_park_url_check). Added 2026-05-23
+    # LATE after NH virgin-state test surfaced gap #41: 6 PAD-US mng_names
+    # (SDNR/SFW/UNKL/OTHS/UNK/RWD) covering 1300+ NH polys had no class-
+    # default row in pad_us_unit_dogs_policy. Without those rows, the
+    # PAD-US emitter can't inherit policy onto state-managed or
+    # local/NGO-managed land, so 250/250 NH active beaches stayed at
+    # policy_tier=3 and the field_population_check failed at phase 49.
+    # Halt-with-templated-INSERT pattern matches the canary discipline.
+    {
+        'key': 'pad_us_manager_class_preflight',
+        'kind': 'python',
+        'action': 'pad_us_manager_class_preflight',
+        'criterion': "select true",
+        'criterion_text':
+            'every PAD-US mng_name with >=20 polygons in $STATE has a '
+            'class-default row in pad_us_unit_dogs_policy (unit_id IS NULL); '
+            'halts with templated INSERT block if any missing',
+    },
     {
         'key': 'ensure_overpass',
         'kind': 'python',
@@ -2703,6 +2722,86 @@ def action_state_park_url_check(state: str) -> int:
     )
 
 
+def action_pad_us_manager_class_preflight(state: str) -> int:
+    """Validate that every high-volume PAD-US mng_name in this state has
+    a class-default row in pad_us_unit_dogs_policy (unit_id IS NULL).
+
+    Per Franz 2026-05-23 LATE — extension of the state_policy_seed +
+    state_park_url_check preflight discipline. NH was the canary: 6
+    mng_names (SDNR/SFW/UNKL/OTHS/UNK/RWD) covering 1300+ polygons
+    fell through the class-default mechanism because the seed table
+    only had federal-class codes (NPS/USFS/etc.) plus a handful of
+    generic non-federal classes (CITY/CNTY/REG/NGO/SPR). State-level
+    codes (SDNR/SFW) and catch-all codes (UNKL/OTHS/UNK) were missing,
+    so 250/250 NH active beaches stayed at policy_tier=3.
+
+    Threshold: any mng_name with >=20 polygons in the state. Tuned to
+    catch load-bearing managers (NH SDNR=429, SFW=275, UNKL=265) while
+    ignoring rare edge-case codes that don't structurally matter.
+    """
+    with open_conn() as c, c.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute("""
+            SELECT u.mng_name, u.mng_type, MIN(u.loc_mang) AS sample_loc_mang,
+                   COUNT(*) AS n_polys
+              FROM public.pad_us_units u
+             WHERE u.state = %s
+             GROUP BY u.mng_name, u.mng_type
+            HAVING COUNT(*) >= 20
+               AND NOT EXISTS (
+                 SELECT 1 FROM public.pad_us_unit_dogs_policy p
+                  WHERE p.mng_name = u.mng_name AND p.unit_id IS NULL
+               )
+             ORDER BY n_polys DESC
+        """, (state,))
+        gaps = cur.fetchall()
+
+    if not gaps:
+        log(f'    all PAD-US mng_names with >=20 polys in {state} have class '
+            f'defaults; skip')
+        return 0
+
+    lines = []
+    lines.append(f'\npad_us_unit_dogs_policy class-default rows MISSING for '
+                 f'{len(gaps)} mng_name(s) with >=20 polygons in {state}:\n')
+    lines.append(f"  {'mng_name':<10} {'mng_type':<10} {'n_polys':>8}  "
+                 f'sample loc_mang')
+    lines.append(f"  {'-'*10} {'-'*10} {'-'*8}  {'-'*50}")
+    for r in gaps:
+        sample = (r['sample_loc_mang'] or '')[:50]
+        lines.append(f"  {r['mng_name']:<10} {r['mng_type']:<10} "
+                     f"{r['n_polys']:>8}  {sample}")
+
+    lines.append('\nWithout these defaults, the PAD-US emitter cannot inherit '
+                 'policy onto these polygons,')
+    lines.append('which means beaches sitting inside them stay at '
+                 'policy_tier=3 (limited_access) and fall through')
+    lines.append('the consumer scoring scope.\n')
+
+    lines.append('TO RESOLVE: create a migration with one row per mng_name. '
+                 'Conservative stub template:\n')
+    lines.append(f'-- supabase/migrations/<YYYYMMDD>_pad_us_class_defaults_'
+                 f'{state.lower()}.sql')
+    lines.append('BEGIN;')
+    for r in gaps:
+        sample_raw = (r['sample_loc_mang'] or 'unknown')[:60]
+        sample_sql = sample_raw.replace("'", "''")
+        lines.append(f'INSERT INTO public.pad_us_unit_dogs_policy')
+        lines.append(f'  (unit_id, mng_name, dogs_allowed, default_rule, '
+                     f'leash_required, notes)')
+        lines.append(f"VALUES (NULL, '{r['mng_name']}', 'unknown', 'unknown', "
+                     f'NULL,')
+        lines.append(f"        'TEMPLATED via {state} preflight — review and "
+                     f"tighten. Sample: {sample_sql}. {r['n_polys']} polys in "
+                     f"{state}.');")
+    lines.append('COMMIT;\n')
+
+    lines.append('After review + apply, resume:')
+    lines.append(f'  python scripts/run_state_pipeline.py --state {state} '
+                 f'--launch-mode state-launch --resume\n')
+
+    raise RuntimeError('\n'.join(lines))
+
+
 def action_seasonal_closure_seed(state: str) -> int:
     """Pending seasonal-closure seed rows for state.
 
@@ -2763,6 +2862,7 @@ PYTHON_ACTIONS = {
     'state_park_url_check':    action_state_park_url_check,
     'ensure_tiger_places':     action_ensure_tiger_places,
     'ensure_pad_us':           action_ensure_pad_us,
+    'pad_us_manager_class_preflight': action_pad_us_manager_class_preflight,
     'ensure_overpass':         action_ensure_overpass,
     'ensure_poi_landing':      action_ensure_poi_landing,
     'ensure_amenities':        action_ensure_amenities,

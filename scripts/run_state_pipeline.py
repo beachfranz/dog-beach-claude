@@ -475,21 +475,24 @@ PHASES = [
         'key': 'refresh_nearest_dog_park',
         'kind': 'python',
         'action': 'refresh_nearest_dog_park',
+        # Sentinel: nearest_dog_park_updated_at populated means the search
+        # RAN (regardless of whether a dog park was found within the 25mi
+        # cap). NULL fid + non-null updated_at is the legitimate "no DP in
+        # range" outcome for rural states. Resolves pin #158.
         'criterion':
-            "select (count(*) filter (where nearest_dog_park_fid is not null "
-            "                            or nearest_dog_park_distance_m is not null) "
+            "select (count(*) filter (where nearest_dog_park_updated_at is not null) "
             "        >= floor(count(*) * $NEAREST_DP_PCT))::boolean "
             "from public.beaches_gold "
             "where state = $STATE and is_active",
         'criterion_text': 'at least 90% (steady-state) / 80% (state-launch) of active beaches '
-                          'have nearest_dog_park_* populated',
+                          'have nearest_dog_park_updated_at populated (search has run; '
+                          'NULL fid is the legitimate no-DP-within-25mi-cap outcome)',
         'progress_sql':
             "with t as (select count(*)::int n from public.beaches_gold "
             "             where state=$STATE and is_active), "
             "     d as (select count(*)::int n from public.beaches_gold "
             "             where state=$STATE and is_active "
-            "               and (nearest_dog_park_fid is not null "
-            "                    or nearest_dog_park_distance_m is not null)) "
+            "               and nearest_dog_park_updated_at is not null) "
             "select d.n done, t.n total from d, t",
     },
     {

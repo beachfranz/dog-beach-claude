@@ -996,6 +996,30 @@ PHASES = [
             "              and bp.source_meta ? 'vision') "
             "select d.n done, t.n total from d, t",
     },
+    # photos_predict — gap #36 (2026-05-23 LATE). Runs the Tier 2 photo-
+    # scoring model (scripts/train_photo_model.py) to write
+    # source_meta.predicted_keep_prob for every vision-tagged photo. The
+    # next phase (photos_curate) requires keep_prob ≥ 0.65 OR
+    # curated_at IS NOT NULL to consider a photo as a candidate.
+    # Without this phase, photos_curate sees "0 candidates" everywhere
+    # because no photos have keep_prob set (vision tags alone don't
+    # populate it).
+    #
+    # Was missing from pipeline — only Dagster + rescue_reactivated_beaches
+    # ran the model. Surfaced by full DE virgin test 2026-05-23 LATE.
+    # Catalog-wide invocation (train_photo_model.py has no --state flag,
+    # and the model is shared across states anyway). Cost: ~10-30 min
+    # depending on label corpus + photo count. Idempotent: re-running
+    # produces a fresh model + fresh predictions, both stored under a
+    # new model_id timestamp.
+    {
+        'key': 'photos_predict',
+        'kind': 'python',
+        'action': 'photos_predict',
+        'criterion': "select true",  # script exit code is the gate; trust on rc=0
+        'criterion_text': 'no exception (Tier 2 model trained + keep_prob written for all '
+                          'vision-tagged photos catalog-wide)',
+    },
     {
         # 2026-05-21: auto-curate N best+diverse photos per beach using
         # the vision-tag-aware diverse selector. HUMAN ALWAYS WINS: skips
@@ -2425,6 +2449,47 @@ def action_photos_tag(state: str) -> int:
     )
 
 
+def action_photos_predict(state: str) -> int:
+    """Run the Tier 2 photo-scoring model — trains on labels + writes
+    `predicted_keep_prob` into `beach_photos.source_meta`.
+
+    Gap #36 (2026-05-23 LATE). Sat unwired in the pipeline indefinitely
+    — Dagster ran it in production, rescue_reactivated_beaches.py ran it
+    on demand, run_state_pipeline.py did not. Result: a fresh state
+    could tag photos with vision but never get a keep_prob, and the
+    photos_curate selector (which gates on keep_prob ≥ 0.65) silently
+    saw "0 candidates" everywhere.
+
+    Catalog-wide invocation: train_photo_model.py has no --state flag
+    (the model is shared across states + label corpus is global). Cost:
+    ~10-30 min wall-clock depending on label corpus + photo count. Cost
+    is unavoidable today; future optimization = a --predict-only mode
+    that reuses the last trained model. Idempotent: each run produces
+    a fresh model_id timestamp + predictions for every vision-tagged
+    photo.
+
+    Returns the number of photos that received fresh keep_prob writes
+    (parsed from "Writing N predictions to beach_photos.source_meta")."""
+    cmd = [sys.executable, 'scripts/train_photo_model.py']
+    log(f'    photos_predict: Tier 2 train+predict (catalog-wide, ~10-30 min)')
+    rc, out, err = _run_subprocess(cmd, timeout=2400)  # 40 min cap
+    if rc != 0:
+        raise RuntimeError(
+            f'train_photo_model.py exit {rc}\n  stderr tail: {(err or "")[-500:]}'
+        )
+    silent = _scan_subprocess_output_for_silent_failure(
+        out, name='train_photo_model.py'
+    )
+    if silent:
+        raise RuntimeError(
+            'train_photo_model.py exited rc=0 but stdout revealed '
+            'silent failures:\n  - ' + '\n  - '.join(silent)
+        )
+    import re as _re
+    m = _re.search(r'Writing\s+(\d+)\s+predictions', out or '')
+    return int(m.group(1)) if m else 0
+
+
 def action_photos_curate(state: str) -> int:
     """Auto-curate (pick N best+diverse photos per beach).
 
@@ -2698,6 +2763,7 @@ PYTHON_ACTIONS = {
     'state_photo_galleries':   action_state_photo_galleries,
     'photo_centroid_backfill': action_photo_centroid_backfill,
     'photos_tag':              action_photos_tag,
+    'photos_predict':          action_photos_predict,
     'photos_curate':           action_photos_curate,
     'descriptions':            action_descriptions,
     'descriptions_audit':      action_descriptions_audit,

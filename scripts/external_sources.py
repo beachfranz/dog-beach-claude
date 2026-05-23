@@ -140,31 +140,6 @@ def _epoch_to_iso(v: Any) -> str | None:
         return None
 
 
-def map_pad_us(feat: dict, scope: dict) -> dict | None:
-    geom = feat.get("geometry"); props = feat.get("properties", {}) or {}
-    if not geom or props.get("OBJECTID") is None:
-        return None
-    return {
-        "unit_id":     props["OBJECTID"],
-        "feat_class":  props.get("FeatClass"),
-        "category":    props.get("Category"),
-        "own_type":    props.get("Own_Type"),
-        "own_name":    props.get("Own_Name"),
-        "loc_own":     props.get("Loc_Own"),
-        "mng_type":    props.get("Mang_Type"),
-        "mng_name":    props.get("Mang_Name"),
-        "loc_mang":    props.get("Loc_Mang"),
-        "des_tp":      props.get("Des_Tp"),
-        "loc_ds":      props.get("Loc_Ds"),
-        "unit_name":   props.get("Unit_Nm"),
-        "loc_name":    props.get("Loc_Nm"),
-        "state":       props.get("State_Nm") or scope.get("state"),
-        "agg_src":     props.get("Agg_Src"),
-        "raw_attrs":   psycopg2.extras.Json(props),
-        "geom_geojson": json.dumps(geom),
-    }
-
-
 def map_usfws_critical_habitat(feat: dict, scope: dict) -> dict | None:
     geom = feat.get("geometry"); props = feat.get("properties", {}) or {}
     if not geom or props.get("OBJECTID") is None:
@@ -217,11 +192,6 @@ class Source:
     geom_kind: str = "MultiPolygon"  # 'MultiPolygon' or 'Point'
 
 
-PAD_US_COLUMNS = [
-    "unit_id", "feat_class", "category", "own_type", "own_name", "loc_own",
-    "mng_type", "mng_name", "loc_mang", "des_tp", "loc_ds",
-    "unit_name", "loc_name", "state", "agg_src", "raw_attrs",
-]
 USFWS_COLUMNS = [
     "unit_id", "comname", "sciname", "spcode", "vipcode",
     "unit", "subunit", "unitname", "subunitname", "status",

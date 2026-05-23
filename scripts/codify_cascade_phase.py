@@ -376,7 +376,62 @@ def run_phase(state: str, *, do_precheck_jurisdictions: bool = True,
                 if len(report.queue) > 10:
                     print(f"  ... and {len(report.queue) - 10} more", flush=True)
 
+        # ── Persist queue → codify_dispatch_queue table (Phase A of #154) ──
+        # Replaces the prior "ephemeral JSON manifest" pattern. Operator
+        # workflow + auto-dispatch are Phases B + C (see memory pin
+        # cascade-correctness-phase-bc-design). For now: idempotent UPSERT
+        # so re-runs don't pile up dupes.
+        n_upserted = _upsert_queue_to_db(conn, state, report.queue)
+        if verbose:
+            print(f"\n[persist] UPSERTed {n_upserted} queue rows into "
+                  f"public.codify_dispatch_queue", flush=True)
+
     return report
+
+
+def _upsert_queue_to_db(conn, state: str, queue: list[dict]) -> int:
+    """UPSERT the queue items into public.codify_dispatch_queue.
+
+    Idempotent on (state, kind, target_name) — re-running cascade_phase
+    refreshes target_meta + updated_at but doesn't disturb status if the
+    operator has already approved/dispatched/completed an entry.
+
+    Returns count of rows touched.
+    """
+    if not queue:
+        return 0
+    n = 0
+    with conn.cursor() as cur:
+        for q in queue:
+            kind = q["kind"]
+            if kind == "federal_unit":
+                target_name = q["unit_name"]
+                meta = {
+                    "mng_name":      q.get("mng_name"),
+                    "beaches":       q.get("beaches"),
+                    "suggested_cmd": q.get("suggested_cmd"),
+                }
+            else:  # jurisdiction_county / jurisdiction_city
+                target_name = q["name"]
+                meta = {
+                    "scoreable_beaches": q.get("scoreable_beaches"),
+                    "outcome":           q.get("outcome"),
+                    "suggested_cmd":     q.get("suggested_cmd"),
+                }
+            cur.execute(
+                """
+                INSERT INTO public.codify_dispatch_queue
+                    (state, kind, target_name, target_meta, status)
+                VALUES (%s, %s, %s, %s::jsonb, 'pending')
+                ON CONFLICT (state, kind, target_name) DO UPDATE SET
+                    target_meta = EXCLUDED.target_meta
+                  WHERE codify_dispatch_queue.status = 'pending'
+                """,
+                (state, kind, target_name, json.dumps(meta)),
+            )
+            n += 1
+        conn.commit()
+    return n
 
 
 # ─── Step 3 stub: dispatch suggestion (v1 = report only) ──────────────

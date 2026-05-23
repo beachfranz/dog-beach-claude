@@ -57,6 +57,7 @@ from pathlib import Path
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from scripts.common.db import connect
 from scripts.common.llm import SONNET
 from scripts.common.supa import supa
 
@@ -2588,17 +2589,10 @@ def list_state_jurisdictions(state: str, pilot: int | None = None,
     incorporated places; useful for upstream-authority codify e.g. when
     a city's code governs coastal county beaches via MOU).
 
-    Uses psycopg2 directly because PostgREST can't easily do the spatial
-    EXISTS sub-query.
+    Uses a direct DB connection because PostgREST can't easily do the
+    spatial EXISTS sub-query.
     """
-    import psycopg2
-    pooler = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-    pp = urllib.parse.urlparse(pooler)
-    conn = psycopg2.connect(
-        host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ["SUPABASE_DB_PASSWORD"],
-        dbname=(pp.path or "/postgres").lstrip("/"), sslmode="require",
-    )
+    conn = connect()
     sql = """
         SELECT j.name
         FROM public.jurisdictions j
@@ -2977,16 +2971,8 @@ This rescue queue included: {sorted(eligible_outcomes)}
 # Replaces hand-SQL with `--state-agency-rule` CLI flag.
 
 def _connect_pg():
-    """Open a psycopg2 connection using the same pooler URL pattern as
-    list_state_jurisdictions."""
-    import psycopg2
-    pooler = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
-    pp = urllib.parse.urlparse(pooler)
-    return psycopg2.connect(
-        host=pp.hostname, port=pp.port or 5432, user=pp.username,
-        password=os.environ["SUPABASE_DB_PASSWORD"],
-        dbname=(pp.path or "/postgres").lstrip("/"), sslmode="require",
-    )
+    """Compatibility shim — defers to common.db.connect."""
+    return connect()
 
 
 def lookup_agency_id(name: str, agency_type: str) -> int | None:

@@ -224,37 +224,13 @@ PHASES = [
             "                 where source='osm_dog_features' and state=$STATE), false)",
         'criterion_text': "external_source_status['osm_dog_features', state] in (ok, skipped)",
     },
-    # PIP-prelaunch — populate beach_polygon_membership for the state.
-    # Per docs/pip_prelaunch_spec.md. Refactored RPC asserts indices
-    # exist + state-filters every polygon kind; per-fid ~1.1s on WA.
-    # Must run AFTER ensure_pad_us (needs polygons loaded) and BEFORE
-    # codify_cascade (which reads PIP via codify_federal_coverage).
-    {
-        'key': 'ensure_pip_membership',
-        'kind': 'python',
-        'action': 'ensure_pip_membership',
-        'criterion':
-            # Every active beach in the state has ≥1 polygon_membership row.
-            # (PAD-US has near-universal coverage in MVP+ states.)
-            "select coalesce("
-            "  (select count(*) filter (where exists ("
-            "         select 1 from public.beach_polygon_membership m "
-            "          where m.gold_fid = g.fid)) "
-            "        = count(*) "
-            "    from public.beaches_gold g "
-            "   where g.state = $STATE and g.is_active and g.geom is not null), "
-            "  false)",
-        'criterion_text':
-            'every active beach in state has ≥1 beach_polygon_membership row',
-        'progress_sql':
-            "with t as (select count(*)::int n from public.beaches_gold "
-            "             where state=$STATE and is_active and geom is not null), "
-            "     d as (select count(*)::int n from public.beaches_gold g "
-            "             where g.state=$STATE and g.is_active and g.geom is not null "
-            "               and exists (select 1 from public.beach_polygon_membership m "
-            "                             where m.gold_fid = g.fid)) "
-            "select d.n done, t.n total from d, t",
-    },
+    # NOTE: ensure_pip_membership USED to be here (between ensure_dog_features
+    # and precheck). Moved 2026-05-23 LATE (gap #26) to AFTER promote +
+    # beach_inventory_check — see below. The old position evaluated against
+    # empty beaches_gold for virgin states (membership criterion trivially
+    # passed with `count=0 = count=0`), leaving beach_polygon_membership
+    # silently empty for any state whose codify needs PIP.
+    #
     # precheck moved here from phase #1: now serves as the final sanity
     # check that all loaders above succeeded. With the ensure_* phases
     # auto-running missing loaders, precheck is now belt-and-suspenders
@@ -378,6 +354,48 @@ PHASES = [
         'criterion_text': 'beaches_gold has ≥1 active beach for state '
                           '(if 0 here: load/promote chain produced nothing — '
                           'check upstream loaders, arena_seed, promote)',
+    },
+    # PIP-prelaunch — populate beach_polygon_membership for the state.
+    # Per docs/pip_prelaunch_spec.md. Refactored RPC asserts indices
+    # exist + state-filters every polygon kind; per-fid ~1.1s on WA.
+    #
+    # 2026-05-23 LATE (gap #26): moved from pre-precheck (was phase 11)
+    # to here, AFTER promote + beach_inventory_check. The pre-promote
+    # position ran against an empty beaches_gold on virgin states, so
+    # the action looped over 0 fids and the criterion (`count of fids
+    # with membership == count of all fids`) trivially passed at 0=0.
+    # Result: states whose codify_cascade reads PIP (federal land
+    # managers, state parks) silently launched with empty
+    # beach_polygon_membership.
+    #
+    # New constraint: must run AFTER promote (needs beaches in
+    # beaches_gold) and BEFORE codify_cascade (which reads PIP via
+    # codify_federal_coverage).
+    {
+        'key': 'ensure_pip_membership',
+        'kind': 'python',
+        'action': 'ensure_pip_membership',
+        'criterion':
+            # Every active beach in the state has ≥1 polygon_membership row.
+            # (PAD-US has near-universal coverage in MVP+ states.)
+            "select coalesce("
+            "  (select count(*) filter (where exists ("
+            "         select 1 from public.beach_polygon_membership m "
+            "          where m.gold_fid = g.fid)) "
+            "        = count(*) "
+            "    from public.beaches_gold g "
+            "   where g.state = $STATE and g.is_active and g.geom is not null), "
+            "  false)",
+        'criterion_text':
+            'every active beach in state has ≥1 beach_polygon_membership row',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beaches_gold "
+            "             where state=$STATE and is_active and geom is not null), "
+            "     d as (select count(*)::int n from public.beaches_gold g "
+            "             where g.state=$STATE and g.is_active and g.geom is not null "
+            "               and exists (select 1 from public.beach_polygon_membership m "
+            "                             where m.gold_fid = g.fid)) "
+            "select d.n done, t.n total from d, t",
     },
     {
         # validate_state_geom — guard against county_fips/geom mismatch.
@@ -1484,6 +1502,44 @@ def _run_subprocess(cmd: list[str], timeout: int = 14400) -> tuple[int, str, str
     return rc, ''.join(out_lines), ''.join(err_lines)
 
 
+def _scan_subprocess_output_for_silent_failure(out: str, name: str = 'subprocess') -> list[str]:
+    """Generic silent-failure detector for subprocess stdout.
+
+    Returns a list of failure-summary strings (empty list = clean). Callers
+    that got rc=0 from a subprocess should run this on stdout and treat any
+    non-empty result as a real failure.
+
+    Per gap #27 (2026-05-23 LATE), lifted from gap #22's per-action scan
+    in action_state_photo_galleries so the 6 _ensure_* actions + any
+    future subprocess-calling action all get the same protection.
+
+    Patterns checked (LCD across all loaders):
+      [INSERT FAIL]   — explicit per-row failure marker most loaders use
+      FAIL:           — generic failure marker
+      Traceback       — uncaught Python exception that the script may
+                        have logged via try/except but not raised on
+
+    Source-specific patterns (e.g. state_photo_galleries' discover/insert
+    mismatch) stay in the per-action code — those don't apply to all
+    subprocesses and false-positive elsewhere.
+    """
+    out = out or ''
+    failures = []
+    insert_fail = out.count('[INSERT FAIL]') + out.count(' FAIL:')
+    if insert_fail > 0:
+        failures.append(
+            f'{name}: {insert_fail} explicit failure markers in stdout '
+            f'([INSERT FAIL] / FAIL:) — loader logged per-row failures'
+        )
+    if 'Traceback (most recent call last):' in out:
+        n = out.count('Traceback (most recent call last):')
+        failures.append(
+            f'{name}: {n} Python traceback(s) in stdout '
+            f'(uncaught/logged exception)'
+        )
+    return failures
+
+
 def _ping_or_reconnect(conn):
     """Return a live conn. Long SQL passes (30-min statement_timeout) sit
     behind pgbouncer's idle timeout; the held psycopg2 conn dies silently.
@@ -1533,6 +1589,13 @@ def _ensure_loader(state: str, source: str, script_name: str,
     rc, out, err = _run_subprocess(cmd, timeout=timeout)
     if rc != 0:
         raise RuntimeError(f'{script_name} exit {rc}: {err[-500:]}')
+    # Gap #27: silent-failure detection (rc=0 but stdout has FAILs / tracebacks)
+    silent = _scan_subprocess_output_for_silent_failure(out, name=script_name)
+    if silent:
+        raise RuntimeError(
+            f'{script_name} exited rc=0 but stdout revealed silent failures:\n  - '
+            + '\n  - '.join(silent)
+        )
     return 1
 
 
@@ -1649,6 +1712,13 @@ def action_ensure_pad_us(state: str) -> int:
     )
     if rc != 0:
         raise RuntimeError(f'load_pad_us_state.py exit {rc}: {err[-500:]}')
+    # Gap #27: silent-failure detection
+    silent = _scan_subprocess_output_for_silent_failure(out, name='load_pad_us_state.py')
+    if silent:
+        raise RuntimeError(
+            f'load_pad_us_state.py exited rc=0 but stdout revealed silent failures:\n  - '
+            + '\n  - '.join(silent)
+        )
 
     # Write success row to external_source_status (loader doesn't do this itself)
     with open_conn() as c, c.cursor() as cur:
@@ -2237,20 +2307,17 @@ def action_state_photo_galleries(state: str) -> int:
             continue
         rows = _parse_photos_saved(out) if out else 0
 
-        # Silent-failure detection (gap #22, 2026-05-23 LATE): subprocess
-        # returned rc=0 but the output reveals real errors. Two signals:
-        #   (1) "[INSERT FAIL]" or "FAIL:" patterns — explicit per-row errors
-        #   (2) "unique photos found: N" with N>0 AND "rows inserted: 0" —
-        #       discover/insert mismatch (FK violation, schema drift, etc.)
+        # Silent-failure detection (gap #22 → gap #27 helper 2026-05-23 LATE):
+        # subprocess returned rc=0 but the output reveals real errors.
+        # Generic patterns ([INSERT FAIL] / FAIL: / Traceback) go through
+        # the shared helper. State-parks-specific discover/insert mismatch
+        # stays here (specific to this loader family's output format).
+        silent_failures.extend(_scan_subprocess_output_for_silent_failure(out, name=name))
         out_for_scan = out or ''
-        insert_fail_count = out_for_scan.count('[INSERT FAIL]') + out_for_scan.count('INSERT FAIL]')
         m_found    = re.search(r'unique photos found:\s+(\d+)', out_for_scan)
         m_inserted = re.search(r'rows inserted:\s+(\d+)', out_for_scan)
         n_found    = int(m_found.group(1))    if m_found    else 0
         n_inserted = int(m_inserted.group(1)) if m_inserted else 0
-        if insert_fail_count > 0:
-            silent_failures.append(f'{name}: {insert_fail_count} INSERT FAILs in stdout '
-                                   f'(rc=0 but loader explicitly logged failures)')
         if n_found > 0 and n_inserted == 0:
             silent_failures.append(f'{name}: found {n_found} photos but inserted 0 '
                                    f'(discover/insert mismatch — likely FK or schema)')

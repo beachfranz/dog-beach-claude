@@ -1792,9 +1792,21 @@ def _parse_photos_tagged(out: str) -> int:
 
 
 def _parse_auto_curated(out: str) -> int:
-    """Parse `selected (auto-curated): N` line from auto_curate.py.
-    Counts beaches whose photos got curated (0 = hollow run on subset)."""
-    m = re.search(r'selected \(auto-curated\):\s+(\d+)', out)
+    """Parse auto_curate.py SUMMARY → return WORK ATTEMPTED.
+
+    Originally counted `selected (auto-curated): N` only — but that's
+    "work completed", which misclassifies legitimate no-op runs as
+    hollow. Refined 2026-05-23 LATE (gap #25): use `beaches processed:
+    N` instead. If the action ran on ≥1 beach and decided none had
+    curatable photos / all were already fresh / all were human-owned,
+    that's a real signal — not a hollow subset.
+
+    Hollow halt should fire only when the action didn't process anything
+    at all (e.g. --limit picked fids with no entries in scope at all).
+    "Processed 5, selected 0" = action worked correctly + nothing more
+    to do. "Processed 0" = subset misalignment.
+    """
+    m = re.search(r'beaches processed:\s+(\d+)', out)
     return int(m.group(1)) if m else 0
 
 

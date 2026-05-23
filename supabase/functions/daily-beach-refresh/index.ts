@@ -460,11 +460,36 @@ async function processBeach(
   // g. Upsert hourly rows.
   // tideFromCache=true means we used cached tides; don't bump tide_refreshed_at
   // on these rows (preserves the original fetch timestamp).
+  //
+  // Self-healing fid-drift handling (gap #37 / #185, 2026-05-23): the
+  // scoring tables have a redundant partial unique on (location_id,
+  // forecast_ts) alongside the PK on (arena_group_id, forecast_ts).
+  // When the pipeline's promote phase re-fids a beach (e.g. GNIS
+  // ingestion creates a new fid for an existing location), old rows
+  // under the OLD arena_group_id but SAME location_id strand. ON
+  // CONFLICT (arena_group_id, forecast_ts) misses them; the upsert
+  // falls through to INSERT; the partial unique fires; refresh fails.
+  // Fix: delete by location_id first within this forecast window, so
+  // any orphans from prior fids get cleared before the fresh insert.
+  // Idempotent and safe — every row deleted is about to be re-inserted.
   const dates = [...new Set(scoredHours.map((h) => h.localDate))].sort();
   try {
     const hourlyRows = scoredHours.map((h) =>
       buildHourlyRow(h, beach, config, h.hourText, runAt, tideFromCache)
     );
+    // Clear any pre-existing rows for this location in the forecast window
+    // (handles fid-drift orphans + simple replace-on-rerun semantics).
+    if (hourlyRows.length > 0) {
+      const minTs = hourlyRows[0].forecast_ts;
+      const maxTs = hourlyRows[hourlyRows.length - 1].forecast_ts;
+      const { error: delErr } = await supabase
+        .from("beach_day_hourly_scores")
+        .delete()
+        .eq("location_id", beach.location_id)
+        .gte("forecast_ts", minTs)
+        .lte("forecast_ts", maxTs);
+      if (delErr) throw new Error(`hourly clear failed: ${delErr.message}`);
+    }
     for (let i = 0; i < hourlyRows.length; i += 100) {
       const { error } = await supabase
         .from("beach_day_hourly_scores")
@@ -479,7 +504,7 @@ async function processBeach(
     return { locationId: beach.location_id, ok: false, error: String(err), phases };
   }
 
-  // h. Upsert daily rows
+  // h. Upsert daily rows — same fid-drift handling as hourly.
   try {
     const dailyRows = dates.map((date) => {
       const dayHours     = scoredHours.filter((h) => h.localDate === date);
@@ -489,6 +514,14 @@ async function processBeach(
       console.log(`[${beach.location_id}] ${date}: 72h=${recentPrecip.precip72hMm}mm → ${bacteriaRisk}`);
       return buildDailyRow(beach, date, dayHours, window, config, runAt, recentPrecip, bacteriaRisk);
     });
+    if (dailyRows.length > 0) {
+      const { error: delErr } = await supabase
+        .from("beach_day_recommendations")
+        .delete()
+        .eq("location_id", beach.location_id)
+        .in("local_date", dates);
+      if (delErr) throw new Error(`daily clear failed: ${delErr.message}`);
+    }
     const { error } = await supabase
       .from("beach_day_recommendations")
       .upsert(dailyRows, { onConflict: "arena_group_id,local_date" });

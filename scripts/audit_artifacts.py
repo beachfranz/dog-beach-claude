@@ -75,6 +75,9 @@ ACTIVE_EDGE_FNS = {
     "admin-update-beach-dog-policy", "admin-update-beach", "admin-update-beach-amenities",
     "admin-update-beaches-gold", "admin-move-beach-point", "admin-update-off-leash-beach",
     "send-daily-alerts",
+    # Tier 3 audit (2026-05-23 EVENING) — admin curator UI edge fns:
+    "admin-review-auto-polygon", "admin-save-truth-polygon",
+    "admin-list-gold-candidates", "admin-save-gold-truth",
 }
 
 # HTML pages currently linked from CLAUDE.md or part of the consumer surface
@@ -114,6 +117,12 @@ ACTIVE_FUNCTIONS = {
     "tg_promote_dogs_chain", "tg_auto_scoreable_socal_gold",
     "tg_backfill_scoring_metadata_for_socal",
     "tg_recompute_scoreable_on_dog_policy",
+    # Tier 3 audit (2026-05-23 EVENING) — populators feeding active sources:
+    "populate_from_research_gold",
+    "populate_from_park_url_gold", "populate_from_park_url_governance_gold",
+    "_emit_evidence_from_park_url_hours",
+    "_emit_evidence_from_park_url_parking",
+    "_emit_evidence_from_park_url_raw_amenities",
 }
 
 # Tables that are CANONICAL data sources — always considered active even if
@@ -162,6 +171,12 @@ ACTIVE_DATA_TABLES = {
     # Beach metadata (referenced by detail.html and beach-chat):
     "beach_descriptions", "beach_advisory", "beach_marine_forecast",
     "beach_wikipedia", "beach_section_hour_status",
+    # Tier 3 audit (2026-05-23 EVENING) — verified false-positive orphans:
+    "park_url_extractions",           # active in 5 populators (build_beach_evidence chain)
+    "policy_research_extractions",    # populate_from_research_gold; ~12% of CA tier-1+2
+    "beach_polygons_auto_extracted",  # admin/auto-polygon-review.html curator workflow
+    "beach_polygons_truth",           # curator-save companion (empty but wired)
+    "beach_policy_gold_set",          # gold-set v3 curator backing data
 }
 
 # Tables/functions explicitly known to be LEGACY (parity-only or superseded)

@@ -943,23 +943,46 @@ PHASES = [
         'kind': 'python',
         'action': 'photos_tag',
         'criterion':
-            # Pass: at least $PHOTOS_TAG_PCT of MVP+ beaches have at least
-            # one tagged photo. Launch-mode gate (state-launch 60% /
-            # steady-state 80%) — rural/private beaches legitimately have
-            # no Flickr photos; hard 80% halts every new state on day 1.
-            "select (count(*) filter (where exists ("
-            "          select 1 from public.beach_photos bp "
-            "           where bp.arena_group_id = g.fid "
-            "             and (bp.source_meta ? 'vision' "
-            "                  or bp.source_meta->'vision' is not null))) "
-            "        >= floor(count(*) * $PHOTOS_TAG_PCT))::boolean "
-            "from public.beaches_gold g "
-            "join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
-            "where g.state=$STATE and g.is_active "
-            "  and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
-            "      in ('1_off-leash','2_on-leash')",
-        'criterion_text': 'at least 80% (steady-state) / 60% (state-launch) of MVP+ beaches '
-                          'have at least one vision-tagged photo',
+            # Path 1: at least $PHOTOS_TAG_PCT of MVP+ beaches have at
+            # least one tagged photo. Launch-mode gate (state-launch 60%
+            # / steady-state 80%) — rural/private beaches legitimately
+            # have no Flickr photos.
+            #
+            # Path 2 (gap #35, 2026-05-23 LATE): tagger has nothing left
+            # to do — i.e., every photo attached to an MVP+ beach in this
+            # state is EITHER already vision-tagged OR explicitly skipped
+            # (source_meta.v3_skipped='true'). DE-style states with
+            # Cloudflare-blocked sources (gap #24 → destateparks photos
+            # pre-marked v3_skipped) can never achieve the 60% coverage
+            # gate when most of their photo pool is blocked; the OR-path
+            # accepts "all-possible-work-done" as a legitimate pass.
+            "select ("
+            "  (select count(*) filter (where exists ("
+            "            select 1 from public.beach_photos bp "
+            "             where bp.arena_group_id = g.fid "
+            "               and (bp.source_meta ? 'vision' "
+            "                    or bp.source_meta->'vision' is not null))) "
+            "          >= floor(count(*) * $PHOTOS_TAG_PCT) "
+            "   from public.beaches_gold g "
+            "   join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
+            "   where g.state=$STATE and g.is_active "
+            "     and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "         in ('1_off-leash','2_on-leash')) "
+            "  OR "
+            "  NOT EXISTS ( "
+            "    select 1 from public.beach_photos bp "
+            "    join public.beaches_gold g on g.fid = bp.arena_group_id "
+            "    join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
+            "    where g.state=$STATE and g.is_active "
+            "      and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "          in ('1_off-leash','2_on-leash') "
+            "      and coalesce(bp.source_meta->>'v3_skipped', 'false') != 'true' "
+            "      and bp.source_meta->'vision' is null) "
+            ")::boolean",
+        'criterion_text':
+            'at least 80% (steady-state) / 60% (state-launch) of MVP+ beaches have '
+            'tagged photo OR tagger has nothing left to do (every photo either tagged '
+            'or v3_skipped)',
         'progress_sql':
             "with t as (select count(*)::int n from public.beaches_gold g "
             "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "

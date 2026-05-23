@@ -141,7 +141,7 @@ class NhspLoader(StateParksLoader):
     state_code = "NH"
     source_name = "nhstateparks"
     attribution = "New Hampshire State Parks"
-    sort_order_base = 60   # state-parks tier (matches destateparks band)
+    sort_order_base = 20   # state-parks tier (matches CDPR/WSPRC/OPRD band per Franz 2026-05-23 LATE)
     polygon_filter = {"mng_type": "STAT"}  # PAD-US state lands only
     license = "fair-use"
     # NH park names follow simple suffixes; nothing extra beyond the

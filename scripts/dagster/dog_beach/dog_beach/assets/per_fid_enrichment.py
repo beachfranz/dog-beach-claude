@@ -343,7 +343,7 @@ def harvest_park_text(
     subproc: SubprocessResource,
 ) -> MaterializeResult:
     state = context.partition_key
-    if state not in ("OR", "WA"):
+    if state not in ("CA", "OR", "WA"):
         context.log.info(f"[{state}] no leaf-URL harvester wired — skip")
         return MaterializeResult(
             metadata={"state": state, "skipped": True}

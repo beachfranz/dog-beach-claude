@@ -48,7 +48,7 @@ import psycopg2.extras
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
-from scripts.loaders._base import BROWSER_HEADERS
+from scripts.loaders._base import BROWSER_HEADERS, ParkInfo
 from scripts.loaders.oprd import OprdLoader
 from scripts.loaders.wsprc import WsprcLoader
 
@@ -84,6 +84,9 @@ MIN_USEFUL_CHARS = 500
 FETCH_TIMEOUT_S = 30.0
 
 LOADERS = {"OR": OprdLoader, "WA": WsprcLoader}
+# CA uses a different code path — see discover_ca_parks(). cpad_units
+# carries park_url directly, so no master-list discovery step is needed;
+# polygon-via-membership joins beaches_gold MVP+ to cpad_units in one SQL.
 
 
 def pick_main_content(soup: BeautifulSoup):
@@ -121,6 +124,12 @@ def fetch_and_clean(url: str) -> tuple[int | None, str]:
     strip_chrome(soup)
     content = pick_main_content(soup)
     text = " ".join(content.get_text(separator=" ", strip=True).split())
+    # PG rejects  in text columns (22P05). Strip null bytes and
+    # other control chars (except common whitespace). Bare \x00 shows up
+    # in some CMS-rendered HTML and survives the BS4 .get_text() pass.
+    text = "".join(ch for ch in text
+                   if ch in "\t\n\r" or 0x20 <= ord(ch) < 0xD800
+                                       or 0xE000 <= ord(ch))
     if len(text) < MIN_USEFUL_CHARS:
         return r.status_code, ""
     return r.status_code, text[:RAW_TEXT_CAP]
@@ -165,21 +174,80 @@ def upsert(fid: int, url: str, http_status: int | None, raw_text: str,
         return False
 
 
+def discover_ca_parks(pg) -> dict[str, ParkInfo]:
+    """CA: iterate cpad_units with park_url; resolve fids via
+    beach_polygon_membership. Returns {cpad_unit_id: ParkInfo(..., fids)}.
+
+    Mirrors OPRD/WSPRC's discover_parks() + resolve_park_polygons()
+    contract — one entry per park (cpad_unit), fids already populated.
+
+    Unlike OR/WA, CA's CPAD candidate matching already produces ~41%
+    coverage via beach_cpad_candidates + park_url_scrape_queue. This
+    path picks up the ~19 stranded MVP+ beaches that sit in a CPAD
+    polygon via beach_polygon_membership but were added to beaches_gold
+    after the older beach_cpad_candidates table was last refreshed.
+
+    Filters:
+      - park_url must look like an http(s) page (not a PDF or pure path)
+      - cpad_unit must contain ≥1 active MVP+ CA beach
+    """
+    sql = """
+        SELECT c.unit_id, c.unit_name, c.park_url,
+               array_agg(DISTINCT bpm.gold_fid ORDER BY bpm.gold_fid) AS fids
+          FROM public.cpad_units c
+          JOIN public.beach_polygon_membership bpm
+            ON bpm.polygon_kind = 'cpad_unit'
+           AND bpm.polygon_id   = c.unit_id::text
+          JOIN public.beaches_gold g
+            ON g.fid = bpm.gold_fid
+         WHERE g.state = 'CA' AND g.is_active
+           AND g.scoring_tier IN ('daily','hourly')
+           AND c.park_url IS NOT NULL
+           AND c.park_url ~* '^https?://'
+           AND c.park_url !~* '\\.pdf(\\?|$)'
+         GROUP BY c.unit_id, c.unit_name, c.park_url
+    """
+    out: dict[str, ParkInfo] = {}
+    with pg.cursor() as cur:
+        cur.execute(sql)
+        for unit_id, unit_name, park_url, fids in cur.fetchall():
+            key = f"cpad_{unit_id}"
+            out[key] = ParkInfo(
+                key=key,
+                name=unit_name or f"cpad_unit_{unit_id}",
+                url=park_url,
+                fids=list(fids or []),
+                meta={"cpad_unit_id": unit_id, "polygon_kind": "cpad_unit"},
+            )
+    return out
+
+
 def fid_skip_set(pg, state: str, skip_days: int) -> set[int]:
-    """Return fids that already have a fresh leaf_page_harvest row.
-    Within --skip-if-fresh-within days. Idempotent re-runs are free."""
+    """Return fids (beaches_gold.fid keyspace) that already have
+    substantive park_url text — any extraction_type — within
+    skip_days. Joins via arena_group_id (canonical beaches_gold.fid)
+    so legacy CA rows (where p.fid is locations_stage.fid) still count
+    as "covered" if their arena_group_id matches.
+
+    Substantive = extraction_status='success' AND raw_text length ≥ 200
+    (matches the audit definition of "has grounding text"). Idempotent
+    re-runs are free; cross-pipeline rows (e.g. CA legacy + new
+    leaf_page_harvest) are honored.
+    """
     if skip_days <= 0:
         return set()
     with pg.cursor() as cur:
         cur.execute(
             """
-            SELECT DISTINCT p.fid
-              FROM public.park_url_extractions p
-              JOIN public.beaches_gold g ON g.fid = p.fid
+            SELECT DISTINCT g.fid
+              FROM public.beaches_gold g
+              JOIN public.park_url_extractions p
+                ON p.arena_group_id = g.fid
              WHERE g.state = %s AND g.is_active
-               AND p.extraction_type = 'leaf_page_harvest'
                AND p.scraped_at > now() - (%s::int || ' days')::interval
                AND p.extraction_status = 'success'
+               AND p.raw_text IS NOT NULL
+               AND length(p.raw_text) >= 200
             """,
             (state, skip_days),
         )
@@ -188,9 +256,12 @@ def fid_skip_set(pg, state: str, skip_days: int) -> set[int]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--state", required=True, choices=sorted(LOADERS.keys()),
-                    help="State code (OR or WA). CA harvested by "
-                         "extract_from_park_url.py via park_url_scrape_queue.")
+    ap.add_argument("--state", required=True,
+                    choices=sorted(set(LOADERS.keys()) | {"CA"}),
+                    help="State code (CA / OR / WA). CA uses CPAD-driven "
+                         "polygon-via-membership; OR/WA use the matching "
+                         "StateParksLoader (OPRD / WSPRC). Picks up the "
+                         "stranded set the older pipelines missed.")
     ap.add_argument("--workers", type=int, default=4,
                     help="Parallel page fetches. Default 4 — pacing.")
     ap.add_argument("--limit", type=int, default=0,
@@ -206,33 +277,42 @@ def main() -> int:
     args = ap.parse_args()
 
     state = args.state
-    cls = LOADERS[state]
-    loader = cls()
     skip_days = 0 if args.refresh else args.skip_if_fresh_within
 
     pg = psycopg2.connect(**PG)
     try:
-        # 1. Discover parks (state-park-system master list)
-        with loader.http_session() as http:
-            parks_raw = loader.discover_parks(http)
-        if not parks_raw:
-            print(f"[{state}] discover_parks returned 0 parks", file=sys.stderr)
-            return 1
-        print(f"[{state}] {len(parks_raw)} parks discovered")
+        if state == "CA":
+            # CA path — cpad_units.park_url is the leaf URL; no master-list
+            # discovery needed. One SQL gets {cpad_unit: ParkInfo(fids)}.
+            parks = discover_ca_parks(pg)
+            if not parks:
+                print(f"[{state}] no CPAD candidate parks found", file=sys.stderr)
+                return 1
+            print(f"[{state}] {len(parks)} cpad_units with park_url + "
+                  f"≥1 MVP+ beach (carrying "
+                  f"{sum(len(p.fids) for p in parks.values())} (beach,url) pairs)")
+        else:
+            # OR/WA — master-list discovery + name-match to PAD-US polygons.
+            cls = LOADERS[state]
+            loader = cls()
+            with loader.http_session() as http:
+                parks_raw = loader.discover_parks(http)
+            if not parks_raw:
+                print(f"[{state}] discover_parks returned 0 parks", file=sys.stderr)
+                return 1
+            print(f"[{state}] {len(parks_raw)} parks discovered")
 
-        # 2. State PAD-US polygons containing ≥1 scoreable beach
-        polygons = loader.get_state_polygons(pg)
-        print(f"[{state}] {len(polygons)} pad_us polygons containing scoreable beaches")
+            polygons = loader.get_state_polygons(pg)
+            print(f"[{state}] {len(polygons)} pad_us polygons containing scoreable beaches")
 
-        # 3. Match parks → polygons (name match + token-subset fallback)
-        parks = loader.resolve_park_polygons(parks_raw, polygons)
-        if not parks:
-            print(f"[{state}] resolve_park_polygons matched 0 parks "
-                  f"against polygons — name normalization mismatch?",
-                  file=sys.stderr)
-            return 1
-        print(f"[{state}] {len(parks)} parks matched to polygons "
-              f"(carrying {sum(len(p.fids) for p in parks.values())} beach fids)")
+            parks = loader.resolve_park_polygons(parks_raw, polygons)
+            if not parks:
+                print(f"[{state}] resolve_park_polygons matched 0 parks "
+                      f"against polygons — name normalization mismatch?",
+                      file=sys.stderr)
+                return 1
+            print(f"[{state}] {len(parks)} parks matched to polygons "
+                  f"(carrying {sum(len(p.fids) for p in parks.values())} beach fids)")
 
         # 4. Freshness skip
         skip_fids = fid_skip_set(pg, state, skip_days)

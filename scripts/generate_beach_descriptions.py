@@ -56,6 +56,7 @@ REQUIRED:
    **Multi-region.** When `zones` has 2+ entries with different `zone` names AND different rules, name each region and its rule ("The undeveloped beach + dunes are off-leash; the designated swim beach bans dogs; developed lawns require leash"). Paraphrase jargon ("Director-designated off-leash areas" → "the designated off-leash zone"). Skip if all zones share the same rule.
 2. From `verified_physical_features`, drop AT MOST TWO features naturally ("backed by coastal bluffs", "at the mouth of Aliso Creek"). Two only when they read as one connected thought. Never enumerate three.
 3. **`source_pages` = authoritative grounding** for named features, locations, specific facts. Paraphrase in Scout's voice; never verbatim. **Scope guard:** if the page describes a CONTAINING area (park / preserve), use ONLY for geographic context ("inside [Park]"). Don't attribute its size, mileage, or named features to THIS beach. If source contradicts `zones`, TRUST `zones`.
+3a. **`operator_summaries` = jurisdictional rule grounding** — each entry is a short prose summary of one governing operator's dog-policy (city/county/state/federal/special-district), pulled from that operator's authoritative source. Use ONLY when the summary names THIS beach specifically OR describes a constraint already reflected in `zones` (e.g. "off-leash unless near snowy plover Mar 15–Sep 15"). Paraphrase in Scout's voice, never quote. **Hard floor:** if `zones` already states the rule, `operator_summary` adds nothing — silent. If summaries name OTHER beaches in the jurisdiction (e.g. "no dogs at McNears Beach"), that's context for the surrounding area, not this beach — usable only via bullet #10 (adjacent no-dog beach). NEVER cite code numbers, statute references, or operator names ("per SLO County Code Title 9" — banned).
 3b. **`photo_descriptions` = visual feature mine** (top-3 curated photos' AI-generated prose). EXTRACT durable VISUAL CHARACTER only: NAMED off-site landmarks ("Golden Gate Bridge in the distance"), distinctive vegetation (**named** species or types: "sea grass", "palm trees", "eucalyptus", "ice plant"), specific geological character ("white chalk cliffs", "basalt sea stacks"), geographic context ("hills across the water"), and descriptive color for amenities that are ALREADY in `amenities.present` ("fire pits in brick enclosures" only if `has_fire_pits=true`).
    **Specificity threshold — HARD:** generic descriptors are filler, not character. SKIP "green vegetation", "trees", "plants", "shrubs", "bushes", "groundcover", "structure", "buildings", "a bridge" (unnamed), "rocks" (without "basalt" / "granite" / "sandstone"). If the photo prose doesn't name what it sees, neither do you.
    **Fixed-features vs services boundary:** photos MAY confirm durable on-site FIXED FEATURES even when our amenities schema doesn't carry them — playgrounds, gazebos, BBQ pits, picnic shelters, observation decks, fishing piers, named monuments, kayak racks. Our amenities catalog is incomplete and photos are evidence. But photos do NOT confirm STATEFUL services (lifeguards on duty, water-quality status, dog-bag dispensers stocked, restroom open/closed) — those need operational confirmation. So: photo of a playground → mention it; photo of a lifeguard tower → DO NOT claim "lifeguards on duty" (use bullet 6 if `has_lifeguards=true`, silent otherwise).
@@ -426,6 +427,26 @@ def build_inputs(fid: int, include_photos: bool = True) -> dict | None:
         "raw_text_excerpt": (p.get("raw_text") or "")[:3000],
     } for p in pue if (p.get("description") or p.get("raw_text"))]
 
+    # Operator summaries — jurisdictional rule context (e.g. "Cape Lookout
+    # off-leash unless near snowy plover nesting Mar 15–Sep 15"). Walks
+    # beach_operator_summaries view (BEP → operators → operator_dogs_policy).
+    # Top-6 by BEP confidence; each summary is typically 100-400 chars.
+    # Gap 3 per project_deferred_description_text_reservoir.md.
+    bos = supa("/rest/v1/beach_operator_summaries", params={
+        "select": "operator_name,operator_level,operator_summary,bep_source",
+        "arena_group_id": f"eq.{fid}",
+        "order": "bep_confidence.desc.nullslast",
+        "limit": "6",
+    }) or []
+    operator_summaries = [{
+        "operator": r.get("operator_name"),
+        "level": r.get("operator_level"),
+        "summary": r.get("operator_summary"),
+        "source": r.get("bep_source"),
+    } for r in bos
+        if r.get("operator_summary")
+        and len(r["operator_summary"]) >= 80]
+
     return {
         "name": g.get("display_name_override") or g["name"],
         "location": ", ".join(filter(None, [g.get("county_name"), g.get("state")])),
@@ -440,6 +461,7 @@ def build_inputs(fid: int, include_photos: bool = True) -> dict | None:
         "nearby_dog_friendly_pois": dog_friendly_pois,
         "osm_notes": osm_notes,
         "source_pages": source_pages,
+        "operator_summaries": operator_summaries,
         "photo_descriptions": photo_descriptions,
     }
 

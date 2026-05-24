@@ -21,7 +21,9 @@ Usage
 from __future__ import annotations
 
 import os
+import random
 import threading
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -50,8 +52,28 @@ def connect(**overrides):
 
     Pass overrides to merge into PG_KWARGS (e.g., `connect(application_name='my_script')`).
     Caller owns the connection — commit/rollback/close as appropriate.
+
+    Retries on EMAXCONNSESSION (Supabase pooler session-mode pool ceiling,
+    pool_size=15) with bounded exponential backoff + jitter. Diagnosed
+    2026-05-23 EVENING — Dagster state_launch_job for NH fired enough
+    parallel subprocess assets to exhaust the pool, three steps failed
+    with EMAXCONNSESSION. Pool entries free as parallel scripts finish,
+    so a short retry resolves the race without changing job config.
     """
-    return psycopg2.connect(**{**PG_KWARGS, **overrides})
+    kwargs = {**PG_KWARGS, **overrides}
+    delays = [1.0, 2.0, 4.0, 8.0, 16.0]
+    for attempt, base in enumerate(delays):
+        try:
+            return psycopg2.connect(**kwargs)
+        except psycopg2.OperationalError as e:
+            msg = str(e)
+            if "EMAXCONNSESSION" in msg or "max clients reached" in msg:
+                if attempt == len(delays) - 1:
+                    raise
+                time.sleep(base + random.uniform(0, base))
+                continue
+            raise
+    raise RuntimeError("unreachable")
 
 
 _TLS = threading.local()

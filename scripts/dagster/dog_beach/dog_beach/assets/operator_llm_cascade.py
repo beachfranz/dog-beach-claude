@@ -194,9 +194,11 @@ def operator_llm_extract_for_state(
         t_chunk = _time.time()
         result = subproc.run(
             "scripts/extract_operator_dogs_policy.py",
-            # 2026-05-14: --skip-recent is in DAYS (not hours — was confusing).
-            # 1 day = re-extract any op last touched >24h ago.
-            args=["--ids", ",".join(str(x) for x in chunk), "--skip-recent", "1"],
+            # --skip-recent is in DAYS. 7d matches run_state_pipeline.py
+            # for cost reasons — operator policies change rarely, and
+            # sentinel rows from extract_operator_dogs_policy.py (added
+            # 2026-05-23 EVENING) cache the no-URL outcome.
+            args=["--ids", ",".join(str(x) for x in chunk), "--skip-recent", "7"],
             timeout=600,
         )
         if result.returncode != 0:

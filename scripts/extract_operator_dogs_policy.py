@@ -1019,6 +1019,26 @@ def process_operator(t: dict, dry_run: bool = False, force_url: str | None = Non
     if dry_run:
         return counts
 
+    # No-URL sentinel: when picker rejects every Tavily hit (or there were none),
+    # both a_url and b_url are None. Without writing a row here, the next launch
+    # has no recently_extracted() cache hit and burns the Tavily+Haiku cost again.
+    # Common for defunct agencies, school districts, USACE-operated lakes, and
+    # operators whose name doesn't surface a real policy URL. Discovered
+    # 2026-05-23 EVENING — NH had 23/66 operators in this state, each costing
+    # ~5-15s per run forever. Sentinel uses fetch_status='no_url_found' so
+    # downstream merge_operator_dogs_policy.py treats it as "no signal" (same
+    # as a 404). counts["no_url"] surfaces the count in the per-chunk summary.
+    if a_url is None and b_url is None:
+        try:
+            upsert_extraction(
+                t["id"], "no_url_found", "", None, "no_url_found", 0, {}
+            )
+            counts["no_url"] = counts.get("no_url", 0) + 1
+        except Exception as e:
+            print(f"   [no_url sentinel] upsert error: {e}")
+            counts["errors"] += 1
+        return counts
+
     # Run extraction for each source
     for kind, url, query in [("direct_url", a_url, a_query), ("site_search", b_url, b_query)]:
         if not url:
@@ -1077,7 +1097,7 @@ def main():
         print(f"Skip set: {len(skip_ids)} operators already have rows")
 
     t0 = time.time()
-    totals = {"src_a": 0, "src_b": 0, "errors": 0, "skipped": 0, "skipped_recent": 0}
+    totals = {"src_a": 0, "src_b": 0, "errors": 0, "skipped": 0, "skipped_recent": 0, "no_url": 0}
     for i, op in enumerate(operators, 1):
         op["level"] = op.get("level") or "unknown"
         if op["id"] in skip_ids:

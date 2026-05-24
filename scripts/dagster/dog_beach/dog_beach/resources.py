@@ -123,10 +123,10 @@ class AnthropicResource(ConfigurableResource):
     """Wraps the Anthropic SDK. Used by Phase 26 (operator extract),
     Phase 29 (section_extract), Phase 30 (descriptions).
 
-    Models:
-      claude-haiku-4-5  — fast enum/bool extraction
-      claude-sonnet-4   — 3-pass operator policy extraction
-      claude-sonnet-4-5 — narrative prose generation
+    Models (canonical registry — see scripts/common/llm.py):
+      claude-haiku-4-5  — fast enum/bool extraction (HAIKU)
+      claude-sonnet-4-6 — narrative prose + URL picker (SONNET, latest)
+      claude-opus-4-7   — escalations (OPUS, latest)
     """
     api_key: str
     default_model: str = "claude-haiku-4-5"
@@ -137,14 +137,26 @@ class AnthropicResource(ConfigurableResource):
 
     @staticmethod
     def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:
+        # Prefix-matched so versioned IDs (claude-haiku-4-5-20251001) map
+        # to their family rate without an exact-key miss. Old aliases kept
+        # for backward-compatible cost reports on historical runs.
         rates = {
             # USD per million tokens (input, output) — 2026 pricing
             "claude-haiku-4-5":  (1.00, 5.00),
             "claude-sonnet-4":   (3.00, 15.00),
             "claude-sonnet-4-5": (3.00, 15.00),
+            "claude-sonnet-4-6": (3.00, 15.00),
+            "claude-sonnet-4-7": (3.00, 15.00),
             "claude-opus-4":     (15.00, 75.00),
+            "claude-opus-4-7":   (15.00, 75.00),
         }
-        in_rate, out_rate = rates.get(model, (3.0, 15.0))
+        # Exact match first; then prefix-match (canonical IDs sometimes
+        # carry a -YYYYMMDD suffix that defeats exact lookup).
+        if model in rates:
+            in_rate, out_rate = rates[model]
+        else:
+            match = next((rates[k] for k in rates if model.startswith(k)), None)
+            in_rate, out_rate = match or (3.0, 15.0)
         return (input_tokens / 1_000_000 * in_rate
                 + output_tokens / 1_000_000 * out_rate)
 

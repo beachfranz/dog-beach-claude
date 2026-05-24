@@ -31,6 +31,11 @@ from anthropic import Anthropic
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
+# sys.path bootstrap so `from scripts.common.llm` resolves whether this
+# is invoked as `python scripts/extract_operator.py` or imported.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from scripts.common.llm import SONNET
+
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
 POOLER = (ROOT / "supabase" / ".temp" / "pooler-url").read_text().strip()
@@ -96,7 +101,7 @@ def bs4_strip(html: str) -> str:
 def call_llm(client: Anthropic, page: str) -> dict:
     t0 = time.time()
     resp = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
+        model=SONNET,
         max_tokens=600,
         system="You are extracting a single structured fact from beach webpages. "
                "Always respond with the JSON shape requested, never prose.",
@@ -128,14 +133,14 @@ def register_variant(cur) -> int:
              target_model, active, is_canon, notes)
         VALUES
             ('operator', 'llm_v1', %s, 'structured_json',
-             'claude-sonnet-4-6', true, true,
+             %s, true, true,
              'Day-to-day operator extraction. Closed level enum: city/county/state/federal/private/special_district/tribal/unclear. Added 2026-05-02.')
         ON CONFLICT (field_name, variant_key) DO UPDATE SET
             prompt_template = EXCLUDED.prompt_template,
             active          = true,
             is_canon        = true
         RETURNING id;
-    """, (PROMPT,))
+    """, (PROMPT, SONNET))
     return cur.fetchone()[0]
 
 
@@ -248,7 +253,7 @@ def main() -> int:
         VALUES (%s, %s, %s, %s, 'operator',
                 'llm_extraction', 'llm_v1', %s, %s,
                 %s, %s,
-                'llm_hybrid', %s, 'claude-sonnet-4-6',
+                'llm_hybrid', %s, %s,
                 %s, %s, %s)
         RETURNING id
     """, (
@@ -256,7 +261,7 @@ def main() -> int:
         raw[:6000], parsed_value,
         (obj.get("operator") or {}).get("evidence"),
         parse_ok,
-        run_id,
+        run_id, SONNET,
         resp["input_tokens"], resp["output_tokens"], resp["latency_ms"],
     ))
     new_id = cur.fetchone()[0]

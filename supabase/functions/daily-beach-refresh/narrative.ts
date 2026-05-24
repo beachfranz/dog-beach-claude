@@ -1,6 +1,6 @@
 // narrative.ts
 // Generates plain-language narrative text for beach day recommendations
-// using the Anthropic API (claude-sonnet-4-20250514).
+// using the Anthropic API (claude-sonnet-4-6).
 //
 // Produces four text fields that map directly to beach_day_recommendations:
 //   - day_text:          2-3 sentence day overview
@@ -19,7 +19,7 @@ type TideDirection    = "rising" | "falling" | "steady";
 type BacteriaRisk     = "none" | "low" | "moderate" | "high";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-sonnet-4-20250514";
+const MODEL = "claude-sonnet-4-6";
 const MAX_TOKENS = 1000;
 
 // ─── Input types ──────────────────────────────────────────────────────────────

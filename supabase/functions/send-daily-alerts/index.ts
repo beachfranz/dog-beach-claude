@@ -13,7 +13,7 @@ const TWILIO_FROM_NUMBER   = Deno.env.get("TWILIO_FROM_NUMBER")!;
 const SUPABASE_PUBLIC_URL  = "https://ehlzbwtrsxaaukurekau.supabase.co";
 
 const ANTHROPIC_API_URL    = "https://api.anthropic.com/v1/messages";
-const MODEL                = "claude-sonnet-4-20250514";
+const MODEL                = "claude-sonnet-4-6";
 
 Deno.serve(async (req: Request) => {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);

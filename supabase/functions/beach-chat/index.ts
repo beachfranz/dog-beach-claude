@@ -10,7 +10,7 @@ const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANTHROPIC_API_KEY    = Deno.env.get("anthropic_api_key")!;
 const ANTHROPIC_API_URL    = "https://api.anthropic.com/v1/messages";
-const MODEL                = "claude-sonnet-4-20250514";
+const MODEL                = "claude-sonnet-4-6";
 const MAX_TOKENS           = 1024;
 
 // ─── Entry point ──────────────────────────────────────────────────────────────

@@ -487,6 +487,225 @@ def ensure_pad_us(
 
 @asset(
     partitions_def=state_partitions,
+    deps=[ensure_pad_us],
+    group_name="phase_0_upstream_loaders",
+    description=(
+        "gap #43 — verify every pad_us_units row for the state with non-NULL "
+        "geom also has non-NULL geom_geog. refresh_beach_polygon_membership's "
+        "PAD-US block joins on geom_geog; NULL silently kills the spatial "
+        "join. Halts with templated backfill UPDATE if any rows fail."
+    ),
+)
+def pad_us_geom_geog_check(
+    context: AssetExecutionContext,
+    postgres: PostgresPoolerResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) FILTER (WHERE geom IS NOT NULL AND geom_geog IS NULL),
+                       COUNT(*) FILTER (WHERE geom IS NOT NULL)
+                  FROM public.pad_us_units
+                 WHERE state = %s
+                """,
+                (state,),
+            )
+            n_null_geog, n_with_geom = cur.fetchone()
+    finally:
+        conn.close()
+
+    if n_null_geog == 0:
+        return MaterializeResult(
+            metadata={
+                "state": state,
+                "rows_checked": MetadataValue.int(n_with_geom),
+                "geom_geog_null": 0,
+            }
+        )
+
+    raise RuntimeError(
+        f"pad_us_units geom_geog integrity FAILED for {state}: "
+        f"{n_null_geog}/{n_with_geom} rows have non-NULL geom but NULL geom_geog. "
+        f"Backfill: UPDATE public.pad_us_units SET geom_geog = geom::geography "
+        f"WHERE state = '{state}' AND geom IS NOT NULL AND geom_geog IS NULL;"
+    )
+
+
+@asset(
+    partitions_def=state_partitions,
+    deps=[ensure_pad_us],
+    group_name="phase_0_upstream_loaders",
+    description=(
+        "gap #46 — TIGER County Subdivisions (MCD) loader for town-strong "
+        "states (NH/CT/MA/ME/RI/VT/NJ/PA per state_government_strength). "
+        "Loads the 234-NH-towns-equivalent layer that holds dog-policy "
+        "authority in NE-style states. No-op for county-strong states."
+    ),
+)
+def ensure_county_subdivisions(
+    context: AssetExecutionContext,
+    postgres: PostgresPoolerResource,
+    subproc: SubprocessResource,
+) -> MaterializeResult:
+    state = context.partition_key
+
+    # Gate: only town-strong states.
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT dominant_municipal_tier FROM public.state_government_strength "
+                " WHERE state_code = %s",
+                (state,),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+
+    tier = row[0] if row else None
+    if tier != "town":
+        context.log.info(
+            f"state_government_strength.{state}={tier!r}: COUSUB not needed; skip"
+        )
+        return MaterializeResult(
+            metadata={"state": state, "skipped_county_strong": True, "tier": tier}
+        )
+
+    return _ensure_loader_helper(
+        context, postgres, subproc,
+        source="tiger_county_subdivisions",
+        script_path="scripts/loaders/bulk_load_tiger_county_subdivisions.py",
+        script_args=["--states", state],
+        timeout=900,
+    )
+
+
+@asset(
+    partitions_def=state_partitions,
+    deps=[ensure_pad_us],
+    group_name="phase_0_upstream_loaders",
+    description=(
+        "gap #41/45 — WARNING-only check that every PAD-US mng_name with "
+        ">=20 polys in the state has a class-default row in "
+        "pad_us_unit_dogs_policy. Per gap #45 data review, class defaults "
+        "contribute only 4-18% of MVP+ tier-1+2 coverage — operator-driven "
+        "extraction dominates. So missing class defaults are SURFACED here "
+        "(with templated INSERT) but do NOT halt the pipeline."
+    ),
+)
+def pad_us_manager_class_preflight(
+    context: AssetExecutionContext,
+    postgres: PostgresPoolerResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT u.mng_name, u.mng_type, COUNT(*) AS n_polys
+                  FROM public.pad_us_units u
+                 WHERE u.state = %s
+                 GROUP BY u.mng_name, u.mng_type
+                HAVING COUNT(*) >= 20
+                   AND NOT EXISTS (
+                     SELECT 1 FROM public.pad_us_unit_dogs_policy p
+                      WHERE p.mng_name = u.mng_name AND p.unit_id IS NULL
+                   )
+                 ORDER BY n_polys DESC
+                """,
+                (state,),
+            )
+            gaps = cur.fetchall()
+    finally:
+        conn.close()
+
+    if not gaps:
+        return MaterializeResult(
+            metadata={"state": state, "missing_class_defaults": 0}
+        )
+
+    gap_summary = ", ".join(f"{r[0]}={r[2]}" for r in gaps[:10])
+    context.log.warning(
+        f"[WARNING] pad_us_unit_dogs_policy missing class defaults for "
+        f"{len(gaps)} mng_name(s) in {state}: {gap_summary}. "
+        f"NOT halting (per gap #45 — class defaults are backstop, "
+        f"contribute 4-18% of tier-1+2 coverage)."
+    )
+    return MaterializeResult(
+        metadata={
+            "state": state,
+            "missing_class_defaults": len(gaps),
+            "missing_summary": MetadataValue.text(gap_summary),
+        }
+    )
+
+
+@asset(
+    partitions_def=state_partitions,
+    deps=[seasonal_closure_seed],
+    group_name="phase_0_upstream_loaders",
+    description=(
+        "Validates scripts/state_park_urls.json has an entry for the state. "
+        "Without it, the state-parks photo loader + state-park codify "
+        "enumeration silently skip. Halts with templated entry block if missing."
+    ),
+)
+def state_park_url_check(
+    context: AssetExecutionContext,
+) -> MaterializeResult:
+    import json
+    from pathlib import Path
+    state = context.partition_key
+    repo_root = Path(__file__).resolve().parents[5]
+    registry_path = repo_root / "scripts" / "state_park_urls.json"
+    if not registry_path.exists():
+        raise RuntimeError(f"state_park_urls.json not found at {registry_path}")
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    if state in registry and registry[state].get("url"):
+        entry = registry[state]
+        return MaterializeResult(
+            metadata={
+                "state": state,
+                "agency": entry.get("agency", "?"),
+                "url": entry.get("url", "?"),
+            }
+        )
+    raise RuntimeError(
+        f"state_park_urls.json MISSING entry for {state}. Add an entry with "
+        f"agency/url/loader fields and re-materialize this asset."
+    )
+
+
+@asset(
+    partitions_def=state_partitions,
+    deps=[seasonal_closure_seed],
+    group_name="phase_0_upstream_loaders",
+    description=(
+        "POI landing loader — US_beaches_with_state.csv per-state, into "
+        "poi_landing. Load-bearing for coastal states (DE went 49 → 6 beaches "
+        "with OSM-only; POI fills the gap)."
+    ),
+)
+def ensure_poi_landing(
+    context: AssetExecutionContext,
+    postgres: PostgresPoolerResource,
+    subproc: SubprocessResource,
+) -> MaterializeResult:
+    return _ensure_loader_helper(
+        context, postgres, subproc,
+        source="poi_landing",
+        script_path="scripts/loaders/load_poi_landing_state.py",
+        script_args=["--states", context.partition_key],
+        timeout=600,
+    )
+
+
+@asset(
+    partitions_def=state_partitions,
     deps=[seasonal_closure_seed],
     group_name="phase_0_upstream_loaders",
     description="OSM natural=beach polygons (Overpass QL).",

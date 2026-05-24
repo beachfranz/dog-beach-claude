@@ -239,6 +239,137 @@ def promote_to_gold(
 
 
 # ════════════════════════════════════════════════════════════════════════
+#  Post-promote assertions (beach_inventory_check, validate_state_geom,
+#  ensure_pip_membership) — gate the per-fid enrichment phases.
+# ════════════════════════════════════════════════════════════════════════
+
+@asset(
+    partitions_def=state_partitions,
+    deps=[promote_to_gold],
+    group_name="phase_11_to_25_catalog",
+    description=(
+        "Post-promote sanity gate: verifies the state has >0 active beaches "
+        "in beaches_gold. Catches silent promotion failures (e.g., arena "
+        "data exists but promote_to_gold didn't surface any rows because of "
+        "a dedup/group_id collision)."
+    ),
+)
+def beach_inventory_check(
+    context: AssetExecutionContext,
+    postgres: PostgresPoolerResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM public.beaches_gold "
+                " WHERE state = %s AND is_active",
+                (state,),
+            )
+            n_active = cur.fetchone()[0]
+    finally:
+        conn.close()
+    if n_active == 0:
+        raise RuntimeError(
+            f"beaches_gold has 0 active beaches for {state} post-promote. "
+            f"Inspect arena data + promote_to_gold execution."
+        )
+    return MaterializeResult(
+        metadata={"state": state, "active_beaches": MetadataValue.int(n_active)}
+    )
+
+
+@asset(
+    partitions_def=state_partitions,
+    deps=[beach_inventory_check],
+    group_name="phase_11_to_25_catalog",
+    description=(
+        "PIP membership populate — fans every active beaches_gold fid through "
+        "refresh_beach_polygon_membership(state, fid) so beach_polygon_membership "
+        "carries the spatial join into PAD-US units, c1_city, tcs_town, county, "
+        "military_base, tribal_land. Load-bearing for the entire BEP cascade."
+    ),
+)
+def ensure_pip_membership(
+    context: AssetExecutionContext,
+    postgres: PostgresPoolerResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT fid FROM public.beaches_gold "
+                " WHERE state = %s AND is_active AND geom IS NOT NULL "
+                " ORDER BY fid",
+                (state,),
+            )
+            fids = [r[0] for r in cur.fetchall()]
+        total_rows = 0
+        with conn.cursor() as cur:
+            for fid in fids:
+                cur.execute(
+                    "SELECT kind, n_rows FROM public.refresh_beach_polygon_membership(%s, %s)",
+                    (state, fid),
+                )
+                for _kind, n in cur.fetchall():
+                    total_rows += n or 0
+        conn.commit()
+    finally:
+        conn.close()
+    return MaterializeResult(
+        metadata={
+            "state": state,
+            "fids_processed": MetadataValue.int(len(fids)),
+            "membership_rows": MetadataValue.int(total_rows),
+        }
+    )
+
+
+@asset(
+    partitions_def=state_partitions,
+    deps=[promote_to_gold],
+    group_name="phase_11_to_25_catalog",
+    description=(
+        "Validate every active beaches_gold row has a geometrically-valid "
+        "geom and matches the state's TIGER polygon. Catches stray fids "
+        "that promoted into the wrong state."
+    ),
+)
+def validate_state_geom(
+    context: AssetExecutionContext,
+    postgres: PostgresPoolerResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                  COUNT(*) FILTER (WHERE geom IS NULL) AS null_geom,
+                  COUNT(*) FILTER (WHERE NOT ST_IsValid(geom)) AS invalid_geom,
+                  COUNT(*) AS total
+                  FROM public.beaches_gold
+                 WHERE state = %s AND is_active
+                """,
+                (state,),
+            )
+            null_geom, invalid_geom, total = cur.fetchone()
+    finally:
+        conn.close()
+    if null_geom > 0 or invalid_geom > 0:
+        raise RuntimeError(
+            f"{state}: {null_geom} null-geom + {invalid_geom} invalid-geom "
+            f"out of {total} active. Fix before downstream phases."
+        )
+    return MaterializeResult(
+        metadata={"state": state, "total": MetadataValue.int(total)}
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════
 #  Phases 15-18 — post-promote enrichment
 # ════════════════════════════════════════════════════════════════════════
 

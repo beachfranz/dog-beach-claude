@@ -127,6 +127,85 @@ def daily_refresh_fire(
 
 
 # ════════════════════════════════════════════════════════════════════════
+#  Hourly status refresh + codify coverage check
+# ════════════════════════════════════════════════════════════════════════
+
+@asset(
+    partitions_def=state_partitions,
+    group_name="phase_29_to_33_per_fid",
+    description=(
+        "Per-state idempotent refresh of beach_section_hour_status. Joins "
+        "beach_day_hourly_scores × zone_rules sections to produce a "
+        "(beach_fid, valid_date, section, hour) slice. Runs AFTER "
+        "zone_rules_v2_refresh + operating_hours_refresh."
+    ),
+)
+def hourly_status_refresh(
+    context: AssetExecutionContext,
+    postgres: PostgresPoolerResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT public.refresh_section_hour_status_for_state(%s)",
+                (state,),
+            )
+            n_rows = cur.fetchone()[0]
+        conn.commit()
+    finally:
+        conn.close()
+    return MaterializeResult(
+        metadata={
+            "state": MetadataValue.text(state),
+            "section_hour_rows": MetadataValue.int(n_rows or 0),
+        }
+    )
+
+
+@asset(
+    partitions_def=state_partitions,
+    group_name="phase_29_to_33_per_fid",
+    description=(
+        "Per-state codify coverage check. Counts active scoreable beaches "
+        "without a policy_source attribution (uncovered_scoreable_beaches). "
+        "Surfaces the structural gap that codify_cascade is supposed to close."
+    ),
+)
+def codify_coverage_check(
+    context: AssetExecutionContext,
+    postgres: PostgresPoolerResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT public.count_uncovered_scoreable_beaches(%s)", (state,)
+            )
+            n_uncovered = cur.fetchone()[0]
+            cur.execute(
+                "SELECT COUNT(*) FROM public.beaches_gold "
+                " WHERE state=%s AND is_active "
+                "   AND scoring_tier IN ('daily','hourly')",
+                (state,),
+            )
+            n_scoreable = cur.fetchone()[0]
+    finally:
+        conn.close()
+    pct_covered = 100.0 * (1 - (n_uncovered / max(n_scoreable, 1)))
+    return MaterializeResult(
+        metadata={
+            "state": MetadataValue.text(state),
+            "scoreable": MetadataValue.int(n_scoreable),
+            "uncovered": MetadataValue.int(n_uncovered),
+            "pct_covered": MetadataValue.float(round(pct_covered, 1)),
+        }
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════
 #  Phase 33 — field_population_check (per-state, end-of-pipeline audit)
 # ════════════════════════════════════════════════════════════════════════
 

@@ -57,6 +57,7 @@ def _run_chunked(
     chunk_size: int,
     per_chunk_timeout: int,
     parse_pattern: str,
+    extra_args: list[str] | None = None,
 ) -> tuple[int, int, int]:
     """Returns (total_parsed_value, chunks_done, chunks_failed)."""
     total = 0
@@ -64,9 +65,12 @@ def _run_chunked(
     failed = 0
     for i in range(0, len(fids), chunk_size):
         chunk = fids[i:i + chunk_size]
+        args = ["--fids", ",".join(str(x) for x in chunk)]
+        if extra_args:
+            args.extend(extra_args)
         result = subproc.run(
             script_path,
-            args=["--fids", ",".join(str(x) for x in chunk)],
+            args=args,
             timeout=per_chunk_timeout,
         )
         if result.returncode != 0:
@@ -84,12 +88,173 @@ def _run_chunked(
 
 
 # ════════════════════════════════════════════════════════════════════════
-#  Phase 29 — section_extract (per-fid Haiku, batched 8 beaches/call)
+#  Derived columns + materialized refresh
 # ════════════════════════════════════════════════════════════════════════
 
 @asset(
     partitions_def=state_partitions,
     deps=[rebuild_beach_evidence],
+    group_name="phase_29_to_33_per_fid",
+    description=(
+        "Refresh nearest-dog-park materialized columns on beaches_gold. Uses "
+        "the updated_at sentinel (gap #39) — a beach is 'processed' once the "
+        "search ran, regardless of whether a DP was found within the 25mi cap "
+        "(legitimate no-DP-in-cap outcome in rural states)."
+    ),
+)
+def refresh_nearest_dog_park(
+    context: AssetExecutionContext,
+    postgres: PostgresPoolerResource,
+    subproc: SubprocessResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    result = subproc.run(
+        "scripts/refresh_nearest_dog_park.py",
+        args=["--state", state],
+        timeout=1800,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"refresh_nearest_dog_park.py exit {result.returncode}: "
+            f"{(result.stderr or '')[-500:]}"
+        )
+
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FILTER (WHERE nearest_dog_park_updated_at IS NOT NULL), "
+                "       COUNT(*) FILTER (WHERE nearest_dog_park_fid IS NOT NULL), "
+                "       COUNT(*) "
+                "  FROM public.beaches_gold WHERE state=%s AND is_active",
+                (state,),
+            )
+            n_searched, n_with_dp, total = cur.fetchone()
+    finally:
+        conn.close()
+    return MaterializeResult(
+        metadata={
+            "state": MetadataValue.text(state),
+            "active_beaches": MetadataValue.int(total),
+            "searched": MetadataValue.int(n_searched),
+            "with_dog_park_in_25mi": MetadataValue.int(n_with_dp),
+        }
+    )
+
+
+@asset(
+    partitions_def=state_partitions,
+    deps=[rebuild_beach_evidence],
+    group_name="phase_29_to_33_per_fid",
+    description=(
+        "codify-cascade per-state enumeration of federal/county/city codify "
+        "universe. v1 is REPORT-ONLY — emits a JSON manifest of any units "
+        "needing agent dispatch; doesn't auto-dispatch."
+    ),
+)
+def codify_cascade(
+    context: AssetExecutionContext,
+    subproc: SubprocessResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    result = subproc.run(
+        "scripts/codify_cascade_phase.py",
+        args=["--state", state, "--gate-pct", "80"],
+        timeout=600,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"codify_cascade_phase.py exit {result.returncode}: "
+            f"{(result.stderr or '')[-500:]}"
+        )
+    return MaterializeResult(
+        metadata={
+            "state": MetadataValue.text(state),
+            "log_tail": MetadataValue.text((result.stdout or "")[-2000:]),
+        }
+    )
+
+
+@asset(
+    partitions_def=state_partitions,
+    deps=[rebuild_beach_evidence],
+    group_name="phase_29_to_33_per_fid",
+    description=(
+        "v2 area-first zone_rules re-extract over all policy_sources per "
+        "MVP+ beach. Reads beach_policy_source.full_text directly with the "
+        "canonical-area-description prompt, rewrites bps/temporals. Multi-ps "
+        "beaches get each source re-run. Chunked 30 fids/subprocess."
+    ),
+)
+def zone_rules_v2_refresh(
+    context: AssetExecutionContext,
+    postgres: PostgresPoolerResource,
+    subproc: SubprocessResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    fids = _tier12_fids(postgres, state)
+    if not fids:
+        return MaterializeResult(metadata={"state": state, "fids": 0, "skipped": True})
+
+    total, done, failed = _run_chunked(
+        context, subproc,
+        "scripts/reextract_beach_all_ps.py",
+        fids, chunk_size=30, per_chunk_timeout=900,
+        parse_pattern=r"updated:\s+(\d+)",
+        extra_args=["--skip-if-fresh-within", "7"],
+    )
+    return MaterializeResult(
+        metadata={
+            "state": MetadataValue.text(state),
+            "fids_total": MetadataValue.int(len(fids)),
+            "rules_updated": MetadataValue.int(total),
+            "chunks_done": MetadataValue.int(done),
+            "chunks_failed": MetadataValue.int(failed),
+        }
+    )
+
+
+@asset(
+    partitions_def=state_partitions,
+    deps=[zone_rules_v2_refresh],
+    group_name="phase_29_to_33_per_fid",
+    description=(
+        "Operating-hours canonical populate. Per-state idempotent call to "
+        "public.refresh_operating_hours_for_state — picks highest-priority "
+        "source (manual_curator > operator > osm > agency > inferred) and "
+        "writes beaches_gold.operating_hours jsonb."
+    ),
+)
+def operating_hours_refresh(
+    context: AssetExecutionContext,
+    postgres: PostgresPoolerResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT public.refresh_operating_hours_for_state(%s)", (state,)
+            )
+            n_processed = cur.fetchone()[0]
+        conn.commit()
+    finally:
+        conn.close()
+    return MaterializeResult(
+        metadata={
+            "state": MetadataValue.text(state),
+            "beaches_processed": MetadataValue.int(n_processed),
+        }
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  Phase 29 — section_extract (per-fid Haiku, batched 8 beaches/call)
+# ════════════════════════════════════════════════════════════════════════
+
+@asset(
+    partitions_def=state_partitions,
+    deps=[operating_hours_refresh],
     group_name="phase_29_to_33_per_fid",
     description=(
         "Per-beach section-rule extraction via Haiku. Reads operator_dogs_policy.summary "
@@ -162,6 +327,41 @@ def descriptions(
             "descriptions_generated": MetadataValue.int(total),
             "chunks_done": MetadataValue.int(done),
             "chunks_failed": MetadataValue.int(failed),
+        }
+    )
+
+
+@asset(
+    partitions_def=state_partitions,
+    deps=[descriptions],
+    group_name="phase_29_to_33_per_fid",
+    description=(
+        "Audit recently-generated beach descriptions for forbidden-pattern "
+        "hits (hallucinated lifeguard claims, architecture-explicit leaks, "
+        "etc.). Scoped to the state's tier-1+2 beaches generated within "
+        "the last few hours. Surfaces audit hits but doesn't auto-fix."
+    ),
+)
+def descriptions_audit(
+    context: AssetExecutionContext,
+    subproc: SubprocessResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    result = subproc.run(
+        "scripts/audit_beach_descriptions.py",
+        args=["--state", state, "--hours", "2"],
+        timeout=300,
+    )
+    # Audit is informational — log hits, don't halt the pipeline.
+    if result.returncode != 0:
+        context.log.warning(
+            f"descriptions_audit non-zero exit {result.returncode}: "
+            f"{(result.stderr or '')[-300:]}"
+        )
+    return MaterializeResult(
+        metadata={
+            "state": MetadataValue.text(state),
+            "log_tail": MetadataValue.text((result.stdout or "")[-2000:]),
         }
     )
 

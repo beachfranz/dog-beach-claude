@@ -278,3 +278,112 @@ def photo_keep_prob_model(
         "vision_rules_changed": MetadataValue.int(rules_changed),
         "vision_rules_total":   MetadataValue.int(rules_total),
     })
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  State photo galleries (state-parks photo loaders + auxiliaries)
+# ════════════════════════════════════════════════════════════════════════
+
+@asset(
+    partitions_def=state_partitions,
+    group_name="phase_31_photos",
+    description=(
+        "Per-state state-parks photo loaders (CDPR/OPRD/WSPRC/MD-DNR/"
+        "DNREC-DE/NHSP per scripts/state_park_urls.json) + NPS gallery "
+        "fallback. Routes via run_state_pipeline.action_state_photo_galleries "
+        "which fans out to the registry-driven per-state loader."
+    ),
+)
+def state_photo_galleries(
+    context: AssetExecutionContext,
+    subproc: SubprocessResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    # Invoke the run_state_pipeline action directly via Python -c
+    # (action_state_photo_galleries reads state_park_urls.json + dispatches).
+    result = subproc.run(
+        "python",
+        args=[
+            "-c",
+            "import sys; sys.path.insert(0, '.'); "
+            "from scripts.run_state_pipeline import action_state_photo_galleries; "
+            f"sys.exit(0 if action_state_photo_galleries('{state}') >= 0 else 1)",
+        ],
+        timeout=2400,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"state_photo_galleries failed for {state}: "
+            f"{(result.stderr or '')[-500:]}"
+        )
+    return MaterializeResult(
+        metadata={
+            "state": MetadataValue.text(state),
+            "log_tail": MetadataValue.text((result.stdout or "")[-2000:]),
+        }
+    )
+
+
+@asset(
+    partitions_def=state_partitions,
+    deps=[state_photo_galleries],
+    group_name="phase_31_photos",
+    description=(
+        "Backfill beach_photos.distance_m using polygon centroid for fanout "
+        "URLs that haven't been per-fid attributed yet. Per-source pass."
+    ),
+)
+def photo_centroid_backfill(
+    context: AssetExecutionContext,
+    subproc: SubprocessResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    result = subproc.run(
+        "scripts/backfill_agency_photo_centroid.py",
+        args=["--state", state, "--apply"],
+        timeout=900,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"photo_centroid_backfill failed for {state}: "
+            f"{(result.stderr or '')[-500:]}"
+        )
+    return MaterializeResult(
+        metadata={
+            "state": MetadataValue.text(state),
+            "log_tail": MetadataValue.text((result.stdout or "")[-2000:]),
+        }
+    )
+
+
+@asset(
+    partitions_def=state_partitions,
+    deps=[photo_keep_prob_model, photo_centroid_backfill],
+    group_name="phase_31_photos",
+    description=(
+        "Final per-beach photo selection. Reads predicted_keep_prob + vision "
+        "tags + per-source diversity rules + distance_m and picks the "
+        "best-N photos for each beach's consumer surface."
+    ),
+)
+def photos_curate(
+    context: AssetExecutionContext,
+    subproc: SubprocessResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    result = subproc.run(
+        "scripts/curate_beach_photos.py",
+        args=["--state", state],
+        timeout=900,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"photos_curate failed for {state}: "
+            f"{(result.stderr or '')[-500:]}"
+        )
+    return MaterializeResult(
+        metadata={
+            "state": MetadataValue.text(state),
+            "log_tail": MetadataValue.text((result.stdout or "")[-2000:]),
+        }
+    )

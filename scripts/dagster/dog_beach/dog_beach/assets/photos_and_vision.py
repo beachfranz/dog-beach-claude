@@ -379,9 +379,12 @@ def photos_curate(
     subproc: SubprocessResource,
 ) -> MaterializeResult:
     state = context.partition_key
+    # Real script is scripts/auto_curate.py — earlier code referenced a
+    # curate_beach_photos.py that doesn't exist. Includes --skip-if-fresh-within
+    # 7 freshness guard (matches the runner's pattern).
     result = subproc.run(
-        "scripts/curate_beach_photos.py",
-        args=["--state", state],
+        "scripts/auto_curate.py",
+        args=["--state", state, "--skip-if-fresh-within", "7"],
         timeout=900,
     )
     if result.returncode != 0:

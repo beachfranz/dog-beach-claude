@@ -143,23 +143,59 @@ def daily_refresh_fire(
 def hourly_status_refresh(
     context: AssetExecutionContext,
     postgres: PostgresPoolerResource,
+    subproc: SubprocessResource,
 ) -> MaterializeResult:
     state = context.partition_key
+    # Pull tier-1+2 fids first (the script chunks by --fids).
     conn = postgres.get_connection()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT public.refresh_section_hour_status_for_state(%s)",
+                """
+                SELECT g.fid
+                  FROM public.beaches_gold g
+                  JOIN public.beach_dog_policy bdp ON bdp.arena_group_id = g.fid
+                 WHERE g.state = %s AND g.is_active
+                   AND public.beach_location_tier(
+                         bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash,
+                         bdp.dogs_prohibited_start::text
+                       ) IN ('1_off-leash', '2_on-leash')
+                 ORDER BY g.fid
+                """,
                 (state,),
             )
-            n_rows = cur.fetchone()[0]
-        conn.commit()
+            fids = [r[0] for r in cur.fetchall()]
     finally:
         conn.close()
+
+    if not fids:
+        return MaterializeResult(metadata={"state": state, "fids": 0, "skipped": True})
+
+    # Chunked subprocess to refresh_beach_section_hour_status.py
+    chunk_size = 100
+    done = 0
+    failed = 0
+    for i in range(0, len(fids), chunk_size):
+        chunk = fids[i:i + chunk_size]
+        result = subproc.run(
+            "scripts/refresh_beach_section_hour_status.py",
+            args=["--fids", ",".join(str(x) for x in chunk)],
+            timeout=600,
+        )
+        if result.returncode != 0:
+            failed += 1
+            context.log.warning(
+                f"chunk {i//chunk_size + 1} failed (fids {chunk[0]}..{chunk[-1]}): "
+                f"{(result.stderr or '')[-300:]}"
+            )
+            continue
+        done += 1
     return MaterializeResult(
         metadata={
             "state": MetadataValue.text(state),
-            "section_hour_rows": MetadataValue.int(n_rows or 0),
+            "fids_total": MetadataValue.int(len(fids)),
+            "chunks_done": MetadataValue.int(done),
+            "chunks_failed": MetadataValue.int(failed),
         }
     )
 

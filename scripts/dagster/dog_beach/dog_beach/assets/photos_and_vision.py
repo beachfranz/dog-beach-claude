@@ -296,30 +296,31 @@ def photo_keep_prob_model(
 )
 def state_photo_galleries(
     context: AssetExecutionContext,
-    subproc: SubprocessResource,
 ) -> MaterializeResult:
+    """Call run_state_pipeline.action_state_photo_galleries directly
+    (no subprocess) — it's a Python action that internally fans out to
+    per-source subprocess calls for each registry entry. Calling it
+    in-process is simpler + cheaper than shell-out + lets the action
+    inherit our Dagster log context.
+    """
+    import sys
+    from pathlib import Path
     state = context.partition_key
-    # Invoke the run_state_pipeline action directly via Python -c
-    # (action_state_photo_galleries reads state_park_urls.json + dispatches).
-    result = subproc.run(
-        "python",
-        args=[
-            "-c",
-            "import sys; sys.path.insert(0, '.'); "
-            "from scripts.run_state_pipeline import action_state_photo_galleries; "
-            f"sys.exit(0 if action_state_photo_galleries('{state}') >= 0 else 1)",
-        ],
-        timeout=2400,
-    )
-    if result.returncode != 0:
+    # Make scripts/ importable. Dagster's cwd is the dagster project dir,
+    # so we walk up to repo root.
+    repo_root = Path(__file__).resolve().parents[5]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from scripts.run_state_pipeline import action_state_photo_galleries
+    rc = action_state_photo_galleries(state)
+    if rc < 0:
         raise RuntimeError(
-            f"state_photo_galleries failed for {state}: "
-            f"{(result.stderr or '')[-500:]}"
+            f"state_photo_galleries action returned negative ({rc}) for {state}"
         )
     return MaterializeResult(
         metadata={
             "state": MetadataValue.text(state),
-            "log_tail": MetadataValue.text((result.stdout or "")[-2000:]),
+            "action_return_code": MetadataValue.int(rc),
         }
     )
 

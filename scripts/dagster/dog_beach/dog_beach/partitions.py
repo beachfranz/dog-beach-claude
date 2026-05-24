@@ -48,6 +48,10 @@ state_partitions = StaticPartitionsDefinition(
         "MI",
         "MD",
         "OH",
+        # Subsequent launches (2026-05-22 onward):
+        "DE",   # 2026-05-22
+        "RI",   # 2026-05-22
+        "NH",   # 2026-05-23 virgin-test launch (51/51 phases)
     ]
 )
 

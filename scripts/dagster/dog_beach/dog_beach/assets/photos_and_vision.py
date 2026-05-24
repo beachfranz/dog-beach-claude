@@ -339,9 +339,16 @@ def photo_centroid_backfill(
     subproc: SubprocessResource,
 ) -> MaterializeResult:
     state = context.partition_key
+    # Script defaults to 16 workers, but Supabase pooler session-mode cap
+    # is 15. 16 workers from one script = guaranteed pool exhaustion before
+    # any other Dagster asset can connect. Lower to 6 to leave headroom for
+    # parallel work (~9 connections for the pool's other tenants). Tuned
+    # 2026-05-23 EVENING after NH state_launch_job hit EMAXCONNSESSION even
+    # with the connect() retry in scripts/common/db.py — retries can't help
+    # when one script demands more than the pool's capacity.
     result = subproc.run(
         "scripts/backfill_agency_photo_centroid.py",
-        args=["--state", state, "--apply"],
+        args=["--state", state, "--apply", "--workers", "6"],
         timeout=900,
     )
     if result.returncode != 0:

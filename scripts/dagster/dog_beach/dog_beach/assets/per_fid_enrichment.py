@@ -63,16 +63,30 @@ def _run_chunked(
     total = 0
     done = 0
     failed = 0
+    import subprocess as _sp
     for i in range(0, len(fids), chunk_size):
         chunk = fids[i:i + chunk_size]
         args = ["--fids", ",".join(str(x) for x in chunk)]
         if extra_args:
             args.extend(extra_args)
-        result = subproc.run(
-            script_path,
-            args=args,
-            timeout=per_chunk_timeout,
-        )
+        try:
+            result = subproc.run(
+                script_path,
+                args=args,
+                timeout=per_chunk_timeout,
+            )
+        except _sp.TimeoutExpired as e:
+            # 2026-05-23 EVENING: a single description-generation run hung
+            # for 42 min on one fid (Anthropic call w/ no client-side
+            # timeout). subprocess.TimeoutExpired bubbling up was failing
+            # the whole asset. Catch + treat as failed chunk so other
+            # chunks proceed; surface in metadata via `failed`.
+            failed += 1
+            context.log.warning(
+                f"Chunk {done+failed} timed out (fids {chunk[0]}..{chunk[-1]}, "
+                f"timeout={per_chunk_timeout}s)"
+            )
+            continue
         if result.returncode != 0:
             failed += 1
             context.log.warning(
@@ -162,15 +176,29 @@ def codify_cascade(
         args=["--state", state, "--gate-pct", "80"],
         timeout=600,
     )
+    # Distinguish two failure modes:
+    #   1. Script crash (stderr non-empty, no manifest written) — hard fail.
+    #   2. Coverage below gate-pct (exit 1, "passes_gate=False" in stdout,
+    #      0 queue rows dispatched) — virgin-state launch reality. Log as
+    #      warning + surface coverage% in metadata; don't halt the pipeline.
+    stdout = result.stdout or ""
+    stderr = result.stderr or ""
     if result.returncode != 0:
-        raise RuntimeError(
-            f"codify_cascade_phase.py exit {result.returncode}: "
-            f"{(result.stderr or '')[-500:]}"
+        is_gate_miss = "passes_gate=False" in stdout and "UPSERTed" in stdout
+        if not is_gate_miss:
+            raise RuntimeError(
+                f"codify_cascade_phase.py crashed (exit {result.returncode}): "
+                f"stderr={stderr[-500:]} stdout={stdout[-500:]}"
+            )
+        context.log.warning(
+            f"codify_cascade for {state}: coverage below gate (state launch "
+            f"reality — expected to clear as codify work lands). See log tail."
         )
     return MaterializeResult(
         metadata={
             "state": MetadataValue.text(state),
-            "log_tail": MetadataValue.text((result.stdout or "")[-2000:]),
+            "coverage_gate_passed": MetadataValue.bool(result.returncode == 0),
+            "log_tail": MetadataValue.text(stdout[-2000:]),
         }
     )
 

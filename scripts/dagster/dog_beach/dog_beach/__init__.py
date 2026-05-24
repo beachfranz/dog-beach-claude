@@ -108,6 +108,7 @@ from .assets.per_fid_enrichment import (
     zone_rules_v2_refresh,
     operating_hours_refresh,
     section_extract,
+    harvest_park_text,
     descriptions,
     descriptions_audit,
     photos_wikimedia,
@@ -217,6 +218,7 @@ defs = Definitions(
         gold_set_review_gate,
         # Phases 29-31 per-fid LLM + photos
         section_extract,
+        harvest_park_text,
         descriptions,
         descriptions_audit,
         photos_wikimedia,

@@ -53,7 +53,7 @@ from .assets.operator_llm_cascade import (
 from .assets.per_fid_enrichment import (
     refresh_nearest_dog_park, codify_cascade,
     zone_rules_v2_refresh, operating_hours_refresh,
-    section_extract, descriptions, descriptions_audit, photos_wikimedia,
+    section_extract, harvest_park_text, descriptions, descriptions_audit, photos_wikimedia,
 )
 from .assets.photos_and_vision import (
     state_photo_galleries, photo_centroid_backfill, photos_curate,
@@ -92,7 +92,7 @@ state_launch_job = define_asset_job(
         operator_llm_extract_for_state, operator_merge, rebuild_beach_evidence,
         zone_rules_v2_refresh, operating_hours_refresh,
         gold_set_candidates, gold_set_review_gate,
-        section_extract, descriptions, descriptions_audit, photos_wikimedia,
+        section_extract, harvest_park_text, descriptions, descriptions_audit, photos_wikimedia,
         state_photo_galleries, photo_centroid_backfill, photos_curate,
         hourly_status_refresh, codify_coverage_check,
         daily_refresh_fire, field_population_check,

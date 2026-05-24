@@ -1127,6 +1127,22 @@ PHASES = [
             "select d.n done, t.n total from d, t",
     },
     {
+        # 2026-05-23: harvest descriptive prose from state-park leaf URLs
+        # into park_url_extractions. Fills description-text reservoir gap
+        # for OR/WA (Gap 2 per deferred-description-text-reservoir pin).
+        # No-op for states without a leaf-URL harvester wired (CA's leaf
+        # text is harvested via the older park_url_scrape_queue path).
+        # Criterion is intentionally permissive — this is an opportunistic
+        # grounding lift, not a hard gate. Halting on it would block state
+        # launches whose pad_us polygons don't map to any state-park.
+        'key': 'harvest_park_text',
+        'kind': 'python',
+        'action': 'harvest_park_text',
+        'criterion': "select true",
+        'criterion_text':
+            'leaf-page harvest opportunistic — runs OR/WA, no-ops elsewhere',
+    },
+    {
         # 2026-05-21: descriptions moved AFTER photos_tag + photos_curate
         # so the generator can reference the tagged + curated gallery.
         'key': 'descriptions',
@@ -2336,6 +2352,42 @@ def action_hourly_status_refresh(state: str) -> int:
     )
 
 
+def action_harvest_park_text(state: str) -> int:
+    """Harvest descriptive prose from state-park leaf URLs into
+    park_url_extractions, for states whose pad_us polygons don't carry
+    park_url (OR via OPRD, WA via WSPRC, future MD/DE/NH).
+
+    Fills the description text reservoir gap (Gap 2 per
+    project_deferred_description_text_reservoir.md) — for OR/WA, the
+    CDPR-style park_url_scrape_queue doesn't apply because pad_us has
+    no URL column. This phase calls scripts/harvest_park_text.py which
+    reuses each state's StateParksLoader.discover_parks() for the
+    polygon → leaf-URL mapping (already proven for photos) and writes
+    raw_text into park_url_extractions. The description generator
+    picks up the new grounding text automatically.
+
+    Idempotent + cheap: --skip-if-fresh-within 90d (matches the CA
+    park_url_scrape_queue stale window). No-ops for states without a
+    loader (CA harvests via extract_from_park_url.py / queue view).
+    """
+    # Only OR/WA have loaders today. Skip silently for others —
+    # `harvest_park_text.py --state X` would argparse-reject unknown X
+    # and the phase would halt unnecessarily. CA harvests via the
+    # existing park_url_scrape_queue / extract_from_park_url.py path.
+    if state not in ('OR', 'WA'):
+        log(f'  [{state}] no leaf-URL harvester wired — skip')
+        return 0
+    cmd = [sys.executable, 'scripts/harvest_park_text.py',
+           '--state', state, '--workers', '6']
+    rc, out, err = _run_subprocess(cmd, timeout=900)
+    if rc != 0:
+        raise RuntimeError(f'harvest_park_text exit {rc}: {err[-500:]}')
+    # Parse the per-state summary footer for reporting; counts rows
+    # actually written (script tallies post-upsert).
+    m = re.search(r'rows_written=(\d+)', out or '')
+    return int(m.group(1)) if m else 1
+
+
 def action_descriptions(state: str) -> int:
     """Generate descriptions for state's tier-1+2 fids. Chunked into
     groups of 30 fids (~5min each).
@@ -3045,6 +3097,7 @@ PYTHON_ACTIONS = {
     'photos_tag':              action_photos_tag,
     'photos_predict':          action_photos_predict,
     'photos_curate':           action_photos_curate,
+    'harvest_park_text':       action_harvest_park_text,
     'descriptions':            action_descriptions,
     'descriptions_audit':      action_descriptions_audit,
     'daily_refresh_fire':      action_daily_refresh_fire,

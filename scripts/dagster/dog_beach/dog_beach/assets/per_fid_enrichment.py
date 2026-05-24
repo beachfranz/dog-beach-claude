@@ -319,12 +319,63 @@ def section_extract(
 
 
 # ════════════════════════════════════════════════════════════════════════
-#  Phase 30 — descriptions (per-fid Sonnet, chunked 30 fids/subprocess)
+#  Phase 29.5 — harvest_park_text (leaf-URL prose → park_url_extractions)
 # ════════════════════════════════════════════════════════════════════════
 
 @asset(
     partitions_def=state_partitions,
     deps=[section_extract],
+    group_name="phase_29_to_33_per_fid",
+    description=(
+        "Harvest descriptive prose from state-park leaf URLs into "
+        "park_url_extractions. Fills description-text reservoir gap "
+        "(Gap 2 per deferred-description-text-reservoir pin) for OR/WA "
+        "where pad_us polygons don't carry park_url. Reuses each state's "
+        "StateParksLoader.discover_parks() for polygon → leaf-URL mapping "
+        "(already proven for photos). raw_text only — structured LLM "
+        "extraction deferred. No-op for states without a wired harvester "
+        "(CA harvested via the older park_url_scrape_queue path). "
+        "Idempotent + cheap via --skip-if-fresh-within 90."
+    ),
+)
+def harvest_park_text(
+    context: AssetExecutionContext,
+    subproc: SubprocessResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    if state not in ("OR", "WA"):
+        context.log.info(f"[{state}] no leaf-URL harvester wired — skip")
+        return MaterializeResult(
+            metadata={"state": state, "skipped": True}
+        )
+    result = subproc.run(
+        "scripts/harvest_park_text.py",
+        args=["--state", state, "--workers", "6"],
+        timeout=900,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"harvest_park_text failed for {state}: "
+            f"{(result.stderr or '')[-500:]}"
+        )
+    m = re.search(r"rows_written=(\d+)", result.stdout or "")
+    rows = int(m.group(1)) if m else 0
+    return MaterializeResult(
+        metadata={
+            "state": MetadataValue.text(state),
+            "rows_written": MetadataValue.int(rows),
+            "log_tail": MetadataValue.text((result.stdout or "")[-1500:]),
+        }
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  Phase 30 — descriptions (per-fid Sonnet, chunked 30 fids/subprocess)
+# ════════════════════════════════════════════════════════════════════════
+
+@asset(
+    partitions_def=state_partitions,
+    deps=[section_extract, harvest_park_text],
     group_name="phase_29_to_33_per_fid",
     description=(
         "Per-beach narrative prose via Sonnet. SHA256-hashed input bundle "

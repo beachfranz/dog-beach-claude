@@ -9,11 +9,12 @@ Each module exposes:
     INVENTORY_TABLE: str                 -- source-of-truth table this content_type compares against
     inventory_match_query(cursor, row)   -- per-row match logic
 """
-from . import dog_park, beach
+from . import dog_park, beach, dog_friendly_park
 
 REGISTRY = {
     dog_park.CONTENT_TYPE: dog_park,
     beach.CONTENT_TYPE: beach,
+    dog_friendly_park.CONTENT_TYPE: dog_friendly_park,
 }
 
 

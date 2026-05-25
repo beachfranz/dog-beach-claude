@@ -167,7 +167,7 @@ def main():
                              {"operator_name": op_name,
                               "page_url": url,
                               "page_text": text},
-                             model=SONNET, max_tokens=8000)
+                             model=SONNET, max_tokens=16000, timeout=300)
             parsed = resp["parsed"]
             # Content types use a generic "locations" key. Tolerate legacy
             # "parks" / "beaches" outputs in case the LLM regresses.

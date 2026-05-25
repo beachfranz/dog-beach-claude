@@ -4,6 +4,12 @@ Reads operator_location_sources for the given content_type, fetches each
 URL, runs the content_type's EXTRACTION_PROMPT, writes results to
 operator_extracted_locations.
 
+Fetcher dispatch:
+  - shape='js_rendered'        → Playwright (system Chrome) directly
+  - any other shape            → requests first; if 403, fall through
+                                  to Playwright (per
+                                  [[403-means-playwright-skip-ua-tricks]])
+
 Idempotent: rows with extraction_status='success' within last 30 days are
 skipped unless --force.
 
@@ -29,6 +35,7 @@ sys.path.insert(0, str(ROOT))
 from scripts.common.llm import SONNET, call_json
 from scripts.common.db import connect
 from scripts.harvest import content_types as ctmod
+from scripts.harvest._playwright_fetch import fetch_via_playwright
 
 STALE_DAYS = 30
 HTTP_TIMEOUT = 30
@@ -48,6 +55,27 @@ def fetch_html(url: str) -> tuple[str | None, str | None]:
         tag.decompose()
     text = soup.get_text(separator="\n", strip=True)
     return text[:MAX_PAGE_TEXT], None
+
+
+def fetch_for_extract(url: str, shape: str | None) -> tuple[str | None, str | None]:
+    """Dispatch fetcher based on shape, with 403 → Playwright fallthrough.
+
+    shape='js_rendered'  → straight to Playwright
+    requests success     → return that
+    requests 403         → fall through to Playwright per pin
+    requests other error → return the error (don't burn Playwright budget)
+    """
+    if shape == "js_rendered":
+        text, err = fetch_via_playwright(url)
+        return (text[:MAX_PAGE_TEXT] if text else text, err)
+
+    text, err = fetch_html(url)
+    if err and "403" in err:
+        # Per [[403-means-playwright-skip-ua-tricks]]: don't iterate on
+        # UAs; route directly to a real browser.
+        text, err = fetch_via_playwright(url)
+        return (text[:MAX_PAGE_TEXT] if text else text, err)
+    return text, err
 
 
 def fetch_targets(conn, content_type: str, operator_id: int | None, force: bool):
@@ -127,7 +155,7 @@ def main():
 
     for op_id, op_name, url, shape in targets:
         print(f"\n  op={op_id} ({op_name[:40]})  shape={shape or '?'}\n    {url}")
-        text, err = fetch_html(url)
+        text, err = fetch_for_extract(url, shape)
         if err:
             print(f"    {err}")
             mark_source_scraped(conn, op_id, args.content_type, url, "fetch_error", 0)

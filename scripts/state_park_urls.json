@@ -42,5 +42,13 @@
     "loader_class": "NhspLoader",
     "pattern": "kentico_cms",
     "added": "2026-05-23"
+  },
+  "AL": {
+    "agency": "Alabama State Parks (Alabama Department of Conservation and Natural Resources)",
+    "url": "https://www.alapark.com/parks",
+    "pattern": "drupal_slug",
+    "loader_deferred": true,
+    "notes": "Drupal CMS with /parks/<slug>/ URLs. State-park-specific photo loader deferred; Wikimedia handles photos state-agnostically. State dog policy is deferred to counties/cities per AL Code Title 3 (no statewide leash law).",
+    "added": "2026-05-24"
   }
 }

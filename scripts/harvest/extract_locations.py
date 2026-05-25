@@ -168,7 +168,13 @@ def main():
                               "page_url": url,
                               "page_text": text},
                              model=SONNET, max_tokens=8000)
-            parks = resp["parsed"].get("parks", [])
+            parsed = resp["parsed"]
+            # Content types use a generic "locations" key. Tolerate legacy
+            # "parks" / "beaches" outputs in case the LLM regresses.
+            parks = (parsed.get("locations")
+                     or parsed.get("parks")
+                     or parsed.get("beaches")
+                     or [])
         except Exception as e:
             print(f"    LLM extract error: {e}")
             # LLM/network error may have left the DB connection in a bad

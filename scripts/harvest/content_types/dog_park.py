@@ -44,13 +44,13 @@ are explicitly permitted off-leash. EXCLUDE:
   - aggregate links ("All Dog Parks") or category navigation
   - generic rules pages without per-park enumeration
 
-Output strict JSON; no prose. "parks" is an array. For single-park pages,
+Output strict JSON; no prose. "locations" is an array. For single-park pages,
 return one element. For rules-only pages with NO park enumeration, return
 []. When in doubt about whether something is a dog park, include it if the
 page treats it as one.
 
 {
-  "parks": [
+  "locations": [
     {
       "name":              "<exact name as listed>",
       "address":           "<street + city if listed>" or null,

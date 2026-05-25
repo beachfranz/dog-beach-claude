@@ -72,14 +72,69 @@ page treats it as one.
 """
 
 
+# OSM names that don't actually identify a specific park — they're
+# generic enough that trigram match against an operator's specific
+# name gives misleadingly low scores. When OSM uses one of these,
+# we lean harder on proximity.
+GENERIC_OSM_NAMES = frozenset({
+    "",
+    "dog park",
+    "dog parks",
+    "dog play area",
+    "dog play areas",
+    "dog run",
+    "dog area",
+    "off-leash area",
+    "off-leash dog area",
+    "off leash dog area",
+    "off-leash zone",
+    "off leash zone",
+    "dog park entrance",
+})
+
+# Beyond this radius, even a null/generic OSM polygon shouldn't be
+# treated as "the same park" — too easy to pick up an unrelated
+# nearby off-leash zone.
+NULL_NAME_MATCH_RADIUS_M = 400
+GENERIC_NAME_MATCH_RADIUS_M = 600
+
+
+def _normalize_osm_name(name: str | None) -> str:
+    if name is None:
+        return ""
+    return name.lower().strip()
+
+
+def _proximity_score(dist_m: float, full_score_until_m: float = 100,
+                     zero_score_from_m: float = 1000) -> float:
+    """Linear decay: 1.0 at <=full_score_until_m, 0.0 at >=zero_score_from_m."""
+    if dist_m <= full_score_until_m:
+        return 1.0
+    if dist_m >= zero_score_from_m:
+        return 0.0
+    return (zero_score_from_m - dist_m) / (zero_score_from_m - full_score_until_m)
+
+
 def inventory_match_query(cursor, extracted_row: dict) -> dict:
     """For one extracted dog-park row, find best match in osm_dog_parks.
 
+    Scoring has three modes:
+
+    1. **OSM name is NULL/empty**: name signal unusable. Score by
+       proximity alone, but cap the search radius to NULL_NAME_MATCH_RADIUS_M
+       (default 400m). Beyond that, an unnamed OSM polygon is more likely
+       a different park than the same one.
+
+    2. **OSM name is generic** ("Dog Play Area", "Off-leash Dog Area", etc.):
+       name signal is weak (could describe many parks). Weight proximity
+       heavily and shorten the effective match radius.
+
+    3. **OSM name is specific**: standard weighted scoring
+       (0.6 * trigram + 0.4 * proximity).
+
     Returns dict with keys:
         status        'matched' | 'weak_match' | 'gap' | 'no_geocode'
-        match_id      osm_dog_parks.id of best match (or None)
-        match_score   weighted score 0-1
-        components    {trigram, dist_m, ...}
+        match_id, match_score, components
     """
     lat = extracted_row.get("lat")
     lng = extracted_row.get("lng")
@@ -115,9 +170,52 @@ def inventory_match_query(cursor, extracted_row: dict) -> dict:
     osm_id, osm_name, trigram, dist_m = row
     trigram = float(trigram)
     dist_m = float(dist_m)
-    # Weighted score: name dominates, proximity provides tiebreaking.
-    proximity_score = max(0.0, (1000 - dist_m) / 1000) if dist_m < 1000 else 0.0
-    score = 0.6 * trigram + 0.4 * proximity_score
+    osm_name_norm = _normalize_osm_name(osm_name)
+
+    if osm_name_norm == "":
+        # NULL/empty OSM name: rely on proximity alone, capped radius.
+        mode = "null_name"
+        if dist_m > NULL_NAME_MATCH_RADIUS_M:
+            # Too far to confidently match a null-name polygon
+            return {"status": "gap", "match_id": None, "match_score": None,
+                    "components": {"reason": "null_name_osm_too_far",
+                                    "osm_id_candidate": osm_id,
+                                    "dist_m": round(dist_m, 1)}}
+        score = _proximity_score(dist_m, full_score_until_m=50,
+                                  zero_score_from_m=NULL_NAME_MATCH_RADIUS_M)
+    elif osm_name_norm in GENERIC_OSM_NAMES:
+        # Generic OSM name: weight proximity heavily, capped radius.
+        mode = "generic_name"
+        if dist_m > GENERIC_NAME_MATCH_RADIUS_M:
+            return {"status": "gap", "match_id": None, "match_score": None,
+                    "components": {"reason": "generic_name_osm_too_far",
+                                    "osm_name": osm_name,
+                                    "osm_id_candidate": osm_id,
+                                    "dist_m": round(dist_m, 1)}}
+        prox = _proximity_score(dist_m, full_score_until_m=100,
+                                 zero_score_from_m=GENERIC_NAME_MATCH_RADIUS_M)
+        score = 0.2 * trigram + 0.8 * prox
+    else:
+        # Specific OSM name: standard weighted scoring.
+        mode = "specific_name"
+        prox = _proximity_score(dist_m)
+        score = 0.6 * trigram + 0.4 * prox
+
+        # Tightening (Franz 2026-05-24 LATE): when the OSM neighbor
+        # has a specific name AND proximity is 0 (>=1km away) AND
+        # trigram is below the strong-match threshold (0.85), it's
+        # almost certainly a different park — flag as gap, not weak.
+        # Example: Upper Noe Dog Play Area matched to Upper Douglass
+        # at 1054m with trigram 0.65. Franz confirmed different parks.
+        if prox == 0 and trigram < 0.85:
+            return {"status": "gap", "match_id": None, "match_score": None,
+                    "components": {"reason": "specific_name_distant_low_trigram",
+                                    "osm_id_candidate": osm_id,
+                                    "osm_name": osm_name,
+                                    "trigram": round(trigram, 3),
+                                    "dist_m": round(dist_m, 1),
+                                    "mode": mode}}
+
     status = "matched" if score >= 0.55 else "weak_match"
     return {
         "status": status,
@@ -127,5 +225,6 @@ def inventory_match_query(cursor, extracted_row: dict) -> dict:
             "trigram": round(trigram, 3),
             "dist_m": round(dist_m, 1),
             "osm_name": osm_name,
+            "mode": mode,
         },
     }

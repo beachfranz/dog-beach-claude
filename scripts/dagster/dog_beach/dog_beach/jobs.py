@@ -104,6 +104,7 @@ from .assets.per_fid_enrichment import (
 )
 from .assets.photos_and_vision import (
     state_photo_galleries, photo_centroid_backfill, photos_curate,
+    photo_vision_tags, photo_keep_prob_model,   # excluded from state_launch_job
 )
 # DP photo assets (dp_photos_*, dp_photo_vision_tags, dp_photos_curate) are
 # referenced by dog_park_photo_job via group selection, not named import.
@@ -149,13 +150,22 @@ state_launch_job = define_asset_job(
             zone_rules_v2_refresh, operating_hours_refresh,
             gold_set_candidates, gold_set_review_gate,
             section_extract, harvest_park_text, descriptions, descriptions_audit, photos_wikimedia,
-            state_photo_galleries, photo_centroid_backfill, photos_curate,
             hourly_status_refresh, codify_coverage_check,
             daily_refresh_fire, field_population_check,
         )
+        # Beach photo cascade (Franz 2026-05-26 — was Wikimedia-only):
+        # Flickr/Pixabay/Pexels/Unsplash/CCC + state_photo_galleries +
+        # photo_centroid_backfill + photos_curate. Subtract the two
+        # group members whose partitions_def doesn't match state_partitions
+        # (Dagster requires all selected assets to share a partition def):
+        #   photo_vision_tags (vision_source_partitions per source)
+        #   photo_keep_prob_model (unpartitioned — single global model)
+        # Both run via separate triggers outside state_launch_job.
+        | (AssetSelection.groups("phase_31_photos")
+           - AssetSelection.assets(photo_vision_tags, photo_keep_prob_model))
         # Dog-park coverage (10 ops): seeded operators + classify + amenity extract
         | AssetSelection.groups("dog_park_coverage")
-        # Dog-park photos (5 ops): Flickr/Wikimedia/Unsplash + vision + vision-gated curate
+        # Dog-park photos (6 ops): Flickr/Wikimedia/Unsplash/Websearch + vision + curate
         | AssetSelection.groups("phase_31_dp_photos")
     ),
 )

@@ -249,6 +249,7 @@
       font-size: 13px;
     }
   </style>
+  <link rel="stylesheet" href="src/photo-block.css" />
 </head>
 <body>
 <div class="page">
@@ -261,8 +262,10 @@
     <div id="park-sub" class="park-sub"></div>
   </div>
 
+  <div id="photo-block-mount" class="photo-block-wrap"></div>
   <div id="content"></div>
 </div>
+<script src="src/photo-block.js"></script>
 
 <script type="module">
   const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
@@ -295,6 +298,34 @@
 
   const { dog_park: park, days, now } = data;
   render(park, days, now);
+  loadPhotos(fid);
+
+  async function loadPhotos(parkFid) {
+    // Direct PostgREST against dog_park_photos. RLS exposes only curated +
+    // non-hidden rows to anon, so we can ORDER BY sort_order without filter.
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/dog_park_photos?dog_park_fid=eq.${parkFid}` +
+          `&select=source,image_url,thumb_url,attribution,license,page_url,captured_at` +
+          `&order=sort_order.asc&limit=10`,
+        { headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}` } }
+      );
+      if (!res.ok) return;
+      const photos = await res.json();
+      if (Array.isArray(photos) && photos.length > 0 && window.PhotoBlock) {
+        // Mark first photo as hero (sort_order is already curator-set).
+        photos[0].is_hero = true;
+        PhotoBlock.render(document.getElementById('photo-block-mount'), photos, {});
+      } else {
+        // No photos — hide the mount entirely (don't show "📷 No photos yet" empty state)
+        const m = document.getElementById('photo-block-mount');
+        if (m) m.style.display = 'none';
+      }
+    } catch (_) {
+      const m = document.getElementById('photo-block-mount');
+      if (m) m.style.display = 'none';
+    }
+  }
 
   // ── Render ────────────────────────────────────────────────────────
   function render(park, days, now) {

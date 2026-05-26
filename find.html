@@ -347,6 +347,13 @@
       align-items: center;
       gap: 1px;
     }
+    .dp-thumb {
+      width: 48px;
+      height: 48px;
+      border-radius: 6px;
+      object-fit: cover;
+      display: block;
+    }
     .day-score-value {
       font-family: 'DM Mono', monospace;
       font-size: 15px;
@@ -930,15 +937,17 @@
       : '';
 
     const status = verified ? 'go' : 'advisory';
+    const heroThumb = dp.hero_thumb_url || dp.hero_image_url;
+    const leftVisual = heroThumb
+      ? `<img class="dp-thumb" src="${heroThumb}" alt="" loading="lazy"
+              onerror="this.style.display='none'" />`
+      : `<span class="day-score-value">🐾</span><span class="day-score-label">DP</span>`;
 
     return `
       <div class="day-card status-${status}" onclick="window.location.href='dog-park.html?fid=${dp.fid}'">
         <div class="day-left">
           <div class="rank-label">#${rank}</div>
-          <div class="day-score">
-            <span class="day-score-value">🐾</span>
-            <span class="day-score-label">DP</span>
-          </div>
+          <div class="day-score">${leftVisual}</div>
         </div>
         <div class="day-content">
           <div class="beach-name">${dp.name || 'Unnamed dog park'}</div>

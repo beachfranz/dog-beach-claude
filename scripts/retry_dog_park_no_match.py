@@ -173,6 +173,7 @@ def main():
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--state", type=str, default="CA", help="State filter (default CA)")
     args = ap.parse_args()
 
     conn = connect(); conn.set_client_encoding("UTF8")
@@ -185,16 +186,16 @@ def main():
           FROM public.dog_park_enrichment_provenance dpep
           JOIN public.dog_parks_gold dpg ON dpg.fid = dpep.dog_park_fid
           JOIN public.dog_park_dog_policy ddp ON ddp.dog_park_fid = dpg.fid
-         WHERE dpg.state='CA' AND dpg.is_active AND dpg.is_scoreable
+         WHERE dpg.state=%s AND dpg.is_active AND dpg.is_scoreable
            AND ddp.source IN ('osm_default','default','state_default')
            AND dpep.source='per_park_amenities_v1_no_result'
            AND dpep.claimed_values->>'why' IN ('web_search_no_match','llm_says_name_not_on_page','retry_d_still_no_match')
          ORDER BY dpg.fid
-    """ + (f" LIMIT {int(args.limit)}" if args.limit else ""))
+    """ + (f" LIMIT {int(args.limit)}" if args.limit else ""), (args.state,))
     parks = [dict(r) for r in cur.fetchall()]
     conn.close()
 
-    print(f"Retry-D pool: {len(parks)} CA parks; apply={args.apply}; workers={args.workers}")
+    print(f"Retry-D pool: {len(parks)} {args.state} parks; apply={args.apply}; workers={args.workers}")
 
     summary = {"extracted": 0, "no_match": 0, "llm_error": 0, "empty": 0}
     with ThreadPoolExecutor(max_workers=args.workers) as ex:

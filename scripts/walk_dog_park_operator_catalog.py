@@ -49,27 +49,36 @@ ANTHROPIC_KEY = os.environ["ANTHROPIC_API_KEY"]
 PRINT_LOCK = threading.Lock()
 
 
-# ── Operator target list (singular operator.id) ─────────────────────────
-# Hand-coded URLs were dropped 2026-05-25 LATE per analysis — all 14 were
-# stale, web_search escalation found the right catalog every time.
-# Walker now ALWAYS uses web_search to discover the catalog page.
+# ── Operator targets — auto-discovered per state ─────────────────────────
+# Hand-coded URLs were dropped 2026-05-25 LATE per analysis — all 14 CA
+# targets had stale URLs; web_search escalation found the real catalog every
+# time. Walker now auto-discovers operators per state (top N by park count)
+# AND always uses web_search to find each operator's catalog.
 
-OPERATOR_TARGETS = [
-    77,   # City of San Diego (18 parks)
-    175,  # City of San Jose (18)
-    78,   # City of San Francisco (16)
-    53,   # City of Los Angeles (14)
-    74,   # City of Sacramento (7)
-    52,   # City of Long Beach (6)
-    180,  # City of Santa Rosa (6)
-    21,   # City of Alameda (4)
-    176,  # City of San Ramon (4)
-    83,   # City of Santa Monica (4)
-    177,  # City of Davis (3)
-    48,   # City of Irvine (3)
-    61,   # City of Oakland (3)
-    68,   # City of Pleasanton (3)
-]
+CA_OPERATOR_TARGETS = [
+    77, 175, 78, 53, 74, 52, 180, 21, 176, 83, 177, 48, 61, 68,
+]  # kept for backward compat / known-good set
+
+
+def auto_operator_targets(state: str, min_parks: int = 3) -> list[int]:
+    """Query top operators by park count for a state.
+    Returns operator (singular) IDs to walk."""
+    conn = connect(); conn.set_client_encoding("UTF8")
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT op.id
+              FROM public.dog_parks_gold dpg
+              JOIN public.operator op ON op.id = dpg.inferred_operator_id
+             WHERE dpg.state = %s AND dpg.is_active
+               AND op.type IN ('city','county')
+             GROUP BY op.id
+             HAVING count(*) >= %s
+             ORDER BY count(*) DESC
+        """, (state, min_parks))
+        return [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
 
 
 # ── T1: Retry-with-backoff for transient Anthropic API errors ──────────
@@ -489,7 +498,11 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--op-ids", type=str, default=None,
-                    help="Comma-separated operator.id (singular). Default: all 14 hand-coded operators.")
+                    help="Comma-separated operator.id (singular). Default: auto-discover for --state.")
+    ap.add_argument("--state", type=str, default="CA",
+                    help="State filter for auto-discovery (default CA).")
+    ap.add_argument("--min-parks", type=int, default=3,
+                    help="Operator must have ≥N active parks in state to be a target.")
     ap.add_argument("--workers", type=int, default=4,
                     help="Per-park parallel workers. Default 4; cap < 12 per [[supabase-pool-cap-vs-dagster-concurrency]].")
     ap.add_argument("--chunk", type=int, default=3,
@@ -499,7 +512,7 @@ def main() -> int:
     args = ap.parse_args()
 
     target_ops = ([int(x) for x in args.op_ids.split(",")] if args.op_ids
-                  else OPERATOR_TARGETS)
+                  else auto_operator_targets(args.state, args.min_parks))
 
     conn = connect(); conn.set_client_encoding("UTF8")
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)

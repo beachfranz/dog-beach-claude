@@ -488,8 +488,10 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--fids", type=str, default=None,
                     help="Comma-separated dog_park fids to target (overrides default work-set)")
+    ap.add_argument("--state", type=str, default="CA",
+                    help="State filter (default CA). Use --all-states to bypass.")
     ap.add_argument("--all-states", action="store_true",
-                    help="Default is CA-only; pass this to include all states")
+                    help="Bypass state filter — process all active+scoreable parks")
     ap.add_argument("--workers", type=int, default=6,
                     help="Parallel worker threads. Cap at <15 per [[supabase-pool-cap-vs-dagster-concurrency]]; default 6.")
     ap.add_argument("--include-no-website", action="store_true",
@@ -513,7 +515,8 @@ def main() -> int:
              WHERE dpg.fid = ANY(%s){website_clause}
         """, (target_fids,))
     else:
-        state_filter = " AND state = 'CA' " if not args.all_states else ""
+        state_filter = "" if args.all_states else f" AND state = %s "
+        state_params = [] if args.all_states else [args.state]
         # --include-no-website expands the work-set to parks lacking OSM website
         # but with address_city populated (web_search route works on those).
         website_filter = (
@@ -526,7 +529,7 @@ def main() -> int:
               FROM public.dog_parks_active_unsourced
              WHERE {website_filter} {state_filter}
              ORDER BY (osm_website IS NULL), fid
-        """ + (f" LIMIT {args.limit}" if args.limit else ""))
+        """ + (f" LIMIT {args.limit}" if args.limit else ""), state_params)
     parks = [dict(r) for r in cur.fetchall()]
     conn.close()
 

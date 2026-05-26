@@ -135,6 +135,10 @@ from .assets.weather_grid import (
     refresh_weather_grid,
     rebuild_weather_grid_inventory,
 )
+# dog_park_coverage assets — registered via separate Definitions in
+# scripts/dagster/dog_beach/dog_beach/dog_park_definitions.py to keep them
+# loadable independent of the rest of the project's import chain.
+# Run with: dagster dev -m dog_beach.dog_park_definitions
 from .checks.operator_seeding import operators_for_state_has_breadth
 from .checks.catalog_assembly import (
     promote_to_gold_complete,

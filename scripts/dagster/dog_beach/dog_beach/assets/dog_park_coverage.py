@@ -21,7 +21,6 @@ from typing import Any
 from dagster import (
     asset,
     AssetExecutionContext,
-    StaticPartitionsDefinition,
     MetadataValue,
     MaterializeResult,
 )
@@ -45,11 +44,21 @@ from scripts.dog_park_pipeline import (
     write_run_metric,
 )
 
+# Upstream deps from the broader pipeline. dog-park assets must run AFTER:
+#   - ensure_dog_parks_gold: state has rows in dog_parks_gold
+#   - operators_for_state:   operator registry seeded for the state
+# Per Franz 2026-05-26 wiring into state_launch_job.
+from .upstream_loaders import ensure_dog_parks_gold
+from .operator_seeding import operators_for_state
 
-# States we currently target. Extend as we expand.
-# Add to scripts/dog_park_pipeline/state_operator_seeds.json BEFORE adding here
-# (otherwise seed_operators step is a no-op for the new state).
-DOG_PARK_STATES = StaticPartitionsDefinition(["CA", "OR", "WA", "MD"])
+
+# Aligned with the shared state_partitions (full US) so dog-park assets
+# can chain with the beach pipeline in state_launch_job. Per Franz
+# 2026-05-26 — was a bespoke 4-state static def; raised to full US.
+# Add to scripts/dog_park_pipeline/state_operator_seeds.json BEFORE
+# materializing a partition for a new state (otherwise seed_operators
+# step is a no-op).
+from ..partitions import state_partitions as DOG_PARK_STATES
 
 
 def _persist(state: str, metrics: dict) -> None:
@@ -81,6 +90,7 @@ def _metadata(metrics: dict) -> dict[str, Any]:
 
 @asset(
     partitions_def=DOG_PARK_STATES,
+    deps=[ensure_dog_parks_gold, operators_for_state],
     group_name="dog_park_coverage",
     description="Verify Playwright browser, state inventory, env vars before pipeline run.",
 )

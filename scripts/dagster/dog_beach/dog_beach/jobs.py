@@ -36,6 +36,26 @@ dog_park_coverage_job = define_asset_job(
     ),
 )
 
+
+# Dog-park photo pipeline (Franz 2026-05-26).
+# Mirrors the beach Phase 31 photo cascade for dog parks:
+# Flickr + Wikimedia + Unsplash → vision tagging → vision-gated curate.
+# Per-state partitioned. Uses in_process_executor like the coverage job
+# (same Windows multiprocess-spawn quirk).
+dog_park_photo_job = define_asset_job(
+    name="dog_park_photo_job",
+    # Group-based selection avoids the ordering trap of named imports
+    # (same pattern as dog_park_coverage_job). All 5 DP photo assets use
+    # group_name="phase_31_dp_photos".
+    selection=AssetSelection.groups("phase_31_dp_photos"),
+    executor_def=in_process_executor,
+    description=(
+        "Dog-park photo pipeline: Flickr + Wikimedia + Unsplash -> vision tags "
+        "-> vision-gated curate (top 3 per park where has_dog=true OR scene in "
+        "outdoor/park/beach). State-partitioned. Cost cap ~$5/state for vision."
+    ),
+)
+
 from .assets.upstream_loaders import (
     env_preflight,
     chain_integrity_check,
@@ -51,6 +71,7 @@ from .assets.upstream_loaders import (
     ensure_poi_landing,
     ensure_amenities,
     ensure_dog_features,
+    ensure_dog_parks_gold,
     precheck,
 )
 from .assets.operator_seeding import operators_for_state
@@ -76,6 +97,8 @@ from .assets.per_fid_enrichment import (
 from .assets.photos_and_vision import (
     state_photo_galleries, photo_centroid_backfill, photos_curate,
 )
+# DP photo assets (dp_photos_*, dp_photo_vision_tags, dp_photos_curate) are
+# referenced by dog_park_photo_job via group selection, not named import.
 from .assets.scoring_and_audit import (
     hourly_status_refresh, codify_coverage_check,
     daily_refresh_fire, field_population_check,
@@ -92,31 +115,40 @@ state_launch_job = define_asset_job(
     description=(
         "Full pipeline for a single state (Phases 1-33). Mirrors what "
         "`python scripts/run_state_pipeline.py --state X` does in the CLI. "
-        "Run from the launchpad: select state partition and launch."
+        "Runs beach + dog-park subsystems for the state. Per Franz "
+        "2026-05-26 — dog-park coverage and photo assets now included so "
+        "one launch fires everything."
     ),
-    selection=AssetSelection.assets(
-        env_preflight,
-        chain_integrity_check,
-        state_policy_seed, seasonal_closure_seed, state_park_url_check,
-        ensure_tiger_places, ensure_pad_us,
-        pad_us_geom_geog_check, ensure_county_subdivisions, pad_us_manager_class_preflight,
-        ensure_overpass, ensure_poi_landing,
-        ensure_amenities, ensure_dog_features,
-        precheck,
-        operators_for_state,
-        arena_seed, cluster_group, cluster_extras, promote_to_gold,
-        beach_inventory_check, ensure_pip_membership, validate_state_geom,
-        address_poi, address_city, name_source, strip_plus_codes,
-        catchment_refresh,
-        refresh_nearest_dog_park, codify_cascade,
-        purge_pollution, dedup, dedup_distance_name, geom_queue,
-        operator_llm_extract_for_state, operator_merge, rebuild_beach_evidence,
-        zone_rules_v2_refresh, operating_hours_refresh,
-        gold_set_candidates, gold_set_review_gate,
-        section_extract, harvest_park_text, descriptions, descriptions_audit, photos_wikimedia,
-        state_photo_galleries, photo_centroid_backfill, photos_curate,
-        hourly_status_refresh, codify_coverage_check,
-        daily_refresh_fire, field_population_check,
+    selection=(
+        AssetSelection.assets(
+            env_preflight,
+            chain_integrity_check,
+            state_policy_seed, seasonal_closure_seed, state_park_url_check,
+            ensure_tiger_places, ensure_pad_us,
+            pad_us_geom_geog_check, ensure_county_subdivisions, pad_us_manager_class_preflight,
+            ensure_overpass, ensure_poi_landing,
+            ensure_amenities, ensure_dog_features,
+            ensure_dog_parks_gold,
+            precheck,
+            operators_for_state,
+            arena_seed, cluster_group, cluster_extras, promote_to_gold,
+            beach_inventory_check, ensure_pip_membership, validate_state_geom,
+            address_poi, address_city, name_source, strip_plus_codes,
+            catchment_refresh,
+            refresh_nearest_dog_park, codify_cascade,
+            purge_pollution, dedup, dedup_distance_name, geom_queue,
+            operator_llm_extract_for_state, operator_merge, rebuild_beach_evidence,
+            zone_rules_v2_refresh, operating_hours_refresh,
+            gold_set_candidates, gold_set_review_gate,
+            section_extract, harvest_park_text, descriptions, descriptions_audit, photos_wikimedia,
+            state_photo_galleries, photo_centroid_backfill, photos_curate,
+            hourly_status_refresh, codify_coverage_check,
+            daily_refresh_fire, field_population_check,
+        )
+        # Dog-park coverage (10 ops): seeded operators + classify + amenity extract
+        | AssetSelection.groups("dog_park_coverage")
+        # Dog-park photos (5 ops): Flickr/Wikimedia/Unsplash + vision + vision-gated curate
+        | AssetSelection.groups("phase_31_dp_photos")
     ),
 )
 

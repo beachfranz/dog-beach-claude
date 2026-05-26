@@ -807,3 +807,59 @@ def precheck(
     return MaterializeResult(
         metadata={"state": state, "sources_ready": MetadataValue.int(count)}
     )
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  ensure_dog_parks_gold — per-state dog-park inventory readiness check
+# ════════════════════════════════════════════════════════════════════════
+#
+# Verifies dog_parks_gold has rows for the state. The initial ETL
+# (migration 20260519_dog_parks_gold_create.sql) populates the table for
+# every US state from osm_dog_parks via PIP. So this asset's job is to
+# verify, not re-load. If count==0 the state has no OSM dog-park data
+# (rare — would mean either the OSM whole-US bulk loader hasn't run, or
+# the state genuinely has no dog parks in OSM). Logs warning + returns
+# materialized so the downstream DP pipeline can continue (it'll just
+# have nothing to operate on).
+
+@asset(
+    partitions_def=state_partitions,
+    deps=[ensure_tiger_places],   # state polygons via TIGER are the PIP basis
+    group_name="phase_0_upstream_loaders",
+    description=(
+        "Per-state check that dog_parks_gold has rows for this state. "
+        "Does not re-load — initial migration populated via PIP from "
+        "osm_dog_parks. If count is 0, re-run "
+        "scripts/load_osm_dog_parks.py + the migration's ETL block."
+    ),
+)
+def ensure_dog_parks_gold(
+    context: AssetExecutionContext,
+    postgres: PostgresPoolerResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*), "
+                "       count(*) FILTER (WHERE is_active AND is_scoreable) "
+                "  FROM public.dog_parks_gold WHERE state = %s",
+                (state,),
+            )
+            total, active = cur.fetchone()
+    finally:
+        conn.close()
+
+    if total == 0:
+        context.log.warning(
+            f"ensure_dog_parks_gold: state={state} has 0 rows in dog_parks_gold. "
+            f"Run `python scripts/load_osm_dog_parks.py` + re-apply migration "
+            f"20260519_dog_parks_gold_create.sql section 3 ETL to populate."
+        )
+
+    return MaterializeResult(metadata={
+        "state":             MetadataValue.text(state),
+        "total_parks":       MetadataValue.int(total),
+        "active_scoreable":  MetadataValue.int(active),
+    })

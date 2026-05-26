@@ -38,6 +38,10 @@ from dagster import (
 
 from ..partitions import state_partitions
 from ..resources import PostgresPoolerResource, SubprocessResource
+# DP photo loaders wait for coverage classification (dp_triage_needs_review is
+# the last DP coverage asset) so we only photo parks with settled is_active /
+# is_scoreable flags.
+from .dog_park_coverage import dp_triage_needs_review
 
 
 # Per-source partition def for vision tagging. Mirrors the photo loader
@@ -398,3 +402,232 @@ def photos_curate(
             "log_tail": MetadataValue.text((result.stdout or "")[-2000:]),
         }
     )
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  Dog-park photo pipeline (Franz 2026-05-26)
+#  Mirrors the beach pipeline but reads dog_parks_gold + writes
+#  dog_park_photos. Same scripts, --entity dog_park dispatcher.
+# ════════════════════════════════════════════════════════════════════════
+
+def _tier_fids_dog_park(postgres: PostgresPoolerResource, state: str) -> list[int]:
+    """Active+scoreable dog parks per state. Equivalent of _tier12_fids
+    but against dog_parks_gold (no scoring_tier — all definitionally
+    scoreable when is_scoreable=true)."""
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT array_agg(distinct fid) "
+                "  FROM public.dog_parks_gold "
+                " WHERE state=%s AND is_active AND is_scoreable",
+                (state,),
+            )
+            return cur.fetchone()[0] or []
+    finally:
+        conn.close()
+
+
+def _make_dp_photo_loader_asset(
+    *, name: str, script: str, chunk_size: int, timeout: int,
+    parse_pattern: str, description: str, deps: list | None = None,
+):
+    """Factory for dog-park photo-loader assets. Mirrors
+    _make_photo_loader_asset but uses dog-park fid source + threads
+    --entity dog_park through to the subprocess script."""
+    @asset(
+        name=name,
+        partitions_def=state_partitions,
+        deps=deps or [],
+        group_name="phase_31_dp_photos",
+        description=description,
+    )
+    def _asset(
+        context: AssetExecutionContext,
+        postgres: PostgresPoolerResource,
+        subproc: SubprocessResource,
+    ) -> MaterializeResult:
+        state = context.partition_key
+        fids = _tier_fids_dog_park(postgres, state)
+        if not fids:
+            return MaterializeResult(metadata={"state": state, "fids": 0, "skipped": True})
+        total = done = failed = 0
+        for i in range(0, len(fids), chunk_size):
+            chunk = fids[i:i + chunk_size]
+            result = subproc.run(
+                script,
+                args=["--entity", "dog_park",
+                      "--fids", ",".join(str(x) for x in chunk)],
+                timeout=timeout,
+            )
+            if result.returncode != 0:
+                failed += 1
+                context.log.warning(
+                    f"DP chunk {done+1} failed (fids {chunk[0]}..{chunk[-1]}): "
+                    f"{(result.stderr or '')[-300:]}"
+                )
+                continue
+            m = re.search(parse_pattern, result.stdout or "")
+            if m:
+                total += int(m.group(1))
+            done += 1
+        return MaterializeResult(metadata={
+            "state":         MetadataValue.text(state),
+            "fids_total":    MetadataValue.int(len(fids)),
+            "photos_saved":  MetadataValue.int(total),
+            "chunks_done":   MetadataValue.int(done),
+            "chunks_failed": MetadataValue.int(failed),
+        })
+    return _asset
+
+
+dp_photos_flickr = _make_dp_photo_loader_asset(
+    name="dp_photos_flickr",
+    script="scripts/load_flickr_photos.py",
+    chunk_size=50, timeout=600,
+    parse_pattern=r"saved=(\d+)",
+    deps=[dp_triage_needs_review],
+    description="Dog-park Flickr photo loader. Geo search + entity-aware filter.",
+)
+
+dp_photos_wikimedia = _make_dp_photo_loader_asset(
+    name="dp_photos_wikimedia",
+    script="scripts/load_wikimedia_commons_photos.py",
+    chunk_size=30, timeout=900,
+    parse_pattern=r"saved=(\d+)",
+    deps=[dp_triage_needs_review],
+    description="Dog-park Wikimedia Commons loader. Geosearch by park lat/lng + 500m radius.",
+)
+
+dp_photos_unsplash = _make_dp_photo_loader_asset(
+    name="dp_photos_unsplash",
+    script="scripts/load_unsplash_photos.py",
+    chunk_size=80, timeout=600,
+    parse_pattern=r"saved=(\d+)",
+    deps=[dp_triage_needs_review],
+    description="Dog-park Unsplash loader. Keyword search (name + 'dog park' + state).",
+)
+
+
+@asset(
+    partitions_def=state_partitions,
+    deps=[dp_photos_flickr, dp_photos_wikimedia, dp_photos_unsplash],
+    group_name="phase_31_dp_photos",
+    description=(
+        "Two-pass Haiku vision tagger for dog-park photos. Reads "
+        "dog_park_photos rows with no current vision tag, writes "
+        "source_meta.vision JSON. Per-state partition, chunked."
+    ),
+)
+def dp_photo_vision_tags(
+    context: AssetExecutionContext,
+    subproc: SubprocessResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    chunks_per_state = 10
+    chunk_size = 50
+    total_tagged = total_err = 0
+    for i in range(chunks_per_state):
+        result = subproc.run(
+            "scripts/load_photo_vision_tags.py",
+            args=[
+                "--entity",     "dog_park",
+                "--state",      state,
+                "--chunk-size", str(chunk_size),
+                "--workers",    "4",
+                "--budget-usd", "5.0",
+            ],
+            timeout=900,
+        )
+        if result.returncode != 0:
+            context.log.warning(
+                f"DP vision chunk {i+1} failed: {(result.stderr or '')[-300:]}"
+            )
+            total_err += 1
+            break
+        out = result.stdout or ""
+        m_tagged = re.search(r"ok=(\d+)", out)
+        if m_tagged:
+            n = int(m_tagged.group(1))
+            total_tagged += n
+            if n == 0:
+                break
+        else:
+            break
+    return MaterializeResult(metadata={
+        "state":         MetadataValue.text(state),
+        "photos_tagged": MetadataValue.int(total_tagged),
+        "chunks_failed": MetadataValue.int(total_err),
+    })
+
+
+@asset(
+    partitions_def=state_partitions,
+    deps=[dp_photo_vision_tags],
+    group_name="phase_31_dp_photos",
+    description=(
+        "Vision-gated curation for dog parks. Top 3 photos per park ranked "
+        "by sort_order, filtered to those whose vision tag passes "
+        "(has_dog=true OR scene in outdoor/park/beach) AND no quality_issue. "
+        "Marks curated_at=now() so they render via anon RLS."
+    ),
+)
+def dp_photos_curate(
+    context: AssetExecutionContext,
+    postgres: PostgresPoolerResource,
+) -> MaterializeResult:
+    state = context.partition_key
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                WITH ranked AS (
+                  SELECT p.id, p.dog_park_fid,
+                         ROW_NUMBER() OVER (
+                           PARTITION BY p.dog_park_fid
+                           ORDER BY p.sort_order ASC NULLS LAST, p.id ASC
+                         ) AS rk
+                    FROM public.dog_park_photos p
+                    JOIN public.dog_parks_gold g ON g.fid = p.dog_park_fid
+                   WHERE g.state = %s
+                     AND p.curated_at IS NULL
+                     AND p.hidden_at IS NULL
+                     AND (
+                       (p.source_meta -> 'vision' ->> 'has_dog')::boolean = true
+                       OR (p.source_meta -> 'vision' ->> 'scene') IN ('outdoor', 'park', 'beach')
+                     )
+                     AND COALESCE(p.source_meta -> 'vision' ->> 'quality_issue', 'none') = 'none'
+                )
+                UPDATE public.dog_park_photos p
+                   SET curated_at = now(),
+                       curated_by = 'vision-auto',
+                       match_quality = 'medium'
+                  FROM ranked r
+                 WHERE p.id = r.id AND r.rk <= 3
+            """, (state,))
+            n_curated = cur.rowcount
+            conn.commit()
+            cur.execute("""
+                SELECT count(DISTINCT p.dog_park_fid)
+                  FROM public.dog_park_photos p
+                  JOIN public.dog_parks_gold g ON g.fid = p.dog_park_fid
+                 WHERE g.state = %s AND p.curated_at IS NOT NULL AND p.hidden_at IS NULL
+            """, (state,))
+            parks_with_photo = cur.fetchone()[0]
+            cur.execute(
+                "SELECT count(*) FROM public.dog_parks_gold "
+                " WHERE state = %s AND is_active AND is_scoreable",
+                (state,),
+            )
+            total_parks = cur.fetchone()[0]
+    finally:
+        conn.close()
+    return MaterializeResult(metadata={
+        "state":            MetadataValue.text(state),
+        "photos_curated":   MetadataValue.int(n_curated),
+        "parks_with_photo": MetadataValue.int(parks_with_photo),
+        "total_parks":      MetadataValue.int(total_parks),
+        "coverage_pct":     MetadataValue.float(
+            round(100.0 * parks_with_photo / max(total_parks, 1), 1)
+        ),
+    })

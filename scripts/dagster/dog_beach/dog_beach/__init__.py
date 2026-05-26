@@ -73,6 +73,7 @@ from .assets.upstream_loaders import (
     ensure_poi_landing,
     ensure_amenities,
     ensure_dog_features,
+    ensure_dog_parks_gold,
     precheck,
 )
 from .assets.operator_seeding import operators_for_state
@@ -124,6 +125,12 @@ from .assets.photos_and_vision import (
     state_photo_galleries,
     photo_centroid_backfill,
     photos_curate,
+    # Dog-park photo pipeline (Franz 2026-05-26)
+    dp_photos_flickr,
+    dp_photos_wikimedia,
+    dp_photos_unsplash,
+    dp_photo_vision_tags,
+    dp_photos_curate,
 )
 from .assets.scoring_and_audit import (
     hourly_status_refresh,
@@ -181,6 +188,7 @@ from .jobs import (
     weather_grid_refresh_job,
     weather_grid_inventory_job,
     dog_park_coverage_job,
+    dog_park_photo_job,
 )
 
 
@@ -206,6 +214,7 @@ defs = Definitions(
         ensure_poi_landing,
         ensure_amenities,
         ensure_dog_features,
+        ensure_dog_parks_gold,
         precheck,
         # Phase 10 operator seeding
         operators_for_state,
@@ -274,6 +283,12 @@ defs = Definitions(
         dp_run_extractor,
         dp_retry_no_match,
         dp_triage_needs_review,
+        # Dog-park photo pipeline (Franz 2026-05-26)
+        dp_photos_flickr,
+        dp_photos_wikimedia,
+        dp_photos_unsplash,
+        dp_photo_vision_tags,
+        dp_photos_curate,
         # Lineage-only AssetSpecs for downstream consumers
         *ALL_LINEAGE_SPECS,
     ],
@@ -302,6 +317,7 @@ defs = Definitions(
         weather_grid_refresh_job,
         weather_grid_inventory_job,
         dog_park_coverage_job,
+        dog_park_photo_job,
     ],
     asset_checks=[
         operators_for_state_has_breadth,

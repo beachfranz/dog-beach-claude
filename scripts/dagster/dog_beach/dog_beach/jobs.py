@@ -64,6 +64,31 @@ dog_park_photo_job = define_asset_job(
     ),
 )
 
+
+# Beach photo pipeline (Franz 2026-05-26 — mirror of dog_park_photo_job).
+# Selects phase_31_photos minus the two assets whose partition_def doesn't
+# match state_partitions (vision_tags per-source, keep_prob_model unparted).
+# Multiprocess executor so the 5 source loaders fan out in parallel.
+# Use: dagster job execute -j beach_photo_job --partition MD
+from .assets.photos_and_vision import (
+    photo_vision_tags as _beach_vision_tags,
+    photo_keep_prob_model as _beach_keep_prob,
+)
+beach_photo_job = define_asset_job(
+    name="beach_photo_job",
+    selection=(
+        AssetSelection.groups("phase_31_photos")
+        - AssetSelection.assets(_beach_vision_tags, _beach_keep_prob)
+    ),
+    executor_def=multiprocess_executor.configured({"max_concurrent": 5}),
+    description=(
+        "Beach photo pipeline: Flickr + Wikimedia + Unsplash + Websearch + CCC "
+        "(parallel) + state_photo_galleries + photo_centroid_backfill -> "
+        "photos_curate. State-partitioned. Vision tagging + keep_prob_model "
+        "run via separate triggers (different partition_defs)."
+    ),
+)
+
 from .assets.upstream_loaders import (
     env_preflight,
     chain_integrity_check,

@@ -189,6 +189,7 @@ from .jobs import (
     weather_grid_inventory_job,
     dog_park_coverage_job,
     dog_park_photo_job,
+    beach_photo_job,
 )
 
 
@@ -318,6 +319,7 @@ defs = Definitions(
         weather_grid_inventory_job,
         dog_park_coverage_job,
         dog_park_photo_job,
+        beach_photo_job,
     ],
     asset_checks=[
         operators_for_state_has_breadth,

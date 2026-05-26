@@ -226,16 +226,44 @@ def add_canonical_operator(
                 },
             }
 
+        # FIX 2026-05-25 LATE — public.operators may already have a row
+        # with this slug (from TIGER bulk-load: 'city-of-baltimore' etc.)
+        # but with canonical_operator_id=NULL. Insert would UniqueViolation.
+        # Detect + UPDATE the existing row's canonical_operator_id bridge
+        # instead of inserting a duplicate.
         cur.execute(
-            "INSERT INTO public.operators "
-            "  (slug, canonical_name, short_name, level, subtype, state_code, "
-            "   origin_source, is_active, canonical_operator_id, notes) "
-            "VALUES (%s, %s, %s, %s, %s, %s, 'manual', true, %s, %s) "
-            "RETURNING id",
-            (plural_slug, name, short_name, plural_level, plural_subtype,
-             state_code, singular_id, notes),
+            "SELECT id, canonical_operator_id FROM public.operators "
+            "WHERE slug = %s OR LOWER(canonical_name) = LOWER(%s) LIMIT 1",
+            (plural_slug, name),
         )
-        plural_id = cur.fetchone()[0]
+        existing_plural = cur.fetchone()
+        if existing_plural:
+            plural_id, existing_canonical = existing_plural
+            if existing_canonical is None:
+                cur.execute(
+                    "UPDATE public.operators "
+                    "SET canonical_operator_id = %s, updated_at = now() "
+                    "WHERE id = %s",
+                    (singular_id, plural_id),
+                )
+                plural_inserted = False  # bridged, not inserted
+            elif existing_canonical != singular_id:
+                # Already bridged to a DIFFERENT singular — unexpected; leave alone
+                plural_inserted = False
+            else:
+                plural_inserted = False
+        else:
+            cur.execute(
+                "INSERT INTO public.operators "
+                "  (slug, canonical_name, short_name, level, subtype, state_code, "
+                "   origin_source, is_active, canonical_operator_id, notes) "
+                "VALUES (%s, %s, %s, %s, %s, %s, 'manual', true, %s, %s) "
+                "RETURNING id",
+                (plural_slug, name, short_name, plural_level, plural_subtype,
+                 state_code, singular_id, notes),
+            )
+            plural_id = cur.fetchone()[0]
+            plural_inserted = True
         c.commit()
 
         return {
@@ -243,7 +271,7 @@ def add_canonical_operator(
             "plural_id": plural_id,
             "applied": True,
             "singular_inserted": singular_inserted,
-            "plural_inserted": True,
+            "plural_inserted": plural_inserted,
         }
 
 

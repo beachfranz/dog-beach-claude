@@ -2534,11 +2534,17 @@ def action_state_photo_galleries(state: str) -> int:
         n_inserted = int(m_inserted.group(1)) if m_inserted else 0
         if n_found > 0 and n_inserted == 0:
             # Idempotent re-run check (Franz 2026-05-26): if beach_photos
-            # already has rows from this loader for this state, "0 inserted"
-            # just means "all N discovered were already there" — ON CONFLICT
-            # DO NOTHING. That's correct behavior, not a silent failure.
-            # Map agency_tag → photo_source_type id (lowercase first word).
-            source_id = (name or '').lower()
+            # already has rows for this state from ANY state-park source,
+            # "0 inserted" plausibly means "all N discovered were already
+            # there" — ON CONFLICT DO NOTHING. Treat as ok instead of
+            # raising. Original detection only fires when state is
+            # genuinely empty (true discover/insert mismatch).
+            #
+            # Earlier attempt tried to derive source_id from name
+            # (e.g. 'Maryland' -> 'maryland') but the actual photo_source_type
+            # IDs are loader-specific ('md_dnr', 'oprd', 'wsprc', 'cdpr',
+            # 'nhstateparks', 'destateparks'). Per-state-any-source check
+            # is robust without needing a name-to-id mapping.
             existing = 0
             try:
                 from scripts.common.db import connect as _connect
@@ -2547,15 +2553,16 @@ def action_state_photo_galleries(state: str) -> int:
                     _cur.execute(
                         "SELECT count(*) FROM public.beach_photos bp "
                         "  JOIN public.beaches_gold g ON g.fid = bp.arena_group_id "
-                        " WHERE g.state = %s AND bp.source = %s",
-                        (state, source_id),
+                        " WHERE g.state = %s "
+                        "   AND bp.source NOT IN ('flickr','wikimedia','unsplash','websearch','ccc','pixabay','pexels','mapillary')",
+                        (state,),
                     )
                     existing = _cur.fetchone()[0] or 0
                 _c.close()
             except Exception:
                 pass
             if existing > 0:
-                log(f'      {name}: 0 new inserted but {existing} already in DB — idempotent re-run, treating as ok')
+                log(f'      {name}: 0 new inserted but {existing} state-park photos already in DB — idempotent re-run, treating as ok')
             else:
                 silent_failures.append(
                     f'{name}: found {n_found} photos but inserted 0 '

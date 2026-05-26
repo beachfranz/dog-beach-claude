@@ -168,6 +168,7 @@ from .schedules.time_based import (
     weekly_pipeline_health_schedule,
     hourly_weather_grid_schedule,
     daily_weather_grid_inventory_schedule,
+    monthly_dog_park_coverage_schedule,
 )
 from .jobs import (
     state_launch_job,
@@ -287,6 +288,7 @@ defs = Definitions(
         weekly_pipeline_health_schedule,
         hourly_weather_grid_schedule,
         daily_weather_grid_inventory_schedule,
+        monthly_dog_park_coverage_schedule,
     ],
     jobs=[
         state_launch_job,

@@ -26,6 +26,7 @@ from ..jobs import (
     pipeline_health_audit_job,
     weather_grid_refresh_job,
     weather_grid_inventory_job,
+    dog_park_coverage_job,
 )
 
 
@@ -114,3 +115,25 @@ def daily_weather_grid_inventory_schedule(context: ScheduleEvaluationContext):
     yield RunRequest(
         run_key=f"weather-grid-inventory-{context.scheduled_execution_time.date().isoformat()}",
     )
+
+
+# ── Dog-park coverage (monthly per state) ──────────────────────────────
+
+@schedule(
+    cron_schedule="0 7 1 * *",  # 1st of month, 07:00 UTC
+    job=dog_park_coverage_job,
+    default_status=DefaultScheduleStatus.STOPPED,
+    description=(
+        "Monthly re-run of dog-park coverage pipeline per state. Default "
+        "STOPPED — toggle ON when ready. Re-walks operator catalogs "
+        "(catches new parks added since last run), re-ingests, re-extracts. "
+        "Per pin [[dog-park-coverage-playbook]] — ~$5-15 per state per run."
+    ),
+)
+def monthly_dog_park_coverage_schedule(context: ScheduleEvaluationContext):
+    from ..assets.dog_park_coverage import DOG_PARK_STATES
+    for state in DOG_PARK_STATES.get_partition_keys():
+        yield RunRequest(
+            partition_key=state,
+            run_key=f"dpcov-{state}-{context.scheduled_execution_time.date().isoformat()}",
+        )

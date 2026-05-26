@@ -140,11 +140,50 @@ def add_canonical_operator(
                 singular_inserted = True
             else:
                 import json
+                # FIX 2026-05-25 LATE — operator.chk_operator_gov_or_delegated
+                # constraint requires agency_id IS NOT NULL (for gov types)
+                # OR delegated_authority_via IS NOT NULL (for delegated/private).
+                # For gov op_types ('city','county','state','federal*'),
+                # find-or-create matching agency row and set agency_id.
+                # For 'nonprofit' / 'special_district' etc., caller should
+                # set delegated_authority_via via metadata['delegated_to'] or
+                # we leave them to fail (caller's responsibility for non-gov).
+                agency_id = None
+                gov_types = {"city", "county", "state",
+                             "federal_department", "federal_military",
+                             "state_department", "county_department",
+                             "city_department"}
+                if op_type in gov_types:
+                    # Agency name convention (from existing data): bare entity
+                    # name without "City of " / "County of " / "State of " prefix.
+                    agency_name = name
+                    for pfx in ("City of ", "County of ", "State of ",
+                                "Town of "):
+                        if agency_name.startswith(pfx):
+                            agency_name = agency_name[len(pfx):]
+                            break
+                    cur.execute(
+                        "SELECT id FROM public.agency WHERE name = %s AND type = %s LIMIT 1",
+                        (agency_name, op_type),
+                    )
+                    arow = cur.fetchone()
+                    if arow:
+                        agency_id = arow[0]
+                    else:
+                        cur.execute(
+                            "INSERT INTO public.agency "
+                            "  (name, type, metadata, created_at, updated_at) "
+                            "VALUES (%s, %s, %s::jsonb, now(), now()) "
+                            "RETURNING id",
+                            (agency_name, op_type,
+                             json.dumps({"state_code": state_code})),
+                        )
+                        agency_id = cur.fetchone()[0]
                 cur.execute(
                     "INSERT INTO public.operator "
-                    "  (name, type, short_name, web_url, metadata) "
-                    "VALUES (%s, %s, %s, %s, %s::jsonb) RETURNING id",
-                    (name, op_type, short_name, web_url,
+                    "  (name, type, short_name, web_url, agency_id, metadata) "
+                    "VALUES (%s, %s, %s, %s, %s, %s::jsonb) RETURNING id",
+                    (name, op_type, short_name, web_url, agency_id,
                      json.dumps(metadata or {})),
                 )
                 singular_id = cur.fetchone()[0]

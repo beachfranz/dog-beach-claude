@@ -6,18 +6,18 @@ web_search finds the operator's catalog → LLM enumerates per-park entries
 queue to dog_park_discovery_queue for ingest pipeline.
 """
 from __future__ import annotations
-import os, subprocess, sys
+import os, sys
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from scripts.common.db import connect
+from scripts.dog_park_pipeline._inproc import call_main
 
 
 def walk_catalogs(state: str, workers: int = 4, min_parks: int = 3,
                   apply: bool = True) -> dict:
     started = datetime.now(timezone.utc)
 
-    # Pre-count queue rows for delta
     conn = connect(); conn.set_client_encoding("UTF8")
     try:
         cur = conn.cursor()
@@ -26,19 +26,15 @@ def walk_catalogs(state: str, workers: int = 4, min_parks: int = 3,
     finally:
         conn.close()
 
-    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    cmd = [
-        sys.executable, os.path.join(repo_root, "scripts", "walk_dog_park_operator_catalog.py"),
-        "--state", state,
-        "--workers", str(workers),
-        "--min-parks", str(min_parks),
-        "--chunk", "3", "--sleep", "30",
-    ]
+    # IN-PROCESS — calls walk_dog_park_operator_catalog.main() with monkey-
+    # patched sys.argv. No subprocess fork, no Python re-init.
+    from scripts.walk_dog_park_operator_catalog import main as walker_main
+    args = ["--state", state, "--workers", str(workers),
+            "--min-parks", str(min_parks), "--chunk", "3", "--sleep", "30"]
     if apply:
-        cmd.append("--apply")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        args.append("--apply")
+    exit_code, stdout = call_main(walker_main, "walk_dog_park_operator_catalog.py", args)
 
-    # Re-count for delta
     conn = connect(); conn.set_client_encoding("UTF8")
     try:
         cur = conn.cursor()
@@ -50,11 +46,10 @@ def walk_catalogs(state: str, workers: int = 4, min_parks: int = 3,
     return {
         "op": "walk_catalogs",
         "state": state,
-        "exit_code": result.returncode,
+        "exit_code": exit_code,
         "n_queue_added": n_queue_after - n_queue_before,
         "n_queue_total": n_queue_after,
-        "stdout_tail": (result.stdout or "")[-2000:],
-        "stderr_tail": (result.stderr or "")[-500:],
+        "stdout_tail": stdout[-2000:],
         "started_at": started.isoformat(),
         "ended_at": datetime.now(timezone.utc).isoformat(),
     }

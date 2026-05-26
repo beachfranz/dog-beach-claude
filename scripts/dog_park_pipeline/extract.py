@@ -6,11 +6,12 @@ Routes parks via:
   - No-website → web_search with city + name (via --include-no-website)
 """
 from __future__ import annotations
-import os, subprocess, sys
+import os, sys
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from scripts.common.db import connect
+from scripts.dog_park_pipeline._inproc import call_main
 
 
 def _count_operator_posted_v2(state: str) -> int:
@@ -33,27 +34,23 @@ def run_extractor(state: str, workers: int = 6, include_no_website: bool = True,
     started = datetime.now(timezone.utc)
     n_v2_before = _count_operator_posted_v2(state)
 
-    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    cmd = [
-        sys.executable, os.path.join(repo_root, "scripts", "extract_dog_park_amenities.py"),
-        "--state", state,
-        "--workers", str(workers),
-    ]
+    from scripts.extract_dog_park_amenities import main as extract_main
+    args = ["--state", state, "--workers", str(workers)]
     if include_no_website:
-        cmd.append("--include-no-website")
+        args.append("--include-no-website")
     if apply:
-        cmd.append("--apply")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        args.append("--apply")
+    exit_code, stdout = call_main(extract_main, "extract_dog_park_amenities.py", args)
 
     n_v2_after = _count_operator_posted_v2(state)
     return {
         "op": "run_extractor",
         "state": state,
-        "exit_code": result.returncode,
+        "exit_code": exit_code,
         "n_v2_before": n_v2_before,
         "n_v2_after": n_v2_after,
         "n_v2_added": n_v2_after - n_v2_before,
-        "stdout_tail": (result.stdout or "")[-1500:],
+        "stdout_tail": stdout[-1500:],
         "started_at": started.isoformat(),
         "ended_at": datetime.now(timezone.utc).isoformat(),
     }

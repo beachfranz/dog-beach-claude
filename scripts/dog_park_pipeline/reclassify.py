@@ -21,29 +21,78 @@ PRIVATE_NAME_PATTERNS = (
 
 
 def reclassify_obvious_junk(state: str) -> dict:
+    """Two-phase: (1) preview candidates with sample, (2) apply.
+    Preview is logged in metrics for human inspection in Dagster UI.
+
+    PROTECTED — these stay scoreable even if heuristics would match:
+      - "Pet Area" / "Pet Exercise Area" (rest-stop facilities, road-tripper
+        use case per [[dog-park-coverage-playbook]])
+      - "Love's Dog Park" (truck-stop pet zones, same logic)
+    """
     started = datetime.now(timezone.utc)
     conn = connect(); conn.set_client_encoding("UTF8")
+    PROTECTED_NAME_PATTERNS = (
+        '%Pet Area%', '%Pet Exercise%', '%Love%Dog Park%',
+        '%Rest Area%', '%Rest Stop%',
+    )
+
+    def _protected_clause():
+        # Build NOT (name ILIKE pat1 OR name ILIKE pat2 OR ...) clause + params
+        clause = " AND NOT (" + " OR ".join(["name ILIKE %s"] * len(PROTECTED_NAME_PATTERNS)) + ")"
+        return clause, list(PROTECTED_NAME_PATTERNS)
+
     try:
         cur = conn.cursor()
 
-        cur.execute("""
+        # PREVIEW: tiny-area candidates
+        prot_clause, prot_params = _protected_clause()
+        cur.execute(f"""
+            SELECT fid, name, area_m2, address_city
+              FROM public.dog_parks_gold
+             WHERE state = %s AND is_active AND is_scoreable
+               AND area_m2 IS NOT NULL AND area_m2 < 200
+               {prot_clause}
+             ORDER BY area_m2 ASC LIMIT 25
+        """, (state, *prot_params))
+        tiny_preview = [{"fid": r[0], "name": r[1], "area_m2": float(r[2] or 0),
+                         "city": r[3]} for r in cur.fetchall()]
+
+        # PREVIEW: private/residential candidates
+        private_preview = []
+        for pat in PRIVATE_NAME_PATTERNS:
+            cur.execute(f"""
+                SELECT fid, name, address_city FROM public.dog_parks_gold
+                 WHERE state = %s AND is_active AND is_scoreable
+                   AND name ILIKE %s
+                   {prot_clause}
+                 LIMIT 10
+            """, (state, pat, *prot_params))
+            for r in cur.fetchall():
+                private_preview.append({"fid": r[0], "name": r[1],
+                                        "city": r[2], "matched_pattern": pat})
+
+        # APPLY (tiny)
+        cur.execute(f"""
             UPDATE public.dog_parks_gold
                SET is_active = false,
                    inactive_reason = 'tiny_area_likely_mistagged_or_private'
              WHERE state = %s AND is_active AND is_scoreable
                AND area_m2 IS NOT NULL AND area_m2 < 200
-        """, (state,))
+               {prot_clause}
+        """, (state, *prot_params))
         n_tiny = cur.rowcount
 
+        # APPLY (private)
         n_private = 0
         for pat in PRIVATE_NAME_PATTERNS:
-            cur.execute("""
+            cur.execute(f"""
                 UPDATE public.dog_parks_gold
                    SET is_active = false,
                        inactive_reason = 'private_residential_complex'
                  WHERE state = %s AND is_active AND is_scoreable
                    AND name ILIKE %s
-            """, (state, pat))
+                   {prot_clause}
+            """, (state, pat, *prot_params))
             n_private += cur.rowcount
 
         conn.commit()
@@ -56,6 +105,9 @@ def reclassify_obvious_junk(state: str) -> dict:
         "n_tiny_flipped": n_tiny,
         "n_private_flipped": n_private,
         "n_total_flipped": n_tiny + n_private,
+        "tiny_preview": tiny_preview,
+        "private_preview": private_preview,
+        "protected_patterns": list(PROTECTED_NAME_PATTERNS),
         "started_at": started.isoformat(),
         "ended_at": datetime.now(timezone.utc).isoformat(),
     }

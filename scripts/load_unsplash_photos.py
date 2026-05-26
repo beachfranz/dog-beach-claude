@@ -1,4 +1,8 @@
-"""Load Unsplash photos for each beach into beach_photos.
+"""Load Unsplash photos for an entity (beach or dog park).
+
+Entity-aware per Franz 2026-05-26: --entity beach|dog_park dispatches
+table/FK choices via _photo_filters.ENTITIES. Beach is the default for
+back-compat.
 
 Unsplash: keyword search (no geo). Free for commercial use, no
 attribution required (Unsplash License). We provide attribution
@@ -29,7 +33,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scripts.common.supa import supa
-from scripts._photo_filters import beach_name_tokens, is_wrong_beach, haversine_m
+from scripts._photo_filters import beach_name_tokens, is_wrong_beach, haversine_m, ENTITIES
 
 UNSPLASH_KEY = (os.environ.get("UNSPLASH_ACCESS_KEY")
                 or os.environ.get("UNSPLASH_KEY"))
@@ -44,33 +48,49 @@ GEOFENCE_KM = 25  # If Unsplash photo has location data, must be within this man
 
 
 def select_targets(args):
+    ent = ENTITIES[args.entity]
+    table = ent["table"]
+    sel = ent["select_fields"]
     if args.fids:
         ids = [int(s) for s in args.fids.split(",")]
-        rows = supa("/rest/v1/beaches_gold",
-                    params={"select": "fid,name,display_name_override,county_name,state",
+        rows = supa(f"/rest/v1/{table}",
+                    params={"select": sel,
                             "fid": f"in.({','.join(map(str, ids))})",
                             "is_active": "eq.true"})
     elif args.pilot:
-        rows = supa("/rest/v1/beaches_gold",
-                    params={"select": "fid,name,display_name_override,county_name,state",
+        rows = supa(f"/rest/v1/{table}",
+                    params={"select": sel,
                             "is_active": "eq.true", "is_scoreable": "eq.true",
                             "order": "fid.asc", "limit": str(int(args.pilot))})
     elif args.full:
-        rows = supa("/rest/v1/beaches_gold",
-                    params={"select": "fid,name,display_name_override,county_name,state",
+        rows = supa(f"/rest/v1/{table}",
+                    params={"select": sel,
                             "is_active": "eq.true", "is_scoreable": "eq.true",
                             "order": "fid.asc"})
+    elif args.states:
+        states = [s.strip().upper() for s in args.states.split(",")]
+        rows = supa(f"/rest/v1/{table}",
+                    params={"select": sel,
+                            "is_active": "eq.true", "is_scoreable": "eq.true",
+                            "state": f"in.({','.join(states)})",
+                            "order": "fid.asc"})
     else:
-        print("ERROR: provide --fids, --pilot N, or --full", file=sys.stderr); sys.exit(1)
+        print("ERROR: provide --fids, --pilot N, --full, or --states", file=sys.stderr); sys.exit(1)
     out = []
     for r in (rows or []):
-        info = supa("/rest/v1/rpc/get_beach_info", method="POST", body={"p_fid": r["fid"]})
-        b = (info or {}).get("beach") or {}
+        name = r.get("display_name_override") or r.get("name")
+        if ent["has_lat_lon"]:
+            lat, lng = r.get("lat"), r.get("lon")
+        else:
+            info = supa(f"/rest/v1/rpc/{ent['lat_lon_rpc']}", method="POST", body={"p_fid": r["fid"]})
+            b = (info or {}).get("beach") or {}
+            lat, lng = b.get("lat"), b.get("lng")
         out.append({
             "fid": r["fid"],
-            "name": r.get("display_name_override") or r["name"],
-            "county": r.get("county_name"), "state": r.get("state"),
-            "lat": b.get("lat"), "lng": b.get("lng"),
+            "name": name,
+            "county": r.get("county_name") or r.get("address_city"),
+            "state": r.get("state"),
+            "lat": lat, "lng": lng,
         })
     return out
 
@@ -94,9 +114,13 @@ def unsplash_search(query, per_page=PER_BEACH):
         print(f"  unsplash error: {e}", file=sys.stderr); return []
 
 
-def replace_unsplash(fid, photos):
-    supa("/rest/v1/beach_photos", method="DELETE", params={
-        "arena_group_id": f"eq.{fid}", "source": "eq.unsplash",
+def replace_unsplash(fid, photos, entity="beach"):
+    ent = ENTITIES[entity]
+    photo_table = ent["photo_table"]
+    fk_col = ent["fk_col"]
+    supa(f"/rest/v1/{photo_table}", method="DELETE", params={
+        fk_col: f"eq.{fid}", "source": "eq.unsplash",
+        "curated_at": "is.null",
     }, prefer="return=minimal")
     if not photos: return
     rows = []
@@ -112,13 +136,12 @@ def replace_unsplash(fid, photos):
         pos = loc.get("position") or {}
         plat = pos.get("latitude")
         plng = pos.get("longitude")
-        # Geotagged photos rank above non-geo (sort_order 25-29 vs 35-39)
         if plat is not None and plng is not None:
             sort_order = 25 + i
         else:
             sort_order = 35 + i
         rows.append({
-            "arena_group_id": fid,
+            fk_col:           fid,
             "source":         "unsplash",
             "external_id":    p.get("id"),
             "image_url":      urls.get("regular") or urls.get("full"),
@@ -138,10 +161,8 @@ def replace_unsplash(fid, photos):
             },
         })
     if rows:
-        # PostgREST honors resolution=ignore-duplicates ONLY when on_conflict
-        # is set; without it, dup-key raises 409 mid-batch. See Flickr loader.
-        supa("/rest/v1/beach_photos", method="POST", body=rows,
-             params={"on_conflict": "arena_group_id,source,external_id"},
+        supa(f"/rest/v1/{photo_table}", method="POST", body=rows,
+             params={"on_conflict": f"{fk_col},source,external_id"},
              prefer="return=minimal,resolution=ignore-duplicates")
 
 
@@ -150,6 +171,9 @@ def main():
     grp = ap.add_mutually_exclusive_group(required=True)
     grp.add_argument("--fids");      grp.add_argument("--pilot", type=int)
     grp.add_argument("--full", action="store_true")
+    grp.add_argument("--states", help="State codes, e.g. CA,MD")
+    ap.add_argument("--entity", default="beach", choices=["beach", "dog_park"],
+                    help="Entity type. Default: beach (back-compat).")
     ap.add_argument("--refresh", action="store_true")
     args = ap.parse_args()
 
@@ -159,7 +183,13 @@ def main():
     saved = errored = 0
     for i, b in enumerate(targets, 1):
         try:
+            ent_cfg = ENTITIES[args.entity]
             parts = [b["name"]]
+            # Add entity keyword if not already in name (e.g. "Bark Park" already
+            # implies dog park; "Bixby" alone needs disambiguation)
+            kw = ent_cfg["default_query_kw"]
+            if kw.lower() not in b["name"].lower():
+                parts.append(kw)
             if b.get("state"):  parts.append(b["state"])
             query = " ".join(parts)
             tokens = beach_name_tokens(b["name"])
@@ -185,7 +215,7 @@ def main():
                 kept.append(p)
                 if len(kept) >= PER_BEACH:
                     break
-            replace_unsplash(b["fid"], kept)
+            replace_unsplash(b["fid"], kept, entity=args.entity)
             saved += len(kept)
             tag = f'{len(kept)} kept'
             if rejected_caption: tag += f' / {len(rejected_caption)} caption-rejected'

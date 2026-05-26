@@ -108,7 +108,7 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 from _photo_filters import (  # noqa: E402
     POSITIVE_TERMS_DOG, POSITIVE_TERMS_GENERIC, POSITIVE_TERMS, NEGATIVE_TERMS,
-    positive_terms_for,
+    positive_terms_for, ENTITIES,
 )
 
 
@@ -182,39 +182,8 @@ def _relevance_score(title: str, description: str = "", entity: str = "beach") -
     return score
 
 
-# ─── Entity configuration (Franz 2026-05-26 parameterization) ─────────────
-# Per [[never-solve-same-problem-twice]] the loader dispatches all entity-
-# specific choices (table, FK column, photo table, lat/lng resolution,
-# beach-only RPCs) through this dict. Beach is the default for backward
-# compat with existing pipeline callers.
-
-ENTITIES = {
-    "beach": {
-        "table":            "beaches_gold",
-        "fk_col":           "arena_group_id",
-        "photo_table":      "beach_photos",
-        "select_fields":    "fid,name,display_name_override,county_name,state,scoring_tier",
-        "has_lat_lon":      False,    # beach lat/lng comes via get_beach_info RPC
-        "lat_lon_rpc":      "get_beach_info",
-        "supports_agencies": True,
-        "supports_curator_rpcs": True,  # blocked_photographers + rejected RPC
-        "default_query_kw": "beach",
-        "auto_curate_top": 0,           # beaches use admin curator UI
-    },
-    "dog_park": {
-        "table":            "dog_parks_gold",
-        "fk_col":           "dog_park_fid",
-        "photo_table":      "dog_park_photos",
-        "select_fields":    "fid,name,display_name_override,address_city,state,lat,lon",
-        "has_lat_lon":      True,     # dog_parks_gold has lat + lon columns directly
-        "lat_lon_rpc":      None,
-        "supports_agencies": False,
-        "supports_curator_rpcs": False,
-        "default_query_kw": "dog park",
-        "auto_curate_top": 3,           # no curator UI yet → auto-mark top 3
-    },
-}
-
+# ENTITIES dispatch lives in _photo_filters.ENTITIES (single source of truth
+# shared by all photo loaders + Dagster assets).
 
 # ─── Supabase REST helpers ────────────────────────────────────────────────
 

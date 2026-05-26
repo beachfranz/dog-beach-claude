@@ -50,6 +50,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scripts.common.db import connect
 from scripts.common.llm import HAIKU
+from scripts._photo_filters import ENTITIES
 
 # Haiku 4.5 vision — cheapest capable vision model per env description.
 MODEL = HAIKU
@@ -191,7 +192,7 @@ def _image_source(image_url: str, force_b64: bool = False) -> dict:
     return {"type": "url", "url": url}
 
 
-def _describe(image_url: str, beach_name: str) -> tuple[str, int, int]:
+def _describe(image_url: str, entity_name: str, entity_label: str = "beach") -> tuple[str, int, int]:
     """Pass 1: free-form description. Returns (text, in_tok, out_tok)."""
     msg = _client.messages.create(
         model=MODEL,
@@ -202,11 +203,11 @@ def _describe(image_url: str, beach_name: str) -> tuple[str, int, int]:
                 {"type": "image", "source": _image_source(image_url)},
                 {"type": "text",
                  "text": (
-                    f"This photo is supposedly of {beach_name}. "
+                    f"This photo is supposedly of {entity_name}. "
                     "Describe what you see in 1-2 plain sentences. Focus on "
                     "the main subject, what's happening, and the setting. "
                     "Do not use markdown headers, do not speculate about "
-                    "whether it's actually that beach."
+                    f"whether it's actually that {entity_label}."
                  )},
             ],
         }],
@@ -239,9 +240,10 @@ Given the photo and an initial description, return a JSON object with these fiel
 Return ONLY the JSON object, no prose, no markdown fences."""
 
 
-def _extract(image_url: str, beach_name: str, description: str
-             ) -> tuple[dict, int, int]:
+def _extract(image_url: str, entity_name: str, description: str,
+             entity_label: str = "beach") -> tuple[dict, int, int]:
     """Pass 2: structured extraction. Returns (parsed, in_tok, out_tok)."""
+    label_titlecase = entity_label.title()   # "Beach" / "Dog Park"
     msg = _client.messages.create(
         model=MODEL,
         max_tokens=400,
@@ -251,7 +253,7 @@ def _extract(image_url: str, beach_name: str, description: str
                 {"type": "image", "source": _image_source(image_url)},
                 {"type": "text",
                  "text": (
-                    f"Beach context: {beach_name}\n"
+                    f"{label_titlecase} context: {entity_name}\n"
                     f"Initial description: {description}\n\n"
                     + _EXTRACT_PROMPT
                  )},
@@ -271,15 +273,15 @@ def _extract(image_url: str, beach_name: str, description: str
 
 # ─── Per-photo driver ─────────────────────────────────────────────────────
 
-def tag_photo(image_url: str, beach_name: str, retries: int = 3
-              ) -> tuple[dict, dict]:
+def tag_photo(image_url: str, entity_name: str, retries: int = 3,
+              entity_label: str = "beach") -> tuple[dict, dict]:
     """Run two passes; return (tags, usage). Retries on transient errors
     including Wikimedia 429s during the base64 fetch."""
     last_err = None
     for attempt in range(retries + 1):
         try:
-            desc, in1, out1 = _describe(image_url, beach_name)
-            tags, in2, out2 = _extract(image_url, beach_name, desc)
+            desc, in1, out1 = _describe(image_url, entity_name, entity_label)
+            tags, in2, out2 = _extract(image_url, entity_name, desc, entity_label)
             tags["description"] = desc
             tags["model"] = MODEL
             tags["schema_version"] = SCHEMA_VERSION
@@ -316,6 +318,8 @@ def tag_photo(image_url: str, beach_name: str, retries: int = 3
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--entity", default="beach", choices=["beach", "dog_park"],
+                    help="Entity type. Default: beach (back-compat).")
     ap.add_argument("--audit", help="Comma-separated fids — print tags, no write")
     ap.add_argument("--chunk-size", type=int, default=50,
                     help="Photos per run (default 50)")
@@ -344,6 +348,13 @@ def main():
                          "tagging — e.g. NPS backfill 2026-05-20.")
     args = ap.parse_args()
 
+    ent = ENTITIES[args.entity]
+    photo_table = ent["photo_table"]
+    fk_col      = ent["fk_col"]
+    gold_table  = ent["table"]
+    entity_label = "dog park" if args.entity == "dog_park" else "beach"
+    print(f"[vision] entity={args.entity}  photo_table={photo_table}  gold={gold_table}", flush=True)
+
     conn = connect()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("set statement_timeout = '120s'")
@@ -351,17 +362,15 @@ def main():
     # Build target set.
     if args.audit:
         fids = [int(x) for x in args.audit.split(",")]
-        cur.execute("""
+        cur.execute(f"""
             select bp.id, bp.image_url, bp.thumb_url, bp.source_meta,
-                   coalesce(g.display_name_override, g.name) as beach_name
-              from public.beach_photos bp
-              join public.beaches_gold g on g.fid = bp.arena_group_id
-             where bp.arena_group_id = any(%s)
-             order by bp.arena_group_id, bp.sort_order
+                   coalesce(g.display_name_override, g.name) as entity_name
+              from public.{photo_table} bp
+              join public.{gold_table} g on g.fid = bp.{fk_col}
+             where bp.{fk_col} = any(%s)
+             order by bp.{fk_col}, bp.sort_order
         """, (fids,))
     else:
-        # Idempotency: skip rows already tagged with the current model+schema.
-        # Bumping SCHEMA_VERSION auto-invalidates v1 rows without manual ops.
         source_filter = ""
         source_params: tuple = ()
         if args.source:
@@ -376,24 +385,15 @@ def main():
         fid_filter = ""
         if args.fids:
             fid_list = [int(s) for s in args.fids.split(",") if s.strip()]
-            fid_filter = "and bp.arena_group_id = any(%s)"
+            fid_filter = f"and bp.{fk_col} = any(%s)"
             source_params = source_params + (fid_list,)
-        # v3_skipped sentinel (task #76) marks photos to NOT re-tag for
-        # cost savings. --include-v3-skipped overrides for cases where
-        # tagging IS wanted (e.g. NPS backfill — Franz 2026-05-20).
         v3_skipped_filter = ("" if args.include_v3_skipped
                               else "and coalesce(source_meta ->> 'v3_skipped', 'false') != 'true'")
-        # Per Franz 2026-05-19 collapsed-architecture: every photo loaded
-        # via the refactored Flickr/Wikimedia loaders has already passed
-        # the unified v3 ingest filter. Pre-existing photos (ingested
-        # under old per-source filters) get retroactively evaluated by
-        # scripts/filter_non_curated_for_retag.py — rejects are marked
-        # source_meta.v3_skipped=true. The WHERE clause excludes them.
         cur.execute(f"""
             select bp.id, bp.image_url, bp.thumb_url, bp.source_meta,
-                   coalesce(g.display_name_override, g.name) as beach_name
-              from public.beach_photos bp
-              join public.beaches_gold g on g.fid = bp.arena_group_id
+                   coalesce(g.display_name_override, g.name) as entity_name
+              from public.{photo_table} bp
+              join public.{gold_table} g on g.fid = bp.{fk_col}
              where bp.image_url is not null
                {source_filter}
                {state_filter}
@@ -424,7 +424,7 @@ def main():
     # silently on OperationalError + retries the write. Diagnosed 2026-05-19.
     nonlocal_state = {"conn": conn, "cur": upd_cur}
     def _safe_update(tags, pid):
-        sql = ("update public.beach_photos "
+        sql = (f"update public.{photo_table} "
                "   set source_meta = source_meta || jsonb_build_object('vision', %s::jsonb) "
                " where id = %s")
         params = (json.dumps(tags), pid)
@@ -440,7 +440,7 @@ def main():
     def process(p):
         url = p["thumb_url"] or p["image_url"]
         try:
-            tags, usage = tag_photo(url, p["beach_name"] or "a beach")
+            tags, usage = tag_photo(url, p["entity_name"] or f"a {entity_label}", entity_label=entity_label)
         except Exception as e:
             with lock:
                 state["err"] += 1

@@ -1,4 +1,8 @@
-"""Load nearby Wikimedia Commons photos for each beach into beach_photos.
+"""Load nearby Wikimedia Commons photos for an entity (beach or dog park).
+
+Entity-aware per Franz 2026-05-26: --entity beach|dog_park dispatches all
+table/FK/RPC choices through _photo_filters.ENTITIES. Beach is the
+default for back-compat.
 
 Wikimedia Commons hosts millions of CC-licensed photos with geographic
 coordinates. We query the Commons MediaWiki API's geosearch around each
@@ -43,6 +47,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scripts.common.supa import supa
 
+# Single source of truth for per-entity table / FK / RPC dispatch.
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+from _photo_filters import ENTITIES  # noqa: E402
+
 USER_AGENT    = "DogBeachScout/1.0 (https://dogbeachscout.app; data@dogbeachscout.app) commons-loader"
 COMMONS_API   = "https://commons.wikimedia.org/w/api.php"
 RADIUS_M      = 500          # geosearch radius around beach centroid
@@ -56,55 +66,71 @@ SKIP_EXTS     = {"svg", "pdf", "ogv", "ogg", "webm", "mp3", "wav"}
 # ─── Supabase REST helpers ────────────────────────────────────────────────
 
 def select_targets(args) -> list[dict]:
+    ent = ENTITIES[args.entity]
+    table = ent["table"]
+    sel = ent["select_fields"]
+    base = {"is_active": "eq.true"}
     if args.fids:
         ids = [int(s) for s in args.fids.split(",")]
-        rows = supa("/rest/v1/beaches_gold",
-                    params={"select": "fid,name,display_name_override,lat,lon,state,scoring_tier",
+        rows = supa(f"/rest/v1/{table}",
+                    params={"select": sel,
                             "fid": f"in.({','.join(map(str, ids))})",
-                            "is_active": "eq.true"})
-        return _shape(rows or [])
-    if args.states:
+                            **base})
+    elif args.states:
         states = [s.strip().upper() for s in args.states.split(",")]
-        rows = supa("/rest/v1/beaches_gold",
-                    params={"select": "fid,name,display_name_override,lat,lon,state,scoring_tier",
-                            "is_active": "eq.true",
-                            "is_scoreable": "eq.true",
+        rows = supa(f"/rest/v1/{table}",
+                    params={"select": sel,
+                            **base, "is_scoreable": "eq.true",
                             "state": f"in.({','.join(states)})",
                             "order": "fid.asc"})
-        return _shape(rows or [])
-    if args.pilot or args.full:
-        rows = supa("/rest/v1/beaches_gold",
-                    params={"select": "fid,name,display_name_override,lat,lon,state,scoring_tier",
-                            "is_active": "eq.true",
-                            "is_scoreable": "eq.true",
+    elif args.pilot or args.full:
+        rows = supa(f"/rest/v1/{table}",
+                    params={"select": sel,
+                            **base, "is_scoreable": "eq.true",
                             "order": "fid.asc",
                             **({"limit": str(int(args.pilot))} if args.pilot else {})})
-        return _shape(rows or [])
-    print("ERROR: provide --fids, --pilot N, --full, or --states XX,YY", file=sys.stderr)
-    sys.exit(1)
+    else:
+        print("ERROR: provide --fids, --pilot N, --full, or --states XX,YY", file=sys.stderr)
+        sys.exit(1)
+    return _shape(rows or [], args.entity)
 
 
-def _shape(rows):
-    # Fetch dogs_allowed per beach via get_beach_info (needed for v3 cap rule).
-    # Keeps the loader self-contained — same pattern as load_flickr_photos.py.
+def _shape(rows, entity: str):
+    """Normalize candidate rows into the loader's working dict. Per-entity
+    lat/lng resolution: dog_park rows already have lat+lon columns; beach
+    rows need a get_beach_info RPC trip to resolve lat/lng + dogs_allowed."""
+    ent = ENTITIES[entity]
+    has_latlon = ent["has_lat_lon"]
     out = []
     for r in rows:
-        if r.get("lat") is None or r.get("lon") is None:
-            continue
-        try:
-            info = supa("/rest/v1/rpc/get_beach_info", method="POST", body={"p_fid": r["fid"]}) or {}
-            dp = info.get("dog_policy") or {}
-            dogs_allowed = dp.get("dogs_allowed")
-        except Exception:
-            dogs_allowed = None
-        out.append({
-            "fid": r["fid"],
-            "name": r.get("display_name_override") or r["name"],
-            "lat": r.get("lat"), "lng": r.get("lon"),
-            "state": r.get("state"),
-            "scoring_tier": r.get("scoring_tier"),
-            "dogs_allowed": dogs_allowed,
-        })
+        name = r.get("display_name_override") or r.get("name")
+        if has_latlon:
+            lat, lng = r.get("lat"), r.get("lon")
+            if lat is None or lng is None: continue
+            out.append({
+                "fid": r["fid"], "name": name,
+                "lat": lat, "lng": lng,
+                "state": r.get("state"),
+                "scoring_tier": None,
+                "dogs_allowed": "yes",   # dog parks are definitionally yes
+            })
+        else:
+            if r.get("lat") is None or r.get("lon") is None:
+                continue
+            try:
+                info = supa(f"/rest/v1/rpc/{ent['lat_lon_rpc']}", method="POST",
+                            body={"p_fid": r["fid"]}) or {}
+                dp = info.get("dog_policy") or {}
+                dogs_allowed = dp.get("dogs_allowed")
+            except Exception:
+                dogs_allowed = None
+            out.append({
+                "fid": r["fid"], "name": name,
+                "lat": r.get("lat"), "lng": r.get("lon"),
+                "state": r.get("state"),
+                "scoring_tier": r.get("scoring_tier"),
+                "dogs_allowed": dogs_allowed,
+            })
     return out
 
 
@@ -374,18 +400,18 @@ def rank_and_pick(geo_results: list[dict], info_map: dict[int, dict],
 
 # ─── Persistence ──────────────────────────────────────────────────────────
 
-def replace_commons(fid: int, photos: list[dict]):
+def replace_commons(fid: int, photos: list[dict], entity: str = "beach"):
     # API transient = "nothing to replace with" — preserve existing rather
     # than wipe-then-fail-to-refill. Diagnosed 2026-05-19 for Flickr; same
     # risk shape applies here.
     if not photos: return
-    # Delete ONLY uncurated rows (curated photos are preserved). Also: the
-    # stored source is 'wikimedia' — historical bug used 'wikimedia_commons'
-    # in the DELETE which never matched, making the loader silently additive.
-    supa("/rest/v1/beach_photos", method="DELETE", params={
-        "arena_group_id": f"eq.{fid}",
-        "source":         "eq.wikimedia",
-        "curated_at":     "is.null",
+    ent = ENTITIES[entity]
+    photo_table = ent["photo_table"]
+    fk_col = ent["fk_col"]
+    supa(f"/rest/v1/{photo_table}", method="DELETE", params={
+        fk_col:          f"eq.{fid}",
+        "source":        "eq.wikimedia",
+        "curated_at":    "is.null",
     }, prefer="return=minimal")
     rows = []
     for i, p in enumerate(photos):
@@ -395,10 +421,9 @@ def replace_commons(fid: int, photos: list[dict]):
         license_short = _meta(extmd, "LicenseShortName") or _meta(extmd, "License") or "see Commons"
         description = _meta(extmd, "ImageDescription")
         page_url = f"https://commons.wikimedia.org/wiki/{urllib.parse.quote(p['_title'])}"
-        # Build a sensible thumb URL via Commons' thumbnail endpoint
         full_url = info.get("url") or ""
         rows.append({
-            "arena_group_id": fid,
+            fk_col:           fid,
             "source":         "wikimedia",
             "external_id":    str(p.get("pageid")),
             "image_url":      full_url,
@@ -410,22 +435,19 @@ def replace_commons(fid: int, photos: list[dict]):
             "lat":            p.get("lat"),
             "lng":            p.get("lon"),
             "distance_m":     int(p["_distance_m"]),
-            "sort_order":     50 + i,        # rank Commons just below CCC, above Mapillary
+            "sort_order":     50 + i,
             "page_url":       page_url,
             "source_meta":    {"description": (description or "")[:500],
                                "title": p["_title"],
-                               "artist": artist[:200],   # for blocklist grouping
+                               "artist": artist[:200],
                                "credit": _meta(extmd, "Credit"),
                                "usage_terms": _meta(extmd, "UsageTerms"),
                                "relevance_score":  round(p.get("_relevance", 0.0), 2),
                                "name_match_score": round(p.get("_name_match", 0.0), 2),
                                "composite_score":  round(p.get("_composite", 0.0), 2)},
         })
-    # PostgREST needs on_conflict= to honor resolution=ignore-duplicates;
-    # without it, dup-key 409s mid-batch leaves DELETE half-applied (lost
-    # photos). Diagnosed 2026-05-19 — fid 6065 went 5→1.
-    supa("/rest/v1/beach_photos", method="POST", body=rows,
-         params={"on_conflict": "arena_group_id,source,external_id"},
+    supa(f"/rest/v1/{photo_table}", method="POST", body=rows,
+         params={"on_conflict": f"{fk_col},source,external_id"},
          prefer="return=minimal,resolution=ignore-duplicates")
 
 
@@ -456,27 +478,32 @@ def _thumb_url(full_url: str, target_width: int) -> str | None:
 def main():
     ap = argparse.ArgumentParser()
     g = ap.add_mutually_exclusive_group()
-    g.add_argument("--fids", help="Comma-separated beach fids")
-    g.add_argument("--pilot", type=int, help="Sample first N tier-1+2 beaches")
-    g.add_argument("--full", action="store_true", help="All tier-1+2 beaches")
+    g.add_argument("--fids", help="Comma-separated entity fids")
+    g.add_argument("--pilot", type=int, help="Sample first N tier-1+2 entities")
+    g.add_argument("--full", action="store_true", help="All tier-1+2 entities")
     g.add_argument("--states", help="State codes, e.g. MA,RI,DE")
+    ap.add_argument("--entity", default="beach", choices=["beach", "dog_park"],
+                    help="Entity type. Default: beach (back-compat).")
     ap.add_argument("--radius", type=int, default=RADIUS_M)
     ap.add_argument("--per-beach", type=int, default=PER_BEACH)
     args = ap.parse_args()
 
+    ent = ENTITIES[args.entity]
     targets = select_targets(args)
-    print(f"Targets: {len(targets)} beaches")
+    print(f"Targets: {len(targets)} {args.entity}s  (radius {args.radius}m, per_{args.entity} {args.per_beach})")
 
-    blocked = fetch_blocked_photographers()
+    # Beach-only RPCs — skip for dog_park (no curator/blocklist tables yet).
+    blocked = fetch_blocked_photographers() if ent["supports_curator_rpcs"] else set()
     if blocked:
         print(f"Photographer blocklist: {len(blocked)} artists "
               f"(>=3 prior photos, mean rel <= 0)")
 
-    rejected_by_fid = fetch_rejected_external_ids([b["fid"] for b in targets])
+    rejected_by_fid = (fetch_rejected_external_ids([b["fid"] for b in targets])
+                       if ent["supports_curator_rpcs"] else {})
     if rejected_by_fid:
         total_rej = sum(len(s) for s in rejected_by_fid.values())
         print(f"Curator-rejected tombstones: {total_rej} external_ids "
-              f"across {len(rejected_by_fid)} beaches (will skip)")
+              f"across {len(rejected_by_fid)} entities (will skip)")
 
     saved_total = 0
     no_photos = 0
@@ -488,7 +515,7 @@ def main():
             geo = commons_geosearch(b["lat"], b["lng"], args.radius, limit=30)
             if not geo:
                 no_photos += 1
-                replace_commons(b["fid"], [])
+                replace_commons(b["fid"], [], entity=args.entity)
                 continue
             # Filter curator-rejected external_ids — don't surface trashed photos
             rej = rejected_by_fid.get(b["fid"]) or set()
@@ -496,7 +523,7 @@ def main():
                 geo = [g for g in geo if str(g.get("pageid")) not in rej]
                 if not geo:
                     no_photos += 1
-                    replace_commons(b["fid"], [])
+                    replace_commons(b["fid"], [], entity=args.entity)
                     continue
             time.sleep(THROTTLE_S)
             info_map = commons_imageinfo([g["pageid"] for g in geo])
@@ -507,7 +534,7 @@ def main():
                                                "dogs_allowed": b.get("dogs_allowed")})
             if not picked:
                 no_photos += 1
-                replace_commons(b["fid"], [])
+                replace_commons(b["fid"], [], entity=args.entity)
                 continue
             replace_commons(b["fid"], picked)
             saved_total += len(picked)

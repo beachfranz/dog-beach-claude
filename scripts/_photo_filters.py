@@ -256,6 +256,40 @@ def entity_name_keyword(entity: str) -> str:
     """Word for score_photo's name-bonus boost — 'beach' vs 'dog park'."""
     return "dog park" if entity == "dog_park" else "beach"
 
+
+# ═══════════════════════════════════════════════════════════════════════
+# ENTITIES — single source of truth for per-loader entity dispatch.
+# Every loader imports this and uses ENTITIES[args.entity][...] for
+# table / FK / RPC / curate decisions. Adding a new entity = one entry
+# here; loaders should never re-declare these per-file.
+# ═══════════════════════════════════════════════════════════════════════
+ENTITIES = {
+    "beach": {
+        "table":             "beaches_gold",
+        "fk_col":            "arena_group_id",
+        "photo_table":       "beach_photos",
+        "select_fields":     "fid,name,display_name_override,county_name,state,scoring_tier",
+        "has_lat_lon":       False,    # lat/lng via get_beach_info RPC
+        "lat_lon_rpc":       "get_beach_info",
+        "supports_agencies":  True,
+        "supports_curator_rpcs": True,  # blocked_photographers + rejected RPC
+        "default_query_kw":  "beach",
+        "auto_curate_top":   0,         # admin curator UI gates display
+    },
+    "dog_park": {
+        "table":             "dog_parks_gold",
+        "fk_col":            "dog_park_fid",
+        "photo_table":       "dog_park_photos",
+        "select_fields":     "fid,name,display_name_override,address_city,state,lat,lon",
+        "has_lat_lon":       True,     # dog_parks_gold has lat + lon columns
+        "lat_lon_rpc":       None,
+        "supports_agencies":  False,
+        "supports_curator_rpcs": False,
+        "default_query_kw":  "dog park",
+        "auto_curate_top":   0,        # vision-tag pipeline + dp_photos_curate gates display
+    },
+}
+
 # Source priorities — Type B (page-gallery, NULL distance) outranks Type A.
 SOURCE_WEIGHT: dict[str, float] = {
     "ccc":       3.0,   # CA-only; highest curator-keep density (81%)

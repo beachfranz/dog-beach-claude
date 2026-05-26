@@ -312,9 +312,9 @@ Leaflet + `tile.openstreetmap.fr` (OSM Carto). Voyager / Stadia / OpenFreeMap as
 ## Rolling Actuals (NOW)
 
 Hourly cron `hourly-beach-now-refresh` (`pg_cron`) fires `get-beach-now` POST with no body → refreshes every scoreable beach. Each refresh:
-1. Live Open-Meteo `/current` + hourly precip
+1. **Weather: reads from `weather_grid_hourly` via `weather_for_point()` RPC** (Phase W2 cutover, 2026-05-25). Falls back to live Open-Meteo if grid cell unloaded.
 2. Live NOAA tide for current hour
-3. Borrows `busyness_score` from existing DB row (BestTime fetched daily only)
+3. ~~Borrows busyness_score from existing DB row~~ — BestTime soft-removed; crowd score = 0.5 neutral
 4. Runs `scoreHours()` from `_shared/scoring.ts`
 5. Clears previous `is_now=true` row for the beach
 6. Upserts new row with `is_now=true`, overwriting the forecast for that timestamp
@@ -322,6 +322,104 @@ Hourly cron `hourly-beach-now-refresh` (`pg_cron`) fires `get-beach-now` POST wi
 By end of day all past hours have been overwritten with observed actuals.
 
 Migrations: `20260417_is_now.sql` + `20260417_hourly_now_cron.sql`.
+
+---
+
+## Weather as Reference Layer (Phase W1+W2, 2026-05-25)
+
+Weather is a **reference layer** in the same shape as `jurisdictions` / `cpad_units` / `osm_features` — peer to other spatial reference tables. Single loader populates a gridded forecast/observed table; beach + dog-park + future-trail consumers JOIN against it. **No per-entity Open-Meteo fetches** anywhere in the consumer path.
+
+### Tables + helpers
+
+- **`weather_grid`** — materialized inventory of 0.025° (~3km) cells with ≥1 consumer entity. ~4,000 cells across CA + OR + WA + early eastern states. Auto-populated by triggers on entity tables.
+- **`weather_grid_hourly`** — 168-hour rolling forecast per cell + past 3 days observed. PK `(grid_lat, grid_lon, forecast_ts)`. `is_observed=true` for past hours (bacteria-grade), `false` for forecast.
+- **`weather_for_point(lat, lng, start_ts, end_ts)`** — primary consumer read entry point. Returns hourly weather rows for the cell containing the point within a time window.
+- **`weather_grid_bin_lat(lat)` / `weather_grid_bin_lon(lng)`** — bin-floor helpers used by the entity-table triggers + consumers.
+- **`precip_72h_for_point(lat, lng, anchor_date)`** — convenience for bacteria-risk + dog-park mud caution.
+- **`precipitation_history`** (view) — daily SUM(precip_mm) over observed hours per cell × date. Replaces inline 72h precip computation in daily-beach-refresh.
+
+### Materialization
+
+Cached `weather_grid_lat` / `weather_grid_lon` columns on `beaches_gold` + `dog_parks_gold`. Trigger `tg_compute_weather_grid_cell` computes them on lat/lon insert/update AND auto-registers the cell in `weather_grid`. Same pattern as `beach_polygon_membership`. Backfilled for existing rows.
+
+Consumer reads are pure JOIN — no function calls at query time:
+```sql
+SELECT wgh.* FROM weather_grid_hourly wgh
+JOIN beaches_gold b ON b.weather_grid_lat = wgh.grid_lat
+                  AND b.weather_grid_lon = wgh.grid_lon
+WHERE b.fid = $1 AND wgh.forecast_ts BETWEEN $2 AND $3;
+```
+
+### Loader
+
+`scripts/dagster/dog_beach/dog_beach/assets/weather_grid.py` (Python on Dagster — NOT edge function, sidesteps WORKER_RESOURCE_LIMIT). Per-cell tier-based stale thresholds:
+- Cells with ≥1 `scoring_tier='hourly'` beach → 1h fresh threshold
+- Cells with active `daily`-tier beach or scoreable dog park → 6h
+- Cells with no active consumers → 24h
+
+Multi-location batched Open-Meteo fetch (~100 cells per API call). Schedule: hourly (`hourly_weather_grid_schedule`, default STOPPED — toggle ON in Dagster UI). Daily backstop rebuild (`daily_weather_grid_inventory_schedule`) re-UNIONs from entity tables in case triggers drift.
+
+### Consumer cutover (Phase W2)
+
+Four edge functions read from grid instead of fetching Open-Meteo:
+- `daily-beach-refresh` (W2.1) — `fetchWeatherFromGrid()` replaces `fetchWeather()`. NOAA also gated to cache-only (only weekly cron fetches).
+- `daily-dog-park-refresh` (W2.2) — same swap + mud-caution check via `precip_72h_for_point` for dirt-surface parks.
+- `get-beach-now` (W2.3) — `fetchCurrentWeatherFromGrid()` replaces `fetchCurrentWeather()`.
+- `get-dog-park-now` (W2.4) — same swap.
+
+All four have direct-fetch fallback if grid cell is unloaded.
+
+### Cost / call volume
+
+Pre-cutover: ~16,500 Open-Meteo calls/day across all consumers. Post-cutover: <100/day (mostly the grid loader + occasional fallback). ~165× reduction.
+
+### Caveats
+
+- **Dagster schedules default STOPPED** per project convention. Toggle ON via Dagster UI (`hourly_weather_grid_schedule` + `daily_weather_grid_inventory_schedule`) or grid goes stale within 1-3 days as forecasts age out. Consumers degrade to direct-fetch fallback if grid is empty.
+- **WORKER_RESOURCE_LIMIT still possible** on `daily-beach-refresh` at >50 beaches/call. Mitigated via 2-min chunked cron (`beach_refresh_chunked`) + 22h stale filter. Real fix is Phase W4 (Dagster port of daily refreshes).
+
+Migrations: `20260525_weather_grid_schema.sql` + `_helpers.sql` + `_materialization.sql`. Pin: `[[weather-grid-reference-layer]]`.
+
+---
+
+## Per-Beach Off-Leash Extraction (Codify-Pattern Port)
+
+`scripts/extract_per_beach_offleash_v2.py` is the canonical script for extracting per-beach off-leash policy with cite-required verbatim quotes. Built 2026-05-25 LATE as a port of the codify pipeline's URL-resolution + LLM-extraction substrate from `scripts/derive_policy_source_for_jurisdiction.py`.
+
+### Why a separate script
+
+`extract_research_v2.py` finds candidate URLs from a static pool (`park_url_extractions` + operators + cpad_units + city_policy_sources). That pool misses authoritative deep URLs for many famous beaches because the surrounding pipeline focuses on jurisdiction-level metadata, not per-beach pages. Result: v1 of this extractor got 0/25 yes-with-cite because every candidate was an agency catalog root.
+
+### What v2 ports from codify
+
+1. **Park-platform candidate builders** (`candidates_for_beach`) — analog of codify's `_candidates_municode`/`_codepublishing`/`_amlegal`. Switches on `cpad_units.mng_agncy` + city to emit URLs for CDPR, sandiego.gov bchdog, beaches.lacounty.gov, ocparks.com, plus city-specific deep pages (Coronado, Capitola, Newport Beach, Santa Cruz, etc.).
+2. **Smart-fetch routing** (`smart_fetch`) — Playwright for known JS-rendered/blocked hosts (parks.ca.gov, newportbeachca.gov, sanjoseca.gov, cityofdavis.org); urllib otherwise. Auto-escalates to Playwright on 403/503 per `feedback_403_means_playwright_skip_ua_tricks.md`.
+3. **AUTH_DOMAINS scoring** — richer than `extract_research_v2`'s table (adds beaches.lacounty.gov, cityofcapitola.org, malibucity.org, etc.); demotes aggregators (bringfido, yelp, tripadvisor).
+4. **Deep-link gate** (`is_url_deep_enough` + `DEEPLINK_MARKERS`) — backstop rejecting bare catalog roots before LLM cost.
+5. **Anthropic web_search_20250305 escalation** — when ALL deterministic candidates fail OR a candidate returns thin/blocked content, escalate Sonnet with `web_search_20250305` tool enabled. Sonnet routes around Cloudflare/404s by searching the web for authoritative .gov / park-system sources. Cost ~$0.01-0.03 per beach. Patterned after codify Step 6.8.
+6. **Sentinel-row writes** — on no-result paths, write a BEP row with `source='per_beach_offleash_v2_no_result'`, `is_canonical=false` so freshness guards skip re-extracting.
+
+### Cite-required contract
+
+LLM prompt enforces: `answer ∈ {yes, no, unknown, no_match}` + verbatim `quote` 50-300 chars MUST contain the beach name + `time_window` if yes + `confidence ∈ {high, medium, low}`. Yes-with-cite passes name_match() on the quote before writing canonical.
+
+### Output
+
+- **yes-with-cite** → writes BEP row (`source='per_beach_offleash_v2'`, `is_canonical=true`), then fires `compute_beach_field_consensus(fid)` + `promote_canonical_dogs_to_beach_dog_policy(fid)` per fid to propagate to consumer surface.
+- **no / unknown / no_match** → writes sentinel row, skips cascade.
+
+### Usage
+
+```bash
+python scripts/extract_per_beach_offleash_v2.py --apply --limit 5
+python scripts/extract_per_beach_offleash_v2.py --apply --fids 8472,8333
+python scripts/extract_per_beach_offleash_v2.py --apply              # default 25-beach famous-CA set
+python scripts/extract_per_beach_offleash_v2.py --apply --no-web-search   # cheaper, accuracy drops
+```
+
+Default candidate list is `DEFAULT_CANDIDATES` at the top of the script (25 famous CA beaches stuck on `scoring_tier='none'`). Override with `--fids`.
+
+Pin: `[[codify-patterns-beyond-statutes]]`.
 
 ---
 

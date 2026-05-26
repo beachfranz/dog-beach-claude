@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dog Park — Dog Beach Scout</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Outfit:wght@500;600;700&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #eef4f8;
+      --surface:      #ffffff;
+      --surface-hover:#f5f9fc;
+      --border:       #d1dde8;
+      --text:         #0f2742;
+      --text-muted:   #5b6b7d;
+      --text-dim:     #94a3b8;
+      --green:        #15803d;
+      --green-dim:    #d1fae5;
+      --advisory:     #0369a1;
+      --advisory-dim: #e0f2fe;
+      --amber:        #b45309;
+      --amber-dim:    #fed7aa;
+      --red:          #9f1239;
+      --red-dim:      #ffe4e6;
+      --radius:       14px;
+      --radius-sm:    8px;
+    }
+
+    html, body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 15px;
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+    }
+
+    .page { max-width: 480px; margin: 0 auto; padding: 0 0 40px; }
+
+    /* ── Header ───────────────────────────────────────────────────── */
+    .header {
+      padding: 16px 16px 12px;
+      position: sticky; top: 0;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      z-index: 10;
+    }
+    .header-top {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .back-link {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+    .back-link:hover { color: var(--text); }
+    .wordmark {
+      font-family: 'Outfit', sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+    .park-name {
+      font-family: 'Outfit', sans-serif;
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.2;
+    }
+    .park-sub {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* ── Status hero ──────────────────────────────────────────────── */
+    .hero {
+      margin: 16px 16px 0;
+      padding: 14px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .hero.status-go       { border-left: 4px solid var(--green); }
+    .hero.status-advisory { border-left: 4px solid var(--advisory); }
+    .hero.status-caution  { border-left: 4px solid var(--amber); }
+    .hero.status-no_go    { border-left: 4px solid var(--red); }
+
+    .hero-icon {
+      font-size: 28px;
+      flex-shrink: 0;
+    }
+    .hero-body { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+    .hero-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 16px;
+      font-weight: 600;
+    }
+    .hero-detail {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* ── Amenity row ──────────────────────────────────────────────── */
+    .amenities {
+      margin: 12px 16px 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .chip {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+    }
+    .chip.chip-go { background: var(--green-dim); color: var(--green); border-color: var(--green-dim); }
+    .chip.chip-warn { background: var(--amber-dim); color: var(--amber); border-color: var(--amber-dim); }
+    .chip.chip-strong { color: var(--text); border-color: var(--text-muted); }
+
+    /* ── Section labels ───────────────────────────────────────────── */
+    .section-label {
+      margin: 20px 16px 6px;
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    /* ── 7-day pills ──────────────────────────────────────────────── */
+    .day-list {
+      padding: 0 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .day-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 12px;
+    }
+    .day-card.status-go       { border-left: 3px solid var(--green); }
+    .day-card.status-advisory { border-left: 3px solid var(--advisory); }
+    .day-card.status-caution  { border-left: 3px solid var(--amber); }
+    .day-card.status-no_go    { border-left: 3px solid var(--red); opacity: 0.6; }
+
+    .day-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+      min-width: 38px;
+    }
+    .day-info {
+      display: flex; flex-direction: column; gap: 2px;
+      font-size: 13px;
+    }
+    .day-window {
+      font-family: 'DM Sans', sans-serif;
+      color: var(--text);
+    }
+    .day-meta {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+    .day-score {
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* ── Policy footer ────────────────────────────────────────────── */
+    .policy {
+      margin: 20px 16px 0;
+      padding: 14px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 13px;
+    }
+    .policy-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 4px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .policy-row:last-child { border-bottom: none; }
+    .policy-key {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+    .policy-val {
+      font-family: 'DM Sans', sans-serif;
+      color: var(--text);
+      text-align: right;
+    }
+    .policy-source {
+      margin-top: 10px;
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      color: var(--text-dim);
+    }
+    .policy-source a { color: var(--text-muted); }
+
+    /* ── Loading / empty ──────────────────────────────────────────── */
+    .skeleton {
+      background: linear-gradient(90deg, var(--surface) 0%, var(--surface-hover) 50%, var(--surface) 100%);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s linear infinite;
+      border-radius: var(--radius);
+      height: 64px;
+      margin: 16px 16px 0;
+    }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    .empty {
+      margin: 24px 16px;
+      padding: 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <div class="header-top">
+      <a href="find.html" class="back-link">← back</a>
+      <a href="find.html" class="wordmark">🐾 Scout</a>
+    </div>
+    <div id="park-name" class="park-name">Loading…</div>
+    <div id="park-sub" class="park-sub"></div>
+  </div>
+
+  <div id="content"></div>
+</div>
+
+<script type="module">
+  const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+  const ANON_KEY = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+  const params = new URLSearchParams(window.location.search);
+  const fid = params.get('fid') ?? params.get('dog_park_fid');
+  if (!fid || !/^\d+$/.test(fid)) {
+    document.getElementById('content').innerHTML = '<div class="empty">No park selected.</div>';
+    throw new Error('missing fid');
+  }
+
+  // ── Fetch ─────────────────────────────────────────────────────────
+  document.getElementById('content').innerHTML =
+    Array(3).fill('<div class="skeleton"></div>').join('');
+
+  let data;
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/functions/v1/get-dog-park-summary?fid=${fid}`,
+      { headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY } }
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    data = await res.json();
+    if (data.error) throw new Error(data.error);
+  } catch (err) {
+    document.getElementById('content').innerHTML = `<div class="empty">Failed to load: ${err.message}</div>`;
+    throw err;
+  }
+
+  const { dog_park: park, days, now } = data;
+  render(park, days, now);
+
+  // ── Render ────────────────────────────────────────────────────────
+  function render(park, days, now) {
+    document.getElementById('park-name').textContent = park.display_name;
+    const subParts = [];
+    if (park.address) subParts.push(park.address);
+    else if (park.state) subParts.push(`${park.county_name ?? '—'}, ${park.state}`);
+    if (park.area_m2) subParts.push(`${(park.area_m2 * 0.000247).toFixed(1)}ac`);
+    document.getElementById('park-sub').textContent = subParts.filter(Boolean).join(' · ');
+
+    const sections = [];
+    sections.push(buildHero(now, days?.[0]));
+    sections.push(buildAmenities(park));
+    sections.push('<div class="section-label">Next 7 days</div>');
+    sections.push(buildDays(days, park.fid));
+    sections.push('<div class="section-label">Policy</div>');
+    sections.push(buildPolicy(park));
+    document.getElementById('content').innerHTML = sections.join('');
+  }
+
+  function buildHero(now, today) {
+    // Prefer live NOW status if available; else today's day_status
+    const status = now?.hour_status ?? today?.day_status ?? 'no_data';
+    const icon = ({ go: '🟢', advisory: '🔵', caution: '🟡', no_go: '🔴' })[status] ?? '⚪';
+    const title = ({
+      go: 'Good for a visit',
+      advisory: 'Manageable conditions',
+      caution: 'Use caution',
+      no_go: 'Not recommended now',
+      no_data: 'No live data',
+    })[status];
+
+    let detail = '';
+    if (now) {
+      const parts = [];
+      if (now.feels_like != null) parts.push(`${Math.round(now.feels_like)}°F feels-like`);
+      if (now.wind_speed != null) parts.push(`${Math.round(now.wind_speed)}mph wind`);
+      if (now.uv_index != null) parts.push(`UV ${now.uv_index.toFixed(1)}`);
+      if (now.asphalt_temp != null && now.asphalt_temp >= 105) parts.push(`🐾 ${Math.round(now.asphalt_temp)}°F asphalt`);
+      detail = parts.join(' · ');
+    } else if (today?.best_window_label) {
+      detail = `Best window: ${today.best_window_label}`;
+    } else {
+      detail = 'Scoring not yet available for this park';
+    }
+
+    return `
+      <div class="hero status-${status}">
+        <div class="hero-icon">${icon}</div>
+        <div class="hero-body">
+          <div class="hero-title">${title}</div>
+          <div class="hero-detail">${detail}</div>
+        </div>
+      </div>`;
+  }
+
+  function buildAmenities(park) {
+    const chips = [];
+    const pol = park.policy ?? {};
+
+    // Off-leash is definitional for dog parks — always show, no conditional
+    chips.push('<span class="chip chip-go">🐕 Off-leash</span>');
+
+    // has_fence + has_drinking_water — policy overlay wins, fall back to gold/OSM
+    const fence = pol.has_fence ?? park.has_fence;
+    if (fence === true) chips.push('<span class="chip chip-go">🚧 Fenced</span>');
+    else if (fence === false) chips.push('<span class="chip chip-warn">Unfenced</span>');
+
+    const water = pol.has_drinking_water ?? park.has_drinking_water;
+    if (water === true) chips.push('<span class="chip chip-go">💧 Water</span>');
+    else if (water === false) chips.push('<span class="chip chip-warn">No water</span>');
+
+    // Surface — overlay wins over raw OSM
+    const surface = pol.surface_overlay ?? park.surface;
+    if (surface) chips.push(`<span class="chip">${surface}</span>`);
+
+    if (pol.double_gate === true)    chips.push('<span class="chip chip-go">🚪 Double-gate</span>');
+    if (pol.small_dog_area === true) chips.push('<span class="chip chip-go">🐶 Small-dog area</span>');
+    if (pol.large_dog_area === true) chips.push('<span class="chip chip-go">🐕‍🦺 Large-dog area</span>');
+    if (pol.lighting === true)       chips.push('<span class="chip">💡 Lighting</span>');
+
+    if (pol.hours_text) chips.push(`<span class="chip chip-strong">🕐 ${pol.hours_text}</span>`);
+
+    return `<div class="amenities">${chips.join('')}</div>`;
+  }
+
+  function buildDays(days, fid) {
+    if (!days?.length) return '<div class="empty">No forecast available yet.</div>';
+    return `<div class="day-list">${days.map(d => buildDayCard(d, fid)).join('')}</div>`;
+  }
+
+  function buildDayCard(d, fid) {
+    const dt = new Date(d.local_date + 'T12:00:00');
+    const today = new Date();
+    const isToday = dt.toDateString() === today.toDateString();
+    const label = isToday ? 'TDY' : dt.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+    const meta = [
+      d.summary_weather ?? '—',
+      d.avg_temp != null ? `${Math.round(d.avg_temp)}°` : '',
+      d.avg_wind != null ? `${Math.round(d.avg_wind)}mph` : '',
+    ].filter(Boolean).join(' · ');
+    const window = d.best_window_label ?? '—';
+    const score = d.go_hours_count != null
+      ? `${d.go_hours_count}/${d.go_hours_count + d.advisory_hours_count + d.caution_hours_count + d.no_go_hours_count}h`
+      : '';
+
+    // Day cards are informational only in v1 — hour-by-hour view is parked.
+    return `
+      <div class="day-card status-${d.day_status}">
+        <div class="day-label">${label}</div>
+        <div class="day-info">
+          <div class="day-window">${window}</div>
+          <div class="day-meta">${meta}</div>
+        </div>
+        <div class="day-score">${score}</div>
+      </div>`;
+  }
+
+  function buildPolicy(park) {
+    const pol = park.policy ?? {};
+    const op = park.operator;
+    const rows = [
+      ['Leash', 'Off-leash (dog park)'],
+      ['Hours', pol.hours_text ?? '—'],
+      ['Fence', tribool(pol.has_fence ?? park.has_fence)],
+      ['Water', tribool(pol.has_drinking_water ?? park.has_drinking_water)],
+      ['Surface', (pol.surface_overlay ?? park.surface) ?? '—'],
+    ];
+    if (pol.double_gate != null)    rows.push(['Double-gate', tribool(pol.double_gate)]);
+    if (pol.small_dog_area != null) rows.push(['Small-dog area', tribool(pol.small_dog_area)]);
+    if (pol.large_dog_area != null) rows.push(['Large-dog area', tribool(pol.large_dog_area)]);
+    if (pol.lighting != null)       rows.push(['Lighting', tribool(pol.lighting)]);
+    if (pol.additional_rules)       rows.push(['Rules', pol.additional_rules]);
+    const description = pol.description_overlay ?? park.description;
+    if (description)                rows.push(['About', description]);
+
+    const rowsHtml = rows.map(([k, v]) =>
+      `<div class="policy-row"><span class="policy-key">${k}</span><span class="policy-val">${v}</span></div>`
+    ).join('');
+
+    const isOperator = pol.source === 'operator_posted' || pol.source === 'operator_posted_v2';
+    const sourceLine = isOperator && op
+      ? `Operator-verified: ${op.name}${pol.source_url ? ` · <a href="${pol.source_url}" target="_blank" rel="noopener">source</a>` : ''}`
+      : isOperator && pol.source_url
+      ? `Operator-verified · <a href="${pol.source_url}" target="_blank" rel="noopener">source</a>`
+      : pol.source === 'osm_default'
+      ? `Default policy (off-leash inside fence, dawn-dusk). Local rules may vary.`
+      : '';
+
+    return `
+      <div class="policy">
+        ${rowsHtml}
+        ${sourceLine ? `<div class="policy-source">${sourceLine}</div>` : ''}
+      </div>`;
+  }
+
+  function tribool(v) {
+    if (v === true) return '✓';
+    if (v === false) return '✗';
+    return '—';
+  }
+</script>
+</body>
+</html>

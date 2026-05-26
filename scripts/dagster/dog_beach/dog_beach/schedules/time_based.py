@@ -21,7 +21,12 @@ from dagster import (
     DefaultScheduleStatus,
 )
 
-from ..jobs import daily_refresh_job, pipeline_health_audit_job
+from ..jobs import (
+    daily_refresh_job,
+    pipeline_health_audit_job,
+    weather_grid_refresh_job,
+    weather_grid_inventory_job,
+)
 
 
 @schedule(
@@ -75,3 +80,37 @@ def weekly_pipeline_health_schedule(context: ScheduleEvaluationContext):
             partition_key=state,
             run_key=f"health-{state}-{context.scheduled_execution_time.date().isoformat()}",
         )
+
+
+# ── Weather grid (W1.7 + W1.8) ────────────────────────────────────────
+
+@schedule(
+    cron_schedule="0 * * * *",  # every hour at :00
+    job=weather_grid_refresh_job,
+    default_status=DefaultScheduleStatus.STOPPED,
+    description=(
+        "W1.7 — hourly weather_grid refresh. Per-cell tier-based stale "
+        "thresholds in the asset (hot 1h, warm 6h, cold 24h) naturally "
+        "differentiate cadence: most fires refresh just the hot cells, "
+        "warm+cold cells refresh less often. See [[weather-grid-reference-layer]]."
+    ),
+)
+def hourly_weather_grid_schedule(context: ScheduleEvaluationContext):
+    yield RunRequest(
+        run_key=f"weather-grid-{context.scheduled_execution_time.isoformat()}",
+    )
+
+
+@schedule(
+    cron_schedule="0 4 * * *",  # daily at 04:00 UTC
+    job=weather_grid_inventory_job,
+    default_status=DefaultScheduleStatus.STOPPED,
+    description=(
+        "W1.8 — daily backstop. Rebuilds weather_grid from active entity "
+        "tables in case triggers drift. Cheap insurance."
+    ),
+)
+def daily_weather_grid_inventory_schedule(context: ScheduleEvaluationContext):
+    yield RunRequest(
+        run_key=f"weather-grid-inventory-{context.scheduled_execution_time.date().isoformat()}",
+    )

@@ -62,6 +62,9 @@ from .assets.scoring_and_audit import (
     hourly_status_refresh, codify_coverage_check,
     daily_refresh_fire, field_population_check,
 )
+from .assets.weather_grid import (
+    refresh_weather_grid, rebuild_weather_grid_inventory,
+)
 
 
 # ── Full state launch (Phases 1-33) ──────────────────────────────────
@@ -168,4 +171,29 @@ rebuild_beach_evidence_job = define_asset_job(
         "Ad-hoc after operator policy changes or PAD-US re-loads."
     ),
     selection=AssetSelection.assets(rebuild_beach_evidence),
+)
+
+
+# ── Weather grid refresh (W1.5) ──────────────────────────────────────
+
+weather_grid_refresh_job = define_asset_job(
+    name="weather_grid_refresh_job",
+    description=(
+        "W1.5 — refreshes weather_grid_hourly from Open-Meteo. Per-cell "
+        "tier-based stale thresholds (hot 1h, warm 6h, cold 24h). See "
+        "[[weather-grid-reference-layer]]."
+    ),
+    selection=AssetSelection.assets(refresh_weather_grid),
+)
+
+
+# ── Weather grid inventory rebuild (W1.8 backstop) ───────────────────
+
+weather_grid_inventory_job = define_asset_job(
+    name="weather_grid_inventory_job",
+    description=(
+        "W1.8 — daily backstop. UNION-rebuilds weather_grid from "
+        "active beaches_gold + dog_parks_gold in case triggers drift."
+    ),
+    selection=AssetSelection.assets(rebuild_weather_grid_inventory),
 )

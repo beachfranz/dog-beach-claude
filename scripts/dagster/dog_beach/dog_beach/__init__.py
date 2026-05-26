@@ -131,6 +131,10 @@ from .assets.scoring_and_audit import (
     daily_refresh_fire,
     field_population_check,
 )
+from .assets.weather_grid import (
+    refresh_weather_grid,
+    rebuild_weather_grid_inventory,
+)
 from .checks.operator_seeding import operators_for_state_has_breadth
 from .checks.catalog_assembly import (
     promote_to_gold_complete,
@@ -151,6 +155,8 @@ from .schedules.time_based import (
     daily_beach_refresh_schedule,
     hourly_now_refresh_schedule,
     weekly_pipeline_health_schedule,
+    hourly_weather_grid_schedule,
+    daily_weather_grid_inventory_schedule,
 )
 from .jobs import (
     state_launch_job,
@@ -159,6 +165,8 @@ from .jobs import (
     daily_refresh_job,
     pipeline_health_audit_job,
     rebuild_beach_evidence_job,
+    weather_grid_refresh_job,
+    weather_grid_inventory_job,
 )
 
 
@@ -238,6 +246,9 @@ defs = Definitions(
         codify_coverage_check,
         daily_refresh_fire,
         field_population_check,
+        # Weather reference layer (W1.5 + W1.8)
+        refresh_weather_grid,
+        rebuild_weather_grid_inventory,
         # Lineage-only AssetSpecs for downstream consumers
         *ALL_LINEAGE_SPECS,
     ],
@@ -252,6 +263,8 @@ defs = Definitions(
         daily_beach_refresh_schedule,
         hourly_now_refresh_schedule,
         weekly_pipeline_health_schedule,
+        hourly_weather_grid_schedule,
+        daily_weather_grid_inventory_schedule,
     ],
     jobs=[
         state_launch_job,
@@ -260,6 +273,8 @@ defs = Definitions(
         daily_refresh_job,
         pipeline_health_audit_job,
         rebuild_beach_evidence_job,
+        weather_grid_refresh_job,
+        weather_grid_inventory_job,
     ],
     asset_checks=[
         operators_for_state_has_breadth,

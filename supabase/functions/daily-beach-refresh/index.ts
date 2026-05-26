@@ -157,7 +157,11 @@ Deno.serve(async (req: Request) => {
   let tideWindowDays = 7;       // default: refresh fetches up to 7 days
   let forceTideRefresh = false; // default: skip NOAA when buffer is fresh
   let skipRecentHours: number | null = null;  // skip beaches refreshed within N hours
-  let skipBesttime = false;     // default: include BestTime (legacy behavior)
+  // BestTime soft-removed 2026-05-25: human-presence signal clashes with
+  // dog-centric brand, 95% null coverage was inconsistent, paid API with
+  // marginal value. Crowd scoring falls back to 0.5 neutral via scoring.ts.
+  // Override with body { skip_besttime: false } if ever needed (emergency).
+  let skipBesttime = true;
   try {
     const body = await req.json().catch(() => ({}));
     if (Array.isArray(body?.location_ids) && body.location_ids.length > 0) {
@@ -167,7 +171,7 @@ Deno.serve(async (req: Request) => {
       tideWindowDays = Math.min(body.tide_window_days, 30);
     }
     if (body?.force_tide_refresh === true) forceTideRefresh = true;
-    if (body?.skip_besttime === true) skipBesttime = true;
+    if (typeof body?.skip_besttime === "boolean") skipBesttime = body.skip_besttime;
     if (typeof body?.skip_recent_hours === "number" && body.skip_recent_hours > 0) {
       skipRecentHours = Math.min(body.skip_recent_hours, 168);  // cap at 1 week
     }
@@ -358,12 +362,22 @@ async function processBeach(
   const phases: Record<string, "ok" | "error" | "skipped"> = {};
   console.log(`[${beach.location_id}] Starting refresh`);
 
-  // a. Weather
+  // a. Weather (W2.1 cutover — reads from weather_grid_hourly reference layer
+  // via supabase RPC instead of fetching Open-Meteo per beach. Drops per-beach
+  // cost from ~700ms to ~50-100ms; fixes WORKER_RESOURCE_LIMIT. See pin
+  // [[weather-grid-reference-layer]]. Falls back to direct Open-Meteo fetch
+  // ONLY if the grid lookup returns nothing — covers cells loaded mid-refresh.)
   let weatherResult: Awaited<ReturnType<typeof fetchWeather>>;
+  let weatherSource: "grid" | "direct" = "grid";
   try {
-    weatherResult = await fetchWeather(beach);
+    weatherResult = await fetchWeatherFromGrid(beach, supabase);
+    if (weatherResult.hours.length === 0) {
+      console.warn(`[${beach.location_id}] Grid empty for cell; falling back to direct Open-Meteo fetch`);
+      weatherResult = await fetchWeather(beach);
+      weatherSource = "direct";
+    }
     phases.openmeteo = "ok";
-    console.log(`[${beach.location_id}] Weather OK — ${weatherResult.hours.length} hours`);
+    console.log(`[${beach.location_id}] Weather OK — ${weatherResult.hours.length} hours (source=${weatherSource})`);
   } catch (err) {
     await logError(supabase, beach.location_id, "openmeteo", err);
     phases.openmeteo = "error";
@@ -379,32 +393,46 @@ async function processBeach(
   // and proceed with empty tideMap. Scoring math defaults tideHeight=null
   // → tideScore=0.5 (neutral), same pattern as null crowd/busyness data.
   // Don't fail the whole beach for missing tide data.
+  // b. Tides — cache-only by default per Franz directive 2026-05-25 LATE.
+  // NOAA fetches happen ONLY when forceTideRefresh=true (i.e., the weekly
+  // Sunday cron at 08:00 UTC fires with force=true to refresh the 14-day
+  // buffer). Daily refresh just reads cache; cache misses → empty tideMap
+  // → scoring treats as neutral (0.5). Tide harmonics don't drift between
+  // weekly refreshes, so accuracy cost is zero.
   let tideMap: Map<string, number> = new Map();
   let tideFromCache = false;
   if (!beach.noaa_station_id) {
     phases.noaa = "skipped";
     console.log(`[${beach.location_id}] No NOAA station (inland) — scoring without tide`);
-  } else {
+  } else if (opts.forceTideRefresh) {
+    // Weekly cron path only — actually fetch from NOAA.
     try {
-      if (!opts.forceTideRefresh) {
-        const cached = await tryReadTideCache(supabase, beach, runAt);
-        if (cached) {
-          tideMap = cached;
-          tideFromCache = true;
-          phases.noaa = "skipped";
-          console.log(`[${beach.location_id}] Tides cached — ${tideMap.size} hours (skipping NOAA)`);
-        }
-      }
-      if (!tideFromCache) {
-        tideMap = await fetchTides(beach, runAt, opts.tideWindowDays);
-        phases.noaa = "ok";
-        console.log(`[${beach.location_id}] Tides fetched — ${tideMap.size} hours (${opts.tideWindowDays}d window)`);
-      }
+      tideMap = await fetchTides(beach, runAt, opts.tideWindowDays);
+      phases.noaa = "ok";
+      console.log(`[${beach.location_id}] Tides fetched — ${tideMap.size} hours (${opts.tideWindowDays}d window, weekly force-refresh)`);
     } catch (err) {
       await logError(supabase, beach.location_id, "noaa", err);
       phases.noaa = "error";
       tideMap = new Map();
       console.warn(`[${beach.location_id}] NOAA failed — proceeding without tide data`);
+    }
+  } else {
+    // Daily path — cache only, never call NOAA.
+    try {
+      const cached = await tryReadTideCache(supabase, beach, runAt);
+      if (cached) {
+        tideMap = cached;
+        tideFromCache = true;
+        phases.noaa = "skipped";
+        console.log(`[${beach.location_id}] Tides cached — ${tideMap.size} hours (no NOAA call)`);
+      } else {
+        phases.noaa = "skipped";
+        console.log(`[${beach.location_id}] No tide cache — proceeding without tides (neutral score)`);
+      }
+    } catch (err) {
+      phases.noaa = "skipped";
+      tideMap = new Map();
+      console.warn(`[${beach.location_id}] Tide cache read failed — proceeding without tides: ${err}`);
     }
   }
 
@@ -589,6 +617,66 @@ function deriveBacteriaRisk(
   if (precip72hMm >= cautionMm) return "moderate";
   if (precip72hMm > 0)          return "low";
   return "none";
+}
+
+// ─── Weather grid lookup (W2.1 — replaces per-beach Open-Meteo fetch) ────────
+//
+// Reads from weather_grid_hourly via the weather_for_point() RPC and shapes
+// the result to OpenMeteoResult so buildRawHours stays unchanged. Returns
+// {hours: [], days: []} if the cell has no rows (caller falls back to direct
+// fetch). Per [[weather-grid-reference-layer]].
+
+async function fetchWeatherFromGrid(
+  beach: { location_id: string; latitude: number; longitude: number; timezone: string },
+  supabase: ReturnType<typeof createClient>,
+): Promise<Awaited<ReturnType<typeof fetchWeather>>> {
+  // Window: past_3d → +7d, matches the existing fetchWeather range.
+  const now = new Date();
+  const startTs = new Date(now.getTime() - 3 * 86_400_000);
+  const endTs   = new Date(now.getTime() + 7 * 86_400_000);
+
+  const { data, error } = await supabase.rpc("weather_for_point", {
+    p_lat:      beach.latitude,
+    p_lng:      beach.longitude,
+    p_start_ts: startTs.toISOString(),
+    p_end_ts:   endTs.toISOString(),
+  });
+
+  if (error) {
+    throw new Error(`weather_for_point RPC: ${error.message}`);
+  }
+  if (!Array.isArray(data) || data.length === 0) {
+    return { hours: [], days: [] };
+  }
+
+  // Format each row's forecast_ts as local-time string ("YYYY-MM-DDTHH:MM")
+  // in the beach's timezone — matches Open-Meteo's native response shape
+  // so buildRawHours's localDate/localHour slicing works unchanged.
+  const fmt = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: beach.timezone,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+
+  const hours = (data as Array<Record<string, unknown>>).map((row) => {
+    const ts = new Date(row.forecast_ts as string);
+    const parts = Object.fromEntries(fmt.formatToParts(ts).map(p => [p.type, p.value]));
+    const localTime = `${parts.year}-${parts.month}-${parts.day}T${parts.hour === "24" ? "00" : parts.hour}:${parts.minute}`;
+    return {
+      time:                       localTime,
+      temperature_2m:             row.temp_air      as number,
+      apparent_temperature:       row.feels_like    as number,
+      precipitation_probability:  row.precip_chance as number,
+      precipitation:              (row.precip_mm   as number) ?? 0,
+      weathercode:                row.weather_code  as number,
+      windspeed_10m:              row.wind_speed    as number,
+      uv_index:                   row.uv_index      as number,
+      cloud_cover:                row.cloud_cover   as number,
+      is_day:                     row.is_day === true ? 1 : (row.is_day === false ? 0 : 0),
+    };
+  });
+
+  return { hours, days: [] }; // sunrise/sunset unused downstream
 }
 
 // ─── Data merging ─────────────────────────────────────────────────────────────

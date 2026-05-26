@@ -239,8 +239,13 @@ async function refreshNow(
     const localHour = parseInt(get("hour")) % 24;
 
     // ── Fetch weather + tide + crowd in parallel ────────────────────────────
+    // W2.3 cutover: weather reads from weather_grid_hourly (current hour
+    // row) via weather_for_point RPC instead of live Open-Meteo. Falls
+    // back to direct fetch if grid cell is unloaded. Per [[weather-grid-reference-layer]].
     const [weather, tide, crowdRow] = await Promise.all([
-      fetchCurrentWeather(beach.latitude, beach.longitude, beach.timezone),
+      fetchCurrentWeatherFromGrid(beach.latitude, beach.longitude, beach.timezone, supabase)
+        .catch(() => null)
+        .then(w => w ?? fetchCurrentWeather(beach.latitude, beach.longitude, beach.timezone)),
       fetchCurrentTide(beach.noaa_station_id, localHour),
       supabase.from("beach_day_hourly_scores")
         .select("busyness_score, busyness_category")
@@ -380,6 +385,48 @@ interface CurrentWeather {
   cloud_cover:         number;
   precip_chance:       number;
   is_day:              boolean;
+}
+
+// W2.3 — read current-hour weather from weather_grid_hourly via RPC.
+// Returns null if the grid cell isn't loaded (caller falls back to direct fetch).
+async function fetchCurrentWeatherFromGrid(
+  lat: number,
+  lng: number,
+  _timezone: string,
+  supabase: ReturnType<typeof createClient>,
+): Promise<CurrentWeather | null> {
+  // Window: current hour ± 1h, take the closest to now()
+  const now = new Date();
+  const startTs = new Date(now.getTime() - 60 * 60 * 1000);
+  const endTs = new Date(now.getTime() + 60 * 60 * 1000);
+
+  const { data, error } = await supabase.rpc("weather_for_point", {
+    p_lat: lat,
+    p_lng: lng,
+    p_start_ts: startTs.toISOString(),
+    p_end_ts: endTs.toISOString(),
+  });
+  if (error || !Array.isArray(data) || data.length === 0) return null;
+
+  // Pick row closest to now()
+  const nowMs = now.getTime();
+  const closest = (data as Array<Record<string, unknown>>).reduce((best, row) => {
+    const tsMs = new Date(row.forecast_ts as string).getTime();
+    const bestMs = best ? new Date(best.forecast_ts as string).getTime() : Infinity;
+    return Math.abs(tsMs - nowMs) < Math.abs(bestMs - nowMs) ? row : best;
+  }, null as Record<string, unknown> | null);
+  if (!closest) return null;
+
+  return {
+    temperature_2m:       closest.temp_air      as number,
+    apparent_temperature: (closest.feels_like as number) ?? (closest.temp_air as number),
+    wind_speed_10m:       closest.wind_speed    as number,
+    weather_code:         closest.weather_code  as number,
+    uv_index:             (closest.uv_index    as number) ?? 0,
+    cloud_cover:          (closest.cloud_cover as number) ?? 0,
+    precip_chance:        (closest.precip_chance as number) ?? 0,
+    is_day:               closest.is_day === true,
+  };
 }
 
 async function fetchCurrentWeather(

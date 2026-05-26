@@ -115,6 +115,42 @@
     .day-pill:hover { border-color: #303650; color: var(--text); }
     .day-pill.active { background: var(--surface-hover); border-color: #3b5bdb; color: var(--text); }
 
+    /* ── Want chips (multi-select intent) ─────────────────────────── */
+    .want-chips {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      padding: 8px 0 4px;
+    }
+    .want-chip {
+      flex: 0 1 auto;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 6px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .want-chip:hover { border-color: #3b5bdb; color: var(--text); }
+    .want-chip.active {
+      background: #3b5bdb;
+      border-color: #3b5bdb;
+      color: #fff;
+    }
+    .want-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      padding: 4px 0 0;
+    }
+
     /* ── Search controls ──────────────────────────────────────────── */
     .search-controls {
       padding: 12px 16px;
@@ -516,17 +552,19 @@
   </header>
 
   <div class="search-controls">
+    <div class="want-label">Show me</div>
+    <div class="want-chips" id="want-chips">
+      <button type="button" class="want-chip active" data-want="off_leash_beach">Off-leash beaches</button>
+      <button type="button" class="want-chip" data-want="on_leash_beach">On-leash beaches</button>
+      <button type="button" class="want-chip active" data-want="dog_park">Dog parks</button>
+    </div>
     <div class="sort-row">
-      <span class="sort-label">Find</span>
-      <select class="sort-select compact" id="leash-select" onchange="onLeashFilterChange(this.value)">
-        <option value="any">Any</option>
+      <!-- Leash filter merged into want-chips (Off-leash beaches / On-leash beaches / Dog parks).
+           Per [[dog-park-subpipeline-scope]] consumer-UI decision 2026-05-25. -->
+      <select class="sort-select compact" id="leash-select" onchange="onLeashFilterChange(this.value)" style="display:none">
+        <option value="any" selected>Any</option>
         <option value="off_leash">Off-leash</option>
-        <option value="mixed">Mixed</option>
         <option value="on_leash">Required</option>
-      </select>
-      <select class="sort-select compact" id="dest-select" onchange="onDestinationChange(this.value)">
-        <option value="beach">Beaches</option>
-        <option value="dog_park">Dog parks</option>
       </select>
       <span class="sort-label">Within</span>
       <select class="sort-select compact" id="dist-select" onchange="onDistanceFilterChange(this.value)">
@@ -591,17 +629,54 @@
   let currentSort = 'blend';
   let leashFilter = 'any';
 
-  // Destination: 'beach' (default) | 'dog_park'. URL ?dest= takes
-  // precedence; falls back to localStorage; else 'beach'.
-  const DEST_KEY = 'find.destination';
-  let destination = (() => {
+  // Wants: multi-select intent chips. Per [[dog-park-subpipeline-scope]]
+  // 2026-05-25, the consumer UI is "Show me: [chips]" — Off-leash beaches,
+  // On-leash beaches, Dog parks. URL ?want=a,b,c takes precedence; falls
+  // back to localStorage; else default = off_leash_beach + dog_park
+  // ("the off-leash dog experience").
+  //
+  // Back-compat: still honors legacy ?dest=beach|dog_park for shared links.
+  const WANTS_KEY = 'find.wants';
+  const ALL_WANTS = ['off_leash_beach', 'on_leash_beach', 'dog_park'];
+  let wants = (() => {
     try {
-      const urlDest = new URLSearchParams(window.location.search).get('dest');
-      if (urlDest === 'beach' || urlDest === 'dog_park') return urlDest;
-      return localStorage.getItem(DEST_KEY) || 'beach';
-    } catch { return 'beach'; }
+      const params = new URLSearchParams(window.location.search);
+      const urlWant = params.get('want');
+      if (urlWant) {
+        const set = new Set(urlWant.split(',').filter(w => ALL_WANTS.includes(w)));
+        if (set.size > 0) return set;
+      }
+      // Legacy ?dest= → wants
+      const urlDest = params.get('dest');
+      if (urlDest === 'dog_park') return new Set(['dog_park']);
+      if (urlDest === 'beach') return new Set(['off_leash_beach']);
+      // localStorage
+      const stored = localStorage.getItem(WANTS_KEY);
+      if (stored) {
+        const set = new Set(stored.split(',').filter(w => ALL_WANTS.includes(w)));
+        if (set.size > 0) return set;
+      }
+      // Default: off-leash dog experience
+      return new Set(['off_leash_beach', 'dog_park']);
+    } catch { return new Set(['off_leash_beach', 'dog_park']); }
   })();
   let dogParkCache = null; // [{...DP row}, ...] — fetched on first DP render
+
+  // Derived: what's the effective leash filter for beach queries?
+  // - Both chips → 'any'
+  // - Only off → 'off_leash'
+  // - Only on → 'on_leash'
+  // - Neither → 'any' (we won't fetch beaches at all)
+  function effectiveBeachLeash() {
+    const off = wants.has('off_leash_beach');
+    const on = wants.has('on_leash_beach');
+    if (off && on) return 'any';
+    if (off) return 'off_leash';
+    if (on) return 'on_leash';
+    return 'any';
+  }
+  function wantsBeaches() { return wants.has('off_leash_beach') || wants.has('on_leash_beach'); }
+  function wantsDogParks() { return wants.has('dog_park'); }
 
   // Distance filter (miles). 'any' = no cap. Default 10mi. URL ?max_mi=
   // takes precedence; falls back to localStorage; else 10. Numeric string
@@ -813,13 +888,9 @@
 
   function buildDogParkCard(dp, rank) {
     const safeName = (dp.name || 'Unnamed dog park').replace(/'/g, "\\'");
-    const verified = dp.source === 'operator_posted';
-    const leashLabel = ({
-      off_leash:               '🐕 Off-leash',
-      off_leash_voice_control: '🗣️ Off-leash (voice control)',
-      on_leash:                '🦮 On-leash',
-      mixed:                   '↔️ Mixed',
-    })[dp.leash_policy] || dp.leash_policy || '—';
+    const verified = dp.source === 'operator_posted' || dp.source === 'operator_posted_v2';
+    // Leash is definitional for dog parks — hard-coded "Off-leash" label
+    const leashLabel = '🐕 Off-leash';
 
     const hours = dp.hours_text
                 || (dp.hours_open_time && dp.hours_close_time
@@ -832,14 +903,22 @@
 
     const operatorLine = verified && dp.operator_short
       ? `<div class="window-sub status-go">Verified: ${dp.operator_short}</div>`
-      : !verified
-      ? `<div class="window-sub status-none" style="opacity:0.6">Default — not operator-verified</div>`
-      : '';
+      : verified
+      ? `<div class="window-sub status-go">Operator-verified</div>`
+      : `<div class="window-sub status-none" style="opacity:0.6">Default — not operator-verified</div>`;
 
     const chips = [];
-    if (dp.has_fence)          chips.push('<span class="chip chip-go">🚧 Fenced</span>');
-    if (dp.has_drinking_water) chips.push('<span class="chip chip-go">💧 Water</span>');
-    if (dp.surface)            chips.push(`<span class="chip">${dp.surface}</span>`);
+    // Overlay wins over raw OSM
+    const fence = dp.has_fence_overlay ?? dp.has_fence;
+    const water = dp.has_drinking_water_overlay ?? dp.has_drinking_water;
+    const surface = dp.surface_overlay ?? dp.surface;
+    if (fence)              chips.push('<span class="chip chip-go">🚧 Fenced</span>');
+    if (water)              chips.push('<span class="chip chip-go">💧 Water</span>');
+    if (dp.double_gate)     chips.push('<span class="chip chip-go">🚪 Double-gate</span>');
+    if (dp.small_dog_area)  chips.push('<span class="chip chip-go">🐶 Sm-dog</span>');
+    if (dp.large_dog_area)  chips.push('<span class="chip chip-go">🐕‍🦺 Lg-dog</span>');
+    if (dp.lighting)        chips.push('<span class="chip">💡 Lit</span>');
+    if (surface)            chips.push(`<span class="chip">${surface}</span>`);
     const chipsHtml = chips.length
       ? `<div class="chips">${chips.join('<span class="chip-sep">·</span>')}</div>`
       : '';
@@ -847,7 +926,7 @@
     const status = verified ? 'go' : 'advisory';
 
     return `
-      <div class="day-card status-${status}" onclick="window.location.href='detail.html?dog_park_fid=${dp.fid}'">
+      <div class="day-card status-${status}" onclick="window.location.href='dog-park.html?fid=${dp.fid}'">
         <div class="day-left">
           <div class="rank-label">#${rank}</div>
           <div class="day-score">
@@ -926,6 +1005,99 @@
       : `${filtered.length} dog parks nearby. Defaults assume off-leash inside fence (most US dog parks).`;
   }
 
+  // ── Blended render (multi-chip selection includes both types) ────────
+  // Fetches beaches + dog parks in parallel, normalizes both to a common
+  // {kind, displayName, distance, score, status, ...renderData} shape,
+  // ranks by composite_score (with the cross-type wobble noted in
+  // [[dog-park-subpipeline-scope]] R5), interleaves heterogeneous cards.
+  async function sortAndRenderBlended() {
+    const myToken = ++_renderToken;
+    document.getElementById('top-card').innerHTML   = '<div class="skeleton"></div>';
+    document.getElementById('beach-list').innerHTML =
+      Array(4).fill('<div class="skeleton"></div>').join('');
+    document.getElementById('product-chips').style.display = 'none';
+
+    const dateForBeach = selectedDate === 'now'
+      ? new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+      : selectedDate;
+
+    const [beaches, dps] = await Promise.all([
+      loadBeachesForDate(dateForBeach).catch(() => []),
+      loadDogParks().catch(() => []),
+    ]);
+    if (myToken !== _renderToken) return;
+
+    // Beach cards
+    const beachCards = (beaches || [])
+      .filter(b => matchesLeashFilter(b))
+      .map(b => ({
+        kind: 'beach',
+        beach: b,
+        day: beachToDay(b),
+        distance: resolveDistanceMiles(b),
+        score: b.composite_score ?? 0,
+      }))
+      .filter(c => matchesDistanceFilter(c.distance));
+
+    // Dog park cards
+    const dpCards = (dps || [])
+      .filter(d => {
+        // Apply leash chip filter to dog parks too — only relevant when
+        // user selected on_leash_beach but NOT off_leash_beach + dog_park
+        // is also selected. Most dog parks are off-leash by default.
+        const off = wants.has('off_leash_beach');
+        const on = wants.has('on_leash_beach');
+        if (off && !on) return d.leash_policy === 'off_leash' || d.leash_policy === 'off_leash_voice_control';
+        if (on && !off) return d.leash_policy === 'on_leash';
+        return true;
+      })
+      .filter(d => matchesDistanceFilter(d.distance_miles))
+      .map(d => ({
+        kind: 'dog_park',
+        dp: d,
+        distance: d.distance_miles,
+        score: d.source === 'operator_posted' ? 75 : 60, // rough placeholder until DP scoring lands in nearest_dog_parks
+      }));
+
+    // Merge + sort
+    const all = [...beachCards, ...dpCards];
+    let sorted;
+    if (currentSort === 'distance') {
+      sorted = all.sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999));
+    } else if (currentSort === 'blend') {
+      const maxDist = Math.max(...all.map(c => c.distance ?? 0), 1);
+      sorted = all.sort((a, b) => {
+        // Reuse blendScore for beaches; approximate for dog parks
+        const aScore = a.kind === 'beach' ? blendScore(a, maxDist) : (a.score / 100) * 0.7 + (1 - (a.distance ?? 0) / maxDist) * 0.3;
+        const bScore = b.kind === 'beach' ? blendScore(b, maxDist) : (b.score / 100) * 0.7 + (1 - (b.distance ?? 0) / maxDist) * 0.3;
+        return bScore - aScore;
+      });
+    } else {
+      sorted = all.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    }
+    sorted = sorted.slice(0, DISPLAY_LIMIT);
+
+    if (!sorted.length) {
+      document.getElementById('top-card').innerHTML = '';
+      document.getElementById('beach-list').innerHTML = '<div class="no-data">No matches in selected scope.</div>';
+      return;
+    }
+
+    const renderCard = (c, i) => c.kind === 'beach'
+      ? buildBeachCard(c, i + 1)
+      : buildDogParkCard(c.dp, i + 1);
+
+    document.getElementById('top-card').innerHTML = renderCard(sorted[0], 0);
+    document.getElementById('beach-list').innerHTML = sorted.slice(1).map((c, i) => renderCard(c, i + 1)).join('');
+
+    // Update scout blurb with mixed-type summary
+    const blurb = document.getElementById('scout-blurb');
+    blurb.classList.remove('loading');
+    const nBeach = sorted.filter(c => c.kind === 'beach').length;
+    const nDp = sorted.filter(c => c.kind === 'dog_park').length;
+    blurb.textContent = `${nBeach} beach${nBeach !== 1 ? 'es' : ''} and ${nDp} dog park${nDp !== 1 ? 's' : ''} nearby.`;
+  }
+
   async function loadBeachesForDate(date) {
     const cacheKey = date;
     if (beachCache[cacheKey]) return beachCache[cacheKey];
@@ -936,7 +1108,12 @@
       params.set('limit', String(NEAREST_LIMIT));
     }
     // Edge Function default is scored=false (full catalog); opt in here.
-    params.set('scored', 'true');
+    // scored=false (full catalog) so tier-4 no-dog beaches appear with the
+    // 🚫 indicator + greyscale styling. Was scored=true which excluded all
+    // beaches without scoring rows (i.e., tier 4). Per Franz 2026-05-25 —
+    // famous beaches like Venice/Zuma should be discoverable even when dogs
+    // aren't allowed. CSS .tier-4_no_dogs already styles the card.
+    params.set('scored', 'false');
     const res  = await fetch(
       `${SUPABASE_URL}/functions/v1/get-beaches-find?${params}`,
       { headers: { 'Authorization': `Bearer ${ANON_KEY}` } }
@@ -966,13 +1143,23 @@
   }
 
   // ── Sort and render ────────────────────────────────────────────────
+  // Dispatches based on wants Set membership:
+  //   - dog_park only       → existing sortAndRenderDogParks (DP-only render)
+  //   - beach chip(s) only  → existing beach render with leashFilter from chips
+  //   - dog_park + beach    → blended render (parallel fetch, merge by score)
   async function sortAndRender() {
-    if (destination === 'dog_park') {
+    if (wantsDogParks() && !wantsBeaches()) {
       await sortAndRenderDogParks();
       return;
     }
-    // Beach flow — restore day pills + chips that DP mode hides
+    // Set leash filter from chips before the beach render reads it
+    leashFilter = effectiveBeachLeash();
+    // Beach (or blended) flow — restore day pills + chips that DP mode hides
     document.getElementById('day-pills').style.display = '';
+    if (wantsDogParks() && wantsBeaches()) {
+      await sortAndRenderBlended();
+      return;
+    }
     if (selectedDate === 'now') {
       await sortAndRenderNow();
       return;
@@ -1399,18 +1586,44 @@
     sortAndRender();
   }
 
-  function onDestinationChange(val) {
-    destination = val;
-    try { localStorage.setItem(DEST_KEY, val); } catch { /* storage may be blocked */ }
-    // Reflect in URL without reloading
+  // Toggle one want chip; persist + re-render.
+  function onWantChipToggle(want) {
+    if (!ALL_WANTS.includes(want)) return;
+    if (wants.has(want)) {
+      // Disallow deselecting the last chip — user must always have something selected
+      if (wants.size <= 1) return;
+      wants.delete(want);
+    } else {
+      wants.add(want);
+    }
+    persistWants();
+    syncWantChipUI();
+    dogParkCache = null;
+    nowBeaches = null;
+    sortAndRender();
+  }
+
+  function persistWants() {
+    const arr = [...wants];
+    try { localStorage.setItem(WANTS_KEY, arr.join(',')); } catch {}
     try {
       const url = new URL(window.location.href);
-      if (val === 'beach') url.searchParams.delete('dest');
-      else url.searchParams.set('dest', val);
+      url.searchParams.delete('dest'); // drop legacy
+      // Default is off+dog_park → omit param when it matches default for cleaner URLs
+      const defaultArr = ['off_leash_beach', 'dog_park'];
+      const sameAsDefault = arr.length === defaultArr.length
+        && defaultArr.every(w => arr.includes(w));
+      if (sameAsDefault) url.searchParams.delete('want');
+      else url.searchParams.set('want', arr.join(','));
       window.history.replaceState({}, '', url);
     } catch {}
-    dogParkCache = null;  // refetch on next DP render
-    sortAndRender();
+  }
+
+  function syncWantChipUI() {
+    document.querySelectorAll('.want-chip').forEach(el => {
+      const w = el.getAttribute('data-want');
+      el.classList.toggle('active', wants.has(w));
+    });
   }
 
   function onDistanceFilterChange(val) {
@@ -1605,10 +1818,12 @@
   const _todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   loadBeachesForDate(_todayISO);
 
-  // Restore destination select to persisted/URL state; if dog_park, render DPs
-  (function initDestSelect() {
-    const el = document.getElementById('dest-select');
-    if (el) el.value = destination;
+  // Wire want-chip click handlers + sync initial visual state
+  (function initWantChips() {
+    syncWantChipUI();
+    document.querySelectorAll('.want-chip').forEach(el => {
+      el.addEventListener('click', () => onWantChipToggle(el.getAttribute('data-want')));
+    });
   })();
 
   // Restore distance-filter select
@@ -1617,10 +1832,15 @@
     if (el) el.value = distanceFilterMi === 'any' ? 'any' : String(distanceFilterMi);
   })();
 
-  if (destination === 'dog_park') {
+  // Initial render dispatch — same dispatcher as user-triggered renders
+  leashFilter = effectiveBeachLeash();
+  if (wantsDogParks() && !wantsBeaches()) {
     sortAndRenderDogParks();
+  } else if (wantsDogParks() && wantsBeaches()) {
+    sortAndRenderBlended();
+    loadAggregatedChips();
   } else {
-    sortAndRenderNow();   // NOW is default for beaches — fetch immediately
+    sortAndRenderNow();   // beach-only path
     loadAggregatedChips();
   }
 </script>

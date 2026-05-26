@@ -1,0 +1,391 @@
+// get-dog-park-now/index.ts
+// Live NOW refresh for one or many dog parks. Open-Meteo only.
+// Writes is_now=true row to dog_park_day_hourly_scores, overwriting
+// any existing forecast for that hour. Cleared/refreshed each call.
+//
+// GET  ?fid=<n>                      → refresh single dog park, return its NOW row
+// POST { fids?: number[] }           → refresh all (or listed) parks (used by cron)
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { corsHeaders } from "../_shared/cors.ts";
+import {
+  scoreDogParkHours,
+  type RawHourData,
+  type ScoredHour,
+  type DogParkScoringConfig,
+} from "../_shared/scoring_dog_park.ts";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+const STATE_TZ: Record<string, string> = {
+  CA: "America/Los_Angeles", OR: "America/Los_Angeles", WA: "America/Los_Angeles",
+  NV: "America/Los_Angeles", AZ: "America/Phoenix",
+  NM: "America/Denver", UT: "America/Denver", CO: "America/Denver",
+  TX: "America/Chicago",
+  FL: "America/New_York", NY: "America/New_York", NH: "America/New_York",
+  MA: "America/New_York", MD: "America/New_York", DE: "America/New_York",
+};
+const tzForState = (s: string) => STATE_TZ[s] ?? "America/Los_Angeles";
+
+Deno.serve(async (req: Request) => {
+  const cors = { ...corsHeaders(req, "GET, POST, OPTIONS"), "Content-Type": "application/json" };
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: cors });
+
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+  const runAt = new Date();
+
+  let targetFids: number[] | null = null;
+  let skipRecentHours: number | null = null;
+
+  if (req.method === "GET") {
+    const fid = new URL(req.url).searchParams.get("fid");
+    if (fid) targetFids = [parseInt(fid, 10)].filter(Number.isFinite);
+  } else if (req.method === "POST") {
+    const body = await req.json().catch(() => ({}));
+    if (Array.isArray(body?.fids) && body.fids.length > 0) {
+      targetFids = body.fids
+        .map((x: unknown) => typeof x === "number" ? x : parseInt(String(x), 10))
+        .filter(Number.isFinite);
+    }
+    if (typeof body?.skip_recent_hours === "number" && body.skip_recent_hours > 0) {
+      skipRecentHours = Math.min(body.skip_recent_hours, 24);
+    }
+  }
+
+  let q = supabase
+    .from("dog_parks_gold")
+    .select(`
+      fid, name, display_name_override, lat, lon, state, surface,
+      dog_park_dog_policy(hours_open_time, hours_close_time)
+    `)
+    .eq("is_active", true)
+    .eq("is_scoreable", true);
+  if (targetFids?.length) q = q.in("fid", targetFids);
+  else q = q.eq("state", "CA"); // default to CA-only for cron (per v1 scope)
+
+  const [parksRes, configRes] = await Promise.all([
+    q,
+    supabase.from("dog_park_scoring_config")
+      .select("*")
+      .eq("is_active", true)
+      .limit(1)
+      .single(),
+  ]);
+
+  if (parksRes.error) return json({ error: `parks load: ${parksRes.error.message}` }, 500);
+  if (!parksRes.data?.length) return json({ error: "no parks found" }, 404);
+  if (configRes.error || !configRes.data) return json({ error: "no active config" }, 500);
+
+  type Row = {
+    fid: number; name: string; display_name_override: string | null;
+    lat: number; lon: number; state: string; surface: string | null;
+    dog_park_dog_policy: { hours_open_time: string | null; hours_close_time: string | null }
+      | { hours_open_time: string | null; hours_close_time: string | null }[] | null;
+  };
+  let parks = (parksRes.data as Row[]).map((g) => {
+    const dp = Array.isArray(g.dog_park_dog_policy) ? g.dog_park_dog_policy[0] : g.dog_park_dog_policy;
+    return {
+      fid: g.fid,
+      display_name: g.display_name_override ?? g.name ?? `Dog Park ${g.fid}`,
+      latitude: g.lat,
+      longitude: g.lon,
+      state: g.state,
+      surface: g.surface,
+      hours_open_time: dp?.hours_open_time ?? null,
+      hours_close_time: dp?.hours_close_time ?? null,
+    };
+  });
+
+  // skip_recent_hours filter (hourly cron passes ~0.9 = 54min)
+  let skippedRecent = 0;
+  if (skipRecentHours !== null && parks.length > 0) {
+    const cutoff = new Date(runAt.getTime() - skipRecentHours * 3_600_000).toISOString();
+    const { data: recent } = await supabase
+      .from("dog_park_day_hourly_scores")
+      .select("dog_park_fid")
+      .eq("is_now", true)
+      .in("dog_park_fid", parks.map((p) => p.fid))
+      .gte("updated_at", cutoff);
+    const recentSet = new Set((recent ?? []).map((r: any) => r.dog_park_fid));
+    const before = parks.length;
+    parks = parks.filter((p) => !recentSet.has(p.fid));
+    skippedRecent = before - parks.length;
+  }
+
+  const config = configRes.data as DogParkScoringConfig;
+
+  const results = await Promise.all(parks.map((p) => refreshNow(p, config, supabase, runAt)));
+
+  if (req.method === "GET" && results.length === 1) {
+    const r = results[0];
+    if (!r.ok) return json({ error: r.error }, 500);
+    return json(r.row);
+  }
+
+  return json({
+    ok: true,
+    runAt: runAt.toISOString(),
+    total: results.length,
+    ok_count: results.filter((r) => r.ok).length,
+    skipped_recent: skippedRecent,
+    results: results.map((r) => ({ fid: r.fid, ok: r.ok, error: r.error })),
+  });
+});
+
+// ─── Per-park NOW refresh ────────────────────────────────────────────────────
+
+interface Park {
+  fid: number;
+  display_name: string;
+  latitude: number;
+  longitude: number;
+  state: string;
+  surface: string | null;
+  hours_open_time: string | null;
+  hours_close_time: string | null;
+}
+
+async function refreshNow(
+  park: Park,
+  config: DogParkScoringConfig,
+  supabase: ReturnType<typeof createClient>,
+  runAt: Date,
+): Promise<{ fid: number; ok: boolean; row?: unknown; error?: string }> {
+  try {
+    const tz = tzForState(park.state);
+
+    // Current local date+hour for this park
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", hour12: false,
+    }).formatToParts(runAt);
+    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+    const localDate = `${get("year")}-${get("month")}-${get("day")}`;
+    const localHour = parseInt(get("hour"), 10) % 24;
+
+    // Fetch current weather
+    // W2.4 cutover: weather reads from weather_grid_hourly via RPC. Falls
+    // back to direct Open-Meteo if grid cell is unloaded.
+    let weather: CurrentWeather;
+    try {
+      const gridWeather = await fetchCurrentWeatherFromGrid(park.latitude, park.longitude, supabase);
+      weather = gridWeather ?? await fetchCurrentWeather(park.latitude, park.longitude, tz);
+    } catch (_) {
+      weather = await fetchCurrentWeather(park.latitude, park.longitude, tz);
+    }
+
+    // Determine if park is open this hour
+    const openMin = timeToMinutes(park.hours_open_time);
+    const closeMin = timeToMinutes(park.hours_close_time);
+    const isParkOpen = openMin !== null && closeMin !== null
+      ? (localHour * 60) >= openMin && (localHour * 60) < closeMin
+      : weather.is_day; // dawn-dusk fallback
+
+    const rawHour: RawHourData = {
+      forecastTs: localToUtcIso(localDate, localHour, tz),
+      localDate,
+      localHour,
+      hourLabel: formatHour(localHour),
+      isDaylight: weather.is_day,
+      weatherCode: weather.weather_code,
+      tempAir: weather.temperature_2m,
+      feelsLike: weather.apparent_temperature,
+      windSpeed: weather.wind_speed_10m,
+      precipChance: weather.precip_chance,
+      uvIndex: weather.uv_index,
+      cloudCover: weather.cloud_cover,
+      isParkOpen,
+    };
+
+    const [scored] = scoreDogParkHours([rawHour], park.surface as any, config);
+    const row = buildNowRow(scored, park, config, runAt, tz);
+
+    // Clear prior is_now row(s) for this park
+    await supabase
+      .from("dog_park_day_hourly_scores")
+      .update({ is_now: false })
+      .eq("dog_park_fid", park.fid)
+      .eq("is_now", true);
+
+    const { error: upsertErr } = await supabase
+      .from("dog_park_day_hourly_scores")
+      .upsert(row, { onConflict: "dog_park_fid,forecast_ts" });
+    if (upsertErr) throw new Error(upsertErr.message);
+
+    return { fid: park.fid, ok: true, row };
+  } catch (err) {
+    console.error(`[dog_park:${park.fid}] NOW refresh error:`, String(err));
+    return { fid: park.fid, ok: false, error: String(err) };
+  }
+}
+
+// ─── Row builder ─────────────────────────────────────────────────────────────
+
+function buildNowRow(
+  h: ScoredHour,
+  park: { fid: number },
+  config: DogParkScoringConfig,
+  runAt: Date,
+  tz: string,
+) {
+  return {
+    dog_park_fid: park.fid,
+    local_date: h.localDate,
+    forecast_ts: h.forecastTs,
+    local_hour: h.localHour,
+    hour_label: h.hourLabel,
+    is_daylight: h.isDaylight,
+    is_candidate_window: h.isCandidateWindow,
+    is_in_best_window: false,
+    is_now: true,
+    weather_code: h.weatherCode,
+    temp_air: h.tempAir,
+    feels_like: h.feelsLike,
+    wind_speed: h.windSpeed,
+    precip_chance: h.precipChance,
+    uv_index: h.uvIndex,
+    asphalt_temp: h.asphaltTemp,
+    hour_status: h.hourStatus,
+    wind_status: h.metricStatuses.wind_status ?? null,
+    rain_status: h.metricStatuses.rain_status ?? null,
+    temp_status: h.metricStatuses.temp_status ?? null,
+    temp_cold_status: h.metricStatuses.temp_cold_status ?? null,
+    temp_hot_status: h.metricStatuses.temp_hot_status ?? null,
+    uv_status: h.metricStatuses.uv_status ?? null,
+    asphalt_status: h.metricStatuses.asphalt_status ?? null,
+    surface_status: h.metricStatuses.surface_status ?? null,
+    hour_score: h.hourScore,
+    wind_score: h.componentScores.wind_score ?? null,
+    rain_score: h.componentScores.rain_score ?? null,
+    temp_score: h.componentScores.temp_score ?? null,
+    uv_score: h.componentScores.uv_score ?? null,
+    weather_score: h.componentScores.weather_score ?? null,
+    surface_score: h.componentScores.surface_score ?? null,
+    positive_reason_codes: h.positiveReasonCodes,
+    risk_reason_codes: h.riskReasonCodes,
+    explainability: h.componentScores,
+    hour_text: h.hourText,
+    timezone: tz,
+    scoring_version: config.scoring_version,
+    generated_at: runAt.toISOString(),
+    updated_at: runAt.toISOString(),
+    weather_refreshed_at: runAt.toISOString(),
+  };
+}
+
+// ─── Weather fetch ───────────────────────────────────────────────────────────
+
+interface CurrentWeather {
+  temperature_2m: number;
+  apparent_temperature: number;
+  wind_speed_10m: number;
+  weather_code: number;
+  uv_index: number;
+  cloud_cover: number;
+  precip_chance: number;
+  is_day: boolean;
+}
+
+// W2.4 — read current-hour weather from weather_grid_hourly via RPC.
+async function fetchCurrentWeatherFromGrid(
+  lat: number,
+  lng: number,
+  supabase: ReturnType<typeof createClient>,
+): Promise<CurrentWeather | null> {
+  const now = new Date();
+  const startTs = new Date(now.getTime() - 60 * 60 * 1000);
+  const endTs = new Date(now.getTime() + 60 * 60 * 1000);
+  const { data, error } = await supabase.rpc("weather_for_point", {
+    p_lat: lat,
+    p_lng: lng,
+    p_start_ts: startTs.toISOString(),
+    p_end_ts: endTs.toISOString(),
+  });
+  if (error || !Array.isArray(data) || data.length === 0) return null;
+  const nowMs = now.getTime();
+  const closest = (data as Array<Record<string, unknown>>).reduce((best, row) => {
+    const tsMs = new Date(row.forecast_ts as string).getTime();
+    const bestMs = best ? new Date(best.forecast_ts as string).getTime() : Infinity;
+    return Math.abs(tsMs - nowMs) < Math.abs(bestMs - nowMs) ? row : best;
+  }, null as Record<string, unknown> | null);
+  if (!closest) return null;
+  return {
+    temperature_2m:       closest.temp_air      as number,
+    apparent_temperature: (closest.feels_like as number) ?? (closest.temp_air as number),
+    wind_speed_10m:       closest.wind_speed    as number,
+    weather_code:         closest.weather_code  as number,
+    uv_index:             (closest.uv_index    as number) ?? 0,
+    cloud_cover:          (closest.cloud_cover as number) ?? 0,
+    precip_chance:        (closest.precip_chance as number) ?? 0,
+    is_day:               closest.is_day === true,
+  };
+}
+
+async function fetchCurrentWeather(lat: number, lng: number, tz: string): Promise<CurrentWeather> {
+  const params = new URLSearchParams({
+    latitude: String(lat),
+    longitude: String(lng),
+    current: "temperature_2m,apparent_temperature,wind_speed_10m,weather_code,uv_index,cloud_cover,is_day",
+    hourly: "precipitation_probability",
+    forecast_days: "1",
+    temperature_unit: "fahrenheit",
+    windspeed_unit: "mph",
+    timezone: tz,
+  });
+
+  const res = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
+  if (!res.ok) throw new Error(`Open-Meteo error ${res.status}`);
+  const data = await res.json();
+  const cur = data.current;
+  const nowHour = new Date().getHours();
+  const precip = data.hourly?.precipitation_probability?.[nowHour] ?? 0;
+
+  return {
+    temperature_2m: cur.temperature_2m,
+    apparent_temperature: cur.apparent_temperature ?? cur.temperature_2m,
+    wind_speed_10m: cur.wind_speed_10m,
+    weather_code: cur.weather_code,
+    uv_index: cur.uv_index ?? 0,
+    cloud_cover: cur.cloud_cover ?? 0,
+    precip_chance: precip,
+    is_day: cur.is_day === 1,
+  };
+}
+
+// ─── Utilities ───────────────────────────────────────────────────────────────
+
+function timeToMinutes(t: string | null): number | null {
+  if (!t) return null;
+  const m = t.match(/^(\d{1,2}):(\d{2})/);
+  return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : null;
+}
+
+function formatHour(h: number): string {
+  if (h === 0 || h === 24) return "12am";
+  if (h === 12) return "12pm";
+  return h < 12 ? `${h}am` : `${h - 12}pm`;
+}
+
+function localToUtcIso(localDate: string, localHour: number, tz: string): string {
+  const [Y, Mo, D] = localDate.split("-").map(Number);
+  const utcGuess = Date.UTC(Y, Mo - 1, D, localHour, 0);
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+  const parts = Object.fromEntries(dtf.formatToParts(new Date(utcGuess)).map((p) => [p.type, p.value]));
+  const rendered = Date.UTC(
+    parseInt(parts.year, 10),
+    parseInt(parts.month, 10) - 1,
+    parseInt(parts.day, 10),
+    parseInt(parts.hour === "24" ? "0" : parts.hour, 10),
+    parseInt(parts.minute, 10),
+  );
+  const offsetMs = rendered - utcGuess;
+  return new Date(utcGuess - offsetMs).toISOString();
+}

@@ -224,6 +224,63 @@ def write_sentinel(cur, park_fid: int, url: str, why: str) -> None:
     """, (park_fid, url, json.dumps(claimed)))
 
 
+# ── Seattle OLA page — one shared page, per-park anchor sections ─────────
+# seattle.gov/parks/recreation/dog-off-leash-areas has all 14 Seattle OLAs
+# as accordion sections. Catalog-walker produces URLs like #kinnearpark but
+# the real section id is `kinnearparkoffleasharea-x64872_panel-7`. Fetch
+# the page once + slice the section that starts with <shortname>offleasharea-.
+
+import threading as _threading
+_SEATTLE_OLA_PAGE_URL = "https://www.seattle.gov/parks/recreation/dog-off-leash-areas"
+_SEATTLE_OLA_PAGE_CACHE = {"html": None, "fetched_at": 0.0}
+_SEATTLE_OLA_LOCK = _threading.Lock()
+
+
+def _seattle_ola_anchor_text(catalog_url: str, park_name: str) -> str | None:
+    """For seattle.gov/parks/recreation/dog-off-leash-areas#<anchor> URLs:
+    fetch the shared page once (cached) + return the text of the matching
+    accordion section, or None if no match. The catalog anchor is a short
+    slug like 'kinnearpark'; the real section id is
+    '<slug>offleasharea-x<digits>_panel-<n>'."""
+    if "dog-off-leash-areas" not in catalog_url:
+        return None
+    # Extract anchor (after #)
+    anchor = catalog_url.split("#", 1)[1] if "#" in catalog_url else ""
+    if not anchor:
+        # No anchor — derive from park name (e.g., "Kinnear Park" → "kinnearpark")
+        anchor = re.sub(r"[^a-z]+", "", park_name.lower().split(" off-leash")[0].split(" dog")[0])
+    anchor = anchor.lower()
+
+    # Fetch (cached for 60min)
+    now = time.time()
+    with _SEATTLE_OLA_LOCK:
+        if _SEATTLE_OLA_PAGE_CACHE["html"] is None or (now - _SEATTLE_OLA_PAGE_CACHE["fetched_at"]) > 3600:
+            text_raw, why = smart_fetch(_SEATTLE_OLA_PAGE_URL)
+            if text_raw is None:
+                return None
+            _SEATTLE_OLA_PAGE_CACHE["html"] = text_raw
+            _SEATTLE_OLA_PAGE_CACHE["fetched_at"] = now
+    html = _SEATTLE_OLA_PAGE_CACHE["html"]
+
+    # Find section: id starts with "<anchor>offleasharea-" (case-insensitive)
+    # Pull out the surrounding 4-8K-char window — enough for one accordion panel.
+    pattern = re.compile(
+        rf'id=[\"\'](({re.escape(anchor)})offleasharea-x\d+_panel-\d+)[\"\'](.{{200,15000}}?)(?:<div[^>]*id=[\"\'][^\"\']+offleasharea|</main>|</body>)',
+        re.IGNORECASE | re.DOTALL,
+    )
+    m = pattern.search(html)
+    if not m:
+        # Looser fallback: just find <anchor>offleasharea- and grab 5K chars after
+        m2 = re.search(rf'{re.escape(anchor)}offleasharea-x\d+', html, re.IGNORECASE)
+        if not m2:
+            return None
+        section_html = html[m2.start():m2.start() + 5000]
+    else:
+        section_html = m.group(0)
+    # Strip HTML
+    return strip_html(section_html)
+
+
 # ── Hosts where direct fetch doesn't work; route via web_search ──
 # Two failure shapes both treated as "use web_search":
 #   1. SPA listings with no real per-park URLs (sfrecpark.org)
@@ -385,6 +442,47 @@ def process_park(p: dict, apply: bool) -> str:
     if host_lacks_per_park_pages(url):
         say(f"    [route] {fid} → web_search (host lacks per-park URLs)")
         return extract_via_web_search(fid, name, city, url, apply)
+
+    # Seattle OLA shared-page route: extract section text via anchor lookup
+    if "seattle.gov/parks/recreation/dog-off-leash-areas" in url:
+        section_text = _seattle_ola_anchor_text(url, name)
+        if section_text and len(section_text) > 200:
+            say(f"    [route] {fid} → seattle OLA section (anchor extract, {len(section_text)} chars)")
+            try:
+                extracted = call_llm_amenities(section_text, name, city, source_url=url)
+            except Exception as e:
+                say(f"    [!] [{fid}] LLM error: {e}")
+                return "llm_error"
+            if not extracted.get('name_match'):
+                say(f"    [-] [{fid}] LLM says name_match=false (seattle section)")
+                if apply:
+                    conn = connect(); conn.set_client_encoding("UTF8")
+                    try:
+                        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                        write_sentinel(cur, fid, url, "seattle_section_name_no_match")
+                        conn.commit()
+                    finally: conn.close()
+                return "no_match"
+            conf = {'high': 0.92, 'medium': 0.78, 'low': 0.60}.get(
+                       extracted.get('confidence', 'medium'), 0.78)
+            cite = extracted.pop('cite_quote', None)
+            extracted.pop('name_match', None)
+            extracted.pop('confidence', None)
+            claimed = {k: v for k, v in extracted.items() if v is not None}
+            say(f"    [+] [{fid}] (seattle_ola) {len(claimed)}/13 fields: {sorted(claimed.keys())}")
+            if apply and claimed:
+                conn = connect(); conn.set_client_encoding("UTF8")
+                try:
+                    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                    write_park_v1(cur, fid, url, conf, claimed, cite, 'seattle_ola_section')
+                    conn.commit()
+                    cur.execute("SELECT public.promote_canonical_dog_park_policy(%s)", (fid,))
+                    conn.commit()
+                finally: conn.close()
+            return "extracted" if claimed else "empty"
+        else:
+            say(f"    [-] [{fid}] seattle section not found in shared page → fall through to web_search")
+            return extract_via_web_search(fid, name, city, url, apply)
 
     if not is_url_deep_enough(url):
         say(f"    [-] [{fid}] not deep enough")

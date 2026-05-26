@@ -345,19 +345,32 @@ Deno.serve(async (req) => {
   const supa = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
   const url = new URL(req.url);
   const setName = url.searchParams.get("set_name") ?? "v3";
+  // ?fids=1,2,3 — skip the set_name membership lookup and use these fids
+  // directly. Used by the queue-mode UI (Franz 2026-05-26) so we can
+  // render the full CA-quality per-field grid for an ad-hoc set of
+  // beaches (e.g. AL's gold_set_curation_queue entries).
+  const fidsParam = url.searchParams.get("fids");
 
-  // 1. Members
-  const { data: members, error: mErr } = await supa
-    .from("gold_set_membership")
-    .select("fid, archetype, added_at, excluded, notes")
-    .eq("set_name", setName)
-    .eq("excluded", false)
-    .order("archetype").order("fid");
-  if (mErr) return new Response(JSON.stringify({ error: mErr.message }), { status: 500, headers: cors });
+  let fids: number[];
+  if (fidsParam) {
+    fids = fidsParam.split(",").map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n > 0);
+    if (!fids.length) {
+      return new Response(JSON.stringify({ set_name: null, count: 0, candidates: [] }), { headers: cors });
+    }
+  } else {
+    // 1. Members (legacy set-driven path)
+    const { data: members, error: mErr } = await supa
+      .from("gold_set_membership")
+      .select("fid, archetype, added_at, excluded, notes")
+      .eq("set_name", setName)
+      .eq("excluded", false)
+      .order("archetype").order("fid");
+    if (mErr) return new Response(JSON.stringify({ error: mErr.message }), { status: 500, headers: cors });
 
-  const fids = (members ?? []).map((m: any) => m.fid);
-  if (!fids.length) {
-    return new Response(JSON.stringify({ set_name: setName, count: 0, candidates: [] }), { headers: cors });
+    fids = (members ?? []).map((m: any) => m.fid);
+    if (!fids.length) {
+      return new Response(JSON.stringify({ set_name: setName, count: 0, candidates: [] }), { headers: cors });
+    }
   }
 
   // 2. beaches_gold identity

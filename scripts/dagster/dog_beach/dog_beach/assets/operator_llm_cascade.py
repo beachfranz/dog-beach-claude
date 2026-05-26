@@ -515,16 +515,19 @@ def gold_set_review_gate(
             )
             pending, total = cur.fetchone()
 
+            # Franz 2026-05-26: downgraded from hard fail to warning. The gate's
+            # value is calibration-of-existing-LLM-extractions, not gate-correctness
+            # of consumer surface — beach data flows through anyway. Asset still
+            # materializes; the warning surfaces in the Dagster UI + per-state
+            # metadata so the state launcher can act on it (clear queue, sign off)
+            # without blocking downstream phases.
             if not ready and not bypass:
-                raise RuntimeError(
-                    f"gold_set_review_gate: state={state} not ready. "
-                    f"queue_pending={pending}/{total}. "
-                    f"To unblock: (a) curator clears queue via "
-                    f"https://beachfranz.github.io/admin/gold-set-curator-v3.html?queue={state} "
-                    f"then re-materialize this asset; OR (b) write gold_set_signoff "
-                    f"row with approved=true for engineering-validated states; OR "
-                    f"(c) re-launch with run tag gold_set_bypass=true (engineering only — "
-                    f"logged to gold_set_bypass_audit)."
+                context.log.warning(
+                    f"gold_set_review_gate: state={state} has "
+                    f"queue_pending={pending}/{total}. Calibration suffers but "
+                    f"consumer surface is unblocked. Clear queue via "
+                    f"file:///C:/Users/beach/Documents/dog-beach-claude/admin/"
+                    f"gold-set-curator-v3.html?queue={state}"
                 )
 
             if bypass and not ready:

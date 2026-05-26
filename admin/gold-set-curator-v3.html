@@ -561,7 +561,81 @@ function initAuthorized() {
       fp.value = reqField;
     }
   }
+  // Honor ?queue=STATE — state-keyed mode reads gold_set_curation_queue
+  // (the Dagster gold_set_review_gate writes to that table; the legacy
+  // set-picker mode reads beach_policy_gold_set, a different surface).
+  const queueState = params.get("queue");
+  if (queueState) {
+    loadQueue(queueState.toUpperCase());
+    return;
+  }
   loadSet();
+}
+
+// ---- Queue mode (Franz 2026-05-26: bridge gold_set_curation_queue) ----
+// Reuses the existing renderByField() machinery by fetching full candidate
+// context via admin-list-gold-candidates?fids= for the unique fids in the
+// queue. Curator sees the full per-field grid with all extraction variants,
+// source URLs, and confidence dropdowns — same UX as the legacy v3 set.
+// After save (admin-save-gold-truth), matching queue rows auto-flip to
+// status='reviewed' via QUEUE_BY_FID_FIELD lookup.
+let QUEUE_STATE          = null;
+let QUEUE_ROWS           = [];                // raw rows from admin-gold-queue-list
+let QUEUE_BY_FID_FIELD   = {};                // {`${fid}:${field}`: queue_id} — for hook lookup
+
+async function loadQueue(state) {
+  QUEUE_STATE = state;
+  document.getElementById("set-picker").style.display = "none";
+  document.getElementById("stats").textContent = `Queue: ${state} — loading…`;
+  try {
+    // 1. Fetch queue rows
+    const qdata = await apiGet(`admin-gold-queue-list?state=${encodeURIComponent(state)}&status=pending`);
+    QUEUE_ROWS = qdata.queue || qdata.rows || [];
+    QUEUE_BY_FID_FIELD = {};
+    for (const r of QUEUE_ROWS) {
+      QUEUE_BY_FID_FIELD[`${r.gold_fid}:${r.field_name}`] = r.id;
+    }
+    if (!QUEUE_ROWS.length) {
+      document.getElementById("stats").textContent = `Queue: ${state} — empty`;
+      document.getElementById("grid").innerHTML = `<div style="padding:24px;text-align:center;color:var(--muted)">
+        Queue empty — re-launch Dagster <code>state_launch_job --partition ${state}</code>.
+      </div>`;
+      return;
+    }
+    // 2. Get unique fids from the queue
+    const fids = [...new Set(QUEUE_ROWS.map(r => r.gold_fid))];
+    document.getElementById("stats").textContent =
+      `Queue: ${state} — ${QUEUE_ROWS.length} pending across ${fids.length} beaches · loading candidates…`;
+    // 3. Fetch full candidate context for those fids — reuses existing renderer
+    const cdata = await apiGet(`admin-list-gold-candidates?fids=${fids.join(",")}`);
+    CANDIDATES = cdata.candidates || [];
+    document.getElementById("stats").textContent =
+      `Queue: ${state} — ${QUEUE_ROWS.length} pending across ${CANDIDATES.length} beaches`;
+    renderAll();
+  } catch (e) {
+    toast(`Queue load failed: ${e.message}`, "err");
+    document.getElementById("stats").textContent = "load failed";
+  }
+}
+
+// Called after admin-save-gold-truth succeeds in queue mode. Flips the
+// matching gold_set_curation_queue row to status='reviewed' so the
+// Dagster gate eventually unblocks.
+async function maybeFlipQueueAfterSave(fid, fieldName) {
+  if (!QUEUE_STATE) return;
+  const qid = QUEUE_BY_FID_FIELD[`${fid}:${fieldName}`];
+  if (!qid) return;
+  try {
+    await apiPost('admin-gold-queue-update-status', {
+      queue_id: qid, status: 'reviewed', reviewed_by: 'curator-ui'
+    });
+    delete QUEUE_BY_FID_FIELD[`${fid}:${fieldName}`];
+    const remaining = Object.keys(QUEUE_BY_FID_FIELD).length;
+    document.getElementById("stats").textContent =
+      `Queue: ${QUEUE_STATE} — ${remaining} pending across ${CANDIDATES.length} beaches`;
+  } catch (e) {
+    console.warn(`queue flip failed for ${fid}:${fieldName}:`, e.message);
+  }
 }
 
 // ---- API ----
@@ -1078,6 +1152,9 @@ async function saveScalarFromField(fid, fname) {
     const bc = cand ? beachCompletion(cand) : { n: '?', target: BEACH_TRUTH_TARGET };
     toast(`saved ${fname} for fid ${fid}${cc ? ' (conf ' + cc + ')' : ''} — ${bc.n}/${BEACH_TRUTH_TARGET}`);
     refreshFieldHeader();
+    // Queue-mode hook: flip the matching gold_set_curation_queue row to
+    // status='reviewed' so the Dagster gate progress reflects this save.
+    maybeFlipQueueAfterSave(fid, fname);
   } catch (e) {
     console.warn("[curator] save failed", e);
     toast(`save failed: ${e.message}`, "err");

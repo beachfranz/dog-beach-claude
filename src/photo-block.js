@@ -44,10 +44,13 @@
     if (heroIdx < 0) heroIdx = 0;
     const n = photos.length;
 
+    // opts.minimal — drop counter chip + attribution overlay. Used by
+    // dog-park.html per Franz 2026-05-26 (overlay text distracting).
+    // Nav arrows still render when n>1.
     const navHtml = n > 1
       ? `<button class="photo-block-nav photo-block-nav-prev" type="button" aria-label="Previous photo" data-pb-nav="prev">‹</button>
          <button class="photo-block-nav photo-block-nav-next" type="button" aria-label="Next photo"     data-pb-nav="next">›</button>
-         <div class="photo-block-counter">${heroIdx + 1} / ${n}</div>`
+         ${opts.minimal ? '' : `<div class="photo-block-counter">${heroIdx + 1} / ${n}</div>`}`
       : '';
 
     // "View all" link renders only when an explicit viewAllHref is
@@ -64,7 +67,7 @@
       <div class="photo-block">
         <div class="photo-block-hero">
           <img src="${escHtml(hero.image_url || hero.thumb_url)}" alt="" loading="eager">
-          ${attributionHtml(hero)}
+          ${opts.minimal ? '' : attributionHtml(hero)}
           ${navHtml}
         </div>
         ${viewAllHtml}
@@ -84,12 +87,14 @@
       // attribution may exist or not on the new photo — replace block
       const old = heroEl.querySelector('.photo-block-hero-attr');
       if (old) old.remove();
-      const next = attributionHtml(p);
-      if (next) {
-        // Insert before nav buttons / counter so they stay on top
-        const firstControl = heroEl.querySelector('.photo-block-nav, .photo-block-counter');
-        if (firstControl) firstControl.insertAdjacentHTML('beforebegin', next);
-        else heroEl.insertAdjacentHTML('beforeend', next);
+      if (!opts.minimal) {
+        const next = attributionHtml(p);
+        if (next) {
+          // Insert before nav buttons / counter so they stay on top
+          const firstControl = heroEl.querySelector('.photo-block-nav, .photo-block-counter');
+          if (firstControl) firstControl.insertAdjacentHTML('beforebegin', next);
+          else heroEl.insertAdjacentHTML('beforeend', next);
+        }
       }
     }
 

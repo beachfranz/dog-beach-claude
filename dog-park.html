@@ -315,7 +315,7 @@
       if (Array.isArray(photos) && photos.length > 0 && window.PhotoBlock) {
         // Mark first photo as hero (sort_order is already curator-set).
         photos[0].is_hero = true;
-        PhotoBlock.render(document.getElementById('photo-block-mount'), photos, {});
+        PhotoBlock.render(document.getElementById('photo-block-mount'), photos, { minimal: true });
       } else {
         // No photos — hide the mount entirely (don't show "📷 No photos yet" empty state)
         const m = document.getElementById('photo-block-mount');

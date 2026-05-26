@@ -50,5 +50,13 @@
     "loader_deferred": true,
     "notes": "Drupal CMS with /parks/<slug>/ URLs. State-park-specific photo loader deferred; Wikimedia handles photos state-agnostically. State dog policy is deferred to counties/cities per AL Code Title 3 (no statewide leash law).",
     "added": "2026-05-24"
+  },
+  "VA": {
+    "agency": "Virginia State Parks (Virginia Department of Conservation and Recreation)",
+    "url": "https://www.virginia.org/things-to-do/outdoors/state-parks/",
+    "agency_url": "https://www.dcr.virginia.gov/state-parks/",
+    "loader_deferred": true,
+    "notes": "Listing URL is virginia.org/things-to-do/outdoors/state-parks (tourism-maintained, photo-friendly). Agency site dcr.virginia.gov/state-parks is authoritative. State-park-specific photo loader deferred; Wikimedia + websearch handle photos state-agnostically. State dog policy deferred to localities per Va. Code § 3.2-6539 (no statewide leash law).",
+    "added": "2026-05-26"
   }
 }

@@ -48,6 +48,8 @@ import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone  # noqa: F401 (timezone used in auto-curate timestamp)
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # scripts.common loads .env + injects truststore at package init.
@@ -633,6 +635,12 @@ def main():
                          "agency Flickr account (per state) for beach-name "
                          "text matches. Requires --resolve-agencies first. "
                          "Beach-only.")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="Concurrent per-entity workers. Default 1 (serial). "
+                         "Flickr soft-flags at high burst rates; 4 workers "
+                         "with the 2.5s per-call throttle keeps effective QPS "
+                         "below the documented limit. Set higher only if you "
+                         "know your key's burst tolerance.")
     args = ap.parse_args()
     if args.use_agencies and not ENTITIES[args.entity]["supports_agencies"]:
         print(f"ERROR: --use-agencies not supported for entity={args.entity}", file=sys.stderr)
@@ -662,9 +670,11 @@ def main():
         print(f"Curator-rejected tombstones: {total_rej} external_ids "
               f"across {len(rejected_by_fid)} entities (will skip)")
 
-    saved = errored = 0
-    n_agency_cands_total = 0
-    for i, b in enumerate(targets, 1):
+    state = {"saved": 0, "errored": 0, "done": 0, "n_agency_cands": 0}
+    lock = threading.Lock()
+
+    def process_one(idx_b):
+        i, b = idx_b
         try:
             query_parts = [b["name"]]
             if "beach" not in b["name"].lower():
@@ -673,7 +683,7 @@ def main():
             text = " ".join(query_parts)
             cands = flickr_search(text, b["lat"], b["lng"])
 
-            # ── Agency-account pass (Franz 2026-05-19 v3.9) ────────────
+            # Agency-account pass (beach-only — see --use-agencies docs)
             if args.use_agencies:
                 agencies = load_agency_accounts(state=b.get("state"))
                 seen_ids = {str(c.get("id")) for c in cands}
@@ -684,14 +694,13 @@ def main():
                             continue
                         seen_ids.add(str(ac.get("id")))
                         cands.append(ac)
-                        n_agency_cands_total += 1
-                    time.sleep(0.5)  # polite per-agency
+                        with lock:
+                            state["n_agency_cands"] += 1
+                    time.sleep(0.5)
 
-            # Filter blocked photographers before scoring
             if blocked:
                 cands = [c for c in cands
                          if (c.get("ownername") or "").lower() not in blocked]
-            # Filter curator-rejected external_ids — don't surface trashed photos
             rej = rejected_by_fid.get(b["fid"]) or set()
             if rej:
                 cands = [c for c in cands if str(c.get("id")) not in rej]
@@ -700,20 +709,35 @@ def main():
                                            "dogs_allowed": b.get("dogs_allowed")},
                                entity=args.entity)
             replace_flickr(b["fid"], picked, entity=args.entity)
-            saved += len(picked)
+            with lock:
+                state["saved"] += len(picked)
+                state["done"] += 1
+                done = state["done"]
             tag = f'{len(picked)} photos' if picked else '(none)'
-            print(f"  [{i}/{len(targets)}] fid={b['fid']}  {b['name'][:40]:40s}  {tag}")
+            print(f"  [{done}/{len(targets)}] fid={b['fid']}  "
+                  f"{b['name'][:40]:40s}  {tag}", flush=True)
             if picked:
                 p = picked[0]
                 print(f'      top: "{p.get("title", "")[:50]}"  {p.get("ownername")}  '
                       f'{p["_distance_m"]}m  rel={p.get("_relevance",0):.1f} '
-                      f'nm={p.get("_name_match",0):.1f}')
+                      f'nm={p.get("_name_match",0):.1f}', flush=True)
         except Exception as e:
-            errored += 1
-            print(f"  [{i}/{len(targets)}] fid={b['fid']}  ERROR: {e}", file=sys.stderr)
+            with lock:
+                state["errored"] += 1
+                state["done"] += 1
+                done = state["done"]
+            print(f"  [{done}/{len(targets)}] fid={b['fid']}  ERROR: {e}",
+                  file=sys.stderr, flush=True)
         time.sleep(THROTTLE_S)
 
-    print(f"\n=== TOTALS ===  saved={saved}  errors={errored}")
+    if args.workers <= 1:
+        for ib in enumerate(targets, 1):
+            process_one(ib)
+    else:
+        with ThreadPoolExecutor(max_workers=args.workers) as ex:
+            list(ex.map(process_one, enumerate(targets, 1)))
+
+    print(f"\n=== TOTALS ===  saved={state['saved']}  errors={state['errored']}")
 
 
 if __name__ == "__main__":

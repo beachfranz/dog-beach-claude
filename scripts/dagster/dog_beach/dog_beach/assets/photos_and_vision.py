@@ -431,6 +431,7 @@ def _tier_fids_dog_park(postgres: PostgresPoolerResource, state: str) -> list[in
 def _make_dp_photo_loader_asset(
     *, name: str, script: str, chunk_size: int, timeout: int,
     parse_pattern: str, description: str, deps: list | None = None,
+    workers: int | None = None,
 ):
     """Factory for dog-park photo-loader assets. Mirrors
     _make_photo_loader_asset but uses dog-park fid source + threads
@@ -454,10 +455,13 @@ def _make_dp_photo_loader_asset(
         total = done = failed = 0
         for i in range(0, len(fids), chunk_size):
             chunk = fids[i:i + chunk_size]
+            args_list = ["--entity", "dog_park",
+                         "--fids", ",".join(str(x) for x in chunk)]
+            if workers and workers > 1:
+                args_list += ["--workers", str(workers)]
             result = subproc.run(
                 script,
-                args=["--entity", "dog_park",
-                      "--fids", ",".join(str(x) for x in chunk)],
+                args=args_list,
                 timeout=timeout,
             )
             if result.returncode != 0:
@@ -487,6 +491,10 @@ dp_photos_flickr = _make_dp_photo_loader_asset(
     chunk_size=50, timeout=600,
     parse_pattern=r"saved=(\d+)",
     deps=[dp_triage_needs_review],
+    # 4 workers × 2.5s throttle = ~1.6 QPS effective — well under Flickr's
+    # documented limit. Soft-flag at high burst rates is the real concern;
+    # keep this conservative.
+    workers=4,
     description="Dog-park Flickr photo loader. Geo search + entity-aware filter.",
 )
 
@@ -517,6 +525,7 @@ dp_photos_websearch = _make_dp_photo_loader_asset(
     chunk_size=30, timeout=900,
     parse_pattern=r"saved=(\d+)",
     deps=[dp_triage_needs_review],
+    workers=8,  # Tavily handles this throughput well
     description=(
         "Dog-park web-image-search loader (Tavily). Embeds third-party-hosted "
         "image URLs with link-back attribution; vision tagger + dp_photos_curate "

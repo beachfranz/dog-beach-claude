@@ -2533,8 +2533,34 @@ def action_state_photo_galleries(state: str) -> int:
         n_found    = int(m_found.group(1))    if m_found    else 0
         n_inserted = int(m_inserted.group(1)) if m_inserted else 0
         if n_found > 0 and n_inserted == 0:
-            silent_failures.append(f'{name}: found {n_found} photos but inserted 0 '
-                                   f'(discover/insert mismatch — likely FK or schema)')
+            # Idempotent re-run check (Franz 2026-05-26): if beach_photos
+            # already has rows from this loader for this state, "0 inserted"
+            # just means "all N discovered were already there" — ON CONFLICT
+            # DO NOTHING. That's correct behavior, not a silent failure.
+            # Map agency_tag → photo_source_type id (lowercase first word).
+            source_id = (name or '').lower()
+            existing = 0
+            try:
+                from scripts.common.db import connect as _connect
+                _c = _connect(); _c.set_client_encoding('UTF8')
+                with _c.cursor() as _cur:
+                    _cur.execute(
+                        "SELECT count(*) FROM public.beach_photos bp "
+                        "  JOIN public.beaches_gold g ON g.fid = bp.arena_group_id "
+                        " WHERE g.state = %s AND bp.source = %s",
+                        (state, source_id),
+                    )
+                    existing = _cur.fetchone()[0] or 0
+                _c.close()
+            except Exception:
+                pass
+            if existing > 0:
+                log(f'      {name}: 0 new inserted but {existing} already in DB — idempotent re-run, treating as ok')
+            else:
+                silent_failures.append(
+                    f'{name}: found {n_found} photos but inserted 0 '
+                    f'(discover/insert mismatch — likely FK or schema)'
+                )
 
         total += rows
         log(f'      {name}: ok ({elapsed:.0f}s; saved={rows}; found={n_found}; inserted={n_inserted})')

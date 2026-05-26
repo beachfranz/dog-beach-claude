@@ -53,6 +53,7 @@ state_partitions = StaticPartitionsDefinition(
         "RI",   # 2026-05-22
         "NH",   # 2026-05-23 virgin-test launch (51/51 phases)
         "AL",   # 2026-05-24 — Wikimedia photos (no state-park-specific loader yet)
+        "VA",   # 2026-05-26 — beaches not yet loaded; 69 dog parks seeded
     ]
 )
 

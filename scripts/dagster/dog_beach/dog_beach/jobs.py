@@ -67,20 +67,25 @@ dog_park_photo_job = define_asset_job(
 
 # Beach photo pipeline (Franz 2026-05-26 — mirror of dog_park_photo_job).
 # Selects phase_31_photos minus the two assets whose partition_def doesn't
-# match state_partitions (vision_tags per-source, keep_prob_model unparted).
-# Multiprocess executor so the 5 source loaders fan out in parallel.
+# match state_partitions (vision_tags per-source, keep_prob_model unparted)
+# PLUS photos_wikimedia (which lives in group phase_29_to_33_per_fid, not
+# phase_31_photos — historical placement; the group selection alone misses
+# it).
+# Multiprocess executor so the 5+ source loaders fan out in parallel.
 # Use: dagster job execute -j beach_photo_job --partition MD
 from .assets.photos_and_vision import (
     photo_vision_tags as _beach_vision_tags,
     photo_keep_prob_model as _beach_keep_prob,
 )
+from .assets.per_fid_enrichment import photos_wikimedia as _beach_photos_wikimedia
 beach_photo_job = define_asset_job(
     name="beach_photo_job",
     selection=(
-        AssetSelection.groups("phase_31_photos")
-        - AssetSelection.assets(_beach_vision_tags, _beach_keep_prob)
+        (AssetSelection.groups("phase_31_photos")
+         - AssetSelection.assets(_beach_vision_tags, _beach_keep_prob))
+        | AssetSelection.assets(_beach_photos_wikimedia)
     ),
-    executor_def=multiprocess_executor.configured({"max_concurrent": 5}),
+    executor_def=multiprocess_executor.configured({"max_concurrent": 6}),
     description=(
         "Beach photo pipeline: Flickr + Wikimedia + Unsplash + Websearch + CCC "
         "(parallel) + state_photo_galleries + photo_centroid_backfill -> "

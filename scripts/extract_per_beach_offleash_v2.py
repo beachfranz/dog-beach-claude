@@ -136,6 +136,33 @@ PLAYWRIGHT_HOSTS = {
     "parks.ca.gov",
     "sanjoseca.gov", "cityofdavis.org",  # AVG / Cloudflare blockers per pin
     "newportbeachca.gov",
+    # SF Rec & Parks Facilities is a JS SPA — body text empty without longer wait
+    "sfrecpark.org",
+    # Common civicplus / facility-directory SPAs that also need JS rendering
+    "civicplus.com", "oaklandca.gov", "downeyca.org",
+    "elsegundorecparks.org", "redwoodcity.org",
+    "alamedaca.gov", "santaclaraca.gov", "whittierprcs.org",
+    "southpasadenaca.gov", "lagunabeachcity.net",
+    "sanramon.ca.gov", "cityofsacramento.gov",
+}
+
+# Per-host Playwright wait override (some SPAs hydrate slowly). Keep modest —
+# the URL-slug-based name_match fallback in extract_dog_park_amenities catches
+# pages where body hasn't fully hydrated, so we don't need long waits.
+PLAYWRIGHT_WAIT_OVERRIDES = {
+    "sfrecpark.org": 6.0,        # Facilities SPA — short wait + slug fallback
+    "civicplus.com": 6.0,
+    "santaclaraca.gov": 6.0,
+}
+
+# Nav timeout per host (some operator sites are heavy). Default 30s.
+PLAYWRIGHT_TIMEOUT_OVERRIDES_MS = {
+    "sfrecpark.org": 60000,
+    "civicplus.com": 60000,
+    "cityofsacramento.gov": 60000,
+    "alamedaca.gov": 60000,
+    "elsegundorecparks.org": 60000,
+    "whittierprcs.org": 60000,
 }
 
 def smart_fetch(url: str, timeout: int = 15) -> tuple[str | None, str]:
@@ -147,9 +174,19 @@ def smart_fetch(url: str, timeout: int = 15) -> tuple[str | None, str]:
     use_playwright = any(host.endswith(h) for h in PLAYWRIGHT_HOSTS)
 
     if use_playwright and PLAYWRIGHT_AVAILABLE:
+        wait_s = 4.0
+        timeout_ms = 30000
+        for host_pattern, override_wait in PLAYWRIGHT_WAIT_OVERRIDES.items():
+            if host.endswith(host_pattern):
+                wait_s = override_wait
+                break
+        for host_pattern, override_timeout in PLAYWRIGHT_TIMEOUT_OVERRIDES_MS.items():
+            if host.endswith(host_pattern):
+                timeout_ms = override_timeout
+                break
         try:
             text = playwright_fetch(url, selector=None, raw_html=False,
-                                    wait_seconds=4.0, timeout_ms=30000)
+                                    wait_seconds=wait_s, timeout_ms=timeout_ms)
             return (text or ""), "ok_playwright"
         except Exception as e:
             return None, f"playwright_error:{type(e).__name__}"
@@ -172,8 +209,18 @@ def smart_fetch(url: str, timeout: int = 15) -> tuple[str | None, str]:
         # 403 / 503 — often Cloudflare. Try Playwright if available.
         if e.code in (403, 503) and PLAYWRIGHT_AVAILABLE:
             try:
+                wait_s = 4.0
+                timeout_ms = 30000
+                for host_pattern, override_wait in PLAYWRIGHT_WAIT_OVERRIDES.items():
+                    if host.endswith(host_pattern):
+                        wait_s = override_wait
+                        break
+                for host_pattern, override_timeout in PLAYWRIGHT_TIMEOUT_OVERRIDES_MS.items():
+                    if host.endswith(host_pattern):
+                        timeout_ms = override_timeout
+                        break
                 text = playwright_fetch(url, selector=None, raw_html=False,
-                                        wait_seconds=4.0, timeout_ms=30000)
+                                        wait_seconds=wait_s, timeout_ms=timeout_ms)
                 if text:
                     return text, f"ok_playwright_after_{e.code}"
             except Exception:

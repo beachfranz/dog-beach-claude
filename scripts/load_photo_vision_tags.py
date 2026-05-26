@@ -108,10 +108,17 @@ def _strip_utm(url: str) -> str:
 
 
 def _image_source(image_url: str, force_b64: bool = False) -> dict:
-    """Return image-source dict. Wikimedia (any subdomain) → always base64
-    because Anthropic's URL fetcher fails on both Special:FilePath
-    redirects and upload.wikimedia.org URLs in this corpus.
-    Strip only utm_* params so width=N hints survive.
+    """Return image-source dict. Two paths:
+
+    - URL pointer: for known-Anthropic-friendly hosts (Flickr/Unsplash
+      static CDNs). Anthropic fetches the image; cheaper bandwidth on
+      our side.
+    - Bytes-on-our-side base64: default for every other host. Bypasses
+      Cloudflare-blocked origins (Yelp/FB/YT/Reddit/bringfido etc) that
+      Anthropic's URL fetcher returns 400 'Unable to download' on. We
+      already have AVG + certs working in our Python; Anthropic accepts
+      base64 of any host's content. Wikimedia + parks.wa.gov keep their
+      tuned special-case branches below.
 
     Raises RuntimeError('bad_url') early for malformed URLs (no protocol,
     HTTP-only, or non-URL strings) so we don't burn 3 Anthropic retries
@@ -121,6 +128,10 @@ def _image_source(image_url: str, force_b64: bool = False) -> dict:
     if not image_url.startswith("https://"):
         raise RuntimeError(f"bad_url: not https ({image_url[:60]})")
     url = _strip_utm(image_url)
+    # URL-pointer allowlist (Franz 2026-05-26 path 2). Hosts proven to
+    # work with Anthropic's URL fetcher. Everything else falls through
+    # to the bytes-on-our-side default at the end of this function.
+    URL_POINTER_HOSTS = {"live.staticflickr.com", "images.unsplash.com"}
     # parks.wa.gov 403s Anthropic's URL fetcher UA — download server-side
     # with browser UA, base64 to Anthropic. No serial lock needed (small
     # site but no per-IP rate limit observed). Per WSPRC loader 2026-05-19.
@@ -189,7 +200,58 @@ def _image_source(image_url: str, force_b64: bool = False) -> dict:
             time.sleep(WM_PACING_S)            # pace AFTER successful fetch, before releasing lock
         return {"type": "base64", "media_type": ct,
                 "data": base64.b64encode(data).decode()}
-    return {"type": "url", "url": url}
+
+    # URL-pointer fast path for proven-OK hosts.
+    try:
+        host = url.split("/", 3)[2].lower()
+    except Exception:
+        host = ""
+    if host in URL_POINTER_HOSTS:
+        return {"type": "url", "url": url}
+
+    # Default path (Franz 2026-05-26 path 2): bytes-on-our-side base64.
+    # Bypasses Cloudflare-blocked origins that Anthropic's URL fetcher
+    # rejects. Uses browser UA + the same PIL resize cascade as the
+    # parks.wa.gov branch so we stay under the 5MB base64 cap.
+    browser_ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/130.0.0.0 Safari/537.36")
+    req = urllib.request.Request(url, headers={
+        "User-Agent": browser_ua,
+        "Accept": "image/avif,image/webp,image/jpeg,image/png,*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = r.read()
+            ct = r.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+    except urllib.error.HTTPError as e:
+        # Origin blocked us too — fail fast as non-recoverable so the
+        # retry loop in tag_photo doesn't burn 3×backoff on a dead URL.
+        raise RuntimeError(f"bad_url: HTTP {e.code} from {host}") from e
+    except Exception as e:
+        raise RuntimeError(f"bad_url: fetch failed ({type(e).__name__}: {e})") from e
+
+    # Same RAW_CAP + PIL resize cascade as parks.wa.gov branch.
+    RAW_CAP = 3 * 1024 * 1024 + 512 * 1024   # 3.5 MB raw → ~4.67 MB b64
+    if len(data) > RAW_CAP:
+        from PIL import Image
+        import io
+        for max_edge in (2000, 1400, 1000):
+            img = Image.open(io.BytesIO(data))
+            img.thumbnail((max_edge, max_edge))
+            buf = io.BytesIO()
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            img.save(buf, format="JPEG", quality=85, optimize=True)
+            data = buf.getvalue()
+            ct = "image/jpeg"
+            if len(data) <= RAW_CAP:
+                break
+        if len(data) > RAW_CAP:
+            raise RuntimeError(f"image too large after resize: {len(data)} bytes raw")
+    return {"type": "base64", "media_type": ct,
+            "data": base64.b64encode(data).decode()}
 
 
 def _describe(image_url: str, entity_name: str, entity_label: str = "beach") -> tuple[str, int, int]:

@@ -17,7 +17,7 @@ Or via UI's Launchpad.
 """
 
 from dagster import define_asset_job, AssetSelection
-from dagster import in_process_executor
+from dagster import in_process_executor, multiprocess_executor
 
 # Dog-park coverage pipeline — 9 ops, state-partitioned (CA/OR/WA/MD).
 # Per CA proof point: 0% → 79.5%. See [[dog-park-coverage-playbook]].
@@ -39,20 +39,28 @@ dog_park_coverage_job = define_asset_job(
 
 # Dog-park photo pipeline (Franz 2026-05-26).
 # Mirrors the beach Phase 31 photo cascade for dog parks:
-# Flickr + Wikimedia + Unsplash → vision tagging → vision-gated curate.
-# Per-state partitioned. Uses in_process_executor like the coverage job
-# (same Windows multiprocess-spawn quirk).
+# Flickr + Wikimedia + Unsplash + Websearch -> vision tagging -> curate.
+#
+# MULTIPROCESS EXECUTOR (Franz 2026-05-26 — parallel source fan-out):
+# the 4 source loaders have NO inter-deps (all depend only on
+# dp_triage_needs_review upstream), so they fan out in parallel via
+# multiprocess_executor's worker pool. Vision + curate stay sequential
+# via their existing deps. Coverage job stayed in_process because dp_walk_catalogs
+# had real Windows multiprocess-spawn import issues; photo loaders are
+# simpler subprocess.run() wrappers + don't hit that bug.
+#
+# max_concurrent=4 limits parallel workers to the 4 source loaders so
+# we don't blow past API rate caps. Adjust upward if vision-tag chunk
+# size scales beyond a single worker.
 dog_park_photo_job = define_asset_job(
     name="dog_park_photo_job",
-    # Group-based selection avoids the ordering trap of named imports
-    # (same pattern as dog_park_coverage_job). All 5 DP photo assets use
-    # group_name="phase_31_dp_photos".
     selection=AssetSelection.groups("phase_31_dp_photos"),
-    executor_def=in_process_executor,
+    executor_def=multiprocess_executor.configured({"max_concurrent": 4}),
     description=(
-        "Dog-park photo pipeline: Flickr + Wikimedia + Unsplash -> vision tags "
-        "-> vision-gated curate (top 3 per park where has_dog=true OR scene in "
-        "outdoor/park/beach). State-partitioned. Cost cap ~$5/state for vision."
+        "Dog-park photo pipeline: Flickr + Wikimedia + Unsplash + Websearch "
+        "(parallel) -> vision tags -> vision-gated curate (top 3 per park "
+        "where has_dog=true OR scene in outdoor/park/beach). State-partitioned. "
+        "Cost cap ~$5/state for vision."
     ),
 )
 

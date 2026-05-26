@@ -36,6 +36,8 @@ sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 import argparse
 import os
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse
 
 # Repo-root sys.path bootstrap (per [[sys-path-bootstrap-for-common-imports]])
@@ -50,7 +52,8 @@ if not TAVILY_KEY:
     sys.exit(1)
 
 PER_ENTITY = 5            # Top N images per entity
-THROTTLE_S = 1.0          # Tavily allows generous rate; keep us polite
+THROTTLE_S = 0.25         # tighter — workers pace each other naturally
+DEFAULT_WORKERS = 8       # Tavily handles this fine; net 8x throughput
 MAX_DESC_LEN = 400        # Truncate Tavily descriptions for source_meta
 
 
@@ -201,17 +204,21 @@ def main():
                     choices=["beach", "dog_park"],
                     help="Entity type. Default: dog_park (loader's primary use).")
     ap.add_argument("--per-entity", type=int, default=PER_ENTITY)
+    ap.add_argument("--workers", type=int, default=DEFAULT_WORKERS,
+                    help=f"Concurrent Tavily search workers (default {DEFAULT_WORKERS}).")
     args = ap.parse_args()
 
     ent = ENTITIES[args.entity]
     kw = ent["default_query_kw"]
     targets = select_targets(args)
-    print(f"Targets: {len(targets)} {args.entity}s  (top {args.per_entity} images per entity)")
+    print(f"Targets: {len(targets)} {args.entity}s  "
+          f"(top {args.per_entity} images per entity, {args.workers} workers)")
 
-    saved_total = 0
-    errored = 0
-    no_results = 0
-    for i, b in enumerate(targets, 1):
+    state = {"saved": 0, "errored": 0, "no_results": 0, "done": 0}
+    lock = threading.Lock()
+
+    def process_one(idx_b):
+        i, b = idx_b
         try:
             parts = [b["name"]]
             if kw.lower() not in (b["name"] or "").lower():
@@ -223,23 +230,39 @@ def main():
             r = tavily_image_search(query, k=args.per_entity)
             images = r.get("images") or []
             results = r.get("results") or []
-
             n = replace_websearch(b["fid"], images, results, entity=args.entity)
-            saved_total += n
-            if not n: no_results += 1
+
+            with lock:
+                state["saved"] += n
+                if not n: state["no_results"] += 1
+                state["done"] += 1
+                done = state["done"]
             tag = f'{n} images' if n else '(none)'
-            print(f"  [{i}/{len(targets)}] fid={b['fid']}  {b['name'][:40]:40s}  {tag}")
+            print(f"  [{done}/{len(targets)}] fid={b['fid']}  "
+                  f"{b['name'][:40]:40s}  {tag}", flush=True)
             if n and images:
                 first = images[0]
-                first_desc = (first.get('description') if isinstance(first, dict) else '') or '(no description)'
-                print(f"      top: {first_desc[:80]}")
+                desc = (first.get('description') if isinstance(first, dict) else '') or '(no description)'
+                print(f"      top: {desc[:80]}", flush=True)
+            # Polite per-worker pacing (8 workers × 0.25s ≈ 32 QPS ceiling)
+            time.sleep(THROTTLE_S)
         except Exception as e:
-            errored += 1
-            print(f"  [{i}/{len(targets)}] fid={b['fid']}  ERROR: {e}",
-                  file=sys.stderr)
-        time.sleep(THROTTLE_S)
+            with lock:
+                state["errored"] += 1
+                state["done"] += 1
+                done = state["done"]
+            print(f"  [{done}/{len(targets)}] fid={b['fid']}  ERROR: {e}",
+                  file=sys.stderr, flush=True)
 
-    print(f"\n=== TOTALS ===  saved={saved_total}  no_results={no_results}  errors={errored}")
+    if args.workers <= 1:
+        for ib in enumerate(targets, 1):
+            process_one(ib)
+    else:
+        with ThreadPoolExecutor(max_workers=args.workers) as ex:
+            list(ex.map(process_one, enumerate(targets, 1)))
+
+    print(f"\n=== TOTALS ===  saved={state['saved']}  "
+          f"no_results={state['no_results']}  errors={state['errored']}")
 
 
 if __name__ == "__main__":

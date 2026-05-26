@@ -108,6 +108,7 @@ from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 from _photo_filters import (  # noqa: E402
     POSITIVE_TERMS_DOG, POSITIVE_TERMS_GENERIC, POSITIVE_TERMS, NEGATIVE_TERMS,
+    positive_terms_for,
 )
 
 
@@ -154,25 +155,27 @@ def _name_match_score(beach_name: str, title: str) -> float:
     return round(3.0 * matched / len(beach_t), 2)
 
 
-def _relevance_score(title: str, description: str = "") -> float:
-    """Term-list scoring — copy of the WC loader's function.
+def _relevance_score(title: str, description: str = "", entity: str = "beach") -> float:
+    """Term-list scoring — entity-aware (Franz 2026-05-26 split).
        Dog-specific positive: +3.0 title / +2.0 desc
        Generic positive:      +1.5 title / +1.0 desc
        Negative:              -1.2 title / -0.8 desc
     Flickr photos rarely carry descriptions in the search response, so
     description is usually empty and only title-scoring fires.
-    NOTE: this is one of TWO scoring components — name-match is computed
-    separately by _name_match_score(). Composite combines both with proximity.
     """
     txt_title = (title or "").lower()
     txt_desc  = (description or "").lower()
+    dog_terms, generic_terms = positive_terms_for(entity)
     score = 0.0
-    for t in POSITIVE_TERMS_DOG:
+    for t in dog_terms:
         if t in txt_title: score += 3.0
         elif t in txt_desc: score += 2.0
-    for t in POSITIVE_TERMS_GENERIC:
+    for t in generic_terms:
         if t in txt_title: score += 1.5
         elif t in txt_desc: score += 1.0
+    # Negatives still scored against the base NEGATIVE_TERMS for backward
+    # compat; hard-exclusion via pre_vision_rank's title_excluded(entity)
+    # already handles the entity-specific list.
     for t in NEGATIVE_TERMS:
         if t in txt_title: score -= 1.2
         elif t in txt_desc: score -= 0.8
@@ -450,7 +453,8 @@ def haversine_m(la1, lo1, la2, lo2):
     return 2 * 6_371_000 * asin(sqrt(a))
 
 
-def pick_best(photos, beach_lat, beach_lng, beach_name="", beach_meta=None, top_n=None):
+def pick_best(photos, beach_lat, beach_lng, beach_name="", beach_meta=None, top_n=None,
+              entity="beach"):
     """Pick the best candidates per the unified v3 ingest filter.
 
     Refactored 2026-05-19 per Franz collapsed-architecture decision:
@@ -484,7 +488,7 @@ def pick_best(photos, beach_lat, beach_lng, beach_name="", beach_meta=None, top_
             continue   # Flickr ingest path requires geo (Wikimedia loader same)
         d = int(haversine_m(beach_lat, beach_lng, plat, plng))
         title = p.get("title") or ""
-        rel    = _relevance_score(title)
+        rel    = _relevance_score(title, entity=entity)
         name_m = _name_match_score(beach_name, title)
 
         # Build normalized dict the shared scorer expects (pre_vision_rank
@@ -510,10 +514,10 @@ def pick_best(photos, beach_lat, beach_lng, beach_name="", beach_meta=None, top_
     # Backward compat: if top_n was passed explicitly, use it; else cap from beach tier
     if top_n is not None:
         bm = {"scoring_tier": "hourly", "dogs_allowed": "yes"}   # neutral → cap=15
-        kept = pre_vision_rank(enriched, bm)[:top_n]
+        kept = pre_vision_rank(enriched, bm, entity=entity)[:top_n]
     else:
         bm = beach_meta or {"scoring_tier": None, "dogs_allowed": "yes"}
-        kept = pre_vision_rank(enriched, bm)
+        kept = pre_vision_rank(enriched, bm, entity=entity)
     #   2. DISPLAY — re-sort the kept set by distance asc, name-match as
     #      tiebreak. Curator UX wants closest-first (Franz, 2026-05-11).
     kept.sort(key=lambda x: (x["_distance_m"], -x.get("_name_match", 0)))
@@ -724,7 +728,8 @@ def main():
                 cands = [c for c in cands if str(c.get("id")) not in rej]
             picked = pick_best(cands, b["lat"], b["lng"], beach_name=b["name"],
                                beach_meta={"scoring_tier": b.get("scoring_tier"),
-                                           "dogs_allowed": b.get("dogs_allowed")})
+                                           "dogs_allowed": b.get("dogs_allowed")},
+                               entity=args.entity)
             replace_flickr(b["fid"], picked, entity=args.entity)
             saved += len(picked)
             tag = f'{len(picked)} photos' if picked else '(none)'

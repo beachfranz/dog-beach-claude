@@ -124,6 +124,38 @@ POSITIVE_TERMS_GENERIC: list[str] = [
 ]
 POSITIVE_TERMS: list[str] = POSITIVE_TERMS_DOG + POSITIVE_TERMS_GENERIC
 
+# Per-entity positive supplements (Franz 2026-05-26 photo-filter split).
+# Dog parks favor infrastructure / equipment / off-leash-area terms;
+# 'sand'/'shore' drop because most dog parks are grass/mulch/turf.
+POSITIVE_TERMS_DOG_PARK_EXTRA: list[str] = [
+    # Infrastructure
+    "fence", "fenced", "gate", "double gate", "double-gate",
+    "chain link", "vestibule",
+    # Equipment / amenities
+    "agility", "tunnel", "a-frame", "weave", "jump",
+    "play area", "bench", "water bowl", "pet water", "drinking fountain",
+    # Naming
+    "bark park", "dog park", "dog run", "off-leash area", "ola", "paw",
+    # Subgroups
+    "small dog", "large dog", "sm-dog", "lg-dog",
+    # Surface
+    "mulch", "wood chips", "turf", "grass", "shade",
+]
+
+
+def positive_terms_for(entity: str) -> tuple[list[str], list[str]]:
+    """Returns (positive_dog_terms, positive_generic_terms) for an entity.
+
+    Dog parks drop sand/shore (beach signal) and gain the DOG_PARK_EXTRA
+    list. Dog-specific terms (dog/puppy/etc.) apply to both entities.
+    """
+    if entity == "dog_park":
+        # Drop sand/shore — not load-bearing for grass/dirt dog parks
+        generic = [t for t in POSITIVE_TERMS_GENERIC if t not in {"sand", "shore"}]
+        generic = generic + POSITIVE_TERMS_DOG_PARK_EXTRA
+        return POSITIVE_TERMS_DOG, generic
+    return POSITIVE_TERMS_DOG, POSITIVE_TERMS_GENERIC
+
 # Merged from both loaders' NEGATIVE_TERMS + the prior centralized NEGATIVE_RE.
 # Anything matching these (word-boundary, case-insensitive) is hard-excluded
 # at ingest. Photos won't even enter the candidate pool.
@@ -184,6 +216,46 @@ def _compile_negative_re(terms: list[str]) -> re.Pattern:
 
 NEGATIVE_RE = _compile_negative_re(NEGATIVE_TERMS)
 
+# Per-entity negative supplements (Franz 2026-05-26 photo-filter split).
+# Dog parks: catch indoor restaurant/cafe/yard-house false positives + art
+# installation hits (Canton "Puppy Park" sculpture park) + baby/birthday
+# event photos. Drop bird/gull/seagull negatives — a dog chasing a bird at
+# a park IS legitimate content; bird specimen Latin names stay negative.
+DOG_PARK_NEGATIVE_REMOVALS: set[str] = {
+    "bird", "birds", "gull", "seagull", "larus",
+    "pelican", "cormorant", "heron", "egret",
+    "tern", "plover", "sandpiper", "shorebird",
+    "duck", "goose", "swan", "raptor", "hawk", "osprey",
+    "curlew", "willet", "godwit", "sanderling", "phalarope",
+}
+DOG_PARK_NEGATIVE_ADDITIONS: list[str] = [
+    # Indoor / food / venue false-positives
+    "restaurant", "cafe", "coffee shop", "bar", "menu",
+    "yard house",
+    # Event / people false-positives
+    "baby", "babies", "birthday", "wedding party", "bridal",
+    # Art installations (Canton "Puppy Park" sculpture park 2026-05-26)
+    "art installation", "sculpture", "mural", "gallery",
+    "puppy park",   # specific: Canton's pink-poodle/roller-coaster art piece
+    # Non-dog pets (puppy mistagged as kitten owners' pet photos)
+    "cat", "kitten", "parakeet", "parrot",
+]
+
+NEGATIVE_TERMS_DOG_PARK: list[str] = (
+    [t for t in NEGATIVE_TERMS if t not in DOG_PARK_NEGATIVE_REMOVALS]
+    + DOG_PARK_NEGATIVE_ADDITIONS
+)
+NEGATIVE_RE_DOG_PARK = _compile_negative_re(NEGATIVE_TERMS_DOG_PARK)
+
+
+def negative_re_for(entity: str) -> re.Pattern:
+    return NEGATIVE_RE_DOG_PARK if entity == "dog_park" else NEGATIVE_RE
+
+
+def entity_name_keyword(entity: str) -> str:
+    """Word for score_photo's name-bonus boost — 'beach' vs 'dog park'."""
+    return "dog park" if entity == "dog_park" else "beach"
+
 # Source priorities — Type B (page-gallery, NULL distance) outranks Type A.
 SOURCE_WEIGHT: dict[str, float] = {
     "ccc":       3.0,   # CA-only; highest curator-keep density (81%)
@@ -225,14 +297,15 @@ def has_rare_keyword(title_text: str) -> bool:
     return any(phrase in t for phrase in RARE_PHRASES)
 
 
-def title_excluded(title_text: str) -> bool:
-    """True if title matches the NEGATIVE_RE hard-exclusion regex."""
+def title_excluded(title_text: str, entity: str = "beach") -> bool:
+    """True if title matches the entity's negative-term regex."""
     if not title_text:
         return False
-    return bool(NEGATIVE_RE.search(title_text))
+    return bool(negative_re_for(entity).search(title_text))
 
 
-def score_photo(p: dict, photographer_kr: dict[str, tuple[float, int]] | None = None) -> float:
+def score_photo(p: dict, photographer_kr: dict[str, tuple[float, int]] | None = None,
+                entity: str = "beach") -> float:
     """Pre-vision rank score for a single photo dict.
 
     Expected keys (caller normalizes):
@@ -263,8 +336,10 @@ def score_photo(p: dict, photographer_kr: dict[str, tuple[float, int]] | None = 
     title = p.get("title_text") or ""
     if has_rare_keyword(title):
         score += 5.0
-    elif re.search(r"\bbeach\b", title, re.I):
-        score += 0.3
+    else:
+        kw = entity_name_keyword(entity)  # "beach" or "dog park"
+        if re.search(rf"\b{re.escape(kw)}\b", title, re.I):
+            score += 0.3
 
     # Photographer keep-rate (requires ≥5 prior decisions to count)
     pr = p.get("photographer")
@@ -293,6 +368,7 @@ def pre_vision_rank(
     photos: list[dict],
     beach_meta: dict,
     photographer_kr: dict[str, tuple[float, int]] | None = None,
+    entity: str = "beach",
 ) -> list[dict]:
     """Unified ingest filter (Franz 2026-05-19 collapsed architecture):
     Apply hard exclusions + score + per-tier cap + rare-keyword override.
@@ -313,9 +389,13 @@ def pre_vision_rank(
 
     beach_meta: {scoring_tier, dogs_allowed}
     """
-    cap = cap_for_beach(beach_meta.get("scoring_tier"), beach_meta.get("dogs_allowed"))
-    if cap == 0:
-        return []   # no-dogs beaches skip vision tagging entirely
+    # Dog parks: no scoring_tier (all definitionally dogs-allowed); use cap=15.
+    if entity == "dog_park":
+        cap = 15
+    else:
+        cap = cap_for_beach(beach_meta.get("scoring_tier"), beach_meta.get("dogs_allowed"))
+        if cap == 0:
+            return []   # no-dogs beaches skip vision tagging entirely
 
     eligible = []
     rare_hits = []
@@ -323,8 +403,8 @@ def pre_vision_rank(
         title = p.get("title_text") or ""
         d = p.get("distance_m")
         rare = has_rare_keyword(title)
-        # Hard exclusions
-        if title_excluded(title):
+        # Hard exclusions (entity-specific NEGATIVE_RE)
+        if title_excluded(title, entity):
             continue
         if d is not None:
             if rare:
@@ -332,7 +412,7 @@ def pre_vision_rank(
             else:
                 if d > 500:  continue    # tight default
         # Score
-        p["_rank_score"] = score_photo(p, photographer_kr)
+        p["_rank_score"] = score_photo(p, photographer_kr, entity)
         eligible.append(p)
         if rare:
             rare_hits.append(p)

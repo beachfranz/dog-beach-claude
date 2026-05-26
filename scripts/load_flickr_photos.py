@@ -1,10 +1,15 @@
-"""Load Flickr Creative Commons photos for each beach into beach_photos.
+"""Load Flickr Creative Commons photos for an entity (beach or dog park).
 
 Strategy:
-  1. Search Flickr by beach name + "beach" + city for relevance
+  1. Geo-search Flickr near each entity's lat/lng
   2. Filter to CC-licensed (license codes 1, 2, 3, 4, 5, 6, 9, 10 — all CC)
-  3. Within 5km of beach centroid (using Flickr's lat/lng metadata)
-  4. Top 5 by Flickr's "interestingness" rank
+  3. Score by name-match + relevance + proximity
+  4. Top N by composite, with auto-curate of the top photos for dog parks
+
+Entity parameterization (Franz 2026-05-26): the loader takes --entity
+beach|dog_park and dispatches all table/column/RPC choices through the
+ENTITIES dict. Same code, two entity types. Per [[never-solve-same-
+problem-twice]] — beat the urge to clone load_*_dog_park_photos.py.
 
 Flickr license codes (https://www.flickr.com/services/api/flickr.photos.licenses.getInfo.html):
   0  All Rights Reserved (skip)
@@ -42,7 +47,7 @@ import os
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timezone  # noqa: F401 (timezone used in auto-curate timestamp)
 from pathlib import Path
 
 # scripts.common loads .env + injects truststore at package init.
@@ -174,51 +179,104 @@ def _relevance_score(title: str, description: str = "") -> float:
     return score
 
 
+# ─── Entity configuration (Franz 2026-05-26 parameterization) ─────────────
+# Per [[never-solve-same-problem-twice]] the loader dispatches all entity-
+# specific choices (table, FK column, photo table, lat/lng resolution,
+# beach-only RPCs) through this dict. Beach is the default for backward
+# compat with existing pipeline callers.
+
+ENTITIES = {
+    "beach": {
+        "table":            "beaches_gold",
+        "fk_col":           "arena_group_id",
+        "photo_table":      "beach_photos",
+        "select_fields":    "fid,name,display_name_override,county_name,state,scoring_tier",
+        "has_lat_lon":      False,    # beach lat/lng comes via get_beach_info RPC
+        "lat_lon_rpc":      "get_beach_info",
+        "supports_agencies": True,
+        "supports_curator_rpcs": True,  # blocked_photographers + rejected RPC
+        "default_query_kw": "beach",
+        "auto_curate_top": 0,           # beaches use admin curator UI
+    },
+    "dog_park": {
+        "table":            "dog_parks_gold",
+        "fk_col":           "dog_park_fid",
+        "photo_table":      "dog_park_photos",
+        "select_fields":    "fid,name,display_name_override,address_city,state,lat,lon",
+        "has_lat_lon":      True,     # dog_parks_gold has lat + lon columns directly
+        "lat_lon_rpc":      None,
+        "supports_agencies": False,
+        "supports_curator_rpcs": False,
+        "default_query_kw": "dog park",
+        "auto_curate_top": 3,           # no curator UI yet → auto-mark top 3
+    },
+}
+
+
 # ─── Supabase REST helpers ────────────────────────────────────────────────
 
 def select_targets(args):
+    ent = ENTITIES[args.entity]
+    table = ent["table"]
+    sel = ent["select_fields"]
     if args.fids:
         ids = [int(s) for s in args.fids.split(",")]
-        rows = supa("/rest/v1/beaches_gold",
-                    params={"select": "fid,name,display_name_override,county_name,state,scoring_tier",
+        rows = supa(f"/rest/v1/{table}",
+                    params={"select": sel,
                             "fid": f"in.({','.join(map(str, ids))})",
                             "is_active": "eq.true"})
         # Preserve caller's order — Supabase REST `in.(...)` returns rows in
-        # Postgres' arbitrary order otherwise, which kills our "hourly first /
-        # catchment desc" intent.
+        # Postgres' arbitrary order otherwise.
         by_fid = {r["fid"]: r for r in (rows or [])}
         rows = [by_fid[i] for i in ids if i in by_fid]
     elif args.pilot:
-        rows = supa("/rest/v1/beaches_gold",
-                    params={"select": "fid,name,display_name_override,county_name,state,scoring_tier",
+        rows = supa(f"/rest/v1/{table}",
+                    params={"select": sel,
                             "is_active": "eq.true", "is_scoreable": "eq.true",
                             "order": "fid.asc", "limit": str(int(args.pilot))})
     elif args.full:
-        rows = supa("/rest/v1/beaches_gold",
-                    params={"select": "fid,name,display_name_override,county_name,state,scoring_tier",
+        rows = supa(f"/rest/v1/{table}",
+                    params={"select": sel,
                             "is_active": "eq.true", "is_scoreable": "eq.true",
                             "order": "fid.asc"})
+    elif args.state:
+        rows = supa(f"/rest/v1/{table}",
+                    params={"select": sel,
+                            "is_active": "eq.true", "is_scoreable": "eq.true",
+                            "state": f"eq.{args.state}",
+                            "order": "fid.asc"})
     else:
-        print("ERROR: provide --fids, --pilot N, or --full", file=sys.stderr)
+        print("ERROR: provide --fids, --pilot N, --full, or --state", file=sys.stderr)
         sys.exit(1)
 
-    # Add lat/lng via RPC
     out = []
     for r in rows or []:
-        info = supa("/rest/v1/rpc/get_beach_info", method="POST", body={"p_fid": r["fid"]})
-        b = (info or {}).get("beach") or {}
-        if b.get("lat") is None: continue
-        # Fetch dogs_allowed for the per-beach cap rule (no_dogs=0)
-        dp = (info or {}).get("dog_policy") or {}
-        out.append({
-            "fid": r["fid"],
-            "name": r.get("display_name_override") or r["name"],
-            "county": r.get("county_name"),
-            "state": r.get("state"),
-            "scoring_tier": r.get("scoring_tier"),
-            "dogs_allowed": dp.get("dogs_allowed"),
-            "lat": b["lat"], "lng": b["lng"],
-        })
+        name = r.get("display_name_override") or r["name"]
+        if ent["has_lat_lon"]:
+            lat, lng = r.get("lat"), r.get("lon")
+            if lat is None or lng is None: continue
+            out.append({
+                "fid": r["fid"], "name": name,
+                "county": r.get("address_city"),  # nearest equivalent for dog_park
+                "state": r.get("state"),
+                "scoring_tier": None,
+                "dogs_allowed": "yes",  # dog parks are definitionally yes
+                "lat": lat, "lng": lng,
+            })
+        else:
+            info = supa(f"/rest/v1/rpc/{ent['lat_lon_rpc']}",
+                        method="POST", body={"p_fid": r["fid"]})
+            b = (info or {}).get("beach") or {}
+            if b.get("lat") is None: continue
+            dp = (info or {}).get("dog_policy") or {}
+            out.append({
+                "fid": r["fid"], "name": name,
+                "county": r.get("county_name"),
+                "state": r.get("state"),
+                "scoring_tier": r.get("scoring_tier"),
+                "dogs_allowed": dp.get("dogs_allowed"),
+                "lat": b["lat"], "lng": b["lng"],
+            })
     return out
 
 
@@ -464,22 +522,26 @@ def pick_best(photos, beach_lat, beach_lng, beach_name="", beach_meta=None, top_
 
 # ─── Persistence ──────────────────────────────────────────────────────────
 
-def replace_flickr(fid, photos):
+def replace_flickr(fid, photos, entity="beach"):
     # API transient = "nothing to replace with" — preserve existing rather
     # than wipe-then-fail-to-refill. Diagnosed 2026-05-19: fid 6017 went
     # 20 → 0 because Flickr search returned (none) on a re-run that
     # had returned 20 photos minutes earlier. The DELETE-then-INSERT
     # pattern assumed the API is authoritative-per-call; it isn't.
     if not photos: return
+    ent = ENTITIES[entity]
+    photo_table = ent["photo_table"]
+    fk_col = ent["fk_col"]
+    auto_curate_top = ent["auto_curate_top"]
     # Delete ONLY uncurated rows. Curated photos (sort_order set by the curator
     # via the admin-curate-beach edge function) are preserved across re-runs.
     # If a candidate from this batch matches a kept photo by external_id, the
-    # unique constraint (arena_group_id, source, external_id) + ignore-duplicates
+    # unique constraint (<fk_col>, source, external_id) + ignore-duplicates
     # on the INSERT will silently drop the duplicate.
-    supa("/rest/v1/beach_photos", method="DELETE", params={
-        "arena_group_id": f"eq.{fid}",
-        "source":         "eq.flickr",
-        "curated_at":     "is.null",
+    supa(f"/rest/v1/{photo_table}", method="DELETE", params={
+        fk_col:        f"eq.{fid}",
+        "source":      "eq.flickr",
+        "curated_at":  "is.null",
     }, prefer="return=minimal")
     rows = []
     for i, p in enumerate(photos):
@@ -505,8 +567,8 @@ def replace_flickr(fid, photos):
             plng = float(p.get("longitude") or 0) or None
         except Exception:
             plat = plng = None
-        rows.append({
-            "arena_group_id": fid,
+        row = {
+            fk_col:           fid,
             "source":         "flickr",
             "external_id":    str(p.get("id")),
             "image_url":      image_url,
@@ -527,13 +589,21 @@ def replace_flickr(fid, photos):
                 "name_match_score": round(p.get("_name_match", 0.0), 2),
                 "composite_score":  round(p.get("_composite", 0.0), 2),
             },
-        })
+        }
+        # PostgREST batch INSERT requires all rows to share the same keys —
+        # include curated/match fields on every row (null for non-auto-curated).
+        if auto_curate_top:
+            in_top = i < auto_curate_top
+            row["curated_at"]    = datetime.now(timezone.utc).isoformat() if in_top else None
+            row["curated_by"]    = "auto" if in_top else None
+            row["match_quality"] = ("high" if p.get("_name_match", 0) >= 3 else "medium") if in_top else None
+        rows.append(row)
     if rows:
         # PostgREST honors resolution=ignore-duplicates ONLY when on_conflict
         # is set; without it, dup-key raises 409 mid-batch and leaves the
         # earlier DELETE half-applied (data loss). Diagnosed 2026-05-19.
-        supa("/rest/v1/beach_photos", method="POST", body=rows,
-             params={"on_conflict": "arena_group_id,source,external_id"},
+        supa(f"/rest/v1/{photo_table}", method="POST", body=rows,
+             params={"on_conflict": f"{fk_col},source,external_id"},
              prefer="return=minimal,resolution=ignore-duplicates")
 
 
@@ -572,11 +642,14 @@ def main():
     ap = argparse.ArgumentParser()
     grp = ap.add_mutually_exclusive_group(required=True)
     grp.add_argument("--fids",  help="comma-separated list of fids")
-    grp.add_argument("--pilot", type=int, help="run on first N beaches")
+    grp.add_argument("--pilot", type=int, help="run on first N entities")
     grp.add_argument("--full",  action="store_true")
+    grp.add_argument("--state", help="2-letter state code — process all active+scoreable in state")
     grp.add_argument("--resolve-agencies", action="store_true",
                      help="One-shot: resolve usernames in agency_flickr_accounts.csv "
                           "to NSIDs and write back. Run this once before --use-agencies.")
+    ap.add_argument("--entity", default="beach", choices=["beach", "dog_park"],
+                    help="Entity type to load photos for. Default: beach (back-compat).")
     ap.add_argument("--refresh", action="store_true", help="redo even if rows exist")
     ap.add_argument("--radius-km", type=float, default=None,
                     help="Override the default search RADIUS_KM. Use 2 for "
@@ -585,8 +658,12 @@ def main():
     ap.add_argument("--use-agencies", action="store_true",
                     help="In addition to geo search, query each applicable "
                          "agency Flickr account (per state) for beach-name "
-                         "text matches. Requires --resolve-agencies first.")
+                         "text matches. Requires --resolve-agencies first. "
+                         "Beach-only.")
     args = ap.parse_args()
+    if args.use_agencies and not ENTITIES[args.entity]["supports_agencies"]:
+        print(f"ERROR: --use-agencies not supported for entity={args.entity}", file=sys.stderr)
+        return 1
 
     if args.resolve_agencies:
         return resolve_agencies_command()
@@ -596,19 +673,21 @@ def main():
         print(f"[override] RADIUS_KM = {RADIUS_KM}")
 
     targets = select_targets(args)
-    print(f"Targets: {len(targets)} beaches  (radius {RADIUS_KM}km, "
-          f"top {PER_BEACH} per beach, hard cutoff {HARD_CUTOFF_M}m)")
+    print(f"Targets: {len(targets)} {args.entity}s  (radius {RADIUS_KM}km, "
+          f"top {PER_BEACH} per entity, hard cutoff {HARD_CUTOFF_M}m)")
 
-    blocked = fetch_blocked_photographers()
+    ent = ENTITIES[args.entity]
+    blocked = fetch_blocked_photographers() if ent["supports_curator_rpcs"] else set()
     if blocked:
         print(f"Photographer blocklist: {len(blocked)} flickr artists "
               f"(>=3 prior photos, mean relevance <= 0)")
 
-    rejected_by_fid = fetch_rejected_external_ids([b["fid"] for b in targets])
+    rejected_by_fid = fetch_rejected_external_ids([b["fid"] for b in targets]) \
+        if ent["supports_curator_rpcs"] else {}
     if rejected_by_fid:
         total_rej = sum(len(s) for s in rejected_by_fid.values())
         print(f"Curator-rejected tombstones: {total_rej} external_ids "
-              f"across {len(rejected_by_fid)} beaches (will skip)")
+              f"across {len(rejected_by_fid)} entities (will skip)")
 
     saved = errored = 0
     n_agency_cands_total = 0
@@ -646,7 +725,7 @@ def main():
             picked = pick_best(cands, b["lat"], b["lng"], beach_name=b["name"],
                                beach_meta={"scoring_tier": b.get("scoring_tier"),
                                            "dogs_allowed": b.get("dogs_allowed")})
-            replace_flickr(b["fid"], picked)
+            replace_flickr(b["fid"], picked, entity=args.entity)
             saved += len(picked)
             tag = f'{len(picked)} photos' if picked else '(none)'
             print(f"  [{i}/{len(targets)}] fid={b['fid']}  {b['name'][:40]:40s}  {tag}")

@@ -508,10 +508,26 @@ dp_photos_unsplash = _make_dp_photo_loader_asset(
     description="Dog-park Unsplash loader. Keyword search (name + 'dog park' + state).",
 )
 
+# Web-search source (Tavily). Most relevant for dog parks since geo-tagged
+# CC sources (Wikimedia/Flickr/Unsplash) miss most parks. Tavily returns
+# image URLs + AI descriptions; vision tagger gates display.
+dp_photos_websearch = _make_dp_photo_loader_asset(
+    name="dp_photos_websearch",
+    script="scripts/load_websearch_photos.py",
+    chunk_size=30, timeout=900,
+    parse_pattern=r"saved=(\d+)",
+    deps=[dp_triage_needs_review],
+    description=(
+        "Dog-park web-image-search loader (Tavily). Embeds third-party-hosted "
+        "image URLs with link-back attribution; vision tagger + dp_photos_curate "
+        "filter for relevance + quality before consumer surface."
+    ),
+)
+
 
 @asset(
     partitions_def=state_partitions,
-    deps=[dp_photos_flickr, dp_photos_wikimedia, dp_photos_unsplash],
+    deps=[dp_photos_flickr, dp_photos_wikimedia, dp_photos_unsplash, dp_photos_websearch],
     group_name="phase_31_dp_photos",
     description=(
         "Two-pass Haiku vision tagger for dog-park photos. Reads "

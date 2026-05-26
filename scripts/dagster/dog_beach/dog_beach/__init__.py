@@ -129,6 +129,7 @@ from .assets.photos_and_vision import (
     dp_photos_flickr,
     dp_photos_wikimedia,
     dp_photos_unsplash,
+    dp_photos_websearch,
     dp_photo_vision_tags,
     dp_photos_curate,
 )
@@ -287,6 +288,7 @@ defs = Definitions(
         dp_photos_flickr,
         dp_photos_wikimedia,
         dp_photos_unsplash,
+        dp_photos_websearch,
         dp_photo_vision_tags,
         dp_photos_curate,
         # Lineage-only AssetSpecs for downstream consumers

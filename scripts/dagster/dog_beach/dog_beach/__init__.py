@@ -116,8 +116,7 @@ from .assets.per_fid_enrichment import (
 )
 from .assets.photos_and_vision import (
     photos_flickr,
-    photos_pixabay,
-    photos_pexels,
+    photos_websearch,
     photos_unsplash,
     photos_ccc,
     photo_vision_tags,
@@ -256,8 +255,7 @@ defs = Definitions(
         photos_wikimedia,
         # Phase 31 photo loaders (per-source) + vision + ML
         photos_flickr,
-        photos_pixabay,
-        photos_pexels,
+        photos_websearch,
         photos_unsplash,
         photos_ccc,
         photo_vision_tags,

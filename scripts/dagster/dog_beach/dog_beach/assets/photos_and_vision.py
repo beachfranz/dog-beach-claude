@@ -45,9 +45,10 @@ from .dog_park_coverage import dp_triage_needs_review
 
 
 # Per-source partition def for vision tagging. Mirrors the photo loader
-# inventory; if you add another loader, add it here too.
+# inventory; if you add another loader, add it here too. Pixabay + pexels
+# dropped 2026-05-26 (replaced by websearch — generic stock didn't pay off).
 vision_source_partitions = StaticPartitionsDefinition(
-    ["wikimedia", "flickr", "pixabay", "pexels", "unsplash", "ccc"]
+    ["wikimedia", "flickr", "unsplash", "ccc", "websearch"]
 )
 
 
@@ -77,16 +78,18 @@ def _run_chunked(
     chunk_size: int,
     per_chunk_timeout: int,
     parse_pattern: str,
+    extra_args: list[str] | None = None,
 ) -> tuple[int, int, int]:
     """Returns (total_parsed_value, chunks_done, chunks_failed)."""
     total = 0
     done = 0
     failed = 0
+    extra = list(extra_args or [])
     for i in range(0, len(fids), chunk_size):
         chunk = fids[i:i + chunk_size]
         result = subproc.run(
             script_path,
-            args=["--fids", ",".join(str(x) for x in chunk)],
+            args=extra + ["--fids", ",".join(str(x) for x in chunk)],
             timeout=per_chunk_timeout,
         )
         if result.returncode != 0:
@@ -115,9 +118,16 @@ def _make_photo_loader_asset(
     timeout: int,
     parse_pattern: str,
     description: str,
+    entity: str | None = None,
+    workers: int | None = None,
 ):
     """Factory for the photo-loader-per-source asset. All loaders share
-    the same shape (per-state, chunked subprocess, parse "N saved")."""
+    the same shape (per-state, chunked subprocess, parse "N saved").
+
+    entity / workers: optional pass-through args for entity-aware loaders
+    (Franz 2026-05-26 — websearch loader defaults --entity dog_park; for
+    beach use we pass entity='beach' explicitly. workers used by
+    parallelized loaders like websearch/flickr)."""
     @asset(
         name=name,
         partitions_def=state_partitions,
@@ -133,10 +143,16 @@ def _make_photo_loader_asset(
         fids = _tier12_fids(postgres, state)
         if not fids:
             return MaterializeResult(metadata={"state": state, "fids": 0, "skipped": True})
+        extra_args = []
+        if entity:
+            extra_args += ["--entity", entity]
+        if workers and workers > 1:
+            extra_args += ["--workers", str(workers)]
         total, done, failed = _run_chunked(
             context, subproc, script, fids,
             chunk_size=chunk_size, per_chunk_timeout=timeout,
             parse_pattern=parse_pattern,
+            extra_args=extra_args,
         )
         return MaterializeResult(metadata={
             "state":         MetadataValue.text(state),
@@ -160,20 +176,25 @@ photos_flickr = _make_photo_loader_asset(
     ),
 )
 
-photos_pixabay = _make_photo_loader_asset(
-    name="photos_pixabay",
-    script="scripts/load_pixabay_photos.py",
-    chunk_size=80, timeout=600,
+# Web image search (Tavily). Per Franz 2026-05-26 — replaces
+# Pixabay + Pexels for beaches (stock sources produced generic stock
+# photos rarely tied to the specific beach; websearch + Tavily image
+# descriptions are dramatically more relevant). Same loader the
+# dog-park pipeline uses; --entity beach swaps the FK col + photo
+# table + query keyword. workers=8 because Tavily handles parallel
+# search well.
+photos_websearch = _make_photo_loader_asset(
+    name="photos_websearch",
+    script="scripts/load_websearch_photos.py",
+    chunk_size=30, timeout=900,
     parse_pattern=r"saved=(\d+)",
-    description="Pixabay photo loader. Royalty-free, name-based query.",
-)
-
-photos_pexels = _make_photo_loader_asset(
-    name="photos_pexels",
-    script="scripts/load_pexels_photos.py",
-    chunk_size=80, timeout=600,
-    parse_pattern=r"saved=(\d+)",
-    description="Pexels photo loader. Royalty-free, name-based query.",
+    entity="beach",
+    workers=8,
+    description=(
+        "Beach web-image-search loader (Tavily). Embeds third-party-hosted "
+        "image URLs with link-back attribution; vision tagger + photos_curate "
+        "filter for relevance + quality before consumer surface."
+    ),
 )
 
 photos_unsplash = _make_photo_loader_asset(

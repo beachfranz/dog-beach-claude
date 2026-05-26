@@ -224,6 +224,67 @@ def fuzzy_match(catalog_name: str, candidates: list[dict],
     return (best, best_score) if best_score >= threshold else (None, best_score)
 
 
+# ── Spatial dedup helper (arena pattern) ─────────────────────────────────
+# Called when fuzzy_match is ambiguous (0.40-0.79). Google Places geocodes
+# the catalog name + operator city, then ST_Distance to ALL operator's gold
+# candidates. <150m → strong match; >500m → real new park; 150-500m →
+# genuinely ambiguous, keep needs_review.
+# Per pin [[dog-park-coverage-playbook]] arena-style spatial > string fuzzy.
+
+def spatial_match(catalog_name: str, operator_city: str | None,
+                  operator_state: str, candidates: list[dict]) -> tuple[dict | None, float, str]:
+    """Return (best_candidate_by_distance, distance_m, geocode_status).
+    Returns (None, inf, why) if geocoding fails or no candidates within 500m."""
+    try:
+        # Lazy import — avoid hard dependency at module load time
+        sys_path_save = sys.path[:]
+        sys.path.insert(0, str(ROOT))
+        from scripts.harvest.geocode import google_places_searchtext
+        sys.path = sys_path_save
+    except Exception as e:
+        return (None, float('inf'), f"import_error:{e}")
+
+    query_parts = [catalog_name]
+    if operator_city:
+        query_parts.append(operator_city)
+    query_parts.append(operator_state or 'CA')
+    query = ", ".join(p for p in query_parts if p)
+
+    try:
+        place = google_places_searchtext(query)
+    except Exception as e:
+        return (None, float('inf'), f"places_error:{type(e).__name__}")
+    if not place or not place.get('location'):
+        return (None, float('inf'), "no_geocode")
+
+    lat = float(place['location']['latitude'])
+    lng = float(place['location']['longitude'])
+
+    # Compute distance to each candidate via DB (PostGIS)
+    if not candidates:
+        return (None, float('inf'), "no_candidates")
+    fids = [c['fid'] for c in candidates]
+    conn = connect(); conn.set_client_encoding("UTF8")
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT fid, name,
+                   ST_Distance(geom::geography,
+                               ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography) AS dist_m
+              FROM public.dog_parks_gold
+             WHERE fid = ANY(%s) AND geom IS NOT NULL
+             ORDER BY dist_m ASC LIMIT 1
+        """, (lng, lat, fids))
+        r = cur.fetchone()
+    finally:
+        conn.close()
+    if not r:
+        return (None, float('inf'), "no_geom_in_candidates")
+    # Find the matching candidate dict
+    best_cand = next((c for c in candidates if c['fid'] == r['fid']), None)
+    return (best_cand, float(r['dist_m']), f"geocoded:{lat:.4f},{lng:.4f}")
+
+
 # ── Per-park extraction (reuses extract_dog_park_amenities substrate) ───
 
 def extract_one_park(park_fid: int, park_name: str, city: str | None,
@@ -413,8 +474,40 @@ def walk_one_operator(op_id: int, op_name: str, catalog_url: str | None,
             elif not cat_url.startswith('http') and catalog_src_url and catalog_src_url.startswith('http'):
                 cat_url = urllib.parse.urljoin(catalog_src_url, cat_url)
         gold, sim = fuzzy_match(cat_name, candidates)
+        # SPATIAL ESCALATION (arena pattern) — if string sim is ambiguous
+        # (no match OR borderline), Google Places geocode the catalog entry
+        # + ST_Distance against ALL operator's gold candidates. Resolves cases
+        # where string match misses ("Doyle Community Park" vs "Rincon Valley
+        # Community Park") but spatial proximity is decisive.
+        used_spatial = False
+        if (gold is None and 0.40 <= sim < 0.60) or (gold is not None and sim < 0.80):
+            # Skip if no city context (geocoding will be noisy)
+            op_city = candidates[0].get('address_city') if candidates else None
+            spat_gold, dist_m, status = spatial_match(cat_name, op_city, 'CA', candidates)
+            used_spatial = True
+            if spat_gold and dist_m < 150:
+                # Strong spatial confirm — promote/override fuzzy decision
+                gold = spat_gold
+                sim = max(sim, 0.85)  # bump to high-confidence
+                say(f"    [spatial<150m] '{cat_name}' → [{gold['fid']}] {gold['name']} (dist={dist_m:.0f}m)")
+            elif spat_gold and dist_m > 500 and gold is not None:
+                # Fuzzy said yes but spatial disagrees — distinct park, demote to queue-only
+                queue_rows.append({
+                    'catalog_park_name': cat_name,
+                    'catalog_park_url':  cat_url,
+                    'blurb':             entry.get('blurb'),
+                    'best_similarity':   sim,
+                    'best_match_fid':    None,
+                    'best_match_name':   None,
+                    'status':            'pending',
+                })
+                say(f"    [spatial>500m] '{cat_name}' real new park (fuzzy said {gold['name']}; dist={dist_m:.0f}m)")
+                out['unmatched_catalog_entries'] += 1
+                continue
+            # else: 150-500m or no geocode → fall through to fuzzy decision
+
         if gold is None:
-            say(f"    [unmatched sim={sim:.2f}] '{cat_name}' → discovery queue")
+            say(f"    [unmatched sim={sim:.2f}{' spatial' if used_spatial else ''}] '{cat_name}' → discovery queue")
             queue_rows.append({
                 'catalog_park_name': cat_name,
                 'catalog_park_url':  cat_url,
@@ -426,7 +519,7 @@ def walk_one_operator(op_id: int, op_name: str, catalog_url: str | None,
             })
             out['unmatched_catalog_entries'] += 1
             continue
-        # Borderline match (0.6-0.8): extract AND queue for review
+        # Borderline match (0.6-0.8) without spatial promotion: extract AND queue for review
         if sim < 0.80:
             queue_rows.append({
                 'catalog_park_name': cat_name,

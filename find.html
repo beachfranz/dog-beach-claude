@@ -660,7 +660,7 @@
       return new Set(['off_leash_beach', 'dog_park']);
     } catch { return new Set(['off_leash_beach', 'dog_park']); }
   })();
-  let dogParkCache = null; // [{...DP row}, ...] — fetched on first DP render
+  let dogParkCache = {}; // { 'YYYY-MM-DD': [...DP rows] } — per-date forecast
 
   // Derived: what's the effective leash filter for beach queries?
   // - Both chips → 'any'
@@ -852,8 +852,10 @@
   // server returns only the nearest NEAREST_LIMIT beaches (GIST-indexed
   // KNN). Without coords, returns the full active set for score sorting.
   // ── Dog parks (Phase c — 2026-05-19) ──────────────────────────────
-  async function loadDogParks() {
-    if (dogParkCache) return dogParkCache;
+  async function loadDogParks(date) {
+    // date: 'YYYY-MM-DD' (preferred) or null/'now' → server uses CURRENT_DATE
+    const cacheKey = date || 'today';
+    if (dogParkCache[cacheKey]) return dogParkCache[cacheKey];
     try {
       const res = await fetch(
         `${SUPABASE_URL}/rest/v1/rpc/nearest_dog_parks`,
@@ -869,6 +871,7 @@
             p_lng:   userLng,
             p_limit: NEAREST_LIMIT,
             p_state: null,
+            p_date:  date && date !== 'now' ? date : null,
           }),
         }
       );
@@ -878,7 +881,10 @@
         return [];
       }
       const rows = await res.json();
-      if (Array.isArray(rows)) dogParkCache = rows;
+      // Only cache when call was anchored to a real location — null-coord
+      // results have distance_miles=null and break the distance filter for
+      // every subsequent location-anchored render.
+      if (Array.isArray(rows) && userLat != null && userLng != null) dogParkCache[cacheKey] = rows;
       return rows ?? [];
     } catch (err) {
       console.warn('nearest_dog_parks fetch failed:', err);
@@ -955,7 +961,7 @@
     document.getElementById('day-pills').style.display     = 'none';
 
     let dps;
-    try { dps = await loadDogParks(); }
+    try { dps = await loadDogParks(selectedDate); }
     catch {
       document.getElementById('beach-list').innerHTML =
         '<div class="no-data">Failed to load dog parks.</div>';
@@ -1023,7 +1029,7 @@
 
     const [beaches, dps] = await Promise.all([
       loadBeachesForDate(dateForBeach).catch(() => []),
-      loadDogParks().catch(() => []),
+      loadDogParks(dateForBeach).catch(() => []),
     ]);
     if (myToken !== _renderToken) return;
 
@@ -1056,26 +1062,43 @@
         kind: 'dog_park',
         dp: d,
         distance: d.distance_miles,
-        score: d.source === 'operator_posted' ? 75 : 60, // rough placeholder until DP scoring lands in nearest_dog_parks
+        // Real composite_score from AVG(hour_score). Falls back to verified
+        // bias (75/60) only when no forecast row exists for this date.
+        score: d.composite_score != null ? d.composite_score
+             : (d.source === 'operator_posted' || d.source === 'operator_posted_v2') ? 75 : 60,
       }));
 
-    // Merge + sort
+    // Merge + sort. Build a single comparator so both type-streams + the
+    // final pass agree on ordering.
     const all = [...beachCards, ...dpCards];
-    let sorted;
-    if (currentSort === 'distance') {
-      sorted = all.sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999));
-    } else if (currentSort === 'blend') {
-      const maxDist = Math.max(...all.map(c => c.distance ?? 0), 1);
-      sorted = all.sort((a, b) => {
-        // Reuse blendScore for beaches; approximate for dog parks
-        const aScore = a.kind === 'beach' ? blendScore(a, maxDist) : (a.score / 100) * 0.7 + (1 - (a.distance ?? 0) / maxDist) * 0.3;
-        const bScore = b.kind === 'beach' ? blendScore(b, maxDist) : (b.score / 100) * 0.7 + (1 - (b.distance ?? 0) / maxDist) * 0.3;
-        return bScore - aScore;
-      });
-    } else {
-      sorted = all.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-    }
-    sorted = sorted.slice(0, DISPLAY_LIMIT);
+    const maxDist = Math.max(...all.map(c => c.distance ?? 0), 1);
+    const cmp = (a, b) => {
+      if (currentSort === 'distance') return (a.distance ?? 9999) - (b.distance ?? 9999);
+      if (currentSort === 'blend') {
+        // Same blend formula for both types now that DP scores are real
+        // composite_score values comparable to beach composite_score.
+        const aS = blendScore({ day: { composite_score: a.score }, distance: a.distance }, maxDist);
+        const bS = blendScore({ day: { composite_score: b.score }, distance: b.distance }, maxDist);
+        return bS - aS;
+      }
+      return (b.score ?? 0) - (a.score ?? 0);
+    };
+
+    // Pre-sort each stream, then reserve min-N quota per type as a safety net.
+    // With real composite scores both types are comparable, but a 10 vs 5 ratio
+    // of beach:DP candidates can still wipe out the smaller stream on tied
+    // scores. Quota guarantees mixed results.
+    const sortedBeaches = [...beachCards].sort(cmp);
+    const sortedDps     = [...dpCards].sort(cmp);
+    const MIN_DP    = 2;
+    const MIN_BEACH = 2;
+    const reservedDps     = sortedDps.slice(0, Math.min(MIN_DP, sortedDps.length));
+    const reservedBeaches = sortedBeaches.slice(0, Math.min(MIN_BEACH, sortedBeaches.length));
+    const reserved = new Set([...reservedDps, ...reservedBeaches]);
+    const remaining = [...sortedBeaches, ...sortedDps].filter(c => !reserved.has(c)).sort(cmp);
+    const fillSlots = Math.max(0, DISPLAY_LIMIT - reserved.size);
+    let sorted = [...reserved, ...remaining.slice(0, fillSlots)];
+    sorted.sort(cmp);
 
     if (!sorted.length) {
       document.getElementById('top-card').innerHTML = '';
@@ -1548,6 +1571,7 @@
     userLng = lng;
     beachCache = {};
     nowBeaches = null;
+    dogParkCache = {};
     Object.keys(scoutCache).forEach(k => delete scoutCache[k]);
   }
 
@@ -1598,7 +1622,7 @@
     }
     persistWants();
     syncWantChipUI();
-    dogParkCache = null;
+    dogParkCache = {};
     nowBeaches = null;
     sortAndRender();
   }

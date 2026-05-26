@@ -48,7 +48,7 @@ from .dog_park_coverage import dp_triage_needs_review
 # inventory; if you add another loader, add it here too. Pixabay + pexels
 # dropped 2026-05-26 (replaced by websearch — generic stock didn't pay off).
 vision_source_partitions = StaticPartitionsDefinition(
-    ["wikimedia", "flickr", "unsplash", "ccc", "websearch"]
+    ["wikimedia", "flickr", "ccc", "websearch"]
 )
 
 
@@ -197,13 +197,11 @@ photos_websearch = _make_photo_loader_asset(
     ),
 )
 
-photos_unsplash = _make_photo_loader_asset(
-    name="photos_unsplash",
-    script="scripts/load_unsplash_photos.py",
-    chunk_size=80, timeout=600,
-    parse_pattern=r"saved=(\d+)",
-    description="Unsplash photo loader. Free use, name-based query.",
-)
+# photos_unsplash REMOVED 2026-05-26 — generic stock photos returned
+# the same image for multiple distinct parks (Maryland City Dog Park vs
+# Ma & Pa Dog Park 64 km apart both got photo-1709790970068-adf7a460659d).
+# Same failure mode as pixabay+pexels earlier. Script kept on disk; no
+# longer wired into any Dagster asset/job.
 
 photos_ccc = _make_photo_loader_asset(
     name="photos_ccc",
@@ -528,18 +526,13 @@ dp_photos_wikimedia = _make_dp_photo_loader_asset(
     description="Dog-park Wikimedia Commons loader. Geosearch by park lat/lng + 500m radius.",
 )
 
-dp_photos_unsplash = _make_dp_photo_loader_asset(
-    name="dp_photos_unsplash",
-    script="scripts/load_unsplash_photos.py",
-    chunk_size=80, timeout=600,
-    parse_pattern=r"saved=(\d+)",
-    deps=[dp_triage_needs_review],
-    description="Dog-park Unsplash loader. Keyword search (name + 'dog park' + state).",
-)
+# dp_photos_unsplash REMOVED 2026-05-26 — generic stock; Maryland City
+# Dog Park + Ma & Pa Dog Park (64 km apart) both got the same Unsplash
+# photo as their hero. Same failure mode as pixabay/pexels earlier.
 
 # Web-search source (Tavily). Most relevant for dog parks since geo-tagged
-# CC sources (Wikimedia/Flickr/Unsplash) miss most parks. Tavily returns
-# image URLs + AI descriptions; vision tagger gates display.
+# CC sources (Wikimedia/Flickr) miss most parks. Tavily returns image URLs
+# + AI descriptions; vision tagger gates display.
 dp_photos_websearch = _make_dp_photo_loader_asset(
     name="dp_photos_websearch",
     script="scripts/load_websearch_photos.py",
@@ -557,7 +550,7 @@ dp_photos_websearch = _make_dp_photo_loader_asset(
 
 @asset(
     partitions_def=state_partitions,
-    deps=[dp_photos_flickr, dp_photos_wikimedia, dp_photos_unsplash, dp_photos_websearch],
+    deps=[dp_photos_flickr, dp_photos_wikimedia, dp_photos_websearch],
     group_name="phase_31_dp_photos",
     description=(
         "Two-pass Haiku vision tagger for dog-park photos. Reads "

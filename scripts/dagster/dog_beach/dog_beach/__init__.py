@@ -117,7 +117,6 @@ from .assets.per_fid_enrichment import (
 from .assets.photos_and_vision import (
     photos_flickr,
     photos_websearch,
-    photos_unsplash,
     photos_ccc,
     photo_vision_tags,
     photo_keep_prob_model,
@@ -127,7 +126,6 @@ from .assets.photos_and_vision import (
     # Dog-park photo pipeline (Franz 2026-05-26)
     dp_photos_flickr,
     dp_photos_wikimedia,
-    dp_photos_unsplash,
     dp_photos_websearch,
     dp_photo_vision_tags,
     dp_photos_curate,
@@ -257,7 +255,6 @@ defs = Definitions(
         # Phase 31 photo loaders (per-source) + vision + ML
         photos_flickr,
         photos_websearch,
-        photos_unsplash,
         photos_ccc,
         photo_vision_tags,
         photo_keep_prob_model,
@@ -286,7 +283,6 @@ defs = Definitions(
         # Dog-park photo pipeline (Franz 2026-05-26)
         dp_photos_flickr,
         dp_photos_wikimedia,
-        dp_photos_unsplash,
         dp_photos_websearch,
         dp_photo_vision_tags,
         dp_photos_curate,

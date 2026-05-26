@@ -135,10 +135,16 @@ from .assets.weather_grid import (
     refresh_weather_grid,
     rebuild_weather_grid_inventory,
 )
-# dog_park_coverage assets — registered via separate Definitions in
-# scripts/dagster/dog_beach/dog_beach/dog_park_definitions.py to keep them
-# loadable independent of the rest of the project's import chain.
-# Run with: dagster dev -m dog_beach.dog_park_definitions
+from .assets.dog_park_coverage import (
+    dp_preflight,
+    dp_pip_address_city,
+    dp_reclassify_junk,
+    dp_generic_display_names,
+    dp_walk_catalogs,
+    dp_ingest_queue,
+    dp_run_extractor,
+    dp_retry_no_match,
+)
 from .checks.operator_seeding import operators_for_state_has_breadth
 from .checks.catalog_assembly import (
     promote_to_gold_complete,
@@ -171,6 +177,7 @@ from .jobs import (
     rebuild_beach_evidence_job,
     weather_grid_refresh_job,
     weather_grid_inventory_job,
+    dog_park_coverage_job,
 )
 
 
@@ -253,6 +260,15 @@ defs = Definitions(
         # Weather reference layer (W1.5 + W1.8)
         refresh_weather_grid,
         rebuild_weather_grid_inventory,
+        # Dog-park coverage pipeline (8 ops, state-partitioned CA/OR/WA)
+        dp_preflight,
+        dp_pip_address_city,
+        dp_reclassify_junk,
+        dp_generic_display_names,
+        dp_walk_catalogs,
+        dp_ingest_queue,
+        dp_run_extractor,
+        dp_retry_no_match,
         # Lineage-only AssetSpecs for downstream consumers
         *ALL_LINEAGE_SPECS,
     ],
@@ -279,6 +295,7 @@ defs = Definitions(
         rebuild_beach_evidence_job,
         weather_grid_refresh_job,
         weather_grid_inventory_job,
+        dog_park_coverage_job,
     ],
     asset_checks=[
         operators_for_state_has_breadth,

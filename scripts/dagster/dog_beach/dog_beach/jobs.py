@@ -18,6 +18,17 @@ Or via UI's Launchpad.
 
 from dagster import define_asset_job, AssetSelection
 
+# Dog-park coverage pipeline — 8 ops, state-partitioned (CA/OR/WA).
+# Per CA proof point: 0% → 79.5%. See [[dog-park-coverage-playbook]].
+dog_park_coverage_job = define_asset_job(
+    name="dog_park_coverage_job",
+    selection=AssetSelection.groups("dog_park_coverage"),
+    description=(
+        "8-op dog-park coverage pipeline. State-partitioned (CA/OR/WA). "
+        "Run with: dagster job execute -j dog_park_coverage_job --partition OR"
+    ),
+)
+
 from .assets.upstream_loaders import (
     env_preflight,
     chain_integrity_check,

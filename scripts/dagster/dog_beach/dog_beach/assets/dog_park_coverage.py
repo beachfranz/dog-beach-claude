@@ -13,7 +13,8 @@ Sequence (locked by upstream/downstream dependencies):
 Per CA proof point 2026-05-25 LATE: 0% → 79.5% operator-posted-policy
 coverage in one pass. See [[dog-park-coverage-playbook]].
 """
-from __future__ import annotations
+# NB: NO `from __future__ import annotations` — Dagster needs real class
+# refs for AssetExecutionContext + Config introspection, not string lazies.
 from datetime import datetime, timezone
 from typing import Any
 

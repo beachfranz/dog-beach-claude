@@ -20,7 +20,10 @@ Lives on Dagster (NOT edge function) per locked decision #4 — sidesteps
 the WORKER_RESOURCE_LIMIT that killed per-entity-fetch refresh.
 """
 
-from __future__ import annotations
+# NB: NO `from __future__ import annotations` here — Dagster's Config
+# introspection requires real class refs in annotations, not lazy strings.
+# Python 3.10+ supports `str | None` syntax natively without the future
+# import, so we lose nothing.
 
 import time
 from datetime import datetime, timezone, timedelta

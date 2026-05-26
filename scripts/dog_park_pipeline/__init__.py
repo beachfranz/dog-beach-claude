@@ -27,6 +27,7 @@ from .walk import walk_catalogs
 from .ingest import ingest_discovery_queue
 from .extract import run_extractor
 from .retry import retry_no_match
+from .triage import triage_needs_review
 from .metrics import write_run_metric
 
 __all__ = [
@@ -39,5 +40,6 @@ __all__ = [
     "ingest_discovery_queue",
     "run_extractor",
     "retry_no_match",
+    "triage_needs_review",
     "write_run_metric",
 ]

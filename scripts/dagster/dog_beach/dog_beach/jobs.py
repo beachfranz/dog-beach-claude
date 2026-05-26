@@ -17,14 +17,21 @@ Or via UI's Launchpad.
 """
 
 from dagster import define_asset_job, AssetSelection
+from dagster import in_process_executor
 
-# Dog-park coverage pipeline — 8 ops, state-partitioned (CA/OR/WA).
+# Dog-park coverage pipeline — 9 ops, state-partitioned (CA/OR/WA/MD).
 # Per CA proof point: 0% → 79.5%. See [[dog-park-coverage-playbook]].
+#
+# IN-PROCESS EXECUTOR: each op already does ThreadPoolExecutor parallelism
+# internally for per-park work. Running ops in the same Python process
+# avoids Windows multiprocess-spawn re-import issues that surfaced 2026-05-25
+# LATE (walker step crashed silently in subprocess; ran clean in-process).
 dog_park_coverage_job = define_asset_job(
     name="dog_park_coverage_job",
     selection=AssetSelection.groups("dog_park_coverage"),
+    executor_def=in_process_executor,
     description=(
-        "8-op dog-park coverage pipeline. State-partitioned (CA/OR/WA). "
+        "9-op dog-park coverage pipeline. State-partitioned (CA/OR/WA/MD). "
         "Run with: dagster job execute -j dog_park_coverage_job --partition OR"
     ),
 )

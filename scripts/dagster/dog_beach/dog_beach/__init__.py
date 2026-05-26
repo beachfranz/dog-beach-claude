@@ -145,6 +145,7 @@ from .assets.dog_park_coverage import (
     dp_ingest_queue,
     dp_run_extractor,
     dp_retry_no_match,
+    dp_triage_needs_review,
 )
 from .checks.operator_seeding import operators_for_state_has_breadth
 from .checks.catalog_assembly import (
@@ -262,7 +263,7 @@ defs = Definitions(
         # Weather reference layer (W1.5 + W1.8)
         refresh_weather_grid,
         rebuild_weather_grid_inventory,
-        # Dog-park coverage pipeline (9 ops, state-partitioned CA/OR/WA/MD)
+        # Dog-park coverage pipeline (10 ops, state-partitioned CA/OR/WA/MD)
         dp_preflight,
         dp_pip_address_city,
         dp_reclassify_junk,
@@ -272,6 +273,7 @@ defs = Definitions(
         dp_ingest_queue,
         dp_run_extractor,
         dp_retry_no_match,
+        dp_triage_needs_review,
         # Lineage-only AssetSpecs for downstream consumers
         *ALL_LINEAGE_SPECS,
     ],

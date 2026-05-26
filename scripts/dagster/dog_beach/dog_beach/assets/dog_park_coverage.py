@@ -23,6 +23,7 @@ from dagster import (
     AssetExecutionContext,
     StaticPartitionsDefinition,
     MetadataValue,
+    MaterializeResult,
 )
 
 import sys
@@ -40,6 +41,7 @@ from scripts.dog_park_pipeline import (
     ingest_discovery_queue,
     run_extractor,
     retry_no_match,
+    triage_needs_review,
     write_run_metric,
 )
 
@@ -82,14 +84,13 @@ def _metadata(metrics: dict) -> dict[str, Any]:
     group_name="dog_park_coverage",
     description="Verify Playwright browser, state inventory, env vars before pipeline run.",
 )
-def dp_preflight(context: AssetExecutionContext) -> dict:
+def dp_preflight(context: AssetExecutionContext) -> MaterializeResult:
     state = context.partition_key
     m = preflight_check(state)
     _persist(state, m)
-    context.add_output_metadata(_metadata(m))
     if not m.get("ok"):
         context.log.warning(f"Preflight issues for {state}: {m.get('issues')}")
-    return m
+    return MaterializeResult(metadata=_metadata(m))
 
 
 # ── 2. pip_address_city_backfill ──────────────────────────────────────
@@ -100,12 +101,11 @@ def dp_preflight(context: AssetExecutionContext) -> dict:
     deps=[dp_preflight],
     description="PIP-fill dog_parks_gold.address_city via ST_Contains(jurisdictions.geom).",
 )
-def dp_pip_address_city(context: AssetExecutionContext) -> dict:
+def dp_pip_address_city(context: AssetExecutionContext) -> MaterializeResult:
     state = context.partition_key
     m = pip_address_city_backfill(state)
     _persist(state, m)
-    context.add_output_metadata(_metadata(m))
-    return m
+    return MaterializeResult(metadata=_metadata(m))
 
 
 # ── 3. reclassify_obvious_junk ────────────────────────────────────────
@@ -116,12 +116,11 @@ def dp_pip_address_city(context: AssetExecutionContext) -> dict:
     deps=[dp_pip_address_city],
     description="Flip mis-tagged tiny + private-residence parks to is_active=false.",
 )
-def dp_reclassify_junk(context: AssetExecutionContext) -> dict:
+def dp_reclassify_junk(context: AssetExecutionContext) -> MaterializeResult:
     state = context.partition_key
     m = reclassify_obvious_junk(state)
     _persist(state, m)
-    context.add_output_metadata(_metadata(m))
-    return m
+    return MaterializeResult(metadata=_metadata(m))
 
 
 # ── 4. generic_name_display_override ──────────────────────────────────
@@ -132,12 +131,11 @@ def dp_reclassify_junk(context: AssetExecutionContext) -> dict:
     deps=[dp_reclassify_junk],
     description="Set display_name_override = city + name for generic-named parks.",
 )
-def dp_generic_display_names(context: AssetExecutionContext) -> dict:
+def dp_generic_display_names(context: AssetExecutionContext) -> MaterializeResult:
     state = context.partition_key
     m = generic_name_display_override(state)
     _persist(state, m)
-    context.add_output_metadata(_metadata(m))
-    return m
+    return MaterializeResult(metadata=_metadata(m))
 
 
 # ── 5. seed_operators ─────────────────────────────────────────────────
@@ -148,12 +146,11 @@ def dp_generic_display_names(context: AssetExecutionContext) -> dict:
     deps=[dp_generic_display_names],
     description="Seed city operators from state_operator_seeds.json. PIP-backfills inferred_operator_id. Walker needs ≥3 ops with ≥3 attributed parks each.",
 )
-def dp_seed_operators(context: AssetExecutionContext) -> dict:
+def dp_seed_operators(context: AssetExecutionContext) -> MaterializeResult:
     state = context.partition_key
     m = seed_state_operators(state)
     _persist(state, m)
-    context.add_output_metadata(_metadata(m))
-    return m
+    return MaterializeResult(metadata=_metadata(m))
 
 
 # ── 6. walk_catalogs ──────────────────────────────────────────────────
@@ -164,14 +161,13 @@ def dp_seed_operators(context: AssetExecutionContext) -> dict:
     deps=[dp_seed_operators],
     description="Walk top-N operator catalogs via web_search. Discover unmatched parks → queue.",
 )
-def dp_walk_catalogs(context: AssetExecutionContext) -> dict:
+def dp_walk_catalogs(context: AssetExecutionContext) -> MaterializeResult:
     state = context.partition_key
     m = walk_catalogs(state, workers=4, min_parks=3, apply=True)
     _persist(state, m)
-    context.add_output_metadata(_metadata(m))
     if m.get("exit_code", 0) != 0:
         context.log.warning(f"walk_catalogs non-zero exit for {state}: {m.get('exit_code')}")
-    return m
+    return MaterializeResult(metadata=_metadata(m))
 
 
 # ── 6. ingest_discovery_queue ─────────────────────────────────────────
@@ -182,12 +178,11 @@ def dp_walk_catalogs(context: AssetExecutionContext) -> dict:
     deps=[dp_walk_catalogs],
     description="Geocode pending queue entries via Google Places + INSERT into dog_parks_gold.",
 )
-def dp_ingest_queue(context: AssetExecutionContext) -> dict:
+def dp_ingest_queue(context: AssetExecutionContext) -> MaterializeResult:
     state = context.partition_key
     m = ingest_discovery_queue(state, apply=True)
     _persist(state, m)
-    context.add_output_metadata(_metadata(m))
-    return m
+    return MaterializeResult(metadata=_metadata(m))
 
 
 # ── 7. run_extractor ──────────────────────────────────────────────────
@@ -198,12 +193,11 @@ def dp_ingest_queue(context: AssetExecutionContext) -> dict:
     deps=[dp_ingest_queue],
     description="Extract amenities (smart_fetch + web_search routes). --include-no-website.",
 )
-def dp_run_extractor(context: AssetExecutionContext) -> dict:
+def dp_run_extractor(context: AssetExecutionContext) -> MaterializeResult:
     state = context.partition_key
     m = run_extractor(state, workers=6, include_no_website=True, apply=True)
     _persist(state, m)
-    context.add_output_metadata(_metadata(m))
-    return m
+    return MaterializeResult(metadata=_metadata(m))
 
 
 # ── 8. retry_no_match ─────────────────────────────────────────────────
@@ -214,9 +208,23 @@ def dp_run_extractor(context: AssetExecutionContext) -> dict:
     deps=[dp_run_extractor],
     description="Query-variant web_search retry for parks with name_match=false.",
 )
-def dp_retry_no_match(context: AssetExecutionContext) -> dict:
+def dp_retry_no_match(context: AssetExecutionContext) -> MaterializeResult:
     state = context.partition_key
     m = retry_no_match(state, workers=6, apply=True)
     _persist(state, m)
-    context.add_output_metadata(_metadata(m))
-    return m
+    return MaterializeResult(metadata=_metadata(m))
+
+
+# ── 9. triage_needs_review ────────────────────────────────────────────
+
+@asset(
+    partitions_def=DOG_PARK_STATES,
+    group_name="dog_park_coverage",
+    deps=[dp_retry_no_match],
+    description="Spatial dedup on borderline (0.6-0.79 sim) queue rows: Google Places geocode + ST_Distance vs best_match_fid. <150m → duplicate; >500m → pending (new park).",
+)
+def dp_triage_needs_review(context: AssetExecutionContext) -> MaterializeResult:
+    state = context.partition_key
+    m = triage_needs_review(state, apply=True)
+    _persist(state, m)
+    return MaterializeResult(metadata=_metadata(m))

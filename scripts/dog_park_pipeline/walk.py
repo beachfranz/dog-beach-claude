@@ -28,6 +28,15 @@ def walk_catalogs(state: str, workers: int = 4, min_parks: int = 3,
 
     # IN-PROCESS — calls walk_dog_park_operator_catalog.main() with monkey-
     # patched sys.argv. No subprocess fork, no Python re-init.
+    # Defensive sys.path re-insert + importlib cache invalidation: the
+    # module-load insert at line 12 does NOT reliably let Python find
+    # scripts.walk_dog_park_operator_catalog when this function is called
+    # from a Dagster worker (namespace-package caching). Invalidating
+    # importlib's caches forces a fresh finder pass.
+    import importlib
+    _repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, _repo)
+    importlib.invalidate_caches()
     from scripts.walk_dog_park_operator_catalog import main as walker_main
     args = ["--state", state, "--workers", str(workers),
             "--min-parks", str(min_parks), "--chunk", "3", "--sleep", "30"]

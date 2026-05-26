@@ -34,6 +34,12 @@ def run_extractor(state: str, workers: int = 6, include_no_website: bool = True,
     started = datetime.now(timezone.utc)
     n_v2_before = _count_operator_posted_v2(state)
 
+    # Defensive sys.path + importlib cache invalidation (Dagster namespace-
+    # package cache bug — same fix as walk.py).
+    import importlib
+    _repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, _repo)
+    importlib.invalidate_caches()
     from scripts.extract_dog_park_amenities import main as extract_main
     args = ["--state", state, "--workers", str(workers)]
     if include_no_website:

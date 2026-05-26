@@ -33,6 +33,12 @@ def triage_needs_review(state: str, apply: bool = True) -> dict:
     finally:
         conn.close()
 
+    # Defensive sys.path + importlib cache invalidation (Dagster namespace-
+    # package cache bug — same fix as walk.py).
+    import importlib
+    _repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, _repo)
+    importlib.invalidate_caches()
     from scripts.triage_dog_park_needs_review import main as triage_main
     args = ["--apply"] if apply else []
     exit_code, stdout = call_main(triage_main, "triage_dog_park_needs_review.py", args)

@@ -26,6 +26,12 @@ def ingest_discovery_queue(state: str, apply: bool = True) -> dict:
     finally:
         conn.close()
 
+    # Defensive sys.path + importlib cache invalidation (Dagster namespace-
+    # package cache bug — same fix as walk.py).
+    import importlib
+    _repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, _repo)
+    importlib.invalidate_caches()
     from scripts.ingest_dog_park_discovery_queue import main as ingest_main
     args = ["--apply"] if apply else []
     exit_code, stdout = call_main(ingest_main, "ingest_dog_park_discovery_queue.py", args)

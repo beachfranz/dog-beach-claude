@@ -35,6 +35,7 @@ from scripts.dog_park_pipeline import (
     pip_address_city_backfill,
     reclassify_obvious_junk,
     generic_name_display_override,
+    seed_state_operators,
     walk_catalogs,
     ingest_discovery_queue,
     run_extractor,
@@ -44,7 +45,9 @@ from scripts.dog_park_pipeline import (
 
 
 # States we currently target. Extend as we expand.
-DOG_PARK_STATES = StaticPartitionsDefinition(["CA", "OR", "WA"])
+# Add to scripts/dog_park_pipeline/state_operator_seeds.json BEFORE adding here
+# (otherwise seed_operators step is a no-op for the new state).
+DOG_PARK_STATES = StaticPartitionsDefinition(["CA", "OR", "WA", "MD"])
 
 
 def _persist(state: str, metrics: dict) -> None:
@@ -137,12 +140,28 @@ def dp_generic_display_names(context: AssetExecutionContext) -> dict:
     return m
 
 
-# ── 5. walk_catalogs ──────────────────────────────────────────────────
+# ── 5. seed_operators ─────────────────────────────────────────────────
 
 @asset(
     partitions_def=DOG_PARK_STATES,
     group_name="dog_park_coverage",
     deps=[dp_generic_display_names],
+    description="Seed city operators from state_operator_seeds.json. PIP-backfills inferred_operator_id. Walker needs ≥3 ops with ≥3 attributed parks each.",
+)
+def dp_seed_operators(context: AssetExecutionContext) -> dict:
+    state = context.partition_key
+    m = seed_state_operators(state)
+    _persist(state, m)
+    context.add_output_metadata(_metadata(m))
+    return m
+
+
+# ── 6. walk_catalogs ──────────────────────────────────────────────────
+
+@asset(
+    partitions_def=DOG_PARK_STATES,
+    group_name="dog_park_coverage",
+    deps=[dp_seed_operators],
     description="Walk top-N operator catalogs via web_search. Discover unmatched parks → queue.",
 )
 def dp_walk_catalogs(context: AssetExecutionContext) -> dict:

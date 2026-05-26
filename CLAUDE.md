@@ -382,6 +382,65 @@ Migrations: `20260525_weather_grid_schema.sql` + `_helpers.sql` + `_materializat
 
 ---
 
+## Dog Park Coverage Sub-Pipeline (9-op state launcher)
+
+`scripts/dog_park_pipeline/` is the canonical per-state coverage pipeline. Brings dog parks from `osm_default` stub policy to `operator_posted_v2` with verbatim cites + source URLs. Codified after CA proof point 0% → 79.5% (2026-05-25 LATE).
+
+### Run signatures
+
+```bash
+# Via Dagster (canonical, observable via dog_park_coverage_runs metrics table):
+dagster asset materialize -m dog_beach \
+  --select "dp_preflight,dp_pip_address_city,dp_reclassify_junk,dp_generic_display_names,dp_seed_operators,dp_walk_catalogs,dp_ingest_queue,dp_run_extractor,dp_retry_no_match" \
+  --partition <CA|OR|WA|MD>
+
+# Or single-state standalone (no Dagster needed):
+python -m scripts.dog_park_pipeline.run --state OR
+```
+
+### 9-op sequence (strict order)
+
+1. **preflight** — Playwright + env vars + operator-coverage check (warns if state has <3 city operators)
+2. **pip_address_city** — `UPDATE dog_parks_gold.address_city = j.name FROM jurisdictions j WHERE ST_Contains(j.geom, dpg.geom)`
+3. **reclassify_junk** — flip tiny + private parks `is_active=false`; PROTECTED list keeps rest stops + truck-stop pet zones
+4. **generic_display_names** — `display_name_override = city + name` for "Dog Park" / "Bark Park" / etc.
+5. **seed_operators** — auto-create city operators from `state_operator_seeds.json` + PIP-backfill `inferred_operator_id`
+6. **walk_catalogs** — top-N city operators → web_search for catalog → enumerate parks → fuzzy+spatial match → queue unmatched
+7. **ingest_queue** — geocode pending queue rows via Google Places + 150m dup check → INSERT new gold rows with `website=catalog_url`
+8. **run_extractor** — process all default-source parks (existing + newly ingested). Routes: OSM-website / URL-slug fallback / `NO_PER_PARK_URL_HOSTS` web_search / `HOST_SECTION_EXTRACTORS` shared-page slicer / no-website web_search
+9. **retry_no_match** — query-variant rescue with web_search max_uses=5 + display_name_override-aware names
+
+Each op writes per-run metrics to `public.dog_park_coverage_runs` (state, op, started_at, ended_at, metrics jsonb).
+
+### Adding a new state
+
+1. Add city list to `scripts/dog_park_pipeline/state_operator_seeds.json` under the state's 2-letter code (cities with ≥3 active dog parks)
+2. Add state code to `DOG_PARK_STATES` `StaticPartitionsDefinition` in `assets/dog_park_coverage.py`
+3. Run the pipeline. Cost ~$5-15 + ~10-15 min runtime per state.
+
+### Adding a per-host shared-page slicer
+
+Seattle pattern: `seattle.gov/parks/recreation/dog-off-leash-areas` is one shared page with all OLAs as accordion sections. To support a similar host (e.g., Portland, Baltimore), add a `_handler(url, park_name) -> section_text | None` function and one entry to `HOST_SECTION_EXTRACTORS` in `scripts/extract_dog_park_amenities.py`.
+
+### Key tables
+
+| Table | Role |
+|---|---|
+| `dog_parks_gold` | Identity (1 row per park). `inferred_operator_id` drives walker. |
+| `dog_park_dog_policy` | Curated overlay (consumer reads). `source='operator_posted_v2'` marks extracted. |
+| `dog_park_enrichment_provenance` | Per-source claims with verbatim cite quotes. Promoted via `promote_canonical_dog_park_policy()`. |
+| `dog_park_discovery_queue` | Walker-found parks not yet in gold; ingest target. Statuses: pending / ingested / duplicate / needs_review / rejected. |
+| `dog_park_coverage_runs` | Per-op run metrics for observability + freshness guards. |
+
+State proof points (2026-05-25 LATE):
+- CA: 322/405 = 79.5%
+- OR: 73/103 = 70.9%
+- WA: 92/142 = 64.8%
+
+Pin: `[[dog-park-coverage-playbook]]` — full sequencing rationale, what helped + what to skip, road-tripper exception for rest stops + truck-stop pet zones.
+
+---
+
 ## Per-Beach Off-Leash Extraction (Codify-Pattern Port)
 
 `scripts/extract_per_beach_offleash_v2.py` is the canonical script for extracting per-beach off-leash policy with cite-required verbatim quotes. Built 2026-05-25 LATE as a port of the codify pipeline's URL-resolution + LLM-extraction substrate from `scripts/derive_policy_source_for_jurisdiction.py`.

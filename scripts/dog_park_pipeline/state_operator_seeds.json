@@ -1,0 +1,24 @@
+{
+  "_note": "Per-state city operators to seed via add_canonical_operator() before the walker step. List cities with >=3 known active dog parks (walker's min_parks threshold). Maintained by hand — preflight will warn if state-launch finds parks-by-city that aren't here.",
+  "_format": "state_code → array of plain city names (no 'City of ' prefix). op_type='city' assumed.",
+  "_last_updated": "2026-05-25",
+  "CA": [
+    "Los Angeles", "San Diego", "San Francisco", "San Jose",
+    "Sacramento", "Long Beach", "Santa Rosa", "Alameda",
+    "San Ramon", "Santa Monica", "Davis", "Irvine",
+    "Oakland", "Pleasanton"
+  ],
+  "OR": [
+    "Portland", "Bend", "Tigard",
+    "Eugene", "Salem", "Gresham", "Hillsboro", "Beaverton"
+  ],
+  "WA": [
+    "Seattle", "Tacoma", "Everett", "Port Angeles", "Kirkland", "Kent",
+    "Spokane", "Bellevue", "Vancouver", "Bellingham", "Olympia"
+  ],
+  "MD": [
+    "Baltimore", "Annapolis", "Frederick", "Rockville",
+    "Gaithersburg", "Bowie", "Bethesda", "Silver Spring",
+    "Columbia", "Towson"
+  ]
+}

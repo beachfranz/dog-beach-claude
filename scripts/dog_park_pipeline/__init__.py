@@ -22,6 +22,7 @@ from .preflight import preflight_check
 from .pip_backfill import pip_address_city_backfill
 from .reclassify import reclassify_obvious_junk
 from .display_names import generic_name_display_override
+from .seed_operators import seed_state_operators
 from .walk import walk_catalogs
 from .ingest import ingest_discovery_queue
 from .extract import run_extractor
@@ -33,6 +34,7 @@ __all__ = [
     "pip_address_city_backfill",
     "reclassify_obvious_junk",
     "generic_name_display_override",
+    "seed_state_operators",
     "walk_catalogs",
     "ingest_discovery_queue",
     "run_extractor",

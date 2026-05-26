@@ -140,6 +140,7 @@ from .assets.dog_park_coverage import (
     dp_pip_address_city,
     dp_reclassify_junk,
     dp_generic_display_names,
+    dp_seed_operators,
     dp_walk_catalogs,
     dp_ingest_queue,
     dp_run_extractor,
@@ -260,11 +261,12 @@ defs = Definitions(
         # Weather reference layer (W1.5 + W1.8)
         refresh_weather_grid,
         rebuild_weather_grid_inventory,
-        # Dog-park coverage pipeline (8 ops, state-partitioned CA/OR/WA)
+        # Dog-park coverage pipeline (9 ops, state-partitioned CA/OR/WA/MD)
         dp_preflight,
         dp_pip_address_city,
         dp_reclassify_junk,
         dp_generic_display_names,
+        dp_seed_operators,
         dp_walk_catalogs,
         dp_ingest_queue,
         dp_run_extractor,

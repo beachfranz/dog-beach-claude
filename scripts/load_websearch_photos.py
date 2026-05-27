@@ -56,6 +56,15 @@ THROTTLE_S = 0.25         # tighter — workers pace each other naturally
 DEFAULT_WORKERS = 8       # Tavily handles this fine; net 8x throughput
 MAX_DESC_LEN = 400        # Truncate Tavily descriptions for source_meta
 
+# Host blocklist — AV-flagged / suspect domains. Substring match against
+# the hostname lowercased so it catches CDN variants
+# (img.barkparkfinder.com etc.). Add new entries when a host triggers
+# warnings in browsers or AV. Franz 2026-05-27 — barkparkfinder.com
+# triggered AVG; existing 14 photos hidden via SQL the same day.
+HOST_BLOCKLIST = (
+    "barkparkfinder.com",
+)
+
 
 # ─── Tavily search ────────────────────────────────────────────────────────
 
@@ -182,6 +191,13 @@ def replace_websearch(fid: int, images: list[dict], results: list[dict],
             host = urlparse(url).hostname or ""
         except Exception:
             host = ""
+        # Host blocklist — domains flagged by AV / containing suspect content.
+        # Match against any substring of the hostname to catch CDN variants
+        # (img.barkparkfinder.com, www.barkparkfinder.com, etc.). Franz
+        # 2026-05-27 — barkparkfinder.com triggered AVG warning.
+        host_lower = host.lower()
+        if any(b in host_lower for b in HOST_BLOCKLIST):
+            continue
         # Prefer matching page from same host; else the image URL itself
         page_url = result_pages_by_host.get(host) or url
         row = {

@@ -1392,7 +1392,7 @@
     const tierClass = `tier-${tier}`;
 
     return `
-      <div class="day-card status-${status} ${tierClass}" data-location-id="${beach.location_id}" onclick="window.location.href='detail.html?${beach.arena_group_id ? 'fid=' + beach.arena_group_id : 'location=' + beach.location_id}&date=${selectedDate}'">
+      <div class="day-card status-${status} ${tierClass}" data-location-id="${beach.location_id}" onclick="window.location.href='beach.html?${beach.arena_group_id ? 'fid=' + beach.arena_group_id : 'location_id=' + beach.location_id}'">
         <div class="day-left">
           <div class="rank-label">#${rank}</div>
           ${scoreHtml}
@@ -1539,12 +1539,57 @@
   }
 
   // ── Geolocation ────────────────────────────────────────────────────
+  // Sticky location: cache lat/lng + label in localStorage so repeat
+  // visits skip the OS-level geolocation prompt. 24h TTL — fresh enough
+  // for distance-sort, expired entries fall through to a fresh prompt.
+  const LOC_KEY = 'dogbeach.user_loc';
+  const LOC_TTL_MS = 24 * 60 * 60 * 1000;
+
+  function _saveCachedLocation(lat, lng, label) {
+    try {
+      localStorage.setItem(LOC_KEY, JSON.stringify({
+        lat, lng, label, ts: Date.now(),
+      }));
+    } catch {}
+  }
+
+  function _readCachedLocation() {
+    try {
+      const raw = localStorage.getItem(LOC_KEY);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!Number.isFinite(obj?.lat) || !Number.isFinite(obj?.lng)) return null;
+      if (typeof obj.ts !== 'number') return null;
+      if (Date.now() - obj.ts > LOC_TTL_MS) return null;
+      return obj;
+    } catch { return null; }
+  }
+
+  // Returns true if cached location was applied (no prompt needed).
+  function hydrateLocationFromCache() {
+    const cached = _readCachedLocation();
+    if (!cached) return false;
+    setUserLocation(cached.lat, cached.lng);
+    showLocationLabel('📍 ' + (cached.label || 'Saved location'));
+    enableDistanceSorts();
+    sortAndRender();
+    // Refresh the label in background if it was stale-looking
+    if (!cached.label) {
+      reverseGeocode(cached.lat, cached.lng).then(name => {
+        showLocationLabel('📍 ' + name);
+        _saveCachedLocation(cached.lat, cached.lng, name);
+      }).catch(() => {});
+    }
+    return true;
+  }
+
   function requestGeolocation() {
     showLocationLabel('📍 Detecting…');
     navigator.geolocation.getCurrentPosition(
       async pos => {
         setUserLocation(pos.coords.latitude, pos.coords.longitude);
         const name = await reverseGeocode(userLat, userLng);
+        _saveCachedLocation(pos.coords.latitude, pos.coords.longitude, name);
         showLocationLabel('📍 ' + name);
         enableDistanceSorts();
         sortAndRender();
@@ -1564,6 +1609,7 @@
       const data = await res.json();
       if (!data[0]) { showZipInput(); return; }
       setUserLocation(parseFloat(data[0].lat), parseFloat(data[0].lon));
+      _saveCachedLocation(parseFloat(data[0].lat), parseFloat(data[0].lon), `ZIP ${zip}`);
       showLocationLabel(`📍 ZIP ${zip}`);
       enableDistanceSorts();
       sortAndRender();
@@ -1846,7 +1892,12 @@
   }
 
   // ── Boot ───────────────────────────────────────────────────────────
-  requestGeolocation();
+  // Cached-location-first: skip the OS geolocation prompt if we have a
+  // fresh (<24h) cached fix from a prior visit. Only prompt on cache
+  // miss / expiry. Per Franz 2026-05-27 — don't re-prompt every visit.
+  if (!hydrateLocationFromCache()) {
+    requestGeolocation();
+  }
   // Pre-fetch today so TDY pill is instant; warms beach list for NOW mode
   const _todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   loadBeachesForDate(_todayISO);

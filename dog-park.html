@@ -1,492 +1,1031 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dog Park — Dog Beach Scout</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Outfit:wght@500;600;700&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet" />
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --bg:           #eef4f8;
-      --surface:      #ffffff;
-      --surface-hover:#f5f9fc;
-      --border:       #d1dde8;
-      --text:         #0f2742;
-      --text-muted:   #5b6b7d;
-      --text-dim:     #94a3b8;
-      --green:        #15803d;
-      --green-dim:    #d1fae5;
-      --advisory:     #0369a1;
-      --advisory-dim: #e0f2fe;
-      --amber:        #b45309;
-      --amber-dim:    #fed7aa;
-      --red:          #9f1239;
-      --red-dim:      #ffe4e6;
-      --radius:       14px;
-      --radius-sm:    8px;
-    }
-
-    html, body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'DM Sans', sans-serif;
-      font-size: 15px;
-      -webkit-font-smoothing: antialiased;
-      min-height: 100vh;
-    }
-
-    .page { max-width: 480px; margin: 0 auto; padding: 0 0 40px; }
-
-    /* ── Header ───────────────────────────────────────────────────── */
-    .header {
-      padding: 16px 16px 12px;
-      position: sticky; top: 0;
-      background: var(--bg);
-      border-bottom: 1px solid var(--border);
-      z-index: 10;
-    }
-    .header-top {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 6px;
-    }
-    .back-link {
-      font-family: 'DM Sans', sans-serif;
-      font-size: 13px;
-      color: var(--text-muted);
-      text-decoration: none;
-    }
-    .back-link:hover { color: var(--text); }
-    .wordmark {
-      font-family: 'Outfit', sans-serif;
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text-muted);
-      text-decoration: none;
-    }
-    .park-name {
-      font-family: 'Outfit', sans-serif;
-      font-size: 22px;
-      font-weight: 700;
-      color: var(--text);
-      line-height: 1.2;
-    }
-    .park-sub {
-      font-family: 'DM Mono', monospace;
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-top: 4px;
-    }
-
-    /* ── Status hero ──────────────────────────────────────────────── */
-    .hero {
-      margin: 16px 16px 0;
-      padding: 14px 16px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      display: flex;
-      align-items: center;
-      gap: 14px;
-    }
-    .hero.status-go       { border-left: 4px solid var(--green); }
-    .hero.status-advisory { border-left: 4px solid var(--advisory); }
-    .hero.status-caution  { border-left: 4px solid var(--amber); }
-    .hero.status-no_go    { border-left: 4px solid var(--red); }
-
-    .hero-icon {
-      font-size: 28px;
-      flex-shrink: 0;
-    }
-    .hero-body { flex: 1; display: flex; flex-direction: column; gap: 2px; }
-    .hero-title {
-      font-family: 'Outfit', sans-serif;
-      font-size: 16px;
-      font-weight: 600;
-    }
-    .hero-detail {
-      font-family: 'DM Mono', monospace;
-      font-size: 11px;
-      color: var(--text-muted);
-    }
-
-    /* ── Amenity row ──────────────────────────────────────────────── */
-    .amenities {
-      margin: 12px 16px 0;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-    .chip {
-      font-family: 'DM Mono', monospace;
-      font-size: 11px;
-      padding: 4px 10px;
-      border-radius: 12px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      color: var(--text-muted);
-    }
-    .chip.chip-go { background: var(--green-dim); color: var(--green); border-color: var(--green-dim); }
-    .chip.chip-warn { background: var(--amber-dim); color: var(--amber); border-color: var(--amber-dim); }
-    .chip.chip-strong { color: var(--text); border-color: var(--text-muted); }
-
-    /* ── Section labels ───────────────────────────────────────────── */
-    .section-label {
-      margin: 20px 16px 6px;
-      font-family: 'DM Mono', monospace;
-      font-size: 10px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--text-dim);
-    }
-
-    /* ── 7-day pills ──────────────────────────────────────────────── */
-    .day-list {
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dog Park — Dog Beach Scout</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&family=DM+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="src/photo-block.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+  crossorigin="">
+<style>
+  :root {
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --text: #0f2742;
+    --text-muted: #64748b;
+    --border: #e2e8f0;
+    --accent: #1d4ed8;
+    --green: #16a34a;
+    --red:   #dc2626;
+    --amber: #f59e0b;
+  }
+  * { box-sizing: border-box; }
+  html, body { overflow-x: hidden; }
+  body {
+    margin: 0; font-family: 'DM Sans', system-ui, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.5;
+  }
+  .page { max-width: 1200px; margin: 0 auto; }
+  .body-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  @media (min-width: 900px) {
+    .body-grid {
+      grid-template-columns: minmax(280px, 34%) 1fr;
+      gap: 16px;
       padding: 0 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
     }
-    .day-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 12px 14px;
-      display: grid;
-      grid-template-columns: auto 1fr auto;
-      align-items: center;
-      gap: 12px;
+    .body-grid > main { padding: 0; }
+    .body-grid > aside#left-rail {
+      position: sticky;
+      top: 96px;
+      align-self: start;
+      padding-top: 12px;
+      max-height: calc(100vh - 110px);
+      overflow-y: auto;
     }
-    .day-card.status-go       { border-left: 3px solid var(--green); }
-    .day-card.status-advisory { border-left: 3px solid var(--advisory); }
-    .day-card.status-caution  { border-left: 3px solid var(--amber); }
-    .day-card.status-no_go    { border-left: 3px solid var(--red); opacity: 0.6; }
+    #left-rail .amenity-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  header.hero {
+    padding: 24px 20px 16px; background: var(--card);
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: flex-start; gap: 12px;
+  }
+  .hero-main { flex: 1; min-width: 0; }
+  .park-name {
+    font-family: 'Outfit', sans-serif;
+    font-size: 24px; font-weight: 700; color: var(--text);
+    margin: 0 0 6px;
+  }
+  .fit-badge {
+    display: inline-block;
+    font-size: 19px; font-weight: 700; line-height: 1.1;
+    padding: 1px 9px; border-radius: 999px;
+    color: white;
+    font-variant-numeric: tabular-nums;
+    vertical-align: 0.04em;
+    margin-right: 4px;
+  }
+  .fit-badge-go      { background: #16a34a; }
+  .fit-badge-caution { background: #f59e0b; }
+  .fit-badge-no_go   { background: #dc2626; }
+  .park-region {
+    color: var(--text-muted);
+    margin-left: 0.4em;
+    font-weight: 600;
+  }
+  .close-btn {
+    color: var(--text-muted); text-decoration: none;
+    font-size: 22px; line-height: 1; padding: 4px 6px;
+    border-radius: 6px; flex-shrink: 0;
+  }
+  .close-btn:hover { background: var(--bg); }
 
-    .day-label {
-      font-family: 'DM Mono', monospace;
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--text);
-      min-width: 38px;
-    }
-    .day-info {
-      display: flex; flex-direction: column; gap: 2px;
-      font-size: 13px;
-    }
-    .day-window {
-      font-family: 'DM Sans', sans-serif;
-      color: var(--text);
-    }
-    .day-meta {
-      font-family: 'DM Mono', monospace;
-      font-size: 10px;
-      color: var(--text-muted);
-    }
-    .day-score {
-      font-family: 'DM Mono', monospace;
-      font-size: 12px;
-      color: var(--text-muted);
-    }
+  section.card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 12px 16px; margin: 8px 16px;
+  }
+  section.card h2 {
+    font-size: 14px; font-weight: 700; margin: 0 0 8px;
+    color: var(--text);
+  }
 
-    /* ── Policy footer ────────────────────────────────────────────── */
-    .policy {
-      margin: 20px 16px 0;
-      padding: 14px 16px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      font-size: 13px;
-    }
-    .policy-row {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 4px 0;
-      border-bottom: 1px solid var(--border);
-    }
-    .policy-row:last-child { border-bottom: none; }
-    .policy-key {
-      font-family: 'DM Mono', monospace;
-      font-size: 10px;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: var(--text-dim);
-    }
-    .policy-val {
-      font-family: 'DM Sans', sans-serif;
-      color: var(--text);
-      text-align: right;
-    }
-    .policy-source {
-      margin-top: 10px;
-      font-family: 'DM Mono', monospace;
-      font-size: 10px;
-      color: var(--text-dim);
-    }
-    .policy-source a { color: var(--text-muted); }
+  /* Tooltip pill */
+  [data-tip] { position: relative; }
+  [data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    left: 50%; bottom: calc(100% + 4px);
+    transform: translateX(-50%);
+    background: rgba(15,23,42,0.78);
+    color: rgba(255,255,255,0.95);
+    padding: 4px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 500; line-height: 1.35;
+    width: max-content; max-width: 220px;
+    text-align: center;
+    z-index: 1000; pointer-events: none;
+    opacity: 0;
+    transition: opacity 80ms ease-out 0s;
+  }
+  [data-tip]:hover::after {
+    opacity: 1;
+    transition-delay: 200ms;
+  }
 
-    /* ── Loading / empty ──────────────────────────────────────────── */
-    .skeleton {
-      background: linear-gradient(90deg, var(--surface) 0%, var(--surface-hover) 50%, var(--surface) 100%);
-      background-size: 200% 100%;
-      animation: shimmer 1.4s linear infinite;
-      border-radius: var(--radius);
-      height: 64px;
-      margin: 16px 16px 0;
-    }
-    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-    .empty {
-      margin: 24px 16px;
-      padding: 16px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      text-align: center;
-      color: var(--text-muted);
-      font-size: 13px;
-    }
-  </style>
-  <link rel="stylesheet" href="src/photo-block.css" />
+  /* Amenities */
+  .amenities-card { margin-top: 16px; }
+  .amenities-card h2 { margin-bottom: 6px; }
+  .amenity-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px;
+  }
+  @media (min-width: 480px) {
+    .amenity-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+  .amenity {
+    display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+    border: 1px solid var(--border); border-radius: 6px;
+    font-size: 12px;
+    background: var(--card);
+  }
+  .amenity-icon { font-size: 14px; flex-shrink: 0; }
+  .amenity-text { display: flex; flex-direction: column; line-height: 1.2; }
+  .amenity-sub {
+    font-size: 10px; color: var(--text-muted); font-weight: 500;
+    margin-top: 1px;
+  }
+  .amenity-label { white-space: normal; line-height: 1.2; }
+  /* Tiles tinted by rule. Dog parks are definitionally off-leash so the
+   * "rule" here means feature-good (green) / feature-warn (amber) /
+   * feature-missing (red). Mirrors beach amenity tinting visually. */
+  .amenity.rule-off_leash   { background: rgba(34,197,94,0.45); border-color: rgba(21,128,61,0.42); }
+  .amenity.rule-on_leash    { background: rgba(251,191,36,0.53); border-color: rgba(180,83,9,0.42); }
+  .amenity.rule-not_allowed { background: rgba(239,68,68,0.45); border-color: rgba(153,27,27,0.42); }
+  .amenity.rule-unknown     { background: rgba(0,0,0,0.04); }
+
+  /* Cautions */
+  .cautions-card h2 { margin-bottom: 6px; }
+  .caution-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px;
+  }
+  @media (min-width: 480px) {
+    .caution-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+  .caution-tile {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 6px 8px;
+    border: 1px solid var(--border); border-radius: 6px;
+    font-size: 12px; background: var(--card);
+    text-align: center; cursor: pointer; font-family: inherit;
+    color: inherit; width: 100%;
+  }
+  .caution-tile:hover { filter: brightness(0.97); }
+  .caution-tile[aria-expanded="true"] { outline: 2px solid rgba(15,23,42,0.55); outline-offset: -1px; }
+  .caution-tile.sev-no_go    { background: rgba(239,68,68,0.45); border-color: rgba(153,27,27,0.42); }
+  .caution-tile.sev-caution  { background: rgba(251,146,60,0.55); border-color: rgba(154,52,18,0.45); }
+  .caution-tile.sev-advisory { background: rgba(0,0,0,0.04); }
+  .caution-detail {
+    margin-top: 8px; padding: 8px 10px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--card); font-size: 12px; line-height: 1.4;
+    text-align: center;
+  }
+  .caution-detail[hidden] { display: none; }
+
+  /* Hours */
+  .hours-range { font-size: 14px; font-weight: 600; color: var(--text); margin: 0; }
+  .hours-sub   { margin: 2px 0 0; font-size: 13px; color: var(--text-muted); }
+
+  /* Weather */
+  .weather-card .weather-now {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 8px; padding: 4px 0 2px;
+  }
+  .weather-now-cond {
+    font-size: 36px; line-height: 1;
+  }
+  .weather-chips {
+    display: flex; flex-wrap: wrap; justify-content: center;
+    gap: 6px 8px;
+  }
+  .weather-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 12px; padding: 3px 8px;
+    border-radius: 999px;
+    background: rgba(0,0,0,0.05); color: var(--text);
+  }
+  .weather-loading { color: var(--text-muted); font-size: 12px; padding: 8px 0; }
+
+  /* Best-time card */
+  .besttime-card h2 {
+    font-size: 16px; font-weight: 700; margin: 0; color: var(--text);
+  }
+  .besttime-header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 12px;
+  }
+  .besttime-headline {
+    font-size: 28px; font-weight: 700; color: var(--text);
+    letter-spacing: -0.02em; line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Scout blurb (in best-time card) */
+  #scout-blurb {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px; line-height: 1.55;
+    color: var(--text);
+    margin-top: 8px;
+    opacity: 0.55;
+    transition: opacity 0.15s;
+  }
+  #scout-blurb.loaded { opacity: 1; }
+  #scout-blurb strong { font-weight: 700; }
+  .scout-card #scout-blurb {
+    font-size: 14px; line-height: 1.55;
+    color: var(--text);
+    margin: 0; padding: 0;
+  }
+  .scout-cta-btn-friends {
+    background: rgba(34,197,94,0.18); color: var(--text);
+    border: 1px solid rgba(34,197,94,0.45);
+  }
+  .scout-cta-btn-friends:hover { background: rgba(34,197,94,0.28); opacity: 1; }
+  .activities-prose {
+    font-size: 14px; line-height: 1.55; color: var(--text);
+    margin: 8px 0 0;
+  }
+  .scout-cta {
+    margin-top: 12px;
+    display: flex; align-items: center; justify-content: center;
+    flex-wrap: wrap; gap: 10px;
+    font-size: 14px; color: var(--text);
+  }
+  .scout-cta:empty { display: none; }
+  .scout-cta-text { font-weight: 600; }
+  .scout-cta-actions {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .scout-cta-btn {
+    background: var(--accent); color: white;
+    padding: 8px 14px; border-radius: 999px;
+    font-size: 13px; font-weight: 600;
+    text-decoration: none; display: inline-block;
+    border: 0; cursor: pointer;
+    font-family: inherit;
+  }
+  .scout-cta-btn:hover { opacity: 0.92; }
+
+  /* Photos + map row */
+  .photo-block-wrap { margin: 0 16px 12px; }
+  .photo-map-row {
+    display: flex; gap: 12px; align-items: stretch;
+    margin: 0 16px 12px;
+  }
+  .photo-map-row .pm-photo-col { flex: 1; margin: 0; min-width: 0; }
+  .photo-map-row .photo-block-hero { margin-bottom: 0; }
+  .photo-map-row .pm-map-col {
+    flex: 0 0 320px; display: flex;
+  }
+  .photo-map-row .pm-map-col #map {
+    width: 320px; height: 100%; min-height: 260px;
+    border-radius: 12px; border: 1px solid var(--border);
+  }
+  @media (max-width: 720px) {
+    .photo-map-row { flex-direction: column; gap: 8px; margin: 0 12px 8px; }
+    .photo-map-row .pm-map-col { flex: 0 0 auto; width: 100%; }
+    .photo-map-row .pm-map-col #map { width: 100%; height: 180px; }
+  }
+
+  /* Overview prose (bare, no card chrome) */
+  .overview-blurb {
+    font-size: 14px; color: var(--text); line-height: 1.55;
+    margin: 28px 16px 16px;
+  }
+
+  /* Pack list */
+  .packlist-card h2 {
+    font-size: 16px; font-weight: 700; margin: 0 0 10px; color: var(--text);
+  }
+  .packlist-chips {
+    display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;
+  }
+  .packlist-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 10px; border-radius: 999px;
+    background: rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.06);
+    font-size: 13px; color: var(--text);
+    cursor: help;
+  }
+  .packlist-icon { font-size: 15px; line-height: 1; }
+  .packlist-label { font-weight: 500; }
+
+  /* Details (curated prose) */
+  .details-prose {
+    font-size: 13px; color: var(--text-muted); line-height: 1.55;
+    white-space: pre-wrap;
+  }
+
+  /* Links */
+  .link-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border: 1px solid var(--border);
+    border-radius: 8px; text-decoration: none; color: var(--text);
+    font-size: 13px; margin-bottom: 8px;
+    transition: background 0.1s;
+  }
+  .link-row:hover { background: var(--bg); }
+  .link-row .arrow { margin-left: auto; color: var(--text-muted); }
+
+  /* Loading state */
+  .state {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 80px 20px; gap: 12px; color: var(--text-muted);
+  }
+  .state-icon { font-size: 36px; }
+
+  /* Source-attribution footer (operator-verified / OSM-default) */
+  .policy-source {
+    margin-top: 10px;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+  .policy-source a { color: var(--text-muted); }
+
+  /* Verified badge in best-time card */
+  .verified-badge {
+    display: inline-block;
+    background: #d1fae5; color: #15803d;
+    font-size: 11px; font-weight: 600;
+    padding: 2px 7px; border-radius: 4px;
+    margin-top: 6px;
+  }
+
+  /* Phone breakpoint */
+  @media (max-width: 600px) {
+    section.card { padding: 10px 12px; margin: 5px 10px; border-radius: 10px; }
+    section.card h2 { font-size: 13px; margin-bottom: 6px; }
+    .park-name { font-size: 20px; margin: 0 0 4px; }
+    .fit-badge { font-size: 16px; padding: 1px 8px; margin-right: 3px; }
+    .park-region { font-size: 13px; margin-left: 0.3em; }
+    .overview-blurb { font-size: 13px; line-height: 1.5; margin: 16px 12px 10px; }
+    .photo-map-row { margin: 0 10px 8px; gap: 6px; }
+    .photo-map-row .pm-map-col #map { height: 160px; }
+    .amenity { padding: 6px 4px; }
+    .amenity-icon { font-size: 18px; }
+    .amenity-label { font-size: 11px; line-height: 1.15; }
+    .amenity-sub   { font-size: 9px; }
+    .amenities-card { margin-top: 8px; }
+    .hours-range { font-size: 13px; }
+    .scout-card #scout-blurb { font-size: 13px; line-height: 1.5; }
+    .activities-prose { font-size: 13px; line-height: 1.5; margin-top: 6px; }
+    .scout-cta { margin-top: 10px; gap: 8px; font-size: 13px; }
+    .scout-cta-btn { padding: 7px 11px; font-size: 12px; }
+    .packlist-chip { padding: 5px 9px; font-size: 12px; }
+  }
+</style>
 </head>
 <body>
+
 <div class="page">
-  <div class="header">
-    <div class="header-top">
-      <a href="find.html" class="back-link">← back</a>
-      <a href="find.html" class="wordmark">🐾 Scout</a>
+  <header class="hero">
+    <div class="hero-main">
+      <h1 class="park-name" id="park-name">Loading...</h1>
     </div>
-    <div id="park-name" class="park-name">Loading…</div>
-    <div id="park-sub" class="park-sub"></div>
+    <a class="close-btn" id="close-btn" href="find.html">✕</a>
+  </header>
+
+  <div class="body-grid" id="body-grid">
+    <aside id="left-rail"></aside>
+    <main id="main-content">
+      <div class="state">
+        <div class="state-icon">🐾</div>
+        <div>Loading dog park info…</div>
+      </div>
+    </main>
   </div>
-
-  <div id="photo-block-mount" class="photo-block-wrap"></div>
-  <div id="content"></div>
 </div>
+
 <script src="src/photo-block.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+  crossorigin=""></script>
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
 
-<script type="module">
-  const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
-  const ANON_KEY = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+const params = new URLSearchParams(location.search);
+const fid = params.get('fid') ?? params.get('dog_park_fid');
+const useOnFetch = params.get('onfetch') === '1';
 
-  const params = new URLSearchParams(window.location.search);
-  const fid = params.get('fid') ?? params.get('dog_park_fid');
+function escHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+
+// ── Fit-score for the header badge ─────────────────────────────────────
+// Dog parks don't have the full beach scoring stack. Derive a simple
+// 0-100 from: off-leash (always +30) + fence (+25) + water (+20) +
+// double-gate (+10) + small-dog-area (+10) + lighting (+5).
+// Score is dampened by "now" caution (asphalt hot / UV high / no_go status).
+function _fitScore(park, now, today) {
+  const pol = park?.policy ?? {};
+  let score = 30; // off-leash
+  if ((pol.has_fence ?? park.has_fence) === true) score += 25;
+  if ((pol.has_drinking_water ?? park.has_drinking_water) === true) score += 20;
+  if (pol.double_gate === true) score += 10;
+  if (pol.small_dog_area === true) score += 8;
+  if (pol.large_dog_area === true) score += 4;
+  if (pol.lighting === true) score += 3;
+  // Dampen by current conditions
+  const status = now?.hour_status ?? today?.day_status;
+  if (status === 'no_go')    score = Math.min(score, 25);
+  if (status === 'caution')  score = Math.min(score, 55);
+  if (status === 'advisory') score = Math.min(score, 75);
+  return Math.max(0, Math.min(100, score));
+}
+
+async function load() {
   if (!fid || !/^\d+$/.test(fid)) {
-    document.getElementById('content').innerHTML = '<div class="empty">No park selected.</div>';
-    throw new Error('missing fid');
+    document.getElementById('main-content').innerHTML =
+      `<div class="state"><div class="state-icon">⚠️</div><div>No park selected.</div></div>`;
+    return;
   }
-
-  // ── Fetch ─────────────────────────────────────────────────────────
-  document.getElementById('content').innerHTML =
-    Array(3).fill('<div class="skeleton"></div>').join('');
 
   let data;
+  const endpoint = useOnFetch
+    ? `${SUPABASE_URL}/functions/v1/dog-park-onfetch?fid=${fid}`
+    : `${SUPABASE_URL}/functions/v1/get-dog-park-summary?fid=${fid}`;
+  const t0 = performance.now();
   try {
-    const res = await fetch(
-      `${SUPABASE_URL}/functions/v1/get-dog-park-summary?fid=${fid}`,
-      { headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'apikey': ANON_KEY } }
-    );
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    data = await res.json();
+    const r = await fetch(endpoint,
+      { headers: { Authorization: `Bearer ${ANON_KEY}`, apikey: ANON_KEY } });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    data = await r.json();
     if (data.error) throw new Error(data.error);
-  } catch (err) {
-    document.getElementById('content').innerHTML = `<div class="empty">Failed to load: ${err.message}</div>`;
-    throw err;
+  } catch (e) {
+    document.getElementById('main-content').innerHTML =
+      `<div class="state"><div class="state-icon">⚠️</div><div>Failed to load: ${escHtml(e.message)}</div></div>`;
+    return;
   }
-
-  const { dog_park: park, days, now } = data;
-  render(park, days, now);
+  if (useOnFetch && data._meta) {
+    console.log('[onfetch]', data._meta, `wall=${Math.round(performance.now()-t0)}ms`);
+  }
+  render(data);
   loadPhotos(fid);
+  loadWeather(data);
+  // onfetch returns scout_blurb inline; skip the separate LLM call.
+  if (useOnFetch && data.scout_blurb) {
+    paintScoutBlurb(data.scout_blurb, data.dog_park);
+  } else {
+    loadScoutBlurb(data.dog_park, data.days?.[0], data.now);
+  }
+}
 
-  async function loadPhotos(parkFid) {
-    // Direct PostgREST against dog_park_photos. RLS exposes only curated +
-    // non-hidden rows to anon, so we can ORDER BY sort_order without filter.
-    try {
-      const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/dog_park_photos?dog_park_fid=eq.${parkFid}` +
-          `&select=source,image_url,thumb_url,attribution,license,page_url,captured_at` +
-          `&order=sort_order.asc&limit=10`,
-        { headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}` } }
-      );
-      if (!res.ok) return;
-      const photos = await res.json();
-      if (Array.isArray(photos) && photos.length > 0 && window.PhotoBlock) {
-        // Mark first photo as hero (sort_order is already curator-set).
-        photos[0].is_hero = true;
-        PhotoBlock.render(document.getElementById('photo-block-mount'), photos, { minimal: true });
+// Render a pre-fetched Scout blurb (from dog-park-onfetch). Mirrors
+// the tail of loadScoutBlurb (markdown bold + CTA).
+function paintScoutBlurb(answer, park) {
+  const el = document.getElementById('scout-blurb');
+  if (!el) return;
+  const safe = escHtml(answer || '');
+  el.innerHTML = safe.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+  el.classList.add('loaded');
+  _renderScoutCTA(park);
+}
+
+function render(data) {
+  const park = data.dog_park;
+  // Edge function returns latitude/longitude; alias to lat/lng so the
+  // verbatim beach.html initMap works without renaming.
+  if (park.lat == null && park.latitude != null) park.lat = park.latitude;
+  if (park.lng == null && park.longitude != null) park.lng = park.longitude;
+  const days = data.days || [];
+  const now  = data.now;
+  const today = days[0];
+  document.title = `${park.display_name} — Dog Beach Scout`;
+
+  // Header: park name + fit badge + region
+  const nameEl = document.getElementById('park-name');
+  nameEl.textContent = '';
+  const fit = _fitScore(park, now, today);
+  const badge = document.createElement('span');
+  badge.className = `fit-badge fit-badge-${fit >= 70 ? 'go' : fit >= 40 ? 'caution' : 'no_go'}`;
+  badge.textContent = fit;
+  badge.title = `Park Fit: ${fit}/100`;
+  nameEl.appendChild(badge);
+  nameEl.appendChild(document.createTextNode(' ' + park.display_name));
+  const regionParts = [];
+  if (park.county_name) regionParts.push(park.county_name);
+  if (park.state) regionParts.push(park.state);
+  if (regionParts.length) {
+    const span = document.createElement('span');
+    span.className = 'park-region';
+    span.textContent = regionParts.join(' · ');
+    nameEl.appendChild(span);
+  }
+
+  // LEFT RAIL: amenities, cautions, hours, weather
+  const left = [];
+  left.push(buildAmenitiesSection(park));
+  const cautionsHtml = buildCautionsSection(now, today, park);
+  if (cautionsHtml) left.push(cautionsHtml);
+  left.push(buildHoursSection(park));
+  left.push(buildWeatherSection());
+  document.getElementById('left-rail').innerHTML = left.filter(Boolean).join('');
+
+  // MAIN: overview, photo+map, scout/best-time, packlist, details, links
+  const main = [];
+  main.push(buildOverviewBlurb(park));
+  const hasMap = park.lat != null && park.lng != null;
+  // Photo block is mounted async; reserve the photo column either way so
+  // the layout doesn't shift when photos arrive.
+  const photoCol = '<div class="photo-block-wrap pm-photo-col" id="photo-block-mount"></div>';
+  const mapCol = hasMap ? '<div class="pm-map-col"><div id="map"></div></div>' : '';
+  main.push(`<div class="photo-map-row">${photoCol}${mapCol}</div>`);
+  main.push(buildScoutCard(park, now, today));
+  main.push(buildPackListCard(park, now, today));
+  main.push(buildDetailsSection(park));
+  main.push(buildLinksSection(park));
+  document.getElementById('main-content').innerHTML = main.filter(Boolean).join('');
+
+  if (hasMap) initMap(park);
+
+  // Bind caution-tile click handlers
+  document.querySelectorAll('.caution-tile').forEach(tile => {
+    tile.addEventListener('click', () => {
+      const open = tile.getAttribute('aria-expanded') === 'true';
+      document.querySelectorAll('.caution-tile').forEach(t => t.setAttribute('aria-expanded', 'false'));
+      const detail = document.getElementById('caution-detail');
+      if (open) {
+        if (detail) detail.hidden = true;
       } else {
-        // No photos — hide the mount entirely (don't show "📷 No photos yet" empty state)
-        const m = document.getElementById('photo-block-mount');
-        if (m) m.style.display = 'none';
+        tile.setAttribute('aria-expanded', 'true');
+        if (detail) {
+          detail.hidden = false;
+          detail.textContent = tile.dataset.detail || '';
+        }
       }
-    } catch (_) {
-      const m = document.getElementById('photo-block-mount');
-      if (m) m.style.display = 'none';
+    });
+  });
+}
+
+// ── LEFT RAIL ────────────────────────────────────────────────────────
+
+function buildAmenitiesSection(park) {
+  const pol = park.policy ?? {};
+  const tiles = [];
+
+  // Off-leash is definitional
+  tiles.push(amenityTile('🐕', 'Off-leash', 'rule-off_leash'));
+
+  // Fence
+  const fence = pol.has_fence ?? park.has_fence;
+  if (fence === true) tiles.push(amenityTile('🚧', 'Fenced', 'rule-off_leash'));
+  else if (fence === false) tiles.push(amenityTile('⚠️', 'Unfenced', 'rule-on_leash'));
+
+  // Water
+  const water = pol.has_drinking_water ?? park.has_drinking_water;
+  if (water === true) tiles.push(amenityTile('💧', 'Water', 'rule-off_leash'));
+  else if (water === false) tiles.push(amenityTile('🚱', 'No water', 'rule-on_leash'));
+
+  // Double-gate (airlock entry — major safety feature)
+  if (pol.double_gate === true) tiles.push(amenityTile('🚪', 'Double-gate', 'rule-off_leash'));
+
+  // Dog areas
+  if (pol.small_dog_area === true) tiles.push(amenityTile('🐶', 'Small-dog area', 'rule-off_leash'));
+  if (pol.large_dog_area === true) tiles.push(amenityTile('🐕‍🦺', 'Large-dog area', 'rule-off_leash'));
+
+  // Lighting
+  if (pol.lighting === true) tiles.push(amenityTile('💡', 'Lighting', 'rule-off_leash'));
+
+  // Surface
+  const surface = pol.surface_overlay ?? park.surface;
+  if (surface) tiles.push(amenityTile('🌱', surface, ''));
+
+  // Area
+  if (park.area_m2) {
+    const acres = (park.area_m2 * 0.000247).toFixed(1);
+    tiles.push(amenityTile('📐', `${acres} acres`, ''));
+  }
+
+  return `<section class="card amenities-card"><h2>Amenities</h2>
+    <div class="amenity-grid">${tiles.join('')}</div></section>`;
+}
+
+function amenityTile(icon, label, ruleClass, sub) {
+  const cls = ruleClass ? `amenity ${ruleClass}` : 'amenity';
+  const subHtml = sub ? `<div class="amenity-sub">${escHtml(sub)}</div>` : '';
+  return `<div class="${cls}">
+    <span class="amenity-icon">${icon}</span>
+    <div class="amenity-text">
+      <span class="amenity-label">${escHtml(label)}</span>${subHtml}
+    </div>
+  </div>`;
+}
+
+function buildCautionsSection(now, today, park) {
+  const tiles = [];
+  const pol = park.policy ?? {};
+
+  // Live conditions — derive from `now`
+  if (now) {
+    if (now.asphalt_temp != null && now.asphalt_temp >= 105) {
+      const sev = now.asphalt_temp >= 125 ? 'no_go' : now.asphalt_temp >= 115 ? 'caution' : 'advisory';
+      tiles.push(cautionTile('🐾', 'Hot pavement', sev,
+        `Asphalt ~${Math.round(now.asphalt_temp)}°F — risk of paw burns. Walk on grass or wait for cooler hours.`));
+    }
+    if (now.uv_index != null && now.uv_index >= 6) {
+      const sev = now.uv_index >= 11 ? 'no_go' : now.uv_index >= 8 ? 'caution' : 'advisory';
+      tiles.push(cautionTile('☀️', `UV ${now.uv_index.toFixed(0)}`, sev,
+        `UV index ${now.uv_index.toFixed(1)} — bring shade for the dog; consider sunscreen for short-haired breeds.`));
+    }
+    if (now.wind_speed != null && now.wind_speed >= 15) {
+      const sev = now.wind_speed >= 25 ? 'caution' : 'advisory';
+      tiles.push(cautionTile('💨', `${Math.round(now.wind_speed)}mph wind`, sev,
+        `Wind ~${Math.round(now.wind_speed)}mph — secure leashes when leaving, dusty conditions likely.`));
+    }
+    if (now.feels_like != null) {
+      if (now.feels_like >= 95) {
+        tiles.push(cautionTile('🌡️', `${Math.round(now.feels_like)}°F`, 'caution',
+          `Feels like ${Math.round(now.feels_like)}°F — heat stress risk. Short visits + plenty of water.`));
+      } else if (now.feels_like < 32) {
+        tiles.push(cautionTile('❄️', `${Math.round(now.feels_like)}°F`, 'advisory',
+          `Feels like ${Math.round(now.feels_like)}°F — short coats may need a jacket.`));
+      }
     }
   }
 
-  // ── Render ────────────────────────────────────────────────────────
-  function render(park, days, now) {
-    document.getElementById('park-name').textContent = park.display_name;
-    const subParts = [];
-    if (park.address) subParts.push(park.address);
-    else if (park.state) subParts.push(`${park.county_name ?? '—'}, ${park.state}`);
-    if (park.area_m2) subParts.push(`${(park.area_m2 * 0.000247).toFixed(1)}ac`);
-    document.getElementById('park-sub').textContent = subParts.filter(Boolean).join(' · ');
-
-    const sections = [];
-    sections.push(buildHero(now, days?.[0]));
-    sections.push(buildAmenities(park));
-    sections.push('<div class="section-label">Next 7 days</div>');
-    sections.push(buildDays(days, park.fid));
-    sections.push('<div class="section-label">Policy</div>');
-    sections.push(buildPolicy(park));
-    document.getElementById('content').innerHTML = sections.join('');
+  // Park-level caveats
+  const fence = pol.has_fence ?? park.has_fence;
+  if (fence === false) {
+    tiles.push(cautionTile('⚠️', 'Unfenced', 'caution',
+      `This park has no perimeter fence. Recall-trained dogs only; consider a long line.`));
   }
 
-  function buildHero(now, today) {
-    // Prefer live NOW status if available; else today's day_status
-    const status = now?.hour_status ?? today?.day_status ?? 'no_data';
-    const icon = ({ go: '🟢', advisory: '🔵', caution: '🟡', no_go: '🔴' })[status] ?? '⚪';
-    const title = ({
-      go: 'Good for a visit',
-      advisory: 'Manageable conditions',
-      caution: 'Use caution',
-      no_go: 'Not recommended now',
-      no_data: 'No live data',
-    })[status];
+  if (!tiles.length) return '';
 
-    let detail = '';
-    if (now) {
-      const parts = [];
-      if (now.feels_like != null) parts.push(`${Math.round(now.feels_like)}°F feels-like`);
-      if (now.wind_speed != null) parts.push(`${Math.round(now.wind_speed)}mph wind`);
-      if (now.uv_index != null) parts.push(`UV ${now.uv_index.toFixed(1)}`);
-      if (now.asphalt_temp != null && now.asphalt_temp >= 105) parts.push(`🐾 ${Math.round(now.asphalt_temp)}°F asphalt`);
-      detail = parts.join(' · ');
-    } else if (today?.best_window_label) {
-      detail = `Best window: ${today.best_window_label}`;
+  return `<section class="card cautions-card"><h2>Cautions</h2>
+    <div class="caution-grid">${tiles.join('')}</div>
+    <div class="caution-detail" id="caution-detail" hidden></div></section>`;
+}
+
+function cautionTile(icon, label, sev, detail) {
+  return `<button class="caution-tile sev-${sev}" type="button" aria-expanded="false"
+    data-detail="${escHtml(detail)}">
+    <span class="amenity-icon">${icon}</span>
+    <span class="amenity-label">${escHtml(label)}</span>
+  </button>`;
+}
+
+function buildHoursSection(park) {
+  const pol = park.policy ?? {};
+  const hoursText = pol.hours_text;
+  let primary = hoursText;
+  let sub = '';
+  if (!primary) {
+    if (pol.hours_open_time && pol.hours_close_time) {
+      primary = `${formatTime(pol.hours_open_time)}–${formatTime(pol.hours_close_time)}`;
     } else {
-      detail = 'Scoring not yet available for this park';
+      primary = 'Dawn to dusk (default)';
+      sub = 'Local rules may vary. Check the operator site for posted hours.';
     }
+  }
+  return `<section class="card hours-card"><h2>Hours</h2>
+    <p class="hours-range">🕐 ${escHtml(primary)}</p>
+    ${sub ? `<p class="hours-sub">${escHtml(sub)}</p>` : ''}</section>`;
+}
 
-    return `
-      <div class="hero status-${status}">
-        <div class="hero-icon">${icon}</div>
-        <div class="hero-body">
-          <div class="hero-title">${title}</div>
-          <div class="hero-detail">${detail}</div>
-        </div>
-      </div>`;
+function formatTime(t) {
+  // "06:00:00" → "6am", "19:30:00" → "7:30pm"
+  if (!t) return '';
+  const [hRaw, mRaw] = String(t).split(':');
+  const h = parseInt(hRaw, 10);
+  const m = parseInt(mRaw, 10);
+  const ampm = h >= 12 ? 'pm' : 'am';
+  const h12 = ((h + 11) % 12) + 1;
+  return m ? `${h12}:${String(m).padStart(2,'0')}${ampm}` : `${h12}${ampm}`;
+}
+
+function buildWeatherSection() {
+  return `<section class="card weather-card"><h2>Weather</h2>
+    <div id="weather-mount" class="weather-loading">Loading conditions…</div></section>`;
+}
+
+async function loadWeather(data) {
+  const mount = document.getElementById('weather-mount');
+  if (!mount) return;
+  const now = data.now;
+  if (!now) {
+    mount.innerHTML = '<div class="weather-loading">No live conditions for this park.</div>';
+    return;
+  }
+  const icon = weatherIconFromCode(now.weather_code);
+  const chips = [];
+  if (now.feels_like != null) chips.push(`<span class="weather-chip">🌡️ ${Math.round(now.feels_like)}°F</span>`);
+  if (now.wind_speed != null) chips.push(`<span class="weather-chip">💨 ${Math.round(now.wind_speed)}mph</span>`);
+  if (now.uv_index != null)   chips.push(`<span class="weather-chip">☀️ UV ${now.uv_index.toFixed(0)}</span>`);
+  if (now.precip_prob != null && now.precip_prob >= 30) chips.push(`<span class="weather-chip">☔ ${Math.round(now.precip_prob)}%</span>`);
+  if (now.asphalt_temp != null && now.asphalt_temp >= 105) chips.push(`<span class="weather-chip">🐾 ${Math.round(now.asphalt_temp)}°F</span>`);
+  mount.innerHTML = `<div class="weather-now">
+    <div class="weather-now-cond">${icon}</div>
+    <div class="weather-chips">${chips.join('')}</div>
+  </div>`;
+}
+
+function weatherIconFromCode(code) {
+  // Open-Meteo WMO weather codes
+  if (code == null) return '🌤️';
+  if (code === 0) return '☀️';
+  if (code <= 3) return '🌤️';
+  if (code <= 48) return '🌫️';
+  if (code <= 67) return '🌧️';
+  if (code <= 77) return '🌨️';
+  if (code <= 82) return '🌧️';
+  if (code <= 99) return '⛈️';
+  return '🌤️';
+}
+
+// ── MAIN ───────────────────────────────────────────────────────────
+
+function buildOverviewBlurb(park) {
+  const pol = park.policy ?? {};
+  const desc = pol.description_overlay ?? park.description;
+  if (!desc) return '';
+  return `<div class="overview-blurb">${escHtml(desc)}</div>`;
+}
+
+function buildScoutCard(park, now, today) {
+  // Headline derived from today's best_window_label OR live status.
+  const headline = today?.best_window_label
+    || (now?.hour_status === 'go' ? 'Great right now' : 'Open dawn–dusk');
+  const verifiedHtml = (park.policy?.source === 'operator_posted'
+    || park.policy?.source === 'operator_posted_v2')
+    ? `<div><span class="verified-badge">✓ Operator-verified</span></div>` : '';
+  return `<section class="card besttime-card scout-card">
+    <div class="besttime-header">
+      <h2>Best time today</h2>
+      <div class="besttime-headline">${escHtml(headline)}</div>
+    </div>
+    ${verifiedHtml}
+    <div id="scout-blurb">…</div>
+    <div id="scout-cta" class="scout-cta"></div>
+  </section>`;
+}
+
+// Async-fill the Scout narrative via dog-park-chat. Mirrors beach.html's
+// loadScoutBlurb. Same markdown-bold rendering, same CTA wiring.
+async function loadScoutBlurb(park, today, now) {
+  const el = document.getElementById('scout-blurb');
+  if (!el) return;
+  const status = now?.hour_status ?? today?.day_status;
+  if (status === 'no_go') {
+    el.textContent = "Conditions are tough right now — try the cool hours or wait it out.";
+    el.classList.add('loaded'); _renderScoutCTA(park); return;
+  }
+  // Build question. Edge function's system prompt already has all the
+  // context; the question just asks for the narrative.
+  const window = today?.best_window_label
+    || (status === 'go' ? 'right now' : 'during operating hours');
+  const question = `Write the Scout intro paragraph for visiting this dog park today. Bold the time window **${window}**.`;
+  try {
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/dog-park-chat`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        dog_park_fid: park.fid,
+        question,
+        conversation_history: [],
+      }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const { answer } = await r.json();
+    const safe = escHtml(answer || '');
+    el.innerHTML = safe.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+    el.classList.add('loaded');
+  } catch (e) {
+    console.warn('scout blurb fetch failed:', e);
+    el.textContent = '';
+  }
+  _renderScoutCTA(park);
+}
+
+// CTA — Wanna go? Drive ~XX min. + Friends button + Get directions.
+// Drive minutes filled in from cached/qs user location (no auto-prompt).
+async function _renderScoutCTA(park) {
+  const ctaEl = document.getElementById('scout-cta');
+  if (!ctaEl || park.lat == null || park.lng == null) return;
+  const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${park.lat},${park.lng}`;
+  const friendsBtn = `<button class="scout-cta-btn scout-cta-btn-friends" type="button" data-friends-share="1">🐾 Let Friends Know</button>`;
+  const dirsBtn = `<a class="scout-cta-btn" href="${escHtml(mapsUrl)}" target="_blank" rel="noopener">Get directions →</a>`;
+  const actions = `<div class="scout-cta-actions">${friendsBtn}${dirsBtn}</div>`;
+  const setHtml = (txt) => {
+    ctaEl.innerHTML = `<span class="scout-cta-text">${txt}</span>${actions}`;
+    const btn = ctaEl.querySelector('[data-friends-share]');
+    if (btn) btn.addEventListener('click', () => _shareFriendsPlan(park));
+  };
+  setHtml('Wanna go?');
+  const user = await _getUserLocation();
+  if (!user) return;
+  const minutes = _estimateDriveMinutes(user, park);
+  if (!Number.isFinite(minutes) || minutes <= 0) return;
+  setHtml(`Wanna go? Drive ~${minutes} min.`);
+}
+
+async function _shareFriendsPlan(park) {
+  const url = location.href;
+  const title = `${park.display_name || park.name || 'Dog Park'} — Dog Beach Scout`;
+  const text  = `Heading to ${park.display_name || park.name || 'the dog park'} today.`;
+  if (navigator.share) {
+    try { await navigator.share({ title, text, url }); return; } catch {}
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    const btn = document.querySelector('#scout-cta [data-friends-share]');
+    if (btn) {
+      const orig = btn.textContent;
+      btn.textContent = '🐾 Link copied';
+      setTimeout(() => { btn.textContent = orig; }, 1600);
+    }
+  } catch {}
+}
+
+function _haversineMiles(a, b) {
+  const R = 3958.8;
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLng = (b.lng - a.lng) * Math.PI / 180;
+  const lat1 = a.lat * Math.PI / 180;
+  const lat2 = b.lat * Math.PI / 180;
+  const s = Math.sin(dLat/2)**2 + Math.sin(dLng/2)**2 * Math.cos(lat1) * Math.cos(lat2);
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+function _estimateDriveMinutes(user, park) {
+  const miles = _haversineMiles(user, { lat: park.lat, lng: park.lng });
+  return Math.round(miles * 1.8);
+}
+async function _getUserLocation() {
+  const qp = new URLSearchParams(location.search);
+  const ulat = parseFloat(qp.get('user_lat'));
+  const ulng = parseFloat(qp.get('user_lng'));
+  if (Number.isFinite(ulat) && Number.isFinite(ulng)) return { lat: ulat, lng: ulng };
+  try {
+    const raw = localStorage.getItem('dogbeach.user_loc');
+    if (raw) {
+      const cached = JSON.parse(raw);
+      if (cached && Number.isFinite(cached.lat) && Number.isFinite(cached.lng)) return cached;
+    }
+  } catch {}
+  return null;
+}
+
+function buildPackListCard(park, now, today) {
+  const pol = park.policy ?? {};
+  const chips = [];
+
+  // Always
+  chips.push(packChip('💩', 'Poop bags', 'Pack out what comes out.'));
+
+  // Water — bring if no fountain on site
+  const water = pol.has_drinking_water ?? park.has_drinking_water;
+  if (water !== true) {
+    chips.push(packChip('💧', 'Water bottle', 'No fountain on site.'));
   }
 
-  function buildAmenities(park) {
-    const chips = [];
-    const pol = park.policy ?? {};
-
-    // Off-leash is definitional for dog parks — always show, no conditional
-    chips.push('<span class="chip chip-go">🐕 Off-leash</span>');
-
-    // has_fence + has_drinking_water — policy overlay wins, fall back to gold/OSM
-    const fence = pol.has_fence ?? park.has_fence;
-    if (fence === true) chips.push('<span class="chip chip-go">🚧 Fenced</span>');
-    else if (fence === false) chips.push('<span class="chip chip-warn">Unfenced</span>');
-
-    const water = pol.has_drinking_water ?? park.has_drinking_water;
-    if (water === true) chips.push('<span class="chip chip-go">💧 Water</span>');
-    else if (water === false) chips.push('<span class="chip chip-warn">No water</span>');
-
-    // Surface — overlay wins over raw OSM
-    const surface = pol.surface_overlay ?? park.surface;
-    if (surface) chips.push(`<span class="chip">${surface}</span>`);
-
-    if (pol.double_gate === true)    chips.push('<span class="chip chip-go">🚪 Double-gate</span>');
-    if (pol.small_dog_area === true) chips.push('<span class="chip chip-go">🐶 Small-dog area</span>');
-    if (pol.large_dog_area === true) chips.push('<span class="chip chip-go">🐕‍🦺 Large-dog area</span>');
-    if (pol.lighting === true)       chips.push('<span class="chip">💡 Lighting</span>');
-
-    if (pol.hours_text) chips.push(`<span class="chip chip-strong">🕐 ${pol.hours_text}</span>`);
-
-    return `<div class="amenities">${chips.join('')}</div>`;
+  // Heat-driven items
+  if (now?.asphalt_temp != null && now.asphalt_temp >= 105) {
+    chips.push(packChip('🐾', 'Paw protection', `Pavement ~${Math.round(now.asphalt_temp)}°F — booties or stick to grass.`));
+  }
+  if (now?.uv_index != null && now.uv_index >= 8) {
+    chips.push(packChip('🕶️', 'Shade', `UV ${now.uv_index.toFixed(1)} — bring something to throw shade.`));
+  }
+  if (now?.feels_like != null && now.feels_like >= 90) {
+    chips.push(packChip('🧊', 'Cooling towel', `Feels like ${Math.round(now.feels_like)}°F.`));
+  }
+  if (now?.feels_like != null && now.feels_like < 40) {
+    chips.push(packChip('🧥', 'Coat (short-hair dogs)', `Feels like ${Math.round(now.feels_like)}°F.`));
   }
 
-  function buildDays(days, fid) {
-    if (!days?.length) return '<div class="empty">No forecast available yet.</div>';
-    return `<div class="day-list">${days.map(d => buildDayCard(d, fid)).join('')}</div>`;
+  // Safety
+  const fence = pol.has_fence ?? park.has_fence;
+  if (fence === false) {
+    chips.push(packChip('🧷', 'Long line', 'Park is unfenced — recall backup.'));
   }
 
-  function buildDayCard(d, fid) {
-    const dt = new Date(d.local_date + 'T12:00:00');
-    const today = new Date();
-    const isToday = dt.toDateString() === today.toDateString();
-    const label = isToday ? 'TDY' : dt.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
-    const meta = [
-      d.summary_weather ?? '—',
-      d.avg_temp != null ? `${Math.round(d.avg_temp)}°` : '',
-      d.avg_wind != null ? `${Math.round(d.avg_wind)}mph` : '',
-    ].filter(Boolean).join(' · ');
-    const window = d.best_window_label ?? '—';
-    const score = d.go_hours_count != null
-      ? `${d.go_hours_count}/${d.go_hours_count + d.advisory_hours_count + d.caution_hours_count + d.no_go_hours_count}h`
-      : '';
+  // Fun
+  chips.push(packChip('🎾', 'A favorite toy', 'Always.'));
 
-    // Day cards are informational only in v1 — hour-by-hour view is parked.
-    return `
-      <div class="day-card status-${d.day_status}">
-        <div class="day-label">${label}</div>
-        <div class="day-info">
-          <div class="day-window">${window}</div>
-          <div class="day-meta">${meta}</div>
-        </div>
-        <div class="day-score">${score}</div>
-      </div>`;
+  return `<section class="card packlist-card"><h2>Pack list</h2>
+    <div class="packlist-chips">${chips.join('')}</div></section>`;
+}
+
+function packChip(icon, label, tip) {
+  return `<span class="packlist-chip" data-tip="${escHtml(tip)}">
+    <span class="packlist-icon">${icon}</span>
+    <span class="packlist-label">${escHtml(label)}</span>
+  </span>`;
+}
+
+function buildDetailsSection(park) {
+  const pol = park.policy ?? {};
+  const rules = pol.additional_rules;
+  if (!rules) return '';
+  return `<section class="card details-card">
+    <h2>Posted rules</h2>
+    <div class="details-prose">${escHtml(rules)}</div>
+  </section>`;
+}
+
+function buildLinksSection(park) {
+  const pol = park.policy ?? {};
+  const links = [];
+
+  const opUrl = park.operator?.web_url || park.website;
+  if (opUrl) {
+    const label = park.operator?.name
+      ? `${park.operator.name} parks page`
+      : 'Official park page';
+    links.push(linkRow('🌐', label, opUrl));
   }
 
-  function buildPolicy(park) {
-    const pol = park.policy ?? {};
-    const op = park.operator;
-    const rows = [
-      ['Leash', 'Off-leash (dog park)'],
-      ['Hours', pol.hours_text ?? '—'],
-      ['Fence', tribool(pol.has_fence ?? park.has_fence)],
-      ['Water', tribool(pol.has_drinking_water ?? park.has_drinking_water)],
-      ['Surface', (pol.surface_overlay ?? park.surface) ?? '—'],
-    ];
-    if (pol.double_gate != null)    rows.push(['Double-gate', tribool(pol.double_gate)]);
-    if (pol.small_dog_area != null) rows.push(['Small-dog area', tribool(pol.small_dog_area)]);
-    if (pol.large_dog_area != null) rows.push(['Large-dog area', tribool(pol.large_dog_area)]);
-    if (pol.lighting != null)       rows.push(['Lighting', tribool(pol.lighting)]);
-    if (pol.additional_rules)       rows.push(['Rules', pol.additional_rules]);
-    const description = pol.description_overlay ?? park.description;
-    if (description)                rows.push(['About', description]);
-
-    const rowsHtml = rows.map(([k, v]) =>
-      `<div class="policy-row"><span class="policy-key">${k}</span><span class="policy-val">${v}</span></div>`
-    ).join('');
-
-    const isOperator = pol.source === 'operator_posted' || pol.source === 'operator_posted_v2';
-    const sourceLine = isOperator && op
-      ? `Operator-verified: ${op.name}${pol.source_url ? ` · <a href="${pol.source_url}" target="_blank" rel="noopener">source</a>` : ''}`
-      : isOperator && pol.source_url
-      ? `Operator-verified · <a href="${pol.source_url}" target="_blank" rel="noopener">source</a>`
-      : pol.source === 'osm_default'
-      ? `Default policy (off-leash inside fence, dawn-dusk). Local rules may vary.`
-      : '';
-
-    return `
-      <div class="policy">
-        ${rowsHtml}
-        ${sourceLine ? `<div class="policy-source">${sourceLine}</div>` : ''}
-      </div>`;
+  // Source attribution
+  let sourceLine = '';
+  if (pol.source === 'operator_posted' || pol.source === 'operator_posted_v2') {
+    const opName = park.operator?.name ? `: ${park.operator.name}` : '';
+    const link = pol.source_url
+      ? ` · <a href="${escHtml(pol.source_url)}" target="_blank" rel="noopener">source</a>` : '';
+    sourceLine = `Operator-verified${opName}${link}`;
+  } else if (pol.source === 'osm_default') {
+    sourceLine = `Default policy (off-leash inside fence, dawn-dusk). Local rules may vary.`;
+  } else if (pol.source_url) {
+    sourceLine = `Sourced from <a href="${escHtml(pol.source_url)}" target="_blank" rel="noopener">linked page</a>.`;
   }
 
-  function tribool(v) {
-    if (v === true) return '✓';
-    if (v === false) return '✗';
-    return '—';
+  if (park.lat != null && park.lng != null) {
+    const dir = `https://www.google.com/maps/dir/?api=1&destination=${park.lat},${park.lng}`;
+    links.push(linkRow('🗺️', 'Directions in Google Maps', dir));
   }
+
+  if (!links.length && !sourceLine) return '';
+
+  return `<section class="card links-card"><h2>Links</h2>
+    ${links.join('')}
+    ${sourceLine ? `<div class="policy-source">${sourceLine}</div>` : ''}
+  </section>`;
+}
+
+function linkRow(icon, label, href) {
+  return `<a class="link-row" href="${escHtml(href)}" target="_blank" rel="noopener">
+    <span>${icon}</span>
+    <span>${escHtml(label)}</span>
+    <span class="arrow">→</span>
+  </a>`;
+}
+
+// ── Map ───────────────────────────────────────────────────────────
+
+// Copied verbatim from beach.html's initMap (incl ResizeObserver +
+// invalidateSize belt-and-suspenders for the flex-row sizing race).
+// Accepts an object with .lat + .lng — the render() function aliases
+// latitude/longitude onto park.lat/lng before calling.
+function initMap(park) {
+  if (park.lat == null || park.lng == null) return;
+  const mapEl = document.getElementById('map');
+  if (!mapEl) return;
+  const map = L.map('map', {
+    zoomControl: true, scrollWheelZoom: false,
+  }).setView([park.lat, park.lng], 15);
+  L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OSM</a>',
+    maxZoom: 19,
+  }).addTo(map);
+  L.marker([park.lat, park.lng]).addTo(map);
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => map.invalidateSize());
+    ro.observe(mapEl);
+  }
+  requestAnimationFrame(() => map.invalidateSize());
+  setTimeout(() => map.invalidateSize(), 400);
+  setTimeout(() => map.invalidateSize(), 1200);
+}
+
+// ── Photos ────────────────────────────────────────────────────────
+
+async function loadPhotos(parkFid) {
+  try {
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/dog_park_photos?dog_park_fid=eq.${parkFid}` +
+      `&select=source,image_url,thumb_url,attribution,license,page_url,captured_at` +
+      `&order=sort_order.asc&limit=10`,
+      { headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } });
+    if (!r.ok) return hidePhotos();
+    const photos = await r.json();
+    if (!Array.isArray(photos) || !photos.length) return hidePhotos();
+    photos[0].is_hero = true;
+    if (window.PhotoBlock) {
+      PhotoBlock.render(document.getElementById('photo-block-mount'), photos, { minimal: true });
+    }
+  } catch (_) {
+    hidePhotos();
+  }
+}
+
+function hidePhotos() {
+  // Photos column is in a flex row with the map; hide just the photo col
+  // so the map can still take its position.
+  const mount = document.getElementById('photo-block-mount');
+  if (mount) mount.style.display = 'none';
+}
+
+load();
 </script>
 </body>
 </html>

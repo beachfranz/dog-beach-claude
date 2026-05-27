@@ -145,6 +145,9 @@ from .assets.scoring_and_audit import (
 from .assets.weather_grid import (
     refresh_weather_grid, rebuild_weather_grid_inventory,
 )
+from .assets.beach_discovery import (
+    beach_walk_state_parks, beach_walk_wikipedia, beach_ingest_queue,
+)
 
 
 # ── Full state launch (Phases 1-33) ──────────────────────────────────
@@ -197,7 +200,33 @@ state_launch_job = define_asset_job(
         | AssetSelection.groups("dog_park_coverage")
         # Dog-park photos (6 ops): Flickr/Wikimedia/Unsplash/Websearch + vision + curate
         | AssetSelection.groups("phase_31_dp_photos")
+        # Beach discovery (Franz 2026-05-27 — state-park-walker + ingest,
+        # Wikipedia excluded since it runs on monthly cron per Franz 2026-05-27)
+        | AssetSelection.assets(beach_walk_state_parks, beach_ingest_queue)
     ),
+)
+
+
+# ── Beach discovery job (annual cadence per Franz 2026-05-27) ────────
+# Per Franz directive: beach discovery runs ONLY when a state comes on-line
+# (via state_launch_job) AND once per year thereafter (this job, fired by
+# annual_beach_discovery_schedule). Don't burn LLM dollars walking the
+# same state-park sites + Wikipedia articles monthly when they change rarely.
+
+beach_discovery_job = define_asset_job(
+    name="beach_discovery_job",
+    description=(
+        "Annual beach-discovery re-walk per state. Fires both walkers + "
+        "ingest: beach_walk_state_parks (per-state-handler) + "
+        "beach_walk_wikipedia (Sonnet enumerates List_of_beaches_in_<State>) "
+        "→ beach_ingest_queue (Google Places geocode → arena → "
+        "promote_to_gold, scoring_tier='none'). "
+        "Per state cost ~$0.05 Sonnet + ~$0.20 Google Places. Annual run "
+        "across 50 states ≈ $12.50/year. Per Franz 2026-05-27 — state-park "
+        "sites + Wikipedia change slowly enough that annual is sufficient."
+    ),
+    selection=AssetSelection.assets(
+        beach_walk_state_parks, beach_walk_wikipedia, beach_ingest_queue),
 )
 
 

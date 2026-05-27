@@ -58,5 +58,13 @@
     "loader_deferred": true,
     "notes": "Listing URL is virginia.org/things-to-do/outdoors/state-parks (tourism-maintained, photo-friendly). Agency site dcr.virginia.gov/state-parks is authoritative. State-park-specific photo loader deferred; Wikimedia + websearch handle photos state-agnostically. State dog policy deferred to localities per Va. Code § 3.2-6539 (no statewide leash law).",
     "added": "2026-05-26"
+  },
+  "UT": {
+    "agency": "Utah State Parks (Utah Division of State Parks, DNR)",
+    "url": "https://stateparks.utah.gov/parks/",
+    "state_law_url": "https://www.utah.gov/pmn/files/698971.pdf",
+    "loader_deferred": true,
+    "notes": "Listing URL is stateparks.utah.gov/parks (Franz-provided 2026-05-27). State law PDF at utah.gov/pmn/files/698971.pdf documents delegation to localities — no statewide leash mandate. State-park-specific photo loader deferred; Wikimedia + websearch handle photos state-agnostically. UT is inland (no coast) — beaches sourced from GNIS lake/reservoir entries (Bear Lake, Utah Lake, Great Salt Lake, Lake Powell shore).",
+    "added": "2026-05-27"
   }
 }

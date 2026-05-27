@@ -1,11 +1,20 @@
 """
 walk_dog_park_operator_catalog.py — operator-catalog-walker (codify-pattern, level 2).
 
+UNIFIED 2026-05-27: walks each operator catalog ONCE, extracts BOTH dog parks
+AND beaches from the same fetched content. Dog-park extraction unchanged
+(existing 60-79% coverage preserved). Beach extraction is additive — adds
+a second LLM call on the same content with a beach-focused prompt, writes
+results to public.beach_discovery_queue with source_handler='operator_catalog_v1'.
+Per Franz "unify, single operator walker, dual extraction" 2026-05-27.
+
 Phase DP-W (after the OSM-shortcut DP-B caps out at ~13% of CA parks). For
 each city/county operator that runs multiple dog parks, fetch the operator's
-DOG-PARK CATALOG page, enumerate the per-park entries with their detail URLs,
-fuzzy-match each catalog entry to a dog_parks_gold row, then run the same
-13-field per-park extraction the OSM-shortcut uses.
+catalog page (dog-park-list OR beach-list — operator may publish either or
+both), enumerate the per-entry detail URLs, fuzzy-match each entry to a
+dog_parks_gold row (for dog parks) or write to beach_discovery_queue (for
+beaches). Then run the 13-field per-park extraction the OSM-shortcut uses
+(dog parks only; beaches stay in queue for ingest_beach_discovery_queue).
 
 Two-level codify-pattern:
   - Level 1 (OPERATOR): discover the catalog URL. Hand-coded per op + web_search
@@ -150,6 +159,146 @@ Extract every dog park listed on this catalog page. Return JSON:
 }}
 
 If the page is an aggregator / not the operator's own catalog, set operator_match=false and return empty parks."""
+
+
+# ── Beach catalog prompts (additive — 2026-05-27) ──────────────────────
+# Beach extraction is a parallel pass on the SAME fetched catalog content.
+# Two LLM calls instead of one keeps the dog-park prompt's specificity intact
+# and avoids regressing the existing 60-79% per-state dog-park coverage.
+# Cost: ~$0.01 extra per operator catalog walked.
+
+BEACH_CATALOG_PROMPT_SYSTEM = (
+    "You are extracting a LIST of NAMED BEACHES from a single operator-posted "
+    "catalog/index page. The page may be a city/county parks department site. "
+    "Many such operators publish a BEACHES catalog alongside their parks catalog. "
+    "Some city operators publish ONLY parks (no beaches) — that is normal and "
+    "you should return an empty list in that case. Use ONLY the provided page."
+)
+
+BEACH_CATALOG_PROMPT_USER_TEMPLATE = """SOURCE CATALOG PAGE CONTENT:
+{content}
+
+OPERATOR: {op_name}
+
+Extract every named beach feature listed on this catalog page. Return JSON:
+{{
+  "operator_match": <true|false: is this a catalog page operated by {op_name}?>,
+  "beaches": [
+    {{
+      "name": "<beach name as listed; MUST be a proper noun containing
+               Beach/Cove/Bay/Lagoon/Swim/Sand stem>",
+      "url":  "<absolute URL to the beach detail page; null if no link>",
+      "blurb": "<1-sentence blurb if available, else null>"
+    }},
+    ...
+  ]
+}}
+
+REJECT:
+- Marinas/boat launches/boat ramps unless 'Beach' is literally in the name
+- Generic phrases like 'sandy beaches' or 'the beach' (no proper noun)
+- Sand dunes / sand mountains (off-road features, not water beaches)
+- Historical / closed beaches
+- Beaches in OTHER operators' jurisdictions
+
+Return operator_match=false and empty beaches if the page is not the operator's
+own catalog OR if the operator publishes no beaches."""
+
+
+def call_llm_enumerate_beaches(content: str, op_name: str,
+                               enable_web_search: bool = False) -> dict:
+    """Beach analog of call_llm_enumerate_catalog. Same fetched content,
+    different prompt. Returns dict with 'operator_match' + 'beaches' list."""
+    user = BEACH_CATALOG_PROMPT_USER_TEMPLATE.format(
+        content=content[:50000], op_name=op_name)
+    body = {
+        "model": SONNET,
+        "max_tokens": 2500,
+        "system": BEACH_CATALOG_PROMPT_SYSTEM,
+        "messages": [{"role": "user", "content": user}],
+    }
+    if enable_web_search:
+        body["tools"] = [{"type": "web_search_20250305",
+                          "name": "web_search", "max_uses": 2}]
+    resp = anthropic_post_with_retry(body)
+    text_blocks = [b.get("text", "") for b in resp.get("content", [])
+                    if b.get("type") == "text"]
+    raw = (text_blocks[-1] if text_blocks else "").strip()
+    if raw.startswith("```"):
+        parts = raw.split("```", 2)
+        if len(parts) >= 2:
+            inner = parts[1]
+            if inner.lower().startswith("json"):
+                inner = inner[4:].lstrip()
+            raw = inner.rsplit("```", 1)[0].strip()
+    if not raw.startswith("{"):
+        i, j = raw.find("{"), raw.rfind("}")
+        if i >= 0 and j > i:
+            raw = raw[i:j+1]
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {"operator_match": False, "beaches": [], "_parse_error": raw[:300]}
+
+
+def insert_beach_queue_rows(op_id: int, op_name: str, op_state: str,
+                             op_city: str | None,
+                             catalog_url: str | None,
+                             beaches: list[dict],
+                             apply: bool = False) -> int:
+    """Insert extracted beaches into public.beach_discovery_queue.
+    Returns count of rows inserted. UNIQUE constraint dedupes within state."""
+    if not beaches:
+        return 0
+    if not apply:
+        return 0  # dry-run: count externally via len(beaches)
+    n_inserted = 0
+    conn = connect(); conn.set_client_encoding("UTF8")
+    try:
+        cur = conn.cursor()
+        for b in beaches:
+            name = (b.get("name") or "").strip()
+            if not name:
+                continue
+            # Same post-LLM guard as walk_state_park_beaches.py: require a
+            # water/beach stem in the name to filter out generic catalog
+            # text that snuck through the prompt.
+            if not re.search(
+                r"\b(beach|cove|bay|lagoon|swim|swimming|sand[ay]?)\b",
+                name, re.I):
+                continue
+            blurb = (b.get("blurb") or "").strip()
+            beach_url = b.get("url") or catalog_url
+            # parent_park_name for operator-catalog-sourced beaches is the
+            # operator's city (e.g., "Long Beach", "San Diego") since these
+            # are city/county beaches, not state-park beaches.
+            parent = op_city or op_name
+            try:
+                cur.execute("""
+                  INSERT INTO public.beach_discovery_queue
+                    (state, parent_park_name, parent_park_url,
+                     beach_name, verbatim_quote, source_url,
+                     source_handler, status, queue_meta)
+                  VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending', %s)
+                  ON CONFLICT
+                    (state, lower(parent_park_name),
+                     lower(beach_name), source_handler)
+                  DO UPDATE SET
+                    verbatim_quote = excluded.verbatim_quote,
+                    source_url = excluded.source_url,
+                    updated_at = now()
+                """, (op_state, parent, catalog_url, name, blurb,
+                      beach_url, "operator_catalog_v1",
+                      json.dumps({"operator_id": op_id,
+                                  "operator_name": op_name})))
+                n_inserted += 1
+            except Exception as e:
+                print(f"    [beach queue insert error] {name}: {e}")
+                continue
+        conn.commit()
+    finally:
+        conn.close()
+    return n_inserted
 
 
 def call_llm_enumerate_catalog(content: str, op_name: str,
@@ -401,8 +550,10 @@ def extract_one_park(park_fid: int, park_name: str, city: str | None,
 # ── Per-operator catalog walk ───────────────────────────────────────────
 
 def walk_one_operator(op_id: int, op_name: str, catalog_url: str | None,
-                      apply: bool, workers: int) -> dict:
-    """Returns per-op outcome dict."""
+                      apply: bool, workers: int,
+                      op_state: str = "CA") -> dict:
+    """Returns per-op outcome dict. op_state controls which state's
+    beach_discovery_queue receives extracted beaches."""
     def say(msg: str) -> None:
         with PRINT_LOCK:
             print(msg, flush=True)
@@ -412,7 +563,8 @@ def walk_one_operator(op_id: int, op_name: str, catalog_url: str | None,
 
     out = {"op_id": op_id, "catalog_fetched": False, "catalog_parks_listed": 0,
            "matched_to_gold": 0, "extracted": 0, "fetch_fails": 0,
-           "no_match": 0, "thin": 0, "unmatched_catalog_entries": 0}
+           "no_match": 0, "thin": 0, "unmatched_catalog_entries": 0,
+           "catalog_beaches_listed": 0, "beaches_queued": 0}
 
     # Step 1: fetch catalog (with web_search escalation when URL missing/dead/wrong)
     text = None
@@ -446,6 +598,42 @@ def walk_one_operator(op_id: int, op_name: str, catalog_url: str | None,
     parks = result.get('parks') or []
     out['catalog_parks_listed'] = len(parks)
     say(f"  catalog enumerated {len(parks)} parks")
+
+    # Step 2b: BEACH extraction on the same fetched content (additive pass
+    # per Franz "unify" 2026-05-27). Beaches are routed to
+    # beach_discovery_queue, NOT dog_park_discovery_queue.
+    try:
+        beach_result = call_llm_enumerate_beaches(
+            text, op_name, enable_web_search=use_web_search)
+        beaches = beach_result.get('beaches') or []
+        out['catalog_beaches_listed'] = len(beaches)
+        if beaches:
+            say(f"  catalog enumerated {len(beaches)} beaches")
+            # Find operator city from existing gold candidates (probed below)
+            # or query operator table directly.
+            op_city = None
+            conn2 = connect(); conn2.set_client_encoding("UTF8")
+            try:
+                cur2 = conn2.cursor()
+                cur2.execute(
+                    "SELECT address_city FROM public.dog_parks_gold "
+                    " WHERE inferred_operator_id=%s AND address_city IS NOT NULL "
+                    " LIMIT 1", (op_id,))
+                r = cur2.fetchone()
+                if r:
+                    op_city = r[0]
+            finally:
+                conn2.close()
+            n_queued = insert_beach_queue_rows(
+                op_id, op_name, op_state, op_city,
+                catalog_url_used, beaches, apply=apply)
+            out['beaches_queued'] = n_queued
+            if apply:
+                say(f"  queued {n_queued} beach rows to beach_discovery_queue")
+            else:
+                say(f"  (dry-run) would queue {len(beaches)} beach rows")
+    except Exception as e:
+        say(f"  [!] beach LLM error (non-fatal): {e}")
 
     # Step 3: fetch gold candidates for this operator
     conn = connect(); conn.set_client_encoding("UTF8")
@@ -622,7 +810,8 @@ def main() -> int:
         op_name = ops.get(op_id, f"op_{op_id}")
         result = walk_one_operator(op_id, op_name,
                                    None,   # T2: always None → forces web_search discovery
-                                   args.apply, args.workers)
+                                   args.apply, args.workers,
+                                   op_state=args.state)
         per_op.append(result)
         # Sleep between chunks (not after last op)
         if (i + 1) % args.chunk == 0 and (i + 1) < len(target_ops):
@@ -631,17 +820,23 @@ def main() -> int:
             time.sleep(args.sleep)
 
     print(f"\n{'='*70}\nSUMMARY:")
-    print(f"  {'op_id':>6} {'fetched':>8} {'listed':>7} {'matched':>8} {'extracted':>10} {'unmatched':>10}")
+    print(f"  {'op_id':>6} {'fetched':>8} {'parks':>6} {'matched':>8} "
+          f"{'extracted':>10} {'unmatched':>10} {'beaches':>8} {'queued':>7}")
     totals = {"catalog_parks_listed": 0, "matched_to_gold": 0, "extracted": 0,
-              "unmatched_catalog_entries": 0}
+              "unmatched_catalog_entries": 0,
+              "catalog_beaches_listed": 0, "beaches_queued": 0}
     for r in per_op:
         print(f"  {r['op_id']:>6} {'Y' if r['catalog_fetched'] else 'N':>8} "
-              f"{r['catalog_parks_listed']:>7} {r['matched_to_gold']:>8} "
-              f"{r['extracted']:>10} {r['unmatched_catalog_entries']:>10}")
-        for k in totals: totals[k] += r[k]
-    print(f"  {'TOTAL':>6} {'':>8} {totals['catalog_parks_listed']:>7} "
+              f"{r['catalog_parks_listed']:>6} {r['matched_to_gold']:>8} "
+              f"{r['extracted']:>10} {r['unmatched_catalog_entries']:>10} "
+              f"{r.get('catalog_beaches_listed',0):>8} "
+              f"{r.get('beaches_queued',0):>7}")
+        for k in totals: totals[k] += r.get(k, 0)
+    print(f"  {'TOTAL':>6} {'':>8} {totals['catalog_parks_listed']:>6} "
           f"{totals['matched_to_gold']:>8} {totals['extracted']:>10} "
-          f"{totals['unmatched_catalog_entries']:>10}")
+          f"{totals['unmatched_catalog_entries']:>10} "
+          f"{totals['catalog_beaches_listed']:>8} "
+          f"{totals['beaches_queued']:>7}")
     return 0
 
 

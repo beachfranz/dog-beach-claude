@@ -20,5 +20,11 @@
     "Baltimore", "Annapolis", "Frederick", "Rockville",
     "Gaithersburg", "Bowie", "Bethesda", "Silver Spring",
     "Columbia", "Towson"
+  ],
+  "UT": [
+    "Salt Lake City", "Provo", "Ogden", "Sandy",
+    "Orem", "West Valley City", "Layton", "West Jordan",
+    "Lehi", "Park City", "Saint George", "Logan",
+    "Draper", "Murray"
   ]
 }

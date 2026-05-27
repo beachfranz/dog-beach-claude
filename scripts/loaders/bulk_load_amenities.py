@@ -74,6 +74,28 @@ EXTRA_BBOX = {
     'IN': (37.77, -88.10, 41.76, -84.78),
     'OH': (38.40, -84.82, 41.98, -80.52),
     'PA': (39.72, -80.52, 42.27, -74.69),
+    # Inland (lake/reservoir beaches + dog parks) — added 2026-05-27 for full-50 coverage
+    'UT': (36.99, -114.07, 42.00, -109.04),
+    'AZ': (31.33, -114.82, 37.00, -109.05),
+    'NV': (35.00, -120.01, 42.00, -114.04),
+    'ID': (41.99, -117.24, 49.00, -111.04),
+    'MT': (44.36, -116.05, 49.00, -104.04),
+    'WY': (40.99, -111.06, 45.01, -104.05),
+    'CO': (36.99, -109.06, 41.00, -102.04),
+    'NM': (31.33, -109.05, 37.00, -103.00),
+    'ND': (45.94, -104.05, 49.00, -96.55),
+    'SD': (42.48, -104.06, 45.95, -96.44),
+    'NE': (39.99, -104.05, 43.00, -95.31),
+    'KS': (36.99, -102.05, 40.00, -94.59),
+    'OK': (33.62, -103.00, 37.00, -94.43),
+    'IA': (40.38, -96.64, 43.50, -90.14),
+    'MO': (35.99, -95.77, 40.61, -89.10),
+    'AR': (33.00, -94.62, 36.50, -89.65),
+    'KY': (36.50, -89.57, 39.15, -81.96),
+    'TN': (34.98, -90.31, 36.68, -81.65),
+    'WV': (37.20, -82.64, 40.64, -77.72),
+    'VT': (42.73, -73.44, 45.02, -71.46),
+    'DC': (38.79, -77.12, 38.99, -76.91),
 }
 PRIORITY_1 = list(EXTRA_BBOX.keys())
 
@@ -107,7 +129,8 @@ def main():
     ap.add_argument('--states', help='Comma-sep override')
     ap.add_argument('--rest-seconds', type=int, default=10,
                     help='Sleep between Overpass calls')
-    ap.add_argument('--storage-cap-mb', type=int, default=6500)
+    ap.add_argument('--storage-cap-mb', type=int, default=11000,
+                    help='Default 11000 MB (~1GB headroom on 12GB Supabase provision per Franz 2026-05-27)')
     ap.add_argument('--skip-threshold', type=int, default=1000)
     ap.add_argument('--dry-run', action='store_true')
     args = ap.parse_args()

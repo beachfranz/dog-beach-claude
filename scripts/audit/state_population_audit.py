@@ -85,15 +85,34 @@ def run(states: list[str], check_mode: bool = False,
                     f'{st}: not all 4 required external sources are loaded '
                     f'(have {r[0]["c"] if r else 0}/4)')
 
+    # Inland-state detection: if dog_parks_gold has rows but beaches_gold doesn't,
+    # treat 0-beach assertions as soft warnings instead of hard failures.
+    inland_states: set[str] = set()
+    for st in states:
+        b = fetch("select count(*) c from public.beaches_gold where state=%s and is_active",
+                  (st,))
+        d = fetch("select count(*) c from public.dog_parks_gold where state=%s and is_active",
+                  (st,))
+        if (b[0]['c'] if b else 0) == 0 and (d[0]['c'] if d else 0) > 0:
+            inland_states.add(st)
+
     hdr(f'B. CATALOG — beaches_gold ({", ".join(states)})')
+    states_seen_in_beaches: set[str] = set()
     for r in fetch(f"""select state, count(*) tot,
                               count(*) filter (where is_active) act,
                               count(*) filter (where scoring_tier IN ('daily','hourly') and is_active) score_act
                          from public.beaches_gold where state in ({s_clause})
                          group by 1 order by 1"""):
         print(f"  {r['state']}: total={r['tot']:>5} active={r['act']:>5} scoreable_active={r['score_act']:>5}")
-        if check_mode and r['act'] == 0:
+        states_seen_in_beaches.add(r['state'])
+        if check_mode and r['act'] == 0 and r['state'] not in inland_states:
             failures.append(f'{r["state"]}: 0 active beaches in beaches_gold')
+    # States with no row at all in beaches_gold (truly empty) also need the check
+    for st in states:
+        if st not in states_seen_in_beaches and st in inland_states:
+            print(f"  {st}: total=    0 active=    0 scoreable_active=    0  (inland — skipping beach assertions)")
+        elif st not in states_seen_in_beaches and check_mode:
+            failures.append(f'{st}: 0 active beaches in beaches_gold')
 
     hdr(f'C. POLICY TIER DISTRIBUTION — {", ".join(states)} active')
     tier_count_by_state: dict[str, dict[str, int]] = {st: {} for st in states}
@@ -108,7 +127,7 @@ def run(states: list[str], check_mode: bool = False,
         for st in states:
             tier12 = (tier_count_by_state.get(st, {}).get('1_off-leash', 0)
                       + tier_count_by_state.get(st, {}).get('2_on-leash', 0))
-            if tier12 == 0:
+            if tier12 == 0 and st not in inland_states:
                 failures.append(
                     f'{st}: 0 beaches in scoring scope (Tier 1+2). Likely '
                     f'missing state_dogs_policy seed or BEP drift (see issue #19/#20).')

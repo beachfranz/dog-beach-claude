@@ -268,15 +268,41 @@ def beach_inventory_check(
                 (state,),
             )
             n_active = cur.fetchone()[0]
+            cur.execute(
+                "SELECT COUNT(*) FROM public.dog_parks_gold "
+                " WHERE state = %s AND is_active",
+                (state,),
+            )
+            n_dog_parks = cur.fetchone()[0]
     finally:
         conn.close()
     if n_active == 0:
+        if n_dog_parks > 0:
+            # Inland state with dog parks but no beaches (UT, future AZ/CO/
+            # NM/ID/etc.). Legitimate — warn but don't halt. Downstream
+            # beach-specific assets handle 0-beach gracefully.
+            context.log.warning(
+                f"beaches_gold has 0 active beaches for {state} "
+                f"(but {n_dog_parks} dog parks). Treating as inland state."
+            )
+            return MaterializeResult(
+                metadata={
+                    "state": state,
+                    "active_beaches": MetadataValue.int(0),
+                    "active_dog_parks": MetadataValue.int(n_dog_parks),
+                    "inland_state": True,
+                }
+            )
         raise RuntimeError(
-            f"beaches_gold has 0 active beaches for {state} post-promote. "
-            f"Inspect arena data + promote_to_gold execution."
+            f"beaches_gold has 0 active beaches AND 0 dog parks for {state} "
+            f"post-promote. Inspect arena data + promote_to_gold execution."
         )
     return MaterializeResult(
-        metadata={"state": state, "active_beaches": MetadataValue.int(n_active)}
+        metadata={
+            "state": state,
+            "active_beaches": MetadataValue.int(n_active),
+            "active_dog_parks": MetadataValue.int(n_dog_parks),
+        }
     )
 
 

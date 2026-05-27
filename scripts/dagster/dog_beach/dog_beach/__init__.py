@@ -152,6 +152,11 @@ from .assets.dog_park_coverage import (
     dp_retry_no_match,
     dp_triage_needs_review,
 )
+from .assets.beach_discovery import (
+    beach_walk_state_parks,
+    beach_walk_wikipedia,
+    beach_ingest_queue,
+)
 from .checks.operator_seeding import operators_for_state_has_breadth
 from .checks.catalog_assembly import (
     promote_to_gold_complete,
@@ -175,6 +180,7 @@ from .schedules.time_based import (
     hourly_weather_grid_schedule,
     daily_weather_grid_inventory_schedule,
     monthly_dog_park_coverage_schedule,
+    annual_beach_discovery_schedule,
 )
 from .jobs import (
     state_launch_job,
@@ -188,6 +194,7 @@ from .jobs import (
     dog_park_coverage_job,
     dog_park_photo_job,
     beach_photo_job,
+    beach_discovery_job,
 )
 
 
@@ -280,6 +287,10 @@ defs = Definitions(
         dp_run_extractor,
         dp_retry_no_match,
         dp_triage_needs_review,
+        # Beach discovery pipeline (Franz 2026-05-27)
+        beach_walk_state_parks,
+        beach_walk_wikipedia,
+        beach_ingest_queue,
         # Dog-park photo pipeline (Franz 2026-05-26)
         dp_photos_flickr,
         dp_photos_wikimedia,
@@ -303,6 +314,7 @@ defs = Definitions(
         hourly_weather_grid_schedule,
         daily_weather_grid_inventory_schedule,
         monthly_dog_park_coverage_schedule,
+        annual_beach_discovery_schedule,
     ],
     jobs=[
         state_launch_job,
@@ -316,6 +328,7 @@ defs = Definitions(
         dog_park_coverage_job,
         dog_park_photo_job,
         beach_photo_job,
+        beach_discovery_job,
     ],
     asset_checks=[
         operators_for_state_has_breadth,

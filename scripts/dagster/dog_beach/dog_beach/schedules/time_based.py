@@ -27,6 +27,7 @@ from ..jobs import (
     weather_grid_refresh_job,
     weather_grid_inventory_job,
     dog_park_coverage_job,
+    beach_discovery_job,
 )
 
 
@@ -136,4 +137,33 @@ def monthly_dog_park_coverage_schedule(context: ScheduleEvaluationContext):
         yield RunRequest(
             partition_key=state,
             run_key=f"dpcov-{state}-{context.scheduled_execution_time.date().isoformat()}",
+        )
+
+
+# ── Beach discovery (annual per Franz 2026-05-27) ──────────────────────
+# Beach discovery primarily runs when a state comes on-line via
+# state_launch_job. This schedule re-walks each state once per year to
+# pick up new beaches added to state-park sites or Wikipedia since the
+# initial launch. State-park inventories change slowly so annual is the
+# right cadence.
+
+@schedule(
+    cron_schedule="0 9 15 1 *",  # Jan 15, 09:00 UTC — annual
+    job=beach_discovery_job,
+    default_status=DefaultScheduleStatus.STOPPED,
+    description=(
+        "ANNUAL re-walk of beach-discovery walkers per state (state-park "
+        "+ Wikipedia + ingest). Default STOPPED — toggle ON when ready. "
+        "Cron: Jan 15 09:00 UTC. Cost ~$12.50/year for all 50 states "
+        "(~$0.25/state). Per Franz 2026-05-27 — state-park sites + "
+        "Wikipedia articles change slowly enough that annual is sufficient. "
+        "First-time state coverage happens in state_launch_job."
+    ),
+)
+def annual_beach_discovery_schedule(context: ScheduleEvaluationContext):
+    from ..partitions import state_partitions
+    for state in state_partitions.get_partition_keys():
+        yield RunRequest(
+            partition_key=state,
+            run_key=f"beach-disc-{state}-{context.scheduled_execution_time.date().isoformat()}",
         )

@@ -333,6 +333,121 @@ def _extract(image_url: str, entity_name: str, description: str,
     return parsed, msg.usage.input_tokens, msg.usage.output_tokens
 
 
+# ─── Batched (multi-image per Haiku call) ─────────────────────────────────
+
+def _parse_json_array(raw: str) -> list:
+    if raw.startswith("```"):
+        raw = raw.strip("`").lstrip("json").strip()
+    return json.loads(raw)
+
+
+def _describe_batch(specs: list[dict]) -> tuple[list[str], int, int]:
+    """Pass 1 batched: one Haiku call describes N images.
+    specs = [{'url':..., 'name':..., 'label':...}, ...]
+    Returns (descriptions_in_order, in_tok, out_tok)."""
+    content: list[dict] = []
+    for i, s in enumerate(specs):
+        content.append({"type": "text",
+                        "text": f"[Image {i}] supposedly of {s['name']}:"})
+        content.append({"type": "image", "source": _image_source(s["url"])})
+    content.append({"type": "text", "text": (
+        f"Above are {len(specs)} images, indexed 0..{len(specs)-1}. "
+        "For each image, write a 1-2 sentence plain description focused on "
+        "the main subject and setting. Do not speculate about whether each is "
+        "actually the location it's supposedly of. "
+        f"Return ONLY a JSON array of {len(specs)} objects in order, "
+        '[{"i":0,"description":"..."}, {"i":1,"description":"..."}, ...]. '
+        "No prose, no markdown fences.")})
+    msg = _client.messages.create(
+        model=MODEL,
+        max_tokens=140 * len(specs),
+        messages=[{"role": "user", "content": content}],
+    )
+    raw = "".join(b.text for b in msg.content if b.type == "text").strip()
+    arr = _parse_json_array(raw)
+    if not isinstance(arr, list) or len(arr) != len(specs):
+        raise RuntimeError(f"describe_batch returned {len(arr) if isinstance(arr,list) else type(arr).__name__}, expected {len(specs)}")
+    descs = [str(o.get("description", "")).strip() for o in arr]
+    return descs, msg.usage.input_tokens, msg.usage.output_tokens
+
+
+def _extract_batch(specs: list[dict], descriptions: list[str]
+                   ) -> tuple[list[dict], int, int]:
+    """Pass 2 batched: one Haiku call returns structured tags for N images."""
+    content: list[dict] = []
+    for i, s in enumerate(specs):
+        label_tc = s["label"].title()
+        content.append({"type": "text", "text": (
+            f"[Image {i}] {label_tc} context: {s['name']}. "
+            f"Initial description: {descriptions[i]}")})
+        content.append({"type": "image", "source": _image_source(s["url"])})
+    content.append({"type": "text", "text": (
+        f"Above are {len(specs)} images, each with context + initial description. "
+        + _EXTRACT_PROMPT + "\n\n"
+        f"Return ONLY a JSON array of {len(specs)} objects in image order, "
+        '[{"i":0, ...tag fields...}, {"i":1, ...}, ...]. No prose, no markdown fences.')})
+    msg = _client.messages.create(
+        model=MODEL,
+        max_tokens=420 * len(specs),
+        messages=[{"role": "user", "content": content}],
+    )
+    raw = "".join(b.text for b in msg.content if b.type == "text").strip()
+    arr = _parse_json_array(raw)
+    if not isinstance(arr, list) or len(arr) != len(specs):
+        raise RuntimeError(f"extract_batch returned {len(arr) if isinstance(arr,list) else type(arr).__name__}, expected {len(specs)}")
+    return arr, msg.usage.input_tokens, msg.usage.output_tokens
+
+
+def tag_batch(specs: list[dict], retries: int = 2
+              ) -> list[tuple[dict | None, dict | None, str | None]]:
+    """Tag a batch of N photos in 2 Haiku calls (vs 2N).
+    Returns list aligned to specs: (tags, usage, err_msg).
+    On batch failure, falls back to per-photo tag_photo() for each spec."""
+    last_err = None
+    for attempt in range(retries + 1):
+        try:
+            descs, d_in, d_out = _describe_batch(specs)
+            tags_list, e_in, e_out = _extract_batch(specs, descs)
+            out: list[tuple[dict | None, dict | None, str | None]] = []
+            # Split token usage evenly across N — approximation.
+            per_in = (d_in + e_in) // max(1, len(specs))
+            per_out = (d_out + e_out) // max(1, len(specs))
+            for i, s in enumerate(specs):
+                tags = tags_list[i]
+                tags["description"] = descs[i]
+                tags["model"] = MODEL
+                tags["schema_version"] = SCHEMA_VERSION
+                tags["tagged_at"] = datetime.now(timezone.utc).isoformat()
+                out.append((tags,
+                            {"input_tokens": per_in, "output_tokens": per_out},
+                            None))
+            return out
+        except Exception as e:
+            last_err = e
+            msg_s = str(e)
+            # Non-recoverable on any image → can't retry batch; fall back to per-photo.
+            if (msg_s.startswith("bad_url:")
+                    or "image too large" in msg_s
+                    or "exceeds 5 MB" in msg_s):
+                break
+            if attempt < retries:
+                wait = 3 * (2 ** attempt)
+                print(f"    batch retry {attempt+1}/{retries} after {wait}s: {msg_s[:120]}",
+                      flush=True)
+                time.sleep(wait)
+    # Fall back to per-photo so one bad image doesn't sink the rest.
+    print(f"    batch failed ({last_err}) — falling back to per-photo",
+          flush=True)
+    out = []
+    for s in specs:
+        try:
+            tags, usage = tag_photo(s["url"], s["name"], entity_label=s["label"])
+            out.append((tags, usage, None))
+        except Exception as e:
+            out.append((None, None, str(e)))
+    return out
+
+
 # ─── Per-photo driver ─────────────────────────────────────────────────────
 
 def tag_photo(image_url: str, entity_name: str, retries: int = 3,
@@ -391,6 +506,10 @@ def main():
                     help=f"Hard stop if est cost exceeds (default ${DEFAULT_BUDGET_USD})")
     ap.add_argument("--workers", type=int, default=1,
                     help="Concurrent vision-tag workers (default 1; backfill should use 5-10)")
+    ap.add_argument("--batch-size", type=int, default=4,
+                    help="Photos per Haiku call (default 4). 1=legacy per-photo. "
+                         "Batching turns 2N calls into 2 calls per N photos = ~Nx wall-clock "
+                         "speedup. Falls back to per-photo on batch failure.")
     ap.add_argument("--source", default=None,
                     help="Comma-separated list of bp.source values to limit to "
                          "(e.g. 'flickr' or 'flickr,ccc'). Lets two processes run "
@@ -499,7 +618,8 @@ def main():
             nonlocal_state["cur"] = nonlocal_state["conn"].cursor()
             nonlocal_state["cur"].execute(sql, params)
 
-    def process(p):
+    def process_one(p):
+        """Single-photo path (used for batch_size=1 + audit mode)."""
         url = p["thumb_url"] or p["image_url"]
         try:
             tags, usage = tag_photo(url, p["entity_name"] or f"a {entity_label}", entity_label=entity_label)
@@ -527,30 +647,81 @@ def main():
                   f"feat={tags.get('landscape_features')}", flush=True)
             print(f"      desc: {tags.get('description', '')[:160]}", flush=True)
             return None
-        return (p["id"], tags, d)
+        return [(p["id"], tags, d)]
 
-    if args.workers <= 1:
-        # Sequential path
-        for p in targets:
-            r = process(p)
-            if r is None: continue
-            pid, tags, d = r
-            _safe_update(tags, pid)
-            if d % 20 == 0:
-                nonlocal_state["conn"].commit()
-                _progress(state, len(targets), t0)
-            time.sleep(0.15)
-    else:
-        # Parallel: workers pool, single DB writer in main thread.
-        # Tag → result queue (via Future); main commits as they land.
-        with ThreadPoolExecutor(max_workers=args.workers) as pool:
-            futures = {pool.submit(process, p): p for p in targets}
-            for fut in as_completed(futures):
-                r = fut.result()
-                if r is None: continue
-                pid, tags, d = r
+    def process_batch(batch):
+        """Batched path: N photos → 2 Haiku calls. Returns list of (pid, tags, d_idx)
+        for successful tags, plus side-effects to state for errors."""
+        specs = [{"url": (p["thumb_url"] or p["image_url"]),
+                  "name": p["entity_name"] or f"a {entity_label}",
+                  "label": entity_label} for p in batch]
+        results = tag_batch(specs)
+        out: list[tuple] = []
+        for p, (tags, usage, err) in zip(batch, results):
+            with lock:
+                if err is not None:
+                    state["err"] += 1
+                    state["done"] += 1
+                    d = state["done"]
+                    print(f"  [{d}/{len(targets)}] id={p['id']} ERR: {err}", flush=True)
+                else:
+                    state["ok"] += 1
+                    state["in"] += usage["input_tokens"]
+                    state["out"] += usage["output_tokens"]
+                    state["done"] += 1
+                    d = state["done"]
+            if tags is None:
+                continue
+            if args.audit:
+                print(f"  [{d}/{len(targets)}] id={p['id']}  "
+                      f"dog={tags.get('has_dog')}  scene={tags.get('scene')}  "
+                      f"q={tags.get('quality_issue')}", flush=True)
+                continue
+            out.append((p["id"], tags, d))
+        return out
+
+    bs = max(1, args.batch_size)
+    if bs == 1:
+        # Legacy per-photo path
+        if args.workers <= 1:
+            for p in targets:
+                r = process_one(p)
+                if not r: continue
+                pid, tags, d = r[0]
                 _safe_update(tags, pid)
                 if d % 20 == 0:
+                    nonlocal_state["conn"].commit()
+                    _progress(state, len(targets), t0)
+                time.sleep(0.15)
+        else:
+            with ThreadPoolExecutor(max_workers=args.workers) as pool:
+                futures = {pool.submit(process_one, p): p for p in targets}
+                for fut in as_completed(futures):
+                    r = fut.result()
+                    if not r: continue
+                    pid, tags, d = r[0]
+                    _safe_update(tags, pid)
+                    if d % 20 == 0:
+                        nonlocal_state["conn"].commit()
+                        _progress(state, len(targets), t0)
+    else:
+        # Batched path: group targets into chunks of bs, dispatch.
+        print(f"[vision] batch_size={bs} → ~{(len(targets)+bs-1)//bs} batches", flush=True)
+        batches = [targets[i:i+bs] for i in range(0, len(targets), bs)]
+        if args.workers <= 1:
+            for b in batches:
+                results = process_batch(b)
+                for pid, tags, d in results:
+                    _safe_update(tags, pid)
+                nonlocal_state["conn"].commit()
+                _progress(state, len(targets), t0)
+        else:
+            with ThreadPoolExecutor(max_workers=args.workers) as pool:
+                futures = {pool.submit(process_batch, b): b for b in batches}
+                for fut in as_completed(futures):
+                    results = fut.result()
+                    for pid, tags, d in results:
+                        _safe_update(tags, pid)
                     nonlocal_state["conn"].commit()
                     _progress(state, len(targets), t0)
 

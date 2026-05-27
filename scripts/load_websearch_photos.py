@@ -44,7 +44,7 @@ from urllib.parse import urlparse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scripts.common.supa import supa
-from scripts._photo_filters import ENTITIES
+from scripts._photo_filters import ENTITIES, tight_name_match
 
 TAVILY_KEY = os.environ.get("TAVILY_API_KEY")
 if not TAVILY_KEY:
@@ -113,11 +113,17 @@ def select_targets(args) -> list[dict]:
     for r in (rows or []):
         name = r.get("display_name_override") or r.get("name")
         city = r.get("address_city") or r.get("county_name")
+        # Centroid for tight-name-match → photo lat/lng stamping.
+        # Beach uses nav_lat/nav_lon (point-on-surface); dog_park uses lat/lon.
+        lat = r.get("nav_lat") if r.get("nav_lat") is not None else r.get("lat")
+        lon = r.get("nav_lon") if r.get("nav_lon") is not None else r.get("lon")
         out.append({
             "fid": r["fid"],
             "name": name,
             "city": city,
             "state": r.get("state"),
+            "lat": lat,
+            "lon": lon,
         })
     return out
 
@@ -125,8 +131,18 @@ def select_targets(args) -> list[dict]:
 # ─── Persistence ──────────────────────────────────────────────────────────
 
 def replace_websearch(fid: int, images: list[dict], results: list[dict],
-                      entity: str = "dog_park") -> int:
+                      entity: str = "dog_park",
+                      entity_name: str | None = None,
+                      entity_lat: float | None = None,
+                      entity_lon: float | None = None) -> int:
     """Replace uncurated websearch rows for this entity+fid.
+
+    Centroid attribution: when entity_name/lat/lon are provided AND a
+    photo's description+page_url contains all distinctive name tokens,
+    we stamp entity_lat/lon on the row (with distance_m=0). Photos that
+    don't pass the tight match are still inserted but with NULL lat/lng
+    — curate gates them out, which is the correct outcome for off-topic
+    websearch hits.
 
     Returns number of rows inserted. Curated rows are preserved.
     """
@@ -135,6 +151,7 @@ def replace_websearch(fid: int, images: list[dict], results: list[dict],
     ent = ENTITIES[entity]
     photo_table = ent["photo_table"]
     fk_col = ent["fk_col"]
+    can_centroid = (entity_name and entity_lat is not None and entity_lon is not None)
     # Wipe uncurated previous run results first
     supa(f"/rest/v1/{photo_table}", method="DELETE", params={
         fk_col:        f"eq.{fid}",
@@ -167,7 +184,7 @@ def replace_websearch(fid: int, images: list[dict], results: list[dict],
             host = ""
         # Prefer matching page from same host; else the image URL itself
         page_url = result_pages_by_host.get(host) or url
-        rows.append({
+        row = {
             fk_col:           fid,
             "source":         "websearch",
             "external_id":    f"websearch:{url}",
@@ -182,7 +199,18 @@ def replace_websearch(fid: int, images: list[dict], results: list[dict],
                 "host": host,
                 "rank": i,
             },
-        })
+        }
+        # Tight-match centroid attribution. Without ALL distinctive name
+        # tokens present in haystack (desc+page_url+host), photo stays
+        # NULL-coord and curate skips it — correct outcome for off-topic
+        # web-search hits like "Pinterest pin titled 'beach'".
+        if can_centroid:
+            haystack = " ".join(filter(None, [desc or "", page_url or "", host or ""]))
+            if tight_name_match(entity_name, haystack):
+                row["lat"] = entity_lat
+                row["lng"] = entity_lon
+                row["distance_m"] = 0
+        rows.append(row)
 
     if rows:
         supa(f"/rest/v1/{photo_table}", method="POST", body=rows,
@@ -230,7 +258,11 @@ def main():
             r = tavily_image_search(query, k=args.per_entity)
             images = r.get("images") or []
             results = r.get("results") or []
-            n = replace_websearch(b["fid"], images, results, entity=args.entity)
+            n = replace_websearch(b["fid"], images, results,
+                                  entity=args.entity,
+                                  entity_name=b["name"],
+                                  entity_lat=b.get("lat"),
+                                  entity_lon=b.get("lon"))
 
             with lock:
                 state["saved"] += n

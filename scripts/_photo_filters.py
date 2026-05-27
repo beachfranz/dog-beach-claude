@@ -68,6 +68,30 @@ def is_wrong_beach(alt_text: str, target_tokens: set[str]) -> bool:
     return True  # Caption names a different specific beach
 
 
+def tight_name_match(entity_name: str, haystack: str) -> bool:
+    """Strict centroid-attribution gate for non-geo photo sources
+    (websearch, unsplash). Returns True iff the haystack (description +
+    page_url + host) contains ALL distinctive tokens from entity_name.
+
+    "Distinctive" = name tokens minus _GENERIC_TOKENS (beach/park/bay/etc).
+    If the name has zero distinctive tokens (e.g., "Main Beach"), returns
+    False — the name is too generic to safely centroid-attribute.
+
+    Used by load_websearch_photos + backfill scripts to decide whether
+    to stamp the beach's centroid (lat/lng/distance_m=0) on a photo
+    whose source didn't supply GPS. Without this gate we'd happily
+    attribute Pinterest pins of random beaches to whatever fid we
+    happened to query for.
+    """
+    if not entity_name or not haystack:
+        return False
+    tokens = beach_name_tokens(entity_name)
+    if not tokens:
+        return False
+    hay_words = {w.lower() for w in re.findall(r"[A-Za-z]+", haystack)}
+    return tokens.issubset(hay_words)
+
+
 def haversine_m(la1: float, lo1: float, la2: float, lo2: float) -> float:
     from math import radians, sin, cos, asin, sqrt
     la1, lo1, la2, lo2 = map(radians, [la1, lo1, la2, lo2])
@@ -268,7 +292,7 @@ ENTITIES = {
         "table":             "beaches_gold",
         "fk_col":            "arena_group_id",
         "photo_table":       "beach_photos",
-        "select_fields":     "fid,name,display_name_override,county_name,state,scoring_tier",
+        "select_fields":     "fid,name,display_name_override,county_name,state,scoring_tier,nav_lat,nav_lon",
         "has_lat_lon":       False,    # lat/lng via get_beach_info RPC
         "lat_lon_rpc":       "get_beach_info",
         "supports_agencies":  True,

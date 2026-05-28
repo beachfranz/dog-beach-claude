@@ -165,8 +165,12 @@ function buildPrompt(
     if (now.wind_speed != null)   conditions.push(`wind ${Math.round(now.wind_speed)}mph`);
     if (now.uv_index != null)     conditions.push(`UV ${Number(now.uv_index).toFixed(1)}`);
     if (now.precip_chance != null) conditions.push(`rain ${Math.round(now.precip_chance)}%`);
-    if (now.asphalt_temp != null && now.asphalt_temp >= 105)
-      conditions.push(`PAVEMENT HOT (~${Math.round(now.asphalt_temp)}°F) — paw risk`);
+    // Pavement-hot threshold = 115°F (matches asphalt penalty curve start).
+    // 125°F+ is the burn-risk gate; flag explicitly when there.
+    if (now.asphalt_temp != null && now.asphalt_temp >= 125)
+      conditions.push(`PAVEMENT BURN-RISK (~${Math.round(now.asphalt_temp)}°F) — keep paws OFF`);
+    else if (now.asphalt_temp != null && now.asphalt_temp >= 115)
+      conditions.push(`pavement warm (~${Math.round(now.asphalt_temp)}°F)`);
   } else if (today) {
     if (today.avg_temp != null) conditions.push(`avg ${Math.round(today.avg_temp)}°F`);
     if (today.avg_wind != null) conditions.push(`wind ${Math.round(today.avg_wind)}mph`);
@@ -180,12 +184,16 @@ function buildPrompt(
   // Pack-list suggestions — concrete items the LLM can name.
   // Dog park staples + condition-triggered extras.
   const pack: string[] = [];
+  // Pack-list thresholds aligned with v2 scoring bands:
+  //   asphalt 115+°F → paw concern   (burn-risk gate at 125)
+  //   UV 8+         → very-high tier, shade matters
+  //   feels-like 90+→ active-play heat-stroke risk; 50°F → cold penalty start
   pack.push("poop bags");
   if (water !== true) pack.push("water bottle and bowl");
-  if (now?.asphalt_temp != null && now.asphalt_temp >= 105) pack.push("paw boots or stick to grass");
+  if (now?.asphalt_temp != null && now.asphalt_temp >= 115) pack.push("paw boots or stick to grass");
   if (now?.uv_index != null && now.uv_index >= 8) pack.push("shade for breaks");
   if (now?.feels_like != null && now.feels_like >= 90) pack.push("cooling towel");
-  if (now?.feels_like != null && now.feels_like < 40) pack.push("a jacket for short-coat dogs");
+  if (now?.feels_like != null && now.feels_like < 50) pack.push("a jacket for short-coat dogs");
   if (fence === false) pack.push("long line as recall backup");
   pack.push("a favorite ball or tug toy");
 
@@ -196,6 +204,13 @@ function buildPrompt(
   if (fence === true) activities.push("safe fetch off-leash");
   else activities.push("fetch with the long line in case recall slips");
   if (water === true) activities.push("a fresh-water break at the on-site fountain");
+  // v2 amenity additions (Franz 2026-05-27 LATE)
+  if (dp?.has_agility === true) activities.push("a turn on the agility course");
+  if (dp?.has_water_play === true) activities.push("a splash-pad cool-down");
+  if (dp?.has_shade === true
+      && ((now?.uv_index ?? 0) >= 6 || (now?.feels_like ?? 0) >= 80))
+    activities.push("breaks in the shade between zoomies");
+  if (dp?.has_picnic_tables === true) activities.push("a post-romp picnic at the tables");
   activities.push("zoomies with new dog friends");
   if (dp?.lighting === true) activities.push("evening visit under the lights");
 
@@ -218,10 +233,17 @@ function buildPrompt(
     `- BOLD THE TIME WINDOW by wrapping it in **markdown asterisks**, e.g. **${window}**. Don't bold anything else.`,
     `- Weave 2-3 activities naturally from this list — DON'T list them, DON'T invent new ones: ${activities.join(" · ")}.`,
     `- Weave 2-3 pack items concretely from this list — DON'T list them, DON'T invent gear: ${pack.join(" · ")}.`,
-    `- Address active cautions with CONCRETE practical guidance:`,
-    `    • hot pavement → "pavement's hot — booties or run on grass"`,
-    `    • high UV → "sun's punching — bring shade and water more often"`,
-    `    • high wind → "wind's up, secure light gear and watch for blowing debris"`,
+    `- Address active cautions with CONCRETE practical guidance (thresholds match v2 scoring bands):`,
+    `    • asphalt 115-124°F (warm) → "pavement's warming up — stick to grass on hot afternoons"`,
+    `    • asphalt 125°F+ (burn-risk gate) → "DON'T walk on asphalt — booties or carry to grass, paws will burn"`,
+    `    • UV 6-7 (high) → "sun's strong — shade breaks every 15 min"`,
+    `    • UV 8-10 (very high) → "intense sun — minimize bare-paw pavement time, frequent water"`,
+    `    • UV 11+ (extreme, gate) → "extreme UV — keep it brief and seek shade constantly"`,
+    `    • wind 13-18mph (nuisance) → "breezy enough to blow papers — secure light gear"`,
+    `    • wind 19-24mph → "fresh wind discouraging activity — watch for blowing debris"`,
+    `    • wind 25mph+ (gale) → "wind's a real problem — light dogs can get spooked, keep the leash handy"`,
+    `    • feels-like ≤50°F → "chilly for short-coat dogs — jacket recommended"`,
+    `    • feels-like ≥95°F (caution) → "heat-stroke risk for active play — short sessions, lots of water"`,
     `    • unfenced → "no perimeter fence — keep the long line on until you read the dogs already there"`,
     `- NEVER suggest swimming or sand/surf activity (this is a DOG PARK, not a beach).`,
     `- NEVER suggest off-leash if the park has unfenced=true unless you also mention the long line.`,

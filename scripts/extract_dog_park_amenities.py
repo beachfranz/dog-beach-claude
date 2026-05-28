@@ -109,7 +109,19 @@ SOURCE PAGE CONTENT:
 
 PARK: {name} ({city}, CA)
 
-Extract the following 13 fields about THIS specific dog park. Return null if not stated. For booleans, only true/false when the page explicitly says so.
+Extract the following 17 fields about THIS specific dog park. Return null if not stated. For booleans, only true/false when the page explicitly says so.
+
+Hints for the new amenity booleans:
+  - has_shade:        meaningful tree canopy, shade sails, or shaded structures
+                      covering some of the play area. Casual "a few trees"
+                      mentions don't qualify; needs intentional shade.
+  - has_agility:      agility equipment such as jumps, tunnels, weave poles,
+                      A-frame, balance beam, dog-walks, etc.
+  - has_water_play:   splash pad, dog fountain, swimmable pond, or any
+                      cooling water feature dogs can interact with. Drinking
+                      bowls alone do NOT count (those are has_drinking_water).
+  - has_picnic_tables:picnic tables (not just benches) where owners can sit
+                      and eat. Single benches alone don't qualify.
 
 Return JSON exactly in this flat shape (no nested blocks):
 {{
@@ -124,6 +136,10 @@ Return JSON exactly in this flat shape (no nested blocks):
   "small_dog_area":     <true|false|null>,
   "large_dog_area":     <true|false|null>,
   "lighting":           <true|false|null>,
+  "has_shade":          <true|false|null>,
+  "has_agility":        <true|false|null>,
+  "has_water_play":     <true|false|null>,
+  "has_picnic_tables":  <true|false|null>,
   "surface":            <"grass"|"dirt"|"wood_chips"|"sand"|"decomposed_granite"|"mixed"|"artificial_turf"|null>,
   "description":        <1-3 sentences of honest descriptive prose per the rule above; null if nothing specific to say>,
   "cite_quote":         <ONE verbatim quote 50-300 chars supporting the above; MUST contain park name; null if no evidence>,

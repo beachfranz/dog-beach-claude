@@ -452,6 +452,7 @@
   /* Positive sub-components — drilldown of weather + features */
   .hourbar-seg.seg-fence     { background: var(--green); }   /* perimeter + gate */
   .hourbar-seg.seg-water     { background: #06b6d4; }        /* drinking water (cyan-500) */
+  .hourbar-seg.seg-shade     { background: #0f766e; }        /* shade (teal-700) — UV+temp scaled */
   .hourbar-seg.seg-comfort   { background: #86efac; }        /* grass + size (green-300) */
   .hourbar-seg.seg-temp      { background: var(--amber); }   /* feels-like bell */
   .hourbar-seg.seg-wind      { background: #14b8a6; }        /* wind bell (teal-500) */
@@ -507,6 +508,7 @@
   }
   .legend-swatch.seg-fence     { background: var(--green); }
   .legend-swatch.seg-water     { background: #06b6d4; }
+  .legend-swatch.seg-shade     { background: #0f766e; }
   .legend-swatch.seg-comfort   { background: #86efac; }
   .legend-swatch.seg-temp      { background: var(--amber); }
   .legend-swatch.seg-wind      { background: #14b8a6; }
@@ -748,9 +750,9 @@ function renderHourlyBars(p, nowH) {
   for (const h of hours) {
     const drivePos = Math.max(0, h.drive || 0);
     const driveNeg = Math.max(0, -(h.drive || 0));
-    const posTotal = (h.pos_fence || 0) + (h.pos_water || 0) + (h.pos_comfort || 0)
-                   + (h.pos_temp  || 0) + (h.pos_wind  || 0) + (h.pos_sky     || 0)
-                   + (h.pos_window || 0) + drivePos;
+    const posTotal = (h.pos_fence || 0) + (h.pos_water || 0) + (h.pos_shade || 0)
+                   + (h.pos_comfort || 0) + (h.pos_temp || 0) + (h.pos_wind || 0)
+                   + (h.pos_sky || 0) + (h.pos_window || 0) + drivePos;
     const negTotal = (h.neg_heat_uv || 0) + (h.neg_harsh || 0) + (h.neg_gotchas || 0) + driveNeg;
     if (posTotal > maxPos) maxPos = posTotal;
     if (negTotal > maxNeg) maxNeg = negTotal;
@@ -766,11 +768,12 @@ function renderHourlyBars(p, nowH) {
     const driveNeg = Math.max(0, -(h.drive || 0));
 
     // Positive segments (above axis). Order from axis up: amenity stack
-    // (fence → water → comfort), then weather stack (temp → wind → sky),
+    // (fence → water → shade → comfort), then weather stack (temp → wind → sky),
     // then window flag, then drive bonus capping the top.
     const posSegs = [
       ['seg-fence',    h.pos_fence   || 0],
       ['seg-water',    h.pos_water   || 0],
+      ['seg-shade',    h.pos_shade   || 0],
       ['seg-comfort',  h.pos_comfort || 0],
       ['seg-temp',     h.pos_temp    || 0],
       ['seg-wind',     h.pos_wind    || 0],
@@ -805,6 +808,7 @@ function renderHourlyBars(p, nowH) {
     const posParts = [];
     if (h.pos_fence)   posParts.push(`fence +${h.pos_fence}%`);
     if (h.pos_water)   posParts.push(`water +${h.pos_water}%`);
+    if (h.pos_shade)   posParts.push(`shade +${h.pos_shade}%`);
     if (h.pos_comfort) posParts.push(`comfort +${h.pos_comfort}%`);
     if (h.pos_temp)    posParts.push(`temp +${h.pos_temp}%`);
     if (h.pos_wind)    posParts.push(`wind +${h.pos_wind}%`);
@@ -857,6 +861,7 @@ function renderHourlyBars(p, nowH) {
   const posItems = [
     { cls: 'seg-fence',   label: 'fence',     show: hasPos('pos_fence') },
     { cls: 'seg-water',   label: 'water',     show: hasPos('pos_water') },
+    { cls: 'seg-shade',   label: 'shade',     show: hasPos('pos_shade') },
     { cls: 'seg-comfort', label: 'comfort',   show: hasPos('pos_comfort') },
     { cls: 'seg-temp',    label: 'temp',      show: hasPos('pos_temp') },
     { cls: 'seg-wind',    label: 'wind',      show: hasPos('pos_wind') },

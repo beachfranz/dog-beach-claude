@@ -152,6 +152,7 @@ from .assets.dog_park_coverage import (
     dp_retry_no_match,
     dp_triage_needs_review,
 )
+from .assets.dog_park_amenity_refresh import dp_amenity_reextract
 from .assets.beach_discovery import (
     beach_walk_state_parks,
     beach_walk_wikipedia,
@@ -287,6 +288,8 @@ defs = Definitions(
         dp_run_extractor,
         dp_retry_no_match,
         dp_triage_needs_review,
+        # Bulk amenity re-extraction (Franz 2026-05-27 LATE)
+        dp_amenity_reextract,
         # Beach discovery pipeline (Franz 2026-05-27)
         beach_walk_state_parks,
         beach_walk_wikipedia,

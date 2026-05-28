@@ -30,12 +30,19 @@ def _count_operator_posted_v2(state: str) -> int:
 
 
 def run_extractor(state: str, workers: int = 6, include_no_website: bool = True,
-                  apply: bool = True) -> dict:
+                  apply: bool = True, mode: str = "unsourced",
+                  limit: int | None = None) -> dict:
+    """Wrap extract_dog_park_amenities.py.
+
+    mode:
+      - 'unsourced' (default): parks without any source — initial state launch
+      - 'all_active':          all active parks in state regardless of source —
+                               use after prompt extensions (e.g. new amenity fields)
+      - 'retry_failed':        parks with the no-result sentinel as latest BEP row
+    """
     started = datetime.now(timezone.utc)
     n_v2_before = _count_operator_posted_v2(state)
 
-    # Defensive sys.path + importlib cache invalidation (Dagster namespace-
-    # package cache bug — same fix as walk.py).
     import importlib
     _repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, _repo)
@@ -46,12 +53,22 @@ def run_extractor(state: str, workers: int = 6, include_no_website: bool = True,
         args.append("--include-no-website")
     if apply:
         args.append("--apply")
+    if mode == "all_active":
+        args.append("--all-active")
+    elif mode == "retry_failed":
+        args.append("--retry-failed")
+    elif mode != "unsourced":
+        raise ValueError(f"Unknown extractor mode: {mode}")
+    if limit is not None:
+        args.extend(["--limit", str(limit)])
     exit_code, stdout = call_main(extract_main, "extract_dog_park_amenities.py", args)
 
     n_v2_after = _count_operator_posted_v2(state)
     return {
         "op": "run_extractor",
         "state": state,
+        "mode": mode,
+        "limit": limit,
         "exit_code": exit_code,
         "n_v2_before": n_v2_before,
         "n_v2_after": n_v2_after,

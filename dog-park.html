@@ -421,6 +421,23 @@
     cursor: help;
     position: relative;
   }
+  /* Closed-hour bar: muted hatch pattern, no positive/negative segments. */
+  .hourbar-col.bar-closed .hourbar-pos,
+  .hourbar-col.bar-closed .hourbar-neg {
+    background: repeating-linear-gradient(
+      45deg,
+      rgba(100,116,139,0.18) 0 3px,
+      rgba(100,116,139,0.32) 3px 6px);
+  }
+  .hourbar-col.bar-closed .hourbar-score { color: var(--text-muted); }
+  /* Closure-context line below chart legend */
+  .hourbars-closures {
+    margin-top: 6px;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
   .hourbar-score {
     height: 14px;
     flex: none;
@@ -750,12 +767,32 @@ function applyHourlyV2(payload) {
   }
   const score = current?.score ?? 0;
 
-  // If v2 returned its own best-window label, override the v1-derived
-  // headline rendered earlier by buildScoutCard. Keeps the headline in
-  // sync with the v2 chart scores (Franz 2026-05-27 LATE).
-  if (payload.best_window_v2_label) {
-    const headlineEl = document.querySelector('.besttime-headline');
-    if (headlineEl) headlineEl.textContent = payload.best_window_v2_label;
+  // If the current hour is closed, override headline with a "Closed right
+  // now — reopens at X" message. Otherwise prefer the v2 best-window label.
+  // Per Franz 2026-05-28 — hour-level closure honored, day still scored.
+  const headlineEl = document.querySelector('.besttime-headline');
+  if (headlineEl) {
+    const isNowClosed = current?.status === 'closed' || current?.is_closed === true;
+    if (isNowClosed) {
+      // Find the next open hour today (status != closed, score > 0)
+      const idx = hours.findIndex(h => h.local_hour === nowH);
+      let reopenLabel = null;
+      for (let i = idx + 1; i < hours.length; i++) {
+        if (hours[i].status !== 'closed' && !hours[i].is_closed) {
+          reopenLabel = hours[i].hour_label;
+          break;
+        }
+      }
+      headlineEl.textContent = reopenLabel
+        ? `Closed right now — reopens ${reopenLabel}`
+        : 'Closed for the rest of today';
+    } else if (payload.best_window_v2_label) {
+      headlineEl.textContent = payload.best_window_v2_label;
+    } else {
+      // No qualifying best window today (e.g. fully-closed day)
+      const anyOpen = hours.some(h => h.status !== 'closed' && !h.is_closed);
+      headlineEl.textContent = anyOpen ? 'Open today (no clear best window)' : 'Closed today';
+    }
   }
 
   // Header badge — colored chip indicating current-hour status.
@@ -851,23 +888,25 @@ function renderHourlyBars(p, nowH) {
       ? `<div class="hourbar-cap-marker"></div>` : '';
     const isNow = h.local_hour === nowH ? ' bar-now' : '';
 
-    // Tooltip — header + icon-and-value lines. Mirrors the chart:
-    // positives ascending (smallest at TOP, largest at bottom = at the
-    // visual axis), then negatives descending (largest at top = at the
-    // axis, smallest at bottom). Reading top-down crosses the axis where
-    // the biggest contributions are concentrated.
+    // Tooltip — header + icon-and-value lines. Mirrors the chart.
     const tipLines = [];
-    tipLines.push(`${h.hour_label}${h.gate_fired ? ' ⚠️ cap' : ''} · ${h.score ?? 0}`);
-    for (const d of [...posSorted].reverse()) tipLines.push(`${d.icon} +${d.val}%`);
-    for (const d of negSorted) tipLines.push(`${d.icon} −${d.val}%`);
+    if (h.status === 'closed' || h.is_closed === true) {
+      tipLines.push(`${h.hour_label} · 🚧 closed`);
+    } else {
+      tipLines.push(`${h.hour_label}${h.gate_fired ? ' ⚠️ cap' : ''} · ${h.score ?? 0}`);
+      for (const d of [...posSorted].reverse()) tipLines.push(`${d.icon} +${d.val}%`);
+      for (const d of negSorted) tipLines.push(`${d.icon} −${d.val}%`);
+    }
     const tip = tipLines.join('\n');
 
+    const isClosed = h.status === 'closed' || h.is_closed === true;
+    const closedClass = isClosed ? ' bar-closed' : '';
     const scoreClass = h.gate_fired ? 'hourbar-score score-cap' : 'hourbar-score';
-    const scoreText = (h.score != null) ? h.score : '';
-    return `<div class="hourbar-col${isNow}" data-tip="${escHtml(tip)}">
+    const scoreText = isClosed ? '' : (h.score != null ? h.score : '');
+    return `<div class="hourbar-col${isNow}${closedClass}" data-tip="${escHtml(tip)}">
       <div class="${scoreClass}">${scoreText}</div>
-      <div class="hourbar-pos">${capMarker}${posHtml}</div>
-      <div class="hourbar-neg">${negHtml}</div>
+      <div class="hourbar-pos">${isClosed ? '' : capMarker + posHtml}</div>
+      <div class="hourbar-neg">${isClosed ? '' : negHtml}</div>
     </div>`;
   }).join('');
 
@@ -918,6 +957,31 @@ function renderHourlyBars(p, nowH) {
        </div>`
     : '';
 
+  // Closure context — single line listing this park's recurring closures,
+  // rendered below the legend so users see the constraint without it gating
+  // the chart. Per Franz 2026-05-28 — hour-level only, no day-level rollup.
+  const closures = Array.isArray(p.closures) ? p.closures : [];
+  const closureLines = closures.map(c => {
+    const dayMap = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
+    const wd = dayMap[(c.weekday || '').toLowerCase()] || '?';
+    const reason = c.reason ? ` for ${c.reason.replace('_', ' ')}` : '';
+    if (c.kind === 'weekly') return `🚧 Closed ${wd}${reason}`;
+    if (c.kind === 'weekly_time') {
+      const fmt = (t) => {
+        if (!t) return '';
+        const [h, m] = t.split(':').map(Number);
+        const ampm = h >= 12 ? 'pm' : 'am';
+        const h12 = ((h + 11) % 12) + 1;
+        return m === 0 ? `${h12}${ampm}` : `${h12}:${String(m).padStart(2,'0')}${ampm}`;
+      };
+      return `🚧 Closed ${wd} ${fmt(c.start)}–${fmt(c.end)}${reason}`;
+    }
+    return null;
+  }).filter(Boolean);
+  const closuresHtml = closureLines.length
+    ? `<div class="hourbars-closures">${closureLines.map(l => `<div>${escHtml(l)}</div>`).join('')}</div>`
+    : '';
+
   return `<div class="hourbars-wrap">
     <div class="hourbars-meta">
       <span>Hourly score · open ${formatHour(p.open_hour)} – ${formatHour(p.close_hour)}</span>
@@ -935,6 +999,7 @@ function renderHourlyBars(p, nowH) {
     </div>
     <div class="hourbar-axis">${labels}</div>
     ${legendHtml}
+    ${closuresHtml}
   </div>`;
 }
 

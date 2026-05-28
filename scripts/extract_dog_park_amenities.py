@@ -197,7 +197,7 @@ def call_llm_amenities(content: str, name: str, city: str | None,
 
 def write_park_v1(cur, park_fid: int, source_url: str, confidence: float,
                   claimed: dict, cite: str | None, extraction_method: str) -> None:
-    """Single dpep row per park — field_group='park_v1', 13 fields in one
+    """Single dpep row per park — field_group='park_v1', 17 fields in one
     jsonb. Refined v2 shape (no per-field_group split for v1 — one source
     per park, no consensus needed)."""
     cur.execute("""
@@ -373,7 +373,7 @@ def extract_via_web_search(park_fid: int, name: str, city: str | None,
             f"per-park data. Use web_search to find AUTHORITATIVE info about "
             f"'{name}' dog park/play area in {city or 'California'}. "
             f"Prefer the operator's own .gov / .org pages over aggregators. "
-            f"Extract the 13 fields per the schema, with a verbatim cite quote."
+            f"Extract the 17 fields per the schema, with a verbatim cite quote."
         )
     else:
         # No website tag at all — start fresh from name + city
@@ -416,7 +416,7 @@ def extract_via_web_search(park_fid: int, name: str, city: str | None,
     extracted.pop('name_match', None)
     extracted.pop('confidence', None)
     claimed = {k: v for k, v in extracted.items() if v is not None}
-    say(f"    [+] [{park_fid}] (web_search) {len(claimed)}/13 fields: {sorted(claimed.keys())}")
+    say(f"    [+] [{park_fid}] (web_search) {len(claimed)}/17 fields: {sorted(claimed.keys())}")
 
     if apply and claimed:
         conn = connect(); conn.set_client_encoding("UTF8")
@@ -504,7 +504,7 @@ def process_park(p: dict, apply: bool) -> str:
             extracted.pop('name_match', None)
             extracted.pop('confidence', None)
             claimed = {k: v for k, v in extracted.items() if v is not None}
-            say(f"    [+] [{fid}] (host_section:{section_handler.__name__}) {len(claimed)}/13 fields: {sorted(claimed.keys())}")
+            say(f"    [+] [{fid}] (host_section:{section_handler.__name__}) {len(claimed)}/17 fields: {sorted(claimed.keys())}")
             if apply and claimed:
                 conn = connect(); conn.set_client_encoding("UTF8")
                 try:
@@ -598,7 +598,7 @@ def process_park(p: dict, apply: bool) -> str:
     extracted.pop('name_match', None)
     extracted.pop('confidence', None)
     claimed = {k: v for k, v in extracted.items() if v is not None}
-    say(f"    [+] [{fid}] {len(claimed)}/13 fields: {sorted(claimed.keys())}")
+    say(f"    [+] [{fid}] {len(claimed)}/17 fields: {sorted(claimed.keys())}")
 
     if apply and claimed:
         conn = connect(); conn.set_client_encoding("UTF8")

@@ -336,6 +336,23 @@ async function processPark(
     return { fid: park.fid, ok: false, error: String(err), phases };
   }
 
+  // Phase v2-best-window: overwrite the v1 best_window_label/start/end on
+  // each date with the v2-scored equivalent. Decoupled from the v1 status
+  // pipeline so a bug here can't block the daily refresh — fail soft.
+  try {
+    for (const d of dates) {
+      const { error: rpcErr } = await supabase.rpc(
+        "apply_v2_best_window_to_recommendations",
+        { p_fid: park.fid, p_date: d },
+      );
+      if (rpcErr) console.warn(`v2 best window apply failed fid=${park.fid} date=${d}: ${rpcErr.message}`);
+    }
+    phases.apply_v2_window = "ok";
+  } catch (err) {
+    console.warn(`v2 best window apply error fid=${park.fid}: ${err}`);
+    phases.apply_v2_window = "soft_error";
+  }
+
   return { fid: park.fid, ok: true, daysProcessed: dates.length, phases };
 }
 

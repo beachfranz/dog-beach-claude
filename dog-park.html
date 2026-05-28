@@ -450,25 +450,24 @@
   .hourbar-col.bar-now .hourbar-pos,
   .hourbar-col.bar-now .hourbar-neg { outline: 2px solid #0f172a; outline-offset: 1px; }
   .hourbar-seg { width: 100%; }
-  /* All positive sub-components → shades of green (Franz 2026-05-27 LATE).
-   * Different greens just for visual segmentation; semantic meaning is
-   * carried by tooltip + legend, not color. */
-  .hourbar-seg.seg-fence       { background: #15803d; }   /* green-700 */
-  .hourbar-seg.seg-water       { background: #14b8a6; }   /* teal-500 (blue-green) */
-  .hourbar-seg.seg-shade       { background: #166534; }   /* green-800 */
-  .hourbar-seg.seg-comfort     { background: #86efac; }   /* green-300 (light) */
-  .hourbar-seg.seg-agility     { background: #10b981; }   /* emerald-500 */
-  .hourbar-seg.seg-water-play  { background: #5eead4; }   /* teal-300 */
-  .hourbar-seg.seg-temp        { background: #65a30d; }   /* lime-600 */
-  .hourbar-seg.seg-wind        { background: #84cc16; }   /* lime-500 */
-  .hourbar-seg.seg-sky         { background: #a3e635; }   /* lime-400 */
-  .hourbar-seg.seg-window      { background: #34d399; }   /* emerald-400 */
-  .hourbar-seg.seg-drive       { background: #14532d; }   /* green-900 (darkest) */
-  /* All negative sub-components → shades of red. */
-  .hourbar-seg.seg-heat_uv     { background: #b91c1c; }   /* red-700 (deepest — danger) */
-  .hourbar-seg.seg-harsh       { background: #dc2626; }   /* red-600 */
-  .hourbar-seg.seg-gotchas     { background: #ef4444; }   /* red-500 */
-  .hourbar-seg.seg-drive-neg   { background: #fca5a5; }   /* red-300 (lightest) */
+  /* Rank-based shading at HALF saturation (Franz 2026-05-27 LATE).
+   * Tailwind blue / red HSL values with saturation × 0.5. Lightness
+   * preserved so the rank progression still reads dark→light. */
+  .hourbar-seg.pos-rank-1 { background: hsl(224, 32%, 33%); }  /* ≈ blue-900 desat — largest */
+  .hourbar-seg.pos-rank-2 { background: hsl(226, 35%, 40%); }  /* ≈ blue-800 desat */
+  .hourbar-seg.pos-rank-3 { background: hsl(224, 38%, 48%); }  /* ≈ blue-700 desat */
+  .hourbar-seg.pos-rank-4 { background: hsl(221, 42%, 53%); }  /* ≈ blue-600 desat */
+  .hourbar-seg.pos-rank-5 { background: hsl(217, 46%, 60%); }  /* ≈ blue-500 desat */
+  .hourbar-seg.pos-rank-6,
+  .hourbar-seg.pos-rank-7,
+  .hourbar-seg.pos-rank-8,
+  .hourbar-seg.pos-rank-9,
+  .hourbar-seg.pos-rank-10,
+  .hourbar-seg.pos-rank-11 { background: hsl(213, 47%, 68%); }  /* ≈ blue-400 desat */
+  .hourbar-seg.neg-rank-1 { background: hsl(0, 37%, 42%); }    /* ≈ red-700 desat — largest */
+  .hourbar-seg.neg-rank-2 { background: hsl(0, 36%, 51%); }    /* ≈ red-600 desat */
+  .hourbar-seg.neg-rank-3 { background: hsl(0, 42%, 60%); }    /* ≈ red-500 desat */
+  .hourbar-seg.neg-rank-4 { background: hsl(0, 45%, 71%); }    /* ≈ red-400 desat — smallest */
   /* Cap stripe at top of positive stack when safety gate fires */
   .hourbar-cap-marker {
     background: repeating-linear-gradient(
@@ -504,28 +503,16 @@
     display: inline-flex; align-items: center; gap: 4px;
     white-space: nowrap;
   }
-  .legend-swatch {
+  /* Legend uses per-component emoji icons (chart colors are rank-based
+   * per-chart, so a fixed-color swatch doesn't apply). */
+  .legend-icon {
     display: inline-block;
-    width: 10px; height: 10px;
-    border-radius: 2px;
+    font-size: 12px;
+    line-height: 1;
     vertical-align: middle;
     flex: none;
+    margin-right: 2px;
   }
-  .legend-swatch.seg-fence       { background: #15803d; }
-  .legend-swatch.seg-water       { background: #14b8a6; }
-  .legend-swatch.seg-shade       { background: #166534; }
-  .legend-swatch.seg-comfort     { background: #86efac; }
-  .legend-swatch.seg-agility     { background: #10b981; }
-  .legend-swatch.seg-water-play  { background: #5eead4; }
-  .legend-swatch.seg-temp        { background: #65a30d; }
-  .legend-swatch.seg-wind        { background: #84cc16; }
-  .legend-swatch.seg-sky         { background: #a3e635; }
-  .legend-swatch.seg-window      { background: #34d399; }
-  .legend-swatch.seg-drive       { background: #14532d; }
-  .legend-swatch.seg-heat_uv     { background: #b91c1c; }
-  .legend-swatch.seg-harsh       { background: #dc2626; }
-  .legend-swatch.seg-gotchas     { background: #ef4444; }
-  .legend-swatch.seg-drive-neg   { background: #fca5a5; }
   .hourbars-legend-sep {
     color: var(--text-muted);
     opacity: 0.5;
@@ -731,6 +718,14 @@ function applyHourlyV2(payload) {
   }
   const score = current?.score ?? 0;
 
+  // If v2 returned its own best-window label, override the v1-derived
+  // headline rendered earlier by buildScoutCard. Keeps the headline in
+  // sync with the v2 chart scores (Franz 2026-05-27 LATE).
+  if (payload.best_window_v2_label) {
+    const headlineEl = document.querySelector('.besttime-headline');
+    if (headlineEl) headlineEl.textContent = payload.best_window_v2_label;
+  }
+
   // Header badge — colored chip indicating current-hour status.
   // No number; the color (+ tooltip) carries the meaning.
   const badge = document.querySelector('.fit-badge');
@@ -796,27 +791,40 @@ function renderHourlyBars(p, nowH) {
       { cls: 'seg-gotchas',    icon: '⚠️', val: h.neg_gotchas || 0 },
       { cls: 'seg-drive-neg',  icon: '🚗', val: driveNeg },
     ];
-    // Sort both stacks by abs(value) desc so the biggest contribution
-    // sits closest to the axis. Same order drives chart + tooltip.
+    // Sort by abs(value) desc — rank-1 = largest contribution this chart,
+    // gets the darkest shade. Identity is conveyed by tooltip icon, not color.
     const posSorted = POS_DEFS.filter(d => d.val > 0).sort((a, b) => b.val - a.val);
     const negSorted = NEG_DEFS.filter(d => d.val > 0).sort((a, b) => b.val - a.val);
+    posSorted.forEach((d, i) => { d.rank = i + 1; });
+    negSorted.forEach((d, i) => { d.rank = i + 1; });
 
+    // VISUAL ORDER (reversed per Franz 2026-05-27 LATE): largest contribution
+    // sits CLOSEST TO THE AXIS, smaller contributions float to the outer
+    // edges. Reading from outer edge inward, both halves go small → large.
+    //   posHtml: column-reverse means first HTML child lands at the BOTTOM
+    //     of positive stack (= closest to axis). So we put largest FIRST
+    //     in HTML (posSorted is already largest-first).
+    //   negHtml: column means first HTML child lands at TOP of negative
+    //     stack (= closest to axis). Largest first too.
     const posHtml = posSorted
-      .map(d => `<div class="hourbar-seg ${d.cls}" style="height:${(d.val / POS_MAX * 100).toFixed(1)}%"></div>`)
+      .map(d => `<div class="hourbar-seg pos-rank-${d.rank}" style="height:${(d.val / POS_MAX * 100).toFixed(1)}%"></div>`)
       .join('');
     const negHtml = negSorted
-      .map(d => `<div class="hourbar-seg ${d.cls}" style="height:${(d.val / NEG_MAX * 100).toFixed(1)}%"></div>`)
+      .map(d => `<div class="hourbar-seg neg-rank-${d.rank}" style="height:${(d.val / NEG_MAX * 100).toFixed(1)}%"></div>`)
       .join('');
 
     const capMarker = h.gate_fired
       ? `<div class="hourbar-cap-marker"></div>` : '';
     const isNow = h.local_hour === nowH ? ' bar-now' : '';
 
-    // Tooltip — header + icon-and-value lines, sorted by abs() (same as chart).
-    // Each point = 1% of final score (bucket caps sum to 50/50).
+    // Tooltip — header + icon-and-value lines. Mirrors the chart:
+    // positives ascending (smallest at TOP, largest at bottom = at the
+    // visual axis), then negatives descending (largest at top = at the
+    // axis, smallest at bottom). Reading top-down crosses the axis where
+    // the biggest contributions are concentrated.
     const tipLines = [];
     tipLines.push(`${h.hour_label}${h.gate_fired ? ' ⚠️ cap' : ''} · ${h.score ?? 0}`);
-    for (const d of posSorted) tipLines.push(`${d.icon} +${d.val}%`);
+    for (const d of [...posSorted].reverse()) tipLines.push(`${d.icon} +${d.val}%`);
     for (const d of negSorted) tipLines.push(`${d.icon} −${d.val}%`);
     const tip = tipLines.join('\n');
 
@@ -846,28 +854,28 @@ function renderHourlyBars(p, nowH) {
   const hasDrivePos = hours.some(h => (h.drive || 0) > 0);
   const hasDriveNeg = hours.some(h => (h.drive || 0) < 0);
   const posItems = [
-    { cls: 'seg-fence',      label: 'fence',      show: hasPos('pos_fence') },
-    { cls: 'seg-water',      label: 'water',      show: hasPos('pos_water') },
-    { cls: 'seg-shade',      label: 'shade',      show: hasPos('pos_shade') },
-    { cls: 'seg-comfort',    label: 'comfort',    show: hasPos('pos_comfort') },
-    { cls: 'seg-agility',    label: 'agility',    show: hasPos('pos_agility') },
-    { cls: 'seg-water-play', label: 'water play', show: hasPos('pos_water_play') },
-    { cls: 'seg-temp',    label: 'temp',      show: hasPos('pos_temp') },
-    { cls: 'seg-wind',    label: 'wind',      show: hasPos('pos_wind') },
-    { cls: 'seg-sky',     label: 'sky',       show: hasPos('pos_sky') },
-    { cls: 'seg-window',  label: 'window',    show: hasPos('pos_window') },
-    { cls: 'seg-drive',   label: 'short drive', show: hasDrivePos },
+    { icon: '🚧', label: 'fence',       show: hasPos('pos_fence') },
+    { icon: '💧', label: 'water',       show: hasPos('pos_water') },
+    { icon: '🌳', label: 'shade',       show: hasPos('pos_shade') },
+    { icon: '🌿', label: 'comfort',     show: hasPos('pos_comfort') },
+    { icon: '🤸', label: 'agility',     show: hasPos('pos_agility') },
+    { icon: '💦', label: 'water play',  show: hasPos('pos_water_play') },
+    { icon: '🌡️', label: 'temp',        show: hasPos('pos_temp') },
+    { icon: '💨', label: 'wind',        show: hasPos('pos_wind') },
+    { icon: '☀️', label: 'sky',         show: hasPos('pos_sky') },
+    { icon: '⏰', label: 'window',      show: hasPos('pos_window') },
+    { icon: '🚗', label: 'short drive', show: hasDrivePos },
   ].filter(x => x.show);
   const negItems = [
-    { cls: 'seg-heat_uv',   label: 'heat / UV', show: hasPos('neg_heat_uv') },
-    { cls: 'seg-harsh',     label: 'harsh wx',  show: hasPos('neg_harsh') },
-    { cls: 'seg-gotchas',   label: 'gotchas',   show: hasPos('neg_gotchas') },
-    { cls: 'seg-drive-neg', label: 'long drive',show: hasDriveNeg },
+    { icon: '🔥', label: 'heat / UV',   show: hasPos('neg_heat_uv') },
+    { icon: '⛈️', label: 'harsh wx',    show: hasPos('neg_harsh') },
+    { icon: '⚠️', label: 'gotchas',     show: hasPos('neg_gotchas') },
+    { icon: '🚗', label: 'long drive',  show: hasDriveNeg },
   ].filter(x => x.show);
-  const swatch = (cls, label) =>
-    `<span class="hourbars-legend-label"><span class="legend-swatch ${cls}"></span>${label}</span>`;
-  const posLegend = posItems.map(i => swatch(i.cls, i.label)).join('');
-  const negLegend = negItems.map(i => swatch(i.cls, i.label)).join('');
+  const legendChip = (icon, label) =>
+    `<span class="hourbars-legend-label"><span class="legend-icon">${icon}</span>${label}</span>`;
+  const posLegend = posItems.map(i => legendChip(i.icon, i.label)).join('');
+  const negLegend = negItems.map(i => legendChip(i.icon, i.label)).join('');
   const legendHtml = (posItems.length || negItems.length)
     ? `<div class="hourbars-legend">
         ${posItems.length ? `<div class="hourbars-legend-group">+ ${posLegend}</div>` : ''}

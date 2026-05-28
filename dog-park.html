@@ -957,27 +957,12 @@ function renderHourlyBars(p, nowH) {
        </div>`
     : '';
 
-  // Closure context — single line listing this park's recurring closures,
-  // rendered below the legend so users see the constraint without it gating
-  // the chart. Per Franz 2026-05-28 — hour-level only, no day-level rollup.
+  // Closure context — single line(s) listing recurring closures, rendered
+  // below the legend so users see the constraint without it gating the
+  // chart. Handles all 4 closure kinds + optional seasonal MM-DD scope.
+  // Per Franz 2026-05-28.
   const closures = Array.isArray(p.closures) ? p.closures : [];
-  const closureLines = closures.map(c => {
-    const dayMap = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
-    const wd = dayMap[(c.weekday || '').toLowerCase()] || '?';
-    const reason = c.reason ? ` for ${c.reason.replace('_', ' ')}` : '';
-    if (c.kind === 'weekly') return `🚧 Closed ${wd}${reason}`;
-    if (c.kind === 'weekly_time') {
-      const fmt = (t) => {
-        if (!t) return '';
-        const [h, m] = t.split(':').map(Number);
-        const ampm = h >= 12 ? 'pm' : 'am';
-        const h12 = ((h + 11) % 12) + 1;
-        return m === 0 ? `${h12}${ampm}` : `${h12}:${String(m).padStart(2,'0')}${ampm}`;
-      };
-      return `🚧 Closed ${wd} ${fmt(c.start)}–${fmt(c.end)}${reason}`;
-    }
-    return null;
-  }).filter(Boolean);
+  const closureLines = closures.map(formatClosureLine).filter(Boolean);
   const closuresHtml = closureLines.length
     ? `<div class="hourbars-closures">${closureLines.map(l => `<div>${escHtml(l)}</div>`).join('')}</div>`
     : '';
@@ -1008,6 +993,60 @@ function formatHour(h) {
   const ampm = h >= 12 ? 'pm' : 'am';
   const h12 = ((h + 11) % 12) + 1;
   return `${h12}${ampm}`;
+}
+
+// Render one closures-jsonb entry as a human-readable line. Handles all
+// four kinds (weekly, weekly_time, daily_all, daily_time) and optional
+// seasonal scope (season_from_md/season_to_md or season_label). Shared
+// between dog-park and beach chart rendering.
+function formatClosureLine(c) {
+  if (!c || !c.kind) return null;
+  const DAY = { mon:'Mon', tue:'Tue', wed:'Wed', thu:'Thu', fri:'Fri', sat:'Sat', sun:'Sun' };
+  const MON = { '01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun',
+                '07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec' };
+  const fmtTime = (t) => {
+    if (!t) return '';
+    const [h, m] = t.split(':').map(Number);
+    const ampm = h >= 12 ? 'pm' : 'am';
+    const h12 = ((h + 11) % 12) + 1;
+    return m === 0 ? `${h12}${ampm}` : `${h12}:${String(m).padStart(2,'0')}${ampm}`;
+  };
+  const fmtMd = (md) => {
+    if (!md) return '';
+    const [m, d] = md.split('-');
+    return `${MON[m] || m} ${parseInt(d, 10)}`;
+  };
+  const reason = c.reason ? c.reason.replace(/_/g, ' ') : '';
+  const reasonClause = reason ? ` for ${reason}` : '';
+  // Prefer a richly-worded season_label when supplied (zone_rules carries them).
+  // Otherwise fall back to "<month> <day>–<month> <day>".
+  const seasonClause = c.season_label
+    ? ` · ${c.season_label}`
+    : (c.season_from_md && c.season_to_md
+        ? ` · ${fmtMd(c.season_from_md)}–${fmtMd(c.season_to_md)}`
+        : '');
+
+  if (c.kind === 'weekly') {
+    return `🚧 Closed ${DAY[(c.weekday||'').toLowerCase()] || '?'}${reasonClause}${seasonClause}`;
+  }
+  if (c.kind === 'weekly_time') {
+    return `🚧 Closed ${DAY[(c.weekday||'').toLowerCase()] || '?'} ${fmtTime(c.start)}–${fmtTime(c.end)}${reasonClause}${seasonClause}`;
+  }
+  if (c.kind === 'daily_all') {
+    // season_label is often already richly worded — use it verbatim.
+    if (c.season_label) return `🚧 ${c.season_label}`;
+    if (!seasonClause) {
+      // Year-round all-day (e.g. dogs_allowed='no' on a no-dogs beach).
+      return reason ? `🚧 ${reason.charAt(0).toUpperCase() + reason.slice(1)}` : '🚧 Closed';
+    }
+    return `🚧 Dogs prohibited${seasonClause}`;
+  }
+  if (c.kind === 'daily_time') {
+    // season_label usually mentions the time range too — avoid duplicating.
+    if (c.season_label) return `🚧 ${c.season_label}`;
+    return `🚧 Closed daily ${fmtTime(c.start)}–${fmtTime(c.end)}${seasonClause || reasonClause}`;
+  }
+  return null;
 }
 
 // Render a pre-fetched Scout blurb (from dog-park-onfetch). Mirrors

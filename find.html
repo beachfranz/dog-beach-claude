@@ -1071,10 +1071,15 @@
         kind: 'dog_park',
         dp: d,
         distance: d.distance_miles,
-        // Real composite_score from AVG(hour_score). Falls back to verified
-        // bias (75/60) only when no forecast row exists for this date.
-        score: d.composite_score != null ? d.composite_score
+        // Prefer score_v2 (server-side spec — baseline 50 + positives -
+        // negatives + drive + status gate). Falls back to legacy
+        // composite_score when v2 is absent (no policy / no scoring), and
+        // verified-bias 75/60 when neither exists. Per
+        // [[dog-park-scoring-v2-spec]] 2026-05-27.
+        score: d.score_v2 != null ? d.score_v2
+             : d.composite_score != null ? d.composite_score
              : (d.source === 'operator_posted' || d.source === 'operator_posted_v2') ? 75 : 60,
+        score_v2_components: d.score_v2_components ?? null,
       }));
 
     // Merge + sort. Build a single comparator so both type-streams + the

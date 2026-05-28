@@ -330,6 +330,116 @@
   }
   .state-icon { font-size: 36px; }
 
+  /* Hourly v2 vertical bar chart — one bar per hour from park open to
+   * close. Bar height ∝ score (0-100). Color by status. Hover for
+   * detail. Centerpiece visualization on the Best-time card. */
+  .hourbars-wrap {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .hourbars-meta {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 8px; margin-bottom: 6px;
+    font-size: 11px; color: var(--text-muted);
+  }
+  .hourbars-track {
+    display: flex; align-items: stretch; gap: 2px;
+    height: 160px;          /* total chart height: pos 80 + axis + neg 80 */
+    padding: 0 2px;
+    position: relative;
+  }
+  /* Single horizontal axis line cutting the chart at vertical midpoint */
+  .hourbars-track::before {
+    content: '';
+    position: absolute;
+    left: 0; right: 0;
+    top: 50%;
+    height: 1px;
+    background: var(--text-muted);
+    opacity: 0.4;
+    pointer-events: none;
+  }
+  .hourbar-col {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column;
+    height: 100%;
+    cursor: help;
+    position: relative;
+  }
+  /* Top half: positives stack UP from axis (column-reverse fills bottom→top
+   * inside, anchored to the axis line). */
+  .hourbar-pos {
+    flex: 1;
+    display: flex; flex-direction: column-reverse;
+    width: 100%;
+    overflow: hidden;
+    border-radius: 3px 3px 0 0;
+  }
+  /* Bottom half: negatives stack DOWN from axis (column fills top→bottom). */
+  .hourbar-neg {
+    flex: 1;
+    display: flex; flex-direction: column;
+    width: 100%;
+    overflow: hidden;
+    border-radius: 0 0 3px 3px;
+  }
+  .hourbar-col:hover .hourbar-pos,
+  .hourbar-col:hover .hourbar-neg { filter: brightness(1.08); }
+  .hourbar-col.bar-now .hourbar-pos,
+  .hourbar-col.bar-now .hourbar-neg { outline: 2px solid #0f172a; outline-offset: 1px; }
+  .hourbar-seg { width: 100%; }
+  /* Positive segments (above axis) — beach.html score-row palette */
+  .hourbar-seg.seg-features  { background: var(--green); }
+  .hourbar-seg.seg-weather   { background: var(--amber); }
+  .hourbar-seg.seg-window    { background: #0ea5e9; }
+  .hourbar-seg.seg-drive     { background: var(--accent); }
+  /* Negative segments (below axis) — red family + neutral for drive penalty */
+  .hourbar-seg.seg-heat_uv      { background: var(--red); }
+  .hourbar-seg.seg-harsh        { background: #f97316; }    /* orange — between amber + red */
+  .hourbar-seg.seg-gotchas      { background: #fda4af; }    /* soft rose */
+  .hourbar-seg.seg-drive-neg    { background: var(--text-muted); }
+  /* Cap stripe at top of positive stack when safety gate fires */
+  .hourbar-cap-marker {
+    background: repeating-linear-gradient(
+      45deg, var(--red), var(--red) 3px,
+      rgba(127,29,29,1) 3px, rgba(127,29,29,1) 6px);
+    height: 3px; width: 100%;
+  }
+  .hourbar-axis {
+    display: flex; gap: 2px; padding: 4px 2px 0;
+    font-family: 'DM Mono', monospace;
+    font-size: 9px; color: var(--text-muted);
+  }
+  .hourbar-axis-label {
+    flex: 1; min-width: 0;
+    text-align: center;
+    white-space: nowrap; overflow: hidden;
+  }
+  /* Show every other label on narrow screens so they don't overlap */
+  @media (max-width: 480px) {
+    .hourbar-axis-label:nth-child(odd) { visibility: hidden; }
+  }
+  .hourbars-score {
+    font-family: 'Outfit', sans-serif;
+    font-weight: 700; font-size: 26px;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .hourbars-drive {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px;
+    background: rgba(0,0,0,0.04);
+    padding: 2px 8px; border-radius: 999px;
+  }
+  .hourbars-gate {
+    display: inline-block;
+    background: #fee2e2; color: #991b1b;
+    font-size: 10px; font-weight: 700;
+    padding: 2px 6px; border-radius: 4px;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+
   /* Source-attribution footer (operator-verified / OSM-default) */
   .policy-source {
     margin-top: 10px;
@@ -410,26 +520,42 @@ function escHtml(s) {
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 }
 
-// ── Fit-score for the header badge ─────────────────────────────────────
-// Dog parks don't have the full beach scoring stack. Derive a simple
-// 0-100 from: off-leash (always +30) + fence (+25) + water (+20) +
-// double-gate (+10) + small-dog-area (+10) + lighting (+5).
-// Score is dampened by "now" caution (asphalt hot / UV high / no_go status).
-function _fitScore(park, now, today) {
-  const pol = park?.policy ?? {};
-  let score = 30; // off-leash
-  if ((pol.has_fence ?? park.has_fence) === true) score += 25;
-  if ((pol.has_drinking_water ?? park.has_drinking_water) === true) score += 20;
-  if (pol.double_gate === true) score += 10;
-  if (pol.small_dog_area === true) score += 8;
-  if (pol.large_dog_area === true) score += 4;
-  if (pol.lighting === true) score += 3;
-  // Dampen by current conditions
-  const status = now?.hour_status ?? today?.day_status;
-  if (status === 'no_go')    score = Math.min(score, 25);
-  if (status === 'caution')  score = Math.min(score, 55);
-  if (status === 'advisory') score = Math.min(score, 75);
-  return Math.max(0, Math.min(100, score));
+// Read sticky user location (set by find.html). Returns {lat, lng} or null.
+function _getUserLatLng() {
+  try {
+    const raw = localStorage.getItem('dogbeach.user_loc');
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (Number.isFinite(obj?.lat) && Number.isFinite(obj?.lng)) {
+      return { lat: obj.lat, lng: obj.lng };
+    }
+  } catch {}
+  return null;
+}
+
+// Server-side v2 per-hour scoring via Postgres RPC. Returns
+// {hours: [{local_hour, hour_label, score, status, ...}], drive_factor, ...}
+// or null on error. Powers the vertical hourly bar chart + header badge.
+async function _fetchHourlyV2(fid) {
+  const loc = _getUserLatLng();
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/compute_dog_park_hourly_v2`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY,
+        Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        p_fid: fid,
+        p_user_lat: loc?.lat ?? null,
+        p_user_lng: loc?.lng ?? null,
+        p_date: null,
+      }),
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
 }
 
 async function load() {
@@ -467,6 +593,143 @@ async function load() {
   } else {
     loadScoutBlurb(data.dog_park, data.days?.[0], data.now);
   }
+  // Hourly v2 — async fill the header badge with current-hour score + render
+  // vertical bar chart inside the Best-time card.
+  _fetchHourlyV2(fid).then(payload => {
+    if (payload && !payload.error) applyHourlyV2(payload);
+  });
+}
+
+// Apply hourly v2: status-colored badge (no number) + vertical bar chart
+// for the park's open->close window. Per Franz 2026-05-27 — no numerical
+// scores visible in the UI; bars + status color carry the meaning.
+function applyHourlyV2(payload) {
+  const hours = payload.hours || [];
+  if (!hours.length) return;
+
+  // Pick the bar for the current local hour (closest match in the open->close set).
+  const nowH = new Date().getHours();
+  let current = hours.find(h => h.local_hour === nowH);
+  if (!current) {
+    if (nowH < payload.open_hour) current = hours[0];
+    else if (nowH > payload.close_hour) current = hours[hours.length - 1];
+    else current = hours[0];
+  }
+  const score = current?.score ?? 0;
+
+  // Header badge — colored chip indicating current-hour status.
+  // No number; the color (+ tooltip) carries the meaning.
+  const badge = document.querySelector('.fit-badge');
+  if (badge) {
+    badge.textContent = ''; // hide the number
+    const cls = score >= 70 ? 'go' : score >= 40 ? 'caution' : 'no_go';
+    badge.className = `fit-badge fit-badge-${cls}`;
+    badge.title = `${current?.hour_label || 'now'}: ${cls.replace('_',' ')}${current?.gate_fired ? ' (safety cap)' : ''}`;
+  }
+  // Render bar chart inside Best-time card
+  const target = document.querySelector('.besttime-card');
+  if (!target) return;
+  target.insertAdjacentHTML('beforeend', renderHourlyBars(payload, nowH));
+}
+
+function renderHourlyBars(p, nowH) {
+  // Tug-of-war chart: positives stack UP from a center axis, negatives
+  // stack DOWN. Each half scales 0..50 (max positive total = max
+  // negative total = 50). The visual gap between the column's top and
+  // bottom tells the user the score's deviation from baseline at a
+  // glance, without numbers.
+  const POS_MAX = 50;  // features 20 + weather 22 + window 5 + drive 3
+  const NEG_MAX = 50;  // heat_uv 25 + harsh 15 + gotchas 10 + drive 10
+  const cols = (p.hours || []).map(h => {
+    const drivePos = Math.max(0, h.drive || 0);
+    const driveNeg = Math.max(0, -(h.drive || 0));
+
+    // Positive segments (above axis). Order: features (closest to axis),
+    // then weather, then window, then drive bonus at top.
+    const posSegs = [
+      ['seg-features', h.pos_features || 0],
+      ['seg-weather',  h.pos_weather  || 0],
+      ['seg-window',   h.pos_window   || 0],
+      ['seg-drive',    drivePos],
+    ];
+    const posHtml = posSegs
+      .filter(([, v]) => v > 0)
+      .map(([cls, v]) => `<div class="hourbar-seg ${cls}" style="height:${(v / POS_MAX * 100).toFixed(1)}%"></div>`)
+      .join('');
+
+    // Negative segments (below axis). Order: heat_uv closest to axis
+    // (safety first), then harsh, then gotchas, then drive penalty at bottom.
+    const negSegs = [
+      ['seg-heat_uv',    h.neg_heat_uv  || 0],
+      ['seg-harsh',      h.neg_harsh    || 0],
+      ['seg-gotchas',    h.neg_gotchas  || 0],
+      ['seg-drive-neg',  driveNeg],
+    ];
+    const negHtml = negSegs
+      .filter(([, v]) => v > 0)
+      .map(([cls, v]) => `<div class="hourbar-seg ${cls}" style="height:${(v / NEG_MAX * 100).toFixed(1)}%"></div>`)
+      .join('');
+
+    const capMarker = h.gate_fired
+      ? `<div class="hourbar-cap-marker"></div>` : '';
+    const isNow = h.local_hour === nowH ? ' bar-now' : '';
+
+    const posParts = [];
+    if (h.pos_features) posParts.push(`+${h.pos_features} features`);
+    if (h.pos_weather)  posParts.push(`+${h.pos_weather} weather`);
+    if (h.pos_window)   posParts.push(`+${h.pos_window} window`);
+    if (drivePos)       posParts.push(`+${drivePos} drive`);
+    const negParts = [];
+    if (h.neg_heat_uv) negParts.push(`-${h.neg_heat_uv} heat/UV`);
+    if (h.neg_harsh)   negParts.push(`-${h.neg_harsh} weather`);
+    if (h.neg_gotchas) negParts.push(`-${h.neg_gotchas} gotchas`);
+    if (driveNeg)      negParts.push(`-${driveNeg} drive`);
+
+    const tip = [
+      h.hour_label,
+      h.status ? `status ${h.status.replace('_',' ')}` : null,
+      posParts.length ? `[${posParts.join(', ')}]` : null,
+      negParts.length ? `[${negParts.join(', ')}]` : null,
+      h.feels_like != null ? `${Math.round(h.feels_like)}°F` : null,
+      h.wind_speed != null ? `wind ${Math.round(h.wind_speed)}mph` : null,
+      h.uv_index != null && h.uv_index >= 6 ? `UV ${h.uv_index.toFixed(1)}` : null,
+      h.asphalt_temp != null && h.asphalt_temp >= 105 ? `pavement ${Math.round(h.asphalt_temp)}°F` : null,
+      h.gate_fired ? '⚠️ safety cap' : null,
+    ].filter(Boolean).join(' · ');
+
+    return `<div class="hourbar-col${isNow}" data-tip="${escHtml(tip)}">
+      <div class="hourbar-pos">${capMarker}${posHtml}</div>
+      <div class="hourbar-neg">${negHtml}</div>
+    </div>`;
+  }).join('');
+
+  const labels = (p.hours || []).map(h =>
+    `<div class="hourbar-axis-label">${escHtml(h.hour_label)}</div>`
+  ).join('');
+
+  const driveBadge = p.drive_minutes != null
+    ? `<span class="hourbars-drive">🚗 ${p.drive_minutes}min ${p.drive_factor >= 0 ? '+' : ''}${p.drive_factor}</span>`
+    : '';
+  const anyGate = (p.hours || []).some(h => h.gate_fired);
+  const gateBadge = anyGate
+    ? `<span class="hourbars-gate" title="One or more hours hit a safety cap">cap ${30}</span>`
+    : '';
+
+  return `<div class="hourbars-wrap">
+    <div class="hourbars-meta">
+      <span>Hourly score · open ${formatHour(p.open_hour)} – ${formatHour(p.close_hour)}</span>
+      <span>${driveBadge} ${gateBadge}</span>
+    </div>
+    <div class="hourbars-track">${cols}</div>
+    <div class="hourbar-axis">${labels}</div>
+  </div>`;
+}
+
+function formatHour(h) {
+  if (h == null) return '';
+  const ampm = h >= 12 ? 'pm' : 'am';
+  const h12 = ((h + 11) % 12) + 1;
+  return `${h12}${ampm}`;
 }
 
 // Render a pre-fetched Scout blurb (from dog-park-onfetch). Mirrors
@@ -491,14 +754,15 @@ function render(data) {
   const today = days[0];
   document.title = `${park.display_name} — Dog Beach Scout`;
 
-  // Header: park name + fit badge + region
+  // Header: park name + fit badge + region. Badge starts with a
+  // placeholder ("--") and gets updated by applyScoreV2() once the RPC
+  // returns the real v2 score.
   const nameEl = document.getElementById('park-name');
   nameEl.textContent = '';
-  const fit = _fitScore(park, now, today);
   const badge = document.createElement('span');
-  badge.className = `fit-badge fit-badge-${fit >= 70 ? 'go' : fit >= 40 ? 'caution' : 'no_go'}`;
-  badge.textContent = fit;
-  badge.title = `Park Fit: ${fit}/100`;
+  badge.className = 'fit-badge fit-badge-caution';
+  badge.textContent = '··';
+  badge.title = 'Loading score...';
   nameEl.appendChild(badge);
   nameEl.appendChild(document.createTextNode(' ' + park.display_name));
   const regionParts = [];

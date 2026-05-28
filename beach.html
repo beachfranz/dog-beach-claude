@@ -2983,11 +2983,14 @@ function buildBestTimeCard(today, dogPolicy, beachFid, hoursToday, beach, amenit
 // "what to do" sentence is the backbone; Scout adds today-flavor.
 function buildScoutCard(today, beach, dogPolicy, amenities, hoursToday) {
   if (!today) return '';
-  // Single corpus: activities + pack-list now fold INTO Scout's blurb
-  // (LLM weaves them naturally). CTA mount sits below; fills async
-  // once user location is known. Both surfaces collapse if data
-  // is missing rather than blocking.
-  return `<section class="card scout-card">
+  // Combined Best Time + Scout card. Mirrors dog-park.html pattern:
+  // both .besttime-card and .scout-card classes so the v2 chart mounts
+  // here. Headline shell starts as '…'; applyBeachHourlyV2 fills it.
+  return `<section class="card besttime-card scout-card">
+    <div class="besttime-header">
+      <h2>Best Time</h2>
+      <div class="besttime-headline">…</div>
+    </div>
     <div id="scout-blurb">…</div>
     <div id="scout-cta" class="scout-cta"></div>
   </section>`;
@@ -3089,16 +3092,14 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
     el.classList.add('loaded'); return;
   }
 
-  // Time-aware window: only consider hours from the current local hour
-  // forward, using the same per-hour Overall the bar chart uses. If the
-  // morning best window already passed, Scout should talk about what's
-  // LEFT today, not what was great at 6am.
-  const nowWindow = _bestWindowFromNow(hoursToday, beach, amenities, dogPolicy);
-  if (!nowWindow) {
-    el.textContent = "Today's good windows have already passed at this beach — check back tomorrow morning.";
-    el.classList.add('loaded'); return;
-  }
-  const windowLabel  = _formatHourRange(nowWindow.start, nowWindow.end);
+  // Best window for the day — pulled from today.best_window_label which by
+  // now is the v2-applied value (apply_v2_best_window_to_beach_recommendations
+  // runs in daily-beach-refresh). Dropped the v1 _bestWindowFromNow
+  // short-circuit that printed "today's good windows have already passed"
+  // — it used a v1 threshold of 70 that's no longer how we score and
+  // gated Scout incorrectly on beaches whose best hours are still ahead.
+  // Per Franz 2026-05-28: v2 is the working standard.
+  const windowLabel = today.best_window_label || 'today';
   const windowStatus = today.best_window_status ?? 'go';
   const signals = [
     today.lowest_tide_height != null ? `tide ${parseFloat(today.lowest_tide_height).toFixed(1)}ft` : null,

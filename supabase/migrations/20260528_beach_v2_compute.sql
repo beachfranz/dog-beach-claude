@@ -28,37 +28,7 @@ begin;
 -- Wraps the existing _v2_is_hour_closed helper. Builds the closures
 -- array from the simpler beach fields. zone_rules deep-parsing deferred.
 
-create or replace function public._beach_closures_from_policy(
-  p_dogs_allowed     text,
-  p_prohibited_start text,
-  p_prohibited_end   text
-) returns jsonb language plpgsql immutable as $$
-declare
-  v_closures jsonb := '[]'::jsonb;
-  v_day text;
-begin
-  if p_dogs_allowed = 'no' then
-    return '[{"kind":"weekly","weekday":"mon","all_day":true,"reason":"dogs_prohibited"},
-             {"kind":"weekly","weekday":"tue","all_day":true,"reason":"dogs_prohibited"},
-             {"kind":"weekly","weekday":"wed","all_day":true,"reason":"dogs_prohibited"},
-             {"kind":"weekly","weekday":"thu","all_day":true,"reason":"dogs_prohibited"},
-             {"kind":"weekly","weekday":"fri","all_day":true,"reason":"dogs_prohibited"},
-             {"kind":"weekly","weekday":"sat","all_day":true,"reason":"dogs_prohibited"},
-             {"kind":"weekly","weekday":"sun","all_day":true,"reason":"dogs_prohibited"}]'::jsonb;
-  end if;
-  if p_prohibited_start is not null and p_prohibited_end is not null then
-    foreach v_day in array array['mon','tue','wed','thu','fri','sat','sun'] loop
-      v_closures := v_closures || jsonb_build_array(
-        jsonb_build_object('kind','weekly_time','weekday', v_day,
-          'start', to_char(p_prohibited_start::time, 'HH24:MI'),
-          'end',   to_char(p_prohibited_end::time,   'HH24:MI'),
-          'reason','dogs_prohibited_daily')
-      );
-    end loop;
-  end if;
-  return v_closures;
-end;
-$$;
+-- (helper _beach_closures_from_policy is defined in 20260528_closures_seasonal.sql)
 
 
 -- ── compute_beach_hourly_v2 ─────────────────────────────────────────
@@ -95,12 +65,11 @@ begin
     where location_id = v_gold.location_id and local_date = v_view_date limit 1;
   select * into v_loc_meta from public.locations_stage where fid = p_fid limit 1;
 
-  -- Closures (dog-prohibited windows from beach_dog_policy)
+  -- Closures (dog-prohibited windows, seasonal-aware via zone_rules)
   if v_policy.arena_group_id is not null then
     v_closures := public._beach_closures_from_policy(
       v_policy.dogs_allowed,
-      v_policy.dogs_prohibited_start::text,
-      v_policy.dogs_prohibited_end::text);
+      v_policy.zone_rules);
   end if;
 
   -- Load bands (entity_type='beach' rows)

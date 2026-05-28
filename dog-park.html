@@ -1043,6 +1043,12 @@ function buildAmenitiesSection(park) {
   // Lighting
   if (pol.lighting === true) tiles.push(amenityTile('💡', 'Lighting', 'rule-off_leash'));
 
+  // v2 enrichment / comfort amenities (Franz 2026-05-27 LATE)
+  if (pol.has_shade === true)         tiles.push(amenityTile('🌳', 'Shade',         'rule-off_leash'));
+  if (pol.has_agility === true)       tiles.push(amenityTile('🤸', 'Agility',       'rule-off_leash'));
+  if (pol.has_water_play === true)    tiles.push(amenityTile('💦', 'Splash pad',    'rule-off_leash'));
+  if (pol.has_picnic_tables === true) tiles.push(amenityTile('🧺', 'Picnic tables', 'rule-off_leash'));
+
   // Surface
   const surface = pol.surface_overlay ?? park.surface;
   if (surface) tiles.push(amenityTile('🌱', surface, ''));

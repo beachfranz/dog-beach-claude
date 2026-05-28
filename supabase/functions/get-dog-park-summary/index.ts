@@ -41,6 +41,7 @@ Deno.serve(async (req: Request) => {
             hours_open_time, hours_close_time, hours_text,
             additional_rules, double_gate, small_dog_area, large_dog_area, lighting,
             has_fence, has_drinking_water,
+            has_shade, has_agility, has_water_play, has_picnic_tables,
             surface_overlay, description_overlay,
             source, source_url, operator_id, consensus_confidence
           ),
@@ -105,6 +106,10 @@ Deno.serve(async (req: Request) => {
           lighting: dp.lighting,
           has_fence: dp.has_fence,                 // overlay; null if not extracted
           has_drinking_water: dp.has_drinking_water,
+          has_shade: dp.has_shade,
+          has_agility: dp.has_agility,
+          has_water_play: dp.has_water_play,
+          has_picnic_tables: dp.has_picnic_tables,
           surface_overlay: dp.surface_overlay,
           description_overlay: dp.description_overlay,
           source: dp.source,

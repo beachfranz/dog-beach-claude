@@ -117,12 +117,11 @@
     background: var(--card); border: 1px solid var(--border);
     border-radius: 12px; padding: 12px 16px; margin: 8px 16px;
   }
-  /* Tooltips on [data-tip] — subtle pill above the element with a
-   * 200ms hover-in delay (much faster than the native ~600ms) and
-   * an instant hover-out. */
+  /* Tooltips on [data-tip] — hover pill on desktop, tap-to-pin on touch. */
   [data-tip] { position: relative; }
   [data-tip]::after {
     content: attr(data-tip);
+    white-space: pre-line;
     position: absolute;
     left: 50%; bottom: calc(100% + 4px);
     transform: translateX(-50%);
@@ -131,15 +130,154 @@
     padding: 4px 8px; border-radius: 4px;
     font-size: 11px; font-weight: 500; line-height: 1.35;
     width: max-content; max-width: 220px;
-    text-align: center;
+    text-align: left;
     z-index: 1000; pointer-events: none;
     opacity: 0;
     transition: opacity 80ms ease-out 0s;
   }
-  [data-tip]:hover::after {
+  [data-tip]:hover::after,
+  [data-tip][data-tip-open]::after {
     opacity: 1;
     transition-delay: 200ms;
   }
+  [data-tip][data-tip-open]::after { transition-delay: 0ms; }
+
+  /* ── V2 tug-of-war chart (mirror of dog-park.html chart bundle) ──
+   * Shared visual language; consider extracting to src/v2-chart.css
+   * if a 3rd entity type ever needs it. Per Franz 2026-05-28. */
+  .hourbars-wrap { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .hourbars-meta {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 8px; margin-bottom: 6px;
+    font-size: 11px; color: var(--text-muted);
+  }
+  .hourbars-chart { display: flex; align-items: stretch; gap: 6px; }
+  .hourbars-yaxis {
+    position: relative; width: 32px; flex: none;
+    font-family: 'DM Mono', monospace; font-size: 9px; color: var(--text-muted);
+    margin-top: 14px;
+  }
+  .hourbars-yaxis > span {
+    position: absolute; right: 4px; line-height: 1;
+    transform: translateY(-50%); white-space: nowrap;
+  }
+  .hourbars-yaxis-top    { top: 0; }
+  .hourbars-yaxis-mid    { top: 25%; opacity: 0.6; }
+  .hourbars-yaxis-zero   { top: 50%; opacity: 0.7; }
+  .hourbars-yaxis-neg-mid{ top: 75%; opacity: 0.6; }
+  .hourbars-yaxis-bot    { top: 100%; }
+  .hourbars-track {
+    flex: 1 1 auto;
+    display: flex; align-items: stretch; justify-content: space-between;
+    gap: 6px; height: 180px; padding: 0 2px; position: relative;
+  }
+  .hourbars-track::before {
+    content: ''; position: absolute; left: 0; right: 0;
+    top: calc(14px + (100% - 14px) / 2);
+    height: 1px; background: var(--text-muted); opacity: 0.4;
+    pointer-events: none;
+  }
+  .hourbars-track::after {
+    content: ''; position: absolute; left: 0; right: 0;
+    top: 14px; bottom: 0;
+    background-image:
+      linear-gradient(to bottom,
+        transparent calc(25% - 0.5px),
+        rgba(100,116,139,0.15) calc(25% - 0.5px),
+        rgba(100,116,139,0.15) calc(25% + 0.5px),
+        transparent calc(25% + 0.5px),
+        transparent calc(75% - 0.5px),
+        rgba(100,116,139,0.15) calc(75% - 0.5px),
+        rgba(100,116,139,0.15) calc(75% + 0.5px),
+        transparent calc(75% + 0.5px));
+    pointer-events: none;
+  }
+  .hourbar-col {
+    flex: 1 1 0; min-width: 0; max-width: 22px;
+    display: flex; flex-direction: column; height: 100%;
+    cursor: help; position: relative;
+  }
+  .hourbar-col.bar-closed .hourbar-pos,
+  .hourbar-col.bar-closed .hourbar-neg {
+    background: repeating-linear-gradient(
+      45deg,
+      rgba(100,116,139,0.18) 0 3px,
+      rgba(100,116,139,0.32) 3px 6px);
+  }
+  .hourbar-col.bar-closed .hourbar-score { color: var(--text-muted); }
+  .hourbars-closures {
+    margin-top: 6px;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px; color: var(--text-muted); line-height: 1.4;
+  }
+  .hourbar-score {
+    height: 14px; flex: none; text-align: center;
+    font-family: 'DM Mono', monospace; font-size: 10px;
+    font-weight: 700; color: var(--text); line-height: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  .hourbar-score.score-cap { color: var(--red); }
+  .hourbar-pos {
+    flex: 1; display: flex; flex-direction: column-reverse;
+    width: 100%; overflow: hidden; border-radius: 3px 3px 0 0;
+  }
+  .hourbar-neg {
+    flex: 1; display: flex; flex-direction: column;
+    width: 100%; overflow: hidden; border-radius: 0 0 3px 3px;
+  }
+  .hourbar-col:hover .hourbar-pos,
+  .hourbar-col:hover .hourbar-neg { filter: brightness(1.08); }
+  .hourbar-col.bar-now .hourbar-pos,
+  .hourbar-col.bar-now .hourbar-neg { outline: 2px solid #0f172a; outline-offset: 1px; }
+  .hourbar-seg { width: 100%; }
+  .hourbar-seg.pos-rank-1 { background: hsl(224, 32%, 33%); }
+  .hourbar-seg.pos-rank-2 { background: hsl(226, 35%, 40%); }
+  .hourbar-seg.pos-rank-3 { background: hsl(224, 38%, 48%); }
+  .hourbar-seg.pos-rank-4 { background: hsl(221, 42%, 53%); }
+  .hourbar-seg.pos-rank-5 { background: hsl(217, 46%, 60%); }
+  .hourbar-seg.pos-rank-6, .hourbar-seg.pos-rank-7, .hourbar-seg.pos-rank-8,
+  .hourbar-seg.pos-rank-9, .hourbar-seg.pos-rank-10, .hourbar-seg.pos-rank-11 { background: hsl(213, 47%, 68%); }
+  .hourbar-seg.neg-rank-1 { background: hsl(0, 37%, 42%); }
+  .hourbar-seg.neg-rank-2 { background: hsl(0, 36%, 51%); }
+  .hourbar-seg.neg-rank-3 { background: hsl(0, 42%, 60%); }
+  .hourbar-seg.neg-rank-4 { background: hsl(0, 45%, 71%); }
+  .hourbar-cap-marker {
+    background: repeating-linear-gradient(
+      45deg, var(--red), var(--red) 3px,
+      rgba(127,29,29,1) 3px, rgba(127,29,29,1) 6px);
+    height: 3px; width: 100%;
+  }
+  .hourbar-axis {
+    display: flex; justify-content: space-between; gap: 6px; padding: 4px 2px 0;
+    font-family: 'DM Mono', monospace; font-size: 9px; color: var(--text-muted);
+  }
+  .hourbar-axis-label {
+    flex: 1 1 0; min-width: 0; max-width: 22px;
+    text-align: center; white-space: nowrap; overflow: hidden;
+  }
+  .hourbars-legend {
+    display: flex; flex-wrap: wrap; gap: 4px 12px;
+    margin-top: 10px; padding-top: 8px;
+    border-top: 1px dashed var(--border);
+    font-size: 10px; color: var(--text-muted);
+  }
+  .hourbars-legend-group { display: flex; align-items: center; gap: 6px; }
+  .hourbars-legend-label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .legend-icon { display: inline-block; font-size: 12px; line-height: 1; vertical-align: middle; flex: none; margin-right: 2px; }
+  .hourbars-legend-sep { color: var(--text-muted); opacity: 0.5; }
+  @media (max-width: 480px) {
+    .hourbar-axis-label:nth-child(odd) { visibility: hidden; }
+  }
+  @media (max-width: 600px) {
+    .hourbars-yaxis { width: 20px; font-size: 8px; }
+    .hourbars-chart { gap: 4px; }
+    .hourbars-track { gap: 3px; padding: 0 1px; }
+    .hourbar-col { max-width: 18px; touch-action: manipulation; }
+    .hourbar-axis-label { font-size: 8px; }
+    .hourbars-meta { font-size: 10px; flex-wrap: wrap; }
+    [data-tip]::after { font-size: 10px; max-width: 180px; padding: 4px 6px; }
+  }
+
   section.card h2 {
     font-size: 14px; font-weight: 700; margin: 0 0 8px;
     color: var(--text);
@@ -850,6 +988,313 @@ const escHtml = s => String(s ?? '')
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
+// ── V2 chart bundle (mirror of dog-park.html — Franz 2026-05-28) ────
+// Tap-to-pin: works on touch (CSS :hover doesn't fire there).
+document.addEventListener('click', (e) => {
+  const target = e.target.closest('[data-tip]');
+  document.querySelectorAll('[data-tip-open]').forEach(el => {
+    if (el !== target) el.removeAttribute('data-tip-open');
+  });
+  if (target) {
+    if (target.hasAttribute('data-tip-open')) target.removeAttribute('data-tip-open');
+    else target.setAttribute('data-tip-open', '');
+  }
+});
+
+function _v2FormatHour(h) {
+  if (h == null) return '';
+  const ampm = h >= 12 ? 'pm' : 'am';
+  const h12 = ((h + 11) % 12) + 1;
+  return `${h12}${ampm}`;
+}
+
+function formatClosureLine(c) {
+  if (!c || !c.kind) return null;
+  const DAY = { mon:'Mon', tue:'Tue', wed:'Wed', thu:'Thu', fri:'Fri', sat:'Sat', sun:'Sun' };
+  const MON = { '01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun',
+                '07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec' };
+  const fmtTime = (t) => {
+    if (!t) return '';
+    const [h, m] = t.split(':').map(Number);
+    const ampm = h >= 12 ? 'pm' : 'am';
+    const h12 = ((h + 11) % 12) + 1;
+    return m === 0 ? `${h12}${ampm}` : `${h12}:${String(m).padStart(2,'0')}${ampm}`;
+  };
+  const fmtMd = (md) => {
+    if (!md) return '';
+    const [m, d] = md.split('-');
+    return `${MON[m] || m} ${parseInt(d, 10)}`;
+  };
+  const reason = c.reason ? c.reason.replace(/_/g, ' ') : '';
+  const reasonClause = reason ? ` for ${reason}` : '';
+  const seasonClause = c.season_label
+    ? ` · ${c.season_label}`
+    : (c.season_from_md && c.season_to_md
+        ? ` · ${fmtMd(c.season_from_md)}–${fmtMd(c.season_to_md)}`
+        : '');
+  if (c.kind === 'weekly') {
+    return `🚧 Closed ${DAY[(c.weekday||'').toLowerCase()] || '?'}${reasonClause}${seasonClause}`;
+  }
+  if (c.kind === 'weekly_time') {
+    return `🚧 Closed ${DAY[(c.weekday||'').toLowerCase()] || '?'} ${fmtTime(c.start)}–${fmtTime(c.end)}${reasonClause}${seasonClause}`;
+  }
+  if (c.kind === 'daily_all') {
+    if (c.season_label) return `🚧 ${c.season_label}`;
+    if (!seasonClause) {
+      return reason ? `🚧 ${reason.charAt(0).toUpperCase() + reason.slice(1)}` : '🚧 Closed';
+    }
+    return `🚧 Dogs prohibited${seasonClause}`;
+  }
+  if (c.kind === 'daily_time') {
+    if (c.season_label) return `🚧 ${c.season_label}`;
+    return `🚧 Closed daily ${fmtTime(c.start)}–${fmtTime(c.end)}${seasonClause || reasonClause}`;
+  }
+  return null;
+}
+
+function renderHourlyBarsV2(p, nowH) {
+  const hours = p.hours || [];
+  let maxPos = 0, maxNeg = 0;
+  for (const h of hours) {
+    const drivePos = Math.max(0, h.drive || 0);
+    const driveNeg = Math.max(0, -(h.drive || 0));
+    // Sum every positive sub-segment that the payload might carry. Unknown
+    // keys are simply 0; this keeps the function entity-agnostic.
+    const posTotal =
+      (h.pos_fence || 0) + (h.pos_water || 0) + (h.pos_shade || 0)
+      + (h.pos_comfort || 0) + (h.pos_agility || 0) + (h.pos_water_play || 0)
+      + (h.pos_temp || 0) + (h.pos_wind || 0) + (h.pos_sky || 0)
+      + (h.pos_window || 0) + drivePos
+      + (h.pos_restroom || 0) + (h.pos_lifeguard || 0) + (h.pos_parking || 0)
+      + (h.pos_shower || 0) + (h.pos_picnic || 0) + (h.pos_food || 0)
+      + (h.pos_drinking || 0) + (h.pos_disabled || 0) + (h.pos_dog_access || 0);
+    const negTotal =
+      (h.neg_heat_uv || 0) + (h.neg_harsh || 0) + (h.neg_gotchas || 0)
+      + (h.neg_tide || 0) + (h.neg_crowd || 0) + driveNeg;
+    if (posTotal > maxPos) maxPos = posTotal;
+    if (negTotal > maxNeg) maxNeg = negTotal;
+  }
+  const niceCeil = v => Math.max(10, Math.ceil(v * 1.1 / 5) * 5);
+  const AXIS_MAX = niceCeil(Math.max(maxPos, maxNeg));
+  const POS_MAX = AXIS_MAX;
+  const NEG_MAX = AXIS_MAX;
+
+  const cols = hours.map(h => {
+    const drivePos = Math.max(0, h.drive || 0);
+    const driveNeg = Math.max(0, -(h.drive || 0));
+    const POS_DEFS = [
+      { cls: 'seg-fence',      icon: '🚧', val: h.pos_fence      || 0 },
+      { cls: 'seg-water',      icon: '💧', val: h.pos_water      || 0 },
+      { cls: 'seg-shade',      icon: '🌳', val: h.pos_shade      || 0 },
+      { cls: 'seg-comfort',    icon: '🌿', val: h.pos_comfort    || 0 },
+      { cls: 'seg-agility',    icon: '🤸', val: h.pos_agility    || 0 },
+      { cls: 'seg-water-play', icon: '💦', val: h.pos_water_play || 0 },
+      { cls: 'seg-restroom',   icon: '🚻', val: h.pos_restroom   || 0 },
+      { cls: 'seg-lifeguard',  icon: '🛟', val: h.pos_lifeguard  || 0 },
+      { cls: 'seg-parking',    icon: '🅿️', val: h.pos_parking    || 0 },
+      { cls: 'seg-shower',     icon: '🚿', val: h.pos_shower     || 0 },
+      { cls: 'seg-picnic',     icon: '🧺', val: h.pos_picnic     || 0 },
+      { cls: 'seg-food',       icon: '🍔', val: h.pos_food       || 0 },
+      { cls: 'seg-drinking',   icon: '🚰', val: h.pos_drinking   || 0 },
+      { cls: 'seg-disabled',   icon: '♿',  val: h.pos_disabled   || 0 },
+      { cls: 'seg-dog-access', icon: '🐕', val: h.pos_dog_access || 0 },
+      { cls: 'seg-temp',       icon: '🌡️', val: h.pos_temp       || 0 },
+      { cls: 'seg-wind',       icon: '💨', val: h.pos_wind       || 0 },
+      { cls: 'seg-sky',        icon: '☀️', val: h.pos_sky        || 0 },
+      { cls: 'seg-window',     icon: '⏰', val: h.pos_window     || 0 },
+      { cls: 'seg-drive',      icon: '🚗', val: drivePos },
+    ];
+    const NEG_DEFS = [
+      { cls: 'seg-heat_uv',    icon: '🔥', val: h.neg_heat_uv || 0 },
+      { cls: 'seg-harsh',      icon: '⛈️', val: h.neg_harsh   || 0 },
+      { cls: 'seg-tide',       icon: '🌊', val: h.neg_tide    || 0 },
+      { cls: 'seg-crowd',      icon: '👥', val: h.neg_crowd   || 0 },
+      { cls: 'seg-gotchas',    icon: '⚠️', val: h.neg_gotchas || 0 },
+      { cls: 'seg-drive-neg',  icon: '🚗', val: driveNeg },
+    ];
+    const posSorted = POS_DEFS.filter(d => d.val > 0).sort((a, b) => b.val - a.val);
+    const negSorted = NEG_DEFS.filter(d => d.val > 0).sort((a, b) => b.val - a.val);
+    posSorted.forEach((d, i) => { d.rank = i + 1; });
+    negSorted.forEach((d, i) => { d.rank = i + 1; });
+
+    const posHtml = posSorted
+      .map(d => `<div class="hourbar-seg pos-rank-${d.rank}" style="height:${(d.val / POS_MAX * 100).toFixed(1)}%"></div>`)
+      .join('');
+    const negHtml = negSorted
+      .map(d => `<div class="hourbar-seg neg-rank-${d.rank}" style="height:${(d.val / NEG_MAX * 100).toFixed(1)}%"></div>`)
+      .join('');
+
+    const capMarker = h.gate_fired ? `<div class="hourbar-cap-marker"></div>` : '';
+    const isNow = h.local_hour === nowH ? ' bar-now' : '';
+    const isClosed = h.status === 'closed' || h.is_closed === true;
+    const closedClass = isClosed ? ' bar-closed' : '';
+    const scoreClass = h.gate_fired ? 'hourbar-score score-cap' : 'hourbar-score';
+    const scoreText = isClosed ? '' : (h.score != null ? h.score : '');
+
+    const tipLines = [];
+    if (isClosed) {
+      tipLines.push(`${h.hour_label} · 🚧 closed`);
+    } else {
+      tipLines.push(`${h.hour_label}${h.gate_fired ? ' ⚠️ cap' : ''} · ${h.score ?? 0}`);
+      for (const d of [...posSorted].reverse()) tipLines.push(`${d.icon} +${d.val}%`);
+      for (const d of negSorted) tipLines.push(`${d.icon} −${d.val}%`);
+    }
+    const tip = tipLines.join('\n');
+
+    return `<div class="hourbar-col${isNow}${closedClass}" data-tip="${escHtml(tip)}">
+      <div class="${scoreClass}">${scoreText}</div>
+      <div class="hourbar-pos">${isClosed ? '' : capMarker + posHtml}</div>
+      <div class="hourbar-neg">${isClosed ? '' : negHtml}</div>
+    </div>`;
+  }).join('');
+
+  const labels = hours.map(h =>
+    `<div class="hourbar-axis-label">${escHtml(h.hour_label)}</div>`
+  ).join('');
+
+  const driveBadge = p.drive_minutes != null
+    ? `<span class="hourbars-drive">🚗 ${p.drive_minutes}min ${p.drive_factor >= 0 ? '+' : ''}${p.drive_factor}</span>`
+    : '';
+  const anyGate = hours.some(h => h.gate_fired);
+  const gateBadge = anyGate ? `<span class="hourbars-gate" title="One or more hours hit a safety cap">cap ${30}</span>` : '';
+
+  // Legend — only icons present in this chart
+  const hasPos = (k) => hours.some(h => (h[k] || 0) > 0);
+  const hasDrivePos = hours.some(h => (h.drive || 0) > 0);
+  const hasDriveNeg = hours.some(h => (h.drive || 0) < 0);
+  const posItems = [
+    { icon: '🚻', label: 'restrooms', show: hasPos('pos_restroom') },
+    { icon: '🛟', label: 'lifeguard', show: hasPos('pos_lifeguard') },
+    { icon: '🅿️', label: 'parking', show: hasPos('pos_parking') },
+    { icon: '🚿', label: 'showers', show: hasPos('pos_shower') },
+    { icon: '🧺', label: 'picnic', show: hasPos('pos_picnic') },
+    { icon: '🍔', label: 'food', show: hasPos('pos_food') },
+    { icon: '🚰', label: 'water', show: hasPos('pos_drinking') },
+    { icon: '♿',  label: 'ADA', show: hasPos('pos_disabled') },
+    { icon: '🐕', label: 'dog access', show: hasPos('pos_dog_access') },
+    { icon: '🚧', label: 'fence', show: hasPos('pos_fence') },
+    { icon: '💧', label: 'water', show: hasPos('pos_water') },
+    { icon: '🌳', label: 'shade', show: hasPos('pos_shade') },
+    { icon: '🌿', label: 'comfort', show: hasPos('pos_comfort') },
+    { icon: '🤸', label: 'agility', show: hasPos('pos_agility') },
+    { icon: '💦', label: 'water play', show: hasPos('pos_water_play') },
+    { icon: '🌡️', label: 'temp', show: hasPos('pos_temp') },
+    { icon: '💨', label: 'wind', show: hasPos('pos_wind') },
+    { icon: '☀️', label: 'sky', show: hasPos('pos_sky') },
+    { icon: '⏰', label: 'window', show: hasPos('pos_window') },
+    { icon: '🚗', label: 'short drive', show: hasDrivePos },
+  ].filter(x => x.show);
+  const negItems = [
+    { icon: '🔥', label: 'heat / UV', show: hasPos('neg_heat_uv') },
+    { icon: '⛈️', label: 'harsh wx', show: hasPos('neg_harsh') },
+    { icon: '🌊', label: 'tide', show: hasPos('neg_tide') },
+    { icon: '👥', label: 'crowd', show: hasPos('neg_crowd') },
+    { icon: '⚠️', label: 'gotchas', show: hasPos('neg_gotchas') },
+    { icon: '🚗', label: 'long drive', show: hasDriveNeg },
+  ].filter(x => x.show);
+  const legendChip = (icon, label) =>
+    `<span class="hourbars-legend-label"><span class="legend-icon">${icon}</span>${label}</span>`;
+  const posLegend = posItems.map(i => legendChip(i.icon, i.label)).join('');
+  const negLegend = negItems.map(i => legendChip(i.icon, i.label)).join('');
+  const legendHtml = (posItems.length || negItems.length)
+    ? `<div class="hourbars-legend">
+        ${posItems.length ? `<div class="hourbars-legend-group">+ ${posLegend}</div>` : ''}
+        ${(posItems.length && negItems.length) ? `<span class="hourbars-legend-sep">·</span>` : ''}
+        ${negItems.length ? `<div class="hourbars-legend-group">− ${negLegend}</div>` : ''}
+      </div>` : '';
+
+  const closures = Array.isArray(p.closures) ? p.closures : [];
+  const closureLines = closures.map(formatClosureLine).filter(Boolean);
+  const closuresHtml = closureLines.length
+    ? `<div class="hourbars-closures">${closureLines.map(l => `<div>${escHtml(l)}</div>`).join('')}</div>`
+    : '';
+
+  return `<div class="hourbars-wrap">
+    <div class="hourbars-meta">
+      <span>Hourly score · ${_v2FormatHour(p.open_hour)} – ${_v2FormatHour(p.close_hour)}</span>
+      <span>${driveBadge} ${gateBadge}</span>
+    </div>
+    <div class="hourbars-chart">
+      <div class="hourbars-yaxis">
+        <span class="hourbars-yaxis-top">+${POS_MAX}%</span>
+        <span class="hourbars-yaxis-mid">+${Math.round(POS_MAX / 2)}%</span>
+        <span class="hourbars-yaxis-zero">0</span>
+        <span class="hourbars-yaxis-neg-mid">−${Math.round(NEG_MAX / 2)}%</span>
+        <span class="hourbars-yaxis-bot">−${NEG_MAX}%</span>
+      </div>
+      <div class="hourbars-track">${cols}</div>
+    </div>
+    <div class="hourbar-axis">${labels}</div>
+    ${legendHtml}
+    ${closuresHtml}
+  </div>`;
+}
+
+async function _fetchBeachHourlyV2(fid) {
+  try {
+    const userLoc = (() => {
+      try {
+        const raw = localStorage.getItem('dogbeach.user_loc');
+        if (!raw) return null;
+        const o = JSON.parse(raw);
+        if (Number.isFinite(o?.lat) && Number.isFinite(o?.lng)) return o;
+      } catch {}
+      return null;
+    })();
+    const body = { p_fid: parseInt(fid, 10) };
+    if (userLoc) { body.p_user_lat = userLoc.lat; body.p_user_lng = userLoc.lng; }
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/compute_beach_hourly_v2`, {
+      method: 'POST',
+      headers: {
+        apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch (err) {
+    console.warn('beach v2 hourly fetch failed', err);
+    return null;
+  }
+}
+
+function applyBeachHourlyV2(payload) {
+  const hours = payload.hours || [];
+  if (!hours.length) return;
+  const nowH = new Date().getHours();
+  let current = hours.find(h => h.local_hour === nowH);
+  if (!current) current = hours[0];
+
+  // Override the besttime headline with v2 best window (or closure-aware message).
+  const headlineEl = document.querySelector('.besttime-headline');
+  if (headlineEl) {
+    const isNowClosed = current?.status === 'closed' || current?.is_closed === true;
+    if (isNowClosed) {
+      let reopenLabel = null;
+      const idx = hours.findIndex(h => h.local_hour === nowH);
+      for (let i = idx + 1; i < hours.length; i++) {
+        if (hours[i].status !== 'closed' && !hours[i].is_closed) {
+          reopenLabel = hours[i].hour_label; break;
+        }
+      }
+      headlineEl.textContent = reopenLabel
+        ? `Closed right now — reopens ${reopenLabel}`
+        : 'Closed for the rest of today';
+    } else if (payload.best_window_v2_label) {
+      headlineEl.textContent = payload.best_window_v2_label;
+    }
+  }
+
+  // Mount the tug-of-war chart inside the existing besttime-card.
+  const target = document.querySelector('.besttime-card');
+  if (!target) return;
+  // Avoid double-paint if user navigated within the SPA
+  const existing = target.querySelector('.hourbars-wrap');
+  if (existing) existing.remove();
+  target.insertAdjacentHTML('beforeend', renderHourlyBarsV2(payload, nowH));
+}
+
 function _currentLocalHour(timezone) {
   const tz = timezone || 'America/Los_Angeles';
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -1020,6 +1465,13 @@ function render(data, beachFid) {
   main.push(buildDetailsSection(dog_policy));
   main.push(buildLinksSection(beach, beachFid));
   document.getElementById('main-content').innerHTML = main.filter(Boolean).join('');
+
+  // V2 tug-of-war chart — fetched in parallel with photos/scout/etc.
+  // Mounts inside the besttime-card (if present) and overrides the
+  // v1-derived headline with the v2 best window when available.
+  _fetchBeachHourlyV2(beachFid).then(payload => {
+    if (payload && !payload.error) applyBeachHourlyV2(payload);
+  });
 
   // _renderZoneRulesBlock removed — zone info is now in the Amenities
   // card (section tiles + per-region time pills).

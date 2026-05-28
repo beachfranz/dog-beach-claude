@@ -344,29 +344,45 @@
     font-size: 11px; color: var(--text-muted);
   }
   .hourbars-track {
-    display: flex; align-items: stretch; gap: 2px;
-    height: 160px;          /* total chart height: pos 80 + axis + neg 80 */
+    display: flex; align-items: stretch;
+    justify-content: space-between;
+    gap: 6px;
+    height: 180px;          /* score label 14 + pos 80 + axis + neg 80 */
     padding: 0 2px;
     position: relative;
   }
-  /* Single horizontal axis line cutting the chart at vertical midpoint */
+  /* Single horizontal axis line at the midpoint of bar area (offset by label height) */
   .hourbars-track::before {
     content: '';
     position: absolute;
     left: 0; right: 0;
-    top: 50%;
+    top: calc(14px + (100% - 14px) / 2);
     height: 1px;
     background: var(--text-muted);
     opacity: 0.4;
     pointer-events: none;
   }
   .hourbar-col {
-    flex: 1; min-width: 0;
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 22px;
     display: flex; flex-direction: column;
     height: 100%;
     cursor: help;
     position: relative;
   }
+  .hourbar-score {
+    height: 14px;
+    flex: none;
+    text-align: center;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  .hourbar-score.score-cap { color: var(--red); }
   /* Top half: positives stack UP from axis (column-reverse fills bottom→top
    * inside, anchored to the axis line). */
   .hourbar-pos {
@@ -389,14 +405,18 @@
   .hourbar-col.bar-now .hourbar-pos,
   .hourbar-col.bar-now .hourbar-neg { outline: 2px solid #0f172a; outline-offset: 1px; }
   .hourbar-seg { width: 100%; }
-  /* Positive segments (above axis) — beach.html score-row palette */
-  .hourbar-seg.seg-features  { background: var(--green); }
-  .hourbar-seg.seg-weather   { background: var(--amber); }
-  .hourbar-seg.seg-window    { background: #0ea5e9; }
-  .hourbar-seg.seg-drive     { background: var(--accent); }
+  /* Positive sub-components — drilldown of weather + features */
+  .hourbar-seg.seg-fence     { background: var(--green); }   /* perimeter + gate */
+  .hourbar-seg.seg-water     { background: #06b6d4; }        /* drinking water (cyan-500) */
+  .hourbar-seg.seg-comfort   { background: #86efac; }        /* grass + size (green-300) */
+  .hourbar-seg.seg-temp      { background: var(--amber); }   /* feels-like bell */
+  .hourbar-seg.seg-wind      { background: #14b8a6; }        /* wind bell (teal-500) */
+  .hourbar-seg.seg-sky       { background: #facc15; }        /* WMO code (yellow-400) */
+  .hourbar-seg.seg-window    { background: #0ea5e9; }        /* best-window flag */
+  .hourbar-seg.seg-drive     { background: var(--accent); }  /* short drive bonus */
   /* Negative segments (below axis) — red family + neutral for drive penalty */
   .hourbar-seg.seg-heat_uv      { background: var(--red); }
-  .hourbar-seg.seg-harsh        { background: #f97316; }    /* orange — between amber + red */
+  .hourbar-seg.seg-harsh        { background: #f97316; }    /* orange */
   .hourbar-seg.seg-gotchas      { background: #fda4af; }    /* soft rose */
   .hourbar-seg.seg-drive-neg    { background: var(--text-muted); }
   /* Cap stripe at top of positive stack when safety gate fires */
@@ -407,14 +427,55 @@
     height: 3px; width: 100%;
   }
   .hourbar-axis {
-    display: flex; gap: 2px; padding: 4px 2px 0;
+    display: flex; justify-content: space-between; gap: 6px; padding: 4px 2px 0;
     font-family: 'DM Mono', monospace;
     font-size: 9px; color: var(--text-muted);
   }
   .hourbar-axis-label {
-    flex: 1; min-width: 0;
+    flex: 1 1 0; min-width: 0;
+    max-width: 22px;
     text-align: center;
     white-space: nowrap; overflow: hidden;
+  }
+  /* Legend below chart */
+  .hourbars-legend {
+    display: flex; flex-wrap: wrap; gap: 4px 12px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border);
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+  .hourbars-legend-group {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .hourbars-legend-group + .hourbars-legend-group { }
+  .hourbars-legend-label {
+    display: inline-flex; align-items: center; gap: 4px;
+    white-space: nowrap;
+  }
+  .legend-swatch {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 2px;
+    vertical-align: middle;
+    flex: none;
+  }
+  .legend-swatch.seg-fence     { background: var(--green); }
+  .legend-swatch.seg-water     { background: #06b6d4; }
+  .legend-swatch.seg-comfort   { background: #86efac; }
+  .legend-swatch.seg-temp      { background: var(--amber); }
+  .legend-swatch.seg-wind      { background: #14b8a6; }
+  .legend-swatch.seg-sky       { background: #facc15; }
+  .legend-swatch.seg-window    { background: #0ea5e9; }
+  .legend-swatch.seg-drive     { background: var(--accent); }
+  .legend-swatch.seg-heat_uv   { background: var(--red); }
+  .legend-swatch.seg-harsh     { background: #f97316; }
+  .legend-swatch.seg-gotchas   { background: #fda4af; }
+  .legend-swatch.seg-drive-neg { background: var(--text-muted); }
+  .hourbars-legend-sep {
+    color: var(--text-muted);
+    opacity: 0.5;
   }
   /* Show every other label on narrow screens so they don't overlap */
   @media (max-width: 480px) {
@@ -634,22 +695,42 @@ function applyHourlyV2(payload) {
 
 function renderHourlyBars(p, nowH) {
   // Tug-of-war chart: positives stack UP from a center axis, negatives
-  // stack DOWN. Each half scales 0..50 (max positive total = max
-  // negative total = 50). The visual gap between the column's top and
-  // bottom tells the user the score's deviation from baseline at a
-  // glance, without numbers.
-  const POS_MAX = 50;  // features 20 + weather 22 + window 5 + drive 3
-  const NEG_MAX = 50;  // heat_uv 25 + harsh 15 + gotchas 10 + drive 10
-  const cols = (p.hours || []).map(h => {
+  // stack DOWN. Each half's scale is DYNAMIC — sized to the largest
+  // positive (or negative) total seen across the day's hours, with
+  // headroom. Lets a mild-day chart zoom in instead of looking tiny.
+  const hours = p.hours || [];
+  let maxPos = 0, maxNeg = 0;
+  for (const h of hours) {
+    const drivePos = Math.max(0, h.drive || 0);
+    const driveNeg = Math.max(0, -(h.drive || 0));
+    const posTotal = (h.pos_fence || 0) + (h.pos_water || 0) + (h.pos_comfort || 0)
+                   + (h.pos_temp  || 0) + (h.pos_wind  || 0) + (h.pos_sky     || 0)
+                   + (h.pos_window || 0) + drivePos;
+    const negTotal = (h.neg_heat_uv || 0) + (h.neg_harsh || 0) + (h.neg_gotchas || 0) + driveNeg;
+    if (posTotal > maxPos) maxPos = posTotal;
+    if (negTotal > maxNeg) maxNeg = negTotal;
+  }
+  // Headroom + nice-number rounding (5-step ceiling), floor at 10 so a
+  // flat-zero day still has a usable scale.
+  const niceCeil = v => Math.max(10, Math.ceil(v * 1.1 / 5) * 5);
+  const POS_MAX = niceCeil(maxPos);
+  const NEG_MAX = niceCeil(maxNeg);
+
+  const cols = hours.map(h => {
     const drivePos = Math.max(0, h.drive || 0);
     const driveNeg = Math.max(0, -(h.drive || 0));
 
-    // Positive segments (above axis). Order: features (closest to axis),
-    // then weather, then window, then drive bonus at top.
+    // Positive segments (above axis). Order from axis up: amenity stack
+    // (fence → water → comfort), then weather stack (temp → wind → sky),
+    // then window flag, then drive bonus capping the top.
     const posSegs = [
-      ['seg-features', h.pos_features || 0],
-      ['seg-weather',  h.pos_weather  || 0],
-      ['seg-window',   h.pos_window   || 0],
+      ['seg-fence',    h.pos_fence   || 0],
+      ['seg-water',    h.pos_water   || 0],
+      ['seg-comfort',  h.pos_comfort || 0],
+      ['seg-temp',     h.pos_temp    || 0],
+      ['seg-wind',     h.pos_wind    || 0],
+      ['seg-sky',      h.pos_sky     || 0],
+      ['seg-window',   h.pos_window  || 0],
       ['seg-drive',    drivePos],
     ];
     const posHtml = posSegs
@@ -675,10 +756,14 @@ function renderHourlyBars(p, nowH) {
     const isNow = h.local_hour === nowH ? ' bar-now' : '';
 
     const posParts = [];
-    if (h.pos_features) posParts.push(`+${h.pos_features} features`);
-    if (h.pos_weather)  posParts.push(`+${h.pos_weather} weather`);
-    if (h.pos_window)   posParts.push(`+${h.pos_window} window`);
-    if (drivePos)       posParts.push(`+${drivePos} drive`);
+    if (h.pos_fence)   posParts.push(`+${h.pos_fence} fence`);
+    if (h.pos_water)   posParts.push(`+${h.pos_water} water`);
+    if (h.pos_comfort) posParts.push(`+${h.pos_comfort} comfort`);
+    if (h.pos_temp)    posParts.push(`+${h.pos_temp} temp`);
+    if (h.pos_wind)    posParts.push(`+${h.pos_wind} wind`);
+    if (h.pos_sky)     posParts.push(`+${h.pos_sky} sky`);
+    if (h.pos_window)  posParts.push(`+${h.pos_window} window`);
+    if (drivePos)      posParts.push(`+${drivePos} drive`);
     const negParts = [];
     if (h.neg_heat_uv) negParts.push(`-${h.neg_heat_uv} heat/UV`);
     if (h.neg_harsh)   negParts.push(`-${h.neg_harsh} weather`);
@@ -697,7 +782,10 @@ function renderHourlyBars(p, nowH) {
       h.gate_fired ? '⚠️ safety cap' : null,
     ].filter(Boolean).join(' · ');
 
+    const scoreClass = h.gate_fired ? 'hourbar-score score-cap' : 'hourbar-score';
+    const scoreText = (h.score != null) ? h.score : '';
     return `<div class="hourbar-col${isNow}" data-tip="${escHtml(tip)}">
+      <div class="${scoreClass}">${scoreText}</div>
       <div class="hourbar-pos">${capMarker}${posHtml}</div>
       <div class="hourbar-neg">${negHtml}</div>
     </div>`;
@@ -710,9 +798,41 @@ function renderHourlyBars(p, nowH) {
   const driveBadge = p.drive_minutes != null
     ? `<span class="hourbars-drive">🚗 ${p.drive_minutes}min ${p.drive_factor >= 0 ? '+' : ''}${p.drive_factor}</span>`
     : '';
-  const anyGate = (p.hours || []).some(h => h.gate_fired);
+  const anyGate = hours.some(h => h.gate_fired);
   const gateBadge = anyGate
     ? `<span class="hourbars-gate" title="One or more hours hit a safety cap">cap ${30}</span>`
+    : '';
+
+  // Legend — only show segments that appear at least once in the rendered chart.
+  const hasPos = (k) => hours.some(h => (h[k] || 0) > 0);
+  const hasDrivePos = hours.some(h => (h.drive || 0) > 0);
+  const hasDriveNeg = hours.some(h => (h.drive || 0) < 0);
+  const posItems = [
+    { cls: 'seg-fence',   label: 'fence',     show: hasPos('pos_fence') },
+    { cls: 'seg-water',   label: 'water',     show: hasPos('pos_water') },
+    { cls: 'seg-comfort', label: 'comfort',   show: hasPos('pos_comfort') },
+    { cls: 'seg-temp',    label: 'temp',      show: hasPos('pos_temp') },
+    { cls: 'seg-wind',    label: 'wind',      show: hasPos('pos_wind') },
+    { cls: 'seg-sky',     label: 'sky',       show: hasPos('pos_sky') },
+    { cls: 'seg-window',  label: 'window',    show: hasPos('pos_window') },
+    { cls: 'seg-drive',   label: 'short drive', show: hasDrivePos },
+  ].filter(x => x.show);
+  const negItems = [
+    { cls: 'seg-heat_uv',   label: 'heat / UV', show: hasPos('neg_heat_uv') },
+    { cls: 'seg-harsh',     label: 'harsh wx',  show: hasPos('neg_harsh') },
+    { cls: 'seg-gotchas',   label: 'gotchas',   show: hasPos('neg_gotchas') },
+    { cls: 'seg-drive-neg', label: 'long drive',show: hasDriveNeg },
+  ].filter(x => x.show);
+  const swatch = (cls, label) =>
+    `<span class="hourbars-legend-label"><span class="legend-swatch ${cls}"></span>${label}</span>`;
+  const posLegend = posItems.map(i => swatch(i.cls, i.label)).join('');
+  const negLegend = negItems.map(i => swatch(i.cls, i.label)).join('');
+  const legendHtml = (posItems.length || negItems.length)
+    ? `<div class="hourbars-legend">
+        ${posItems.length ? `<div class="hourbars-legend-group">+ ${posLegend}</div>` : ''}
+        ${(posItems.length && negItems.length) ? `<span class="hourbars-legend-sep">·</span>` : ''}
+        ${negItems.length ? `<div class="hourbars-legend-group">− ${negLegend}</div>` : ''}
+       </div>`
     : '';
 
   return `<div class="hourbars-wrap">
@@ -722,6 +842,7 @@ function renderHourlyBars(p, nowH) {
     </div>
     <div class="hourbars-track">${cols}</div>
     <div class="hourbar-axis">${labels}</div>
+    ${legendHtml}
   </div>`;
 }
 

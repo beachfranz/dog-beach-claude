@@ -343,7 +343,33 @@
     gap: 8px; margin-bottom: 6px;
     font-size: 11px; color: var(--text-muted);
   }
+  .hourbars-chart {
+    display: flex; align-items: stretch;
+    gap: 6px;
+  }
+  .hourbars-yaxis {
+    position: relative;
+    width: 32px;
+    flex: none;
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    color: var(--text-muted);
+    margin-top: 14px;   /* align with bar area (skip score-label row) */
+  }
+  .hourbars-yaxis > span {
+    position: absolute;
+    right: 4px;
+    line-height: 1;
+    transform: translateY(-50%);
+    white-space: nowrap;
+  }
+  .hourbars-yaxis-top    { top: 0; }
+  .hourbars-yaxis-mid    { top: 25%; opacity: 0.6; }
+  .hourbars-yaxis-zero   { top: 50%; opacity: 0.7; }
+  .hourbars-yaxis-neg-mid{ top: 75%; opacity: 0.6; }
+  .hourbars-yaxis-bot    { top: 100%; }
   .hourbars-track {
+    flex: 1 1 auto;
     display: flex; align-items: stretch;
     justify-content: space-between;
     gap: 6px;
@@ -360,6 +386,24 @@
     height: 1px;
     background: var(--text-muted);
     opacity: 0.4;
+    pointer-events: none;
+  }
+  /* Subtle gridlines at ±25%/±50% of each half (i.e. ±12.5/25 score pts). */
+  .hourbars-track::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0;
+    top: 14px; bottom: 0;
+    background-image:
+      linear-gradient(to bottom,
+        transparent calc(25% - 0.5px),
+        rgba(100,116,139,0.15) calc(25% - 0.5px),
+        rgba(100,116,139,0.15) calc(25% + 0.5px),
+        transparent calc(25% + 0.5px),
+        transparent calc(75% - 0.5px),
+        rgba(100,116,139,0.15) calc(75% - 0.5px),
+        rgba(100,116,139,0.15) calc(75% + 0.5px),
+        transparent calc(75% + 0.5px));
     pointer-events: none;
   }
   .hourbar-col {
@@ -695,9 +739,10 @@ function applyHourlyV2(payload) {
 
 function renderHourlyBars(p, nowH) {
   // Tug-of-war chart: positives stack UP from a center axis, negatives
-  // stack DOWN. Each half's scale is DYNAMIC — sized to the largest
-  // positive (or negative) total seen across the day's hours, with
-  // headroom. Lets a mild-day chart zoom in instead of looking tiny.
+  // stack DOWN. Each point of any bucket = 1% contribution to the final
+  // 0-100 score (tooltips read in %). Scale is DYNAMIC per chart —
+  // nice-ceiled to the day's actual max so a mild-day chart zooms in
+  // instead of looking tiny vs the 50-pt absolute cap.
   const hours = p.hours || [];
   let maxPos = 0, maxNeg = 0;
   for (const h of hours) {
@@ -710,8 +755,8 @@ function renderHourlyBars(p, nowH) {
     if (posTotal > maxPos) maxPos = posTotal;
     if (negTotal > maxNeg) maxNeg = negTotal;
   }
-  // Headroom + nice-number rounding (5-step ceiling), floor at 10 so a
-  // flat-zero day still has a usable scale.
+  // Nice-ceil to a 5-step boundary, floor at 10 so a flat-zero day
+  // still has a usable scale.
   const niceCeil = v => Math.max(10, Math.ceil(v * 1.1 / 5) * 5);
   const POS_MAX = niceCeil(maxPos);
   const NEG_MAX = niceCeil(maxNeg);
@@ -755,20 +800,22 @@ function renderHourlyBars(p, nowH) {
       ? `<div class="hourbar-cap-marker"></div>` : '';
     const isNow = h.local_hour === nowH ? ' bar-now' : '';
 
+    // Each point = 1% of final score (bucket caps sum to 50/50). Tooltip
+    // expresses contribution in % terms to match what the chart shows.
     const posParts = [];
-    if (h.pos_fence)   posParts.push(`+${h.pos_fence} fence`);
-    if (h.pos_water)   posParts.push(`+${h.pos_water} water`);
-    if (h.pos_comfort) posParts.push(`+${h.pos_comfort} comfort`);
-    if (h.pos_temp)    posParts.push(`+${h.pos_temp} temp`);
-    if (h.pos_wind)    posParts.push(`+${h.pos_wind} wind`);
-    if (h.pos_sky)     posParts.push(`+${h.pos_sky} sky`);
-    if (h.pos_window)  posParts.push(`+${h.pos_window} window`);
-    if (drivePos)      posParts.push(`+${drivePos} drive`);
+    if (h.pos_fence)   posParts.push(`fence +${h.pos_fence}%`);
+    if (h.pos_water)   posParts.push(`water +${h.pos_water}%`);
+    if (h.pos_comfort) posParts.push(`comfort +${h.pos_comfort}%`);
+    if (h.pos_temp)    posParts.push(`temp +${h.pos_temp}%`);
+    if (h.pos_wind)    posParts.push(`wind +${h.pos_wind}%`);
+    if (h.pos_sky)     posParts.push(`sky +${h.pos_sky}%`);
+    if (h.pos_window)  posParts.push(`window +${h.pos_window}%`);
+    if (drivePos)      posParts.push(`drive +${drivePos}%`);
     const negParts = [];
-    if (h.neg_heat_uv) negParts.push(`-${h.neg_heat_uv} heat/UV`);
-    if (h.neg_harsh)   negParts.push(`-${h.neg_harsh} weather`);
-    if (h.neg_gotchas) negParts.push(`-${h.neg_gotchas} gotchas`);
-    if (driveNeg)      negParts.push(`-${driveNeg} drive`);
+    if (h.neg_heat_uv) negParts.push(`heat/UV -${h.neg_heat_uv}%`);
+    if (h.neg_harsh)   negParts.push(`harsh -${h.neg_harsh}%`);
+    if (h.neg_gotchas) negParts.push(`gotchas -${h.neg_gotchas}%`);
+    if (driveNeg)      negParts.push(`drive -${driveNeg}%`);
 
     const tip = [
       h.hour_label,
@@ -840,7 +887,16 @@ function renderHourlyBars(p, nowH) {
       <span>Hourly score · open ${formatHour(p.open_hour)} – ${formatHour(p.close_hour)}</span>
       <span>${driveBadge} ${gateBadge}</span>
     </div>
-    <div class="hourbars-track">${cols}</div>
+    <div class="hourbars-chart">
+      <div class="hourbars-yaxis">
+        <span class="hourbars-yaxis-top">+${POS_MAX}%</span>
+        <span class="hourbars-yaxis-mid">+${Math.round(POS_MAX / 2)}%</span>
+        <span class="hourbars-yaxis-zero">0</span>
+        <span class="hourbars-yaxis-neg-mid">−${Math.round(NEG_MAX / 2)}%</span>
+        <span class="hourbars-yaxis-bot">−${NEG_MAX}%</span>
+      </div>
+      <div class="hourbars-track">${cols}</div>
+    </div>
     <div class="hourbar-axis">${labels}</div>
     ${legendHtml}
   </div>`;

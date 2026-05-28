@@ -625,6 +625,13 @@ def main() -> int:
                     help="State filter (default CA). Use --all-states to bypass.")
     ap.add_argument("--all-states", action="store_true",
                     help="Bypass state filter — process all active+scoreable parks")
+    ap.add_argument("--all-active", action="store_true",
+                    help="All active parks in --state, REGARDLESS of existing source. "
+                         "Use for bulk re-extraction (e.g. after prompt extension). Default "
+                         "(without this flag) targets only unsourced parks.")
+    ap.add_argument("--retry-failed", action="store_true",
+                    help="Target parks where the most recent BEP row is a sentinel "
+                         "(per_park_amenities_v1_no_result) — i.e. previous extraction failed.")
     ap.add_argument("--workers", type=int, default=6,
                     help="Parallel worker threads. Cap at <15 per [[supabase-pool-cap-vs-dagster-concurrency]]; default 6.")
     ap.add_argument("--include-no-website", action="store_true",
@@ -647,6 +654,45 @@ def main() -> int:
               FROM public.dog_parks_gold dpg
              WHERE dpg.fid = ANY(%s){website_clause}
         """, (target_fids,))
+    elif args.retry_failed:
+        # Parks where the latest BEP park_v1 row is the no-result sentinel —
+        # previous extraction couldn't find a usable source page. Web-search
+        # mode is implied (set --include-no-website implicit).
+        state_filter = "" if args.all_states else " AND dpg.state = %s "
+        state_params = [] if args.all_states else [args.state]
+        cur.execute(f"""
+            WITH latest_bep AS (
+              SELECT DISTINCT ON (dog_park_fid) dog_park_fid, source
+                FROM public.dog_park_enrichment_provenance
+               WHERE field_group = 'park_v1'
+               ORDER BY dog_park_fid, updated_at DESC
+            )
+            SELECT dpg.fid, dpg.name, dpg.address_city, dpg.website AS osm_website
+              FROM public.dog_parks_gold dpg
+              JOIN latest_bep lb ON lb.dog_park_fid = dpg.fid
+             WHERE dpg.is_active = true
+               AND lb.source = 'per_park_amenities_v1_no_result'
+               {state_filter}
+             ORDER BY dpg.fid
+        """ + (f" LIMIT {args.limit}" if args.limit else ""), state_params)
+    elif args.all_active:
+        # All active parks in state, regardless of existing source. Use for
+        # bulk re-extraction after prompt changes.
+        state_filter = "" if args.all_states else " AND state = %s "
+        state_params = [] if args.all_states else [args.state]
+        website_filter = (
+            " (website IS NOT NULL OR address_city IS NOT NULL)"
+            if args.include_no_website else
+            " website IS NOT NULL"
+        )
+        cur.execute(f"""
+            SELECT fid, name, address_city, website AS osm_website
+              FROM public.dog_parks_gold
+             WHERE is_active = true
+               AND {website_filter}
+               {state_filter}
+             ORDER BY (website IS NULL), fid
+        """ + (f" LIMIT {args.limit}" if args.limit else ""), state_params)
     else:
         state_filter = "" if args.all_states else f" AND state = %s "
         state_params = [] if args.all_states else [args.state]

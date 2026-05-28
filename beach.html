@@ -1025,6 +1025,15 @@ function formatClosureLine(c) {
     const [m, d] = md.split('-');
     return `${MON[m] || m} ${parseInt(d, 10)}`;
   };
+  // Section-aware verbs (Franz 2026-05-28 level #2): sand-only closures
+  // say "Sand off-limits"; global / unknown say "Closed".
+  const section = (c.section || '').toLowerCase();
+  const SECTION_NOUN = {
+    sand: 'Sand', water: 'Water', water_play: 'Water play',
+    playground: 'Playground', picnic_area: 'Picnic area',
+  };
+  const sectionNoun = SECTION_NOUN[section];
+  const verb_open = sectionNoun ? `${sectionNoun} off-limits` : 'Closed';
   const reason = c.reason ? c.reason.replace(/_/g, ' ') : '';
   const reasonClause = reason ? ` for ${reason}` : '';
   const seasonClause = c.season_label
@@ -1033,21 +1042,22 @@ function formatClosureLine(c) {
         ? ` · ${fmtMd(c.season_from_md)}–${fmtMd(c.season_to_md)}`
         : '');
   if (c.kind === 'weekly') {
-    return `🚧 Closed ${DAY[(c.weekday||'').toLowerCase()] || '?'}${reasonClause}${seasonClause}`;
+    return `🚧 ${verb_open} ${DAY[(c.weekday||'').toLowerCase()] || '?'}${reasonClause}${seasonClause}`;
   }
   if (c.kind === 'weekly_time') {
-    return `🚧 Closed ${DAY[(c.weekday||'').toLowerCase()] || '?'} ${fmtTime(c.start)}–${fmtTime(c.end)}${reasonClause}${seasonClause}`;
+    return `🚧 ${verb_open} ${DAY[(c.weekday||'').toLowerCase()] || '?'} ${fmtTime(c.start)}–${fmtTime(c.end)}${reasonClause}${seasonClause}`;
   }
   if (c.kind === 'daily_all') {
-    if (c.season_label) return `🚧 ${c.season_label}`;
+    if (c.season_label) return `🚧 ${sectionNoun ? `${sectionNoun}: ` : ''}${c.season_label}`;
     if (!seasonClause) {
-      return reason ? `🚧 ${reason.charAt(0).toUpperCase() + reason.slice(1)}` : '🚧 Closed';
+      if (reason) return `🚧 ${reason.charAt(0).toUpperCase() + reason.slice(1)}`;
+      return sectionNoun ? `🚧 ${sectionNoun} off-limits` : '🚧 Closed';
     }
-    return `🚧 Dogs prohibited${seasonClause}`;
+    return `🚧 ${sectionNoun || 'Dogs prohibited'}${seasonClause}`;
   }
   if (c.kind === 'daily_time') {
-    if (c.season_label) return `🚧 ${c.season_label}`;
-    return `🚧 Closed daily ${fmtTime(c.start)}–${fmtTime(c.end)}${seasonClause || reasonClause}`;
+    if (c.season_label) return `🚧 ${sectionNoun ? `${sectionNoun}: ` : ''}${c.season_label}`;
+    return `🚧 ${verb_open} daily ${fmtTime(c.start)}–${fmtTime(c.end)}${seasonClause || reasonClause}`;
   }
   return null;
 }
@@ -1278,9 +1288,18 @@ function applyBeachHourlyV2(payload) {
           reopenLabel = hours[i].hour_label; break;
         }
       }
-      headlineEl.textContent = reopenLabel
-        ? `Closed right now — reopens ${reopenLabel}`
+      // Section-aware verb. sand → "Sand off-limits", global/unknown → "Closed".
+      const section = (current.closed_section || '').toLowerCase();
+      const SECTION_NOUN = { sand: 'Sand', water: 'Water', water_play: 'Water play' };
+      const verbNow = SECTION_NOUN[section]
+        ? `${SECTION_NOUN[section]} off-limits right now`
+        : 'Closed right now';
+      const verbRest = SECTION_NOUN[section]
+        ? `${SECTION_NOUN[section]} off-limits for the rest of today`
         : 'Closed for the rest of today';
+      headlineEl.textContent = reopenLabel
+        ? `${verbNow} — reopens ${reopenLabel}`
+        : verbRest;
     } else if (payload.best_window_v2_label) {
       headlineEl.textContent = payload.best_window_v2_label;
     }

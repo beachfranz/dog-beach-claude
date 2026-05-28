@@ -1016,10 +1016,17 @@ function formatClosureLine(c) {
     const [m, d] = md.split('-');
     return `${MON[m] || m} ${parseInt(d, 10)}`;
   };
+  // Section-aware verbs: sand-only closures say "off-limits", whole-location
+  // closures say "Closed". section='global' or absent → "Closed".
+  const section = (c.section || '').toLowerCase();
+  const SECTION_NOUN = {
+    sand: 'Sand', water: 'Water', water_play: 'Water play',
+    playground: 'Playground', picnic_area: 'Picnic area',
+  };
+  const sectionNoun = SECTION_NOUN[section];   // null if unknown / global
+  const verb_open = sectionNoun ? `${sectionNoun} off-limits` : 'Closed';
   const reason = c.reason ? c.reason.replace(/_/g, ' ') : '';
   const reasonClause = reason ? ` for ${reason}` : '';
-  // Prefer a richly-worded season_label when supplied (zone_rules carries them).
-  // Otherwise fall back to "<month> <day>–<month> <day>".
   const seasonClause = c.season_label
     ? ` · ${c.season_label}`
     : (c.season_from_md && c.season_to_md
@@ -1027,24 +1034,22 @@ function formatClosureLine(c) {
         : '');
 
   if (c.kind === 'weekly') {
-    return `🚧 Closed ${DAY[(c.weekday||'').toLowerCase()] || '?'}${reasonClause}${seasonClause}`;
+    return `🚧 ${verb_open} ${DAY[(c.weekday||'').toLowerCase()] || '?'}${reasonClause}${seasonClause}`;
   }
   if (c.kind === 'weekly_time') {
-    return `🚧 Closed ${DAY[(c.weekday||'').toLowerCase()] || '?'} ${fmtTime(c.start)}–${fmtTime(c.end)}${reasonClause}${seasonClause}`;
+    return `🚧 ${verb_open} ${DAY[(c.weekday||'').toLowerCase()] || '?'} ${fmtTime(c.start)}–${fmtTime(c.end)}${reasonClause}${seasonClause}`;
   }
   if (c.kind === 'daily_all') {
-    // season_label is often already richly worded — use it verbatim.
-    if (c.season_label) return `🚧 ${c.season_label}`;
+    if (c.season_label) return `🚧 ${sectionNoun ? `${sectionNoun}: ` : ''}${c.season_label}`;
     if (!seasonClause) {
-      // Year-round all-day (e.g. dogs_allowed='no' on a no-dogs beach).
-      return reason ? `🚧 ${reason.charAt(0).toUpperCase() + reason.slice(1)}` : '🚧 Closed';
+      if (reason) return `🚧 ${reason.charAt(0).toUpperCase() + reason.slice(1)}`;
+      return sectionNoun ? `🚧 ${sectionNoun} off-limits` : '🚧 Closed';
     }
-    return `🚧 Dogs prohibited${seasonClause}`;
+    return `🚧 ${sectionNoun || 'Dogs prohibited'}${seasonClause}`;
   }
   if (c.kind === 'daily_time') {
-    // season_label usually mentions the time range too — avoid duplicating.
-    if (c.season_label) return `🚧 ${c.season_label}`;
-    return `🚧 Closed daily ${fmtTime(c.start)}–${fmtTime(c.end)}${seasonClause || reasonClause}`;
+    if (c.season_label) return `🚧 ${sectionNoun ? `${sectionNoun}: ` : ''}${c.season_label}`;
+    return `🚧 ${verb_open} daily ${fmtTime(c.start)}–${fmtTime(c.end)}${seasonClause || reasonClause}`;
   }
   return null;
 }

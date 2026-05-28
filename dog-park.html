@@ -97,7 +97,7 @@
     color: var(--text);
   }
 
-  /* Tooltip pill */
+  /* Tooltip pill — works on hover AND tap-to-pin (mobile). */
   [data-tip] { position: relative; }
   [data-tip]::after {
     content: attr(data-tip);
@@ -115,9 +115,14 @@
     opacity: 0;
     transition: opacity 80ms ease-out 0s;
   }
-  [data-tip]:hover::after {
+  [data-tip]:hover::after,
+  [data-tip][data-tip-open]::after {
     opacity: 1;
     transition-delay: 200ms;
+  }
+  /* On touch — show immediately when pinned (no 200ms delay) */
+  [data-tip][data-tip-open]::after {
+    transition-delay: 0ms;
   }
 
   /* Amenities */
@@ -563,6 +568,8 @@
   @media (max-width: 600px) {
     section.card { padding: 10px 12px; margin: 5px 10px; border-radius: 10px; }
     section.card h2 { font-size: 13px; margin-bottom: 6px; }
+    /* Slimmer sticky header on phone */
+    header.hero { padding: 14px 14px 10px; gap: 8px; }
     .park-name { font-size: 20px; margin: 0 0 4px; }
     .fit-badge { font-size: 16px; padding: 1px 8px; margin-right: 3px; }
     .park-region { font-size: 13px; margin-left: 0.3em; }
@@ -580,6 +587,15 @@
     .scout-cta { margin-top: 10px; gap: 8px; font-size: 13px; }
     .scout-cta-btn { padding: 7px 11px; font-size: 12px; }
     .packlist-chip { padding: 5px 9px; font-size: 12px; }
+    /* Chart mobile adjustments — narrower Y-axis frees up bar area */
+    .hourbars-yaxis { width: 20px; font-size: 8px; }
+    .hourbars-chart { gap: 4px; }
+    .hourbars-track { gap: 3px; padding: 0 1px; }
+    .hourbar-col { max-width: 18px; touch-action: manipulation; }
+    .hourbar-axis-label { font-size: 8px; }
+    .hourbars-meta { font-size: 10px; flex-wrap: wrap; }
+    /* Tighten tooltip on phone so it doesn't overflow tiny screens */
+    [data-tip]::after { font-size: 10px; max-width: 180px; padding: 4px 6px; }
   }
 </style>
 </head>
@@ -620,6 +636,22 @@ function escHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c =>
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 }
+
+// Tap-to-pin tooltips for touch devices — CSS :hover doesn't fire on
+// touch, so this delegate toggles [data-tip-open] on click. Document-
+// level once-attach handles dynamically rendered chart bars too.
+document.addEventListener('click', (e) => {
+  const target = e.target.closest('[data-tip]');
+  // Close any other open tooltip
+  document.querySelectorAll('[data-tip-open]').forEach(el => {
+    if (el !== target) el.removeAttribute('data-tip-open');
+  });
+  if (target) {
+    // Toggle: tap again closes it
+    if (target.hasAttribute('data-tip-open')) target.removeAttribute('data-tip-open');
+    else target.setAttribute('data-tip-open', '');
+  }
+});
 
 // Read sticky user location (set by find.html). Returns {lat, lng} or null.
 function _getUserLatLng() {
@@ -761,10 +793,12 @@ function renderHourlyBars(p, nowH) {
     if (negTotal > maxNeg) maxNeg = negTotal;
   }
   // Nice-ceil to a 5-step boundary, floor at 10 so a flat-zero day
-  // still has a usable scale.
+  // still has a usable scale. Both halves share the same scale so the
+  // visual axis is symmetric (Franz 2026-05-27 LATE).
   const niceCeil = v => Math.max(10, Math.ceil(v * 1.1 / 5) * 5);
-  const POS_MAX = niceCeil(maxPos);
-  const NEG_MAX = niceCeil(maxNeg);
+  const AXIS_MAX = niceCeil(Math.max(maxPos, maxNeg));
+  const POS_MAX = AXIS_MAX;
+  const NEG_MAX = AXIS_MAX;
 
   const cols = hours.map(h => {
     const drivePos = Math.max(0, h.drive || 0);
@@ -1213,13 +1247,11 @@ function buildScoutCard(park, now, today) {
 async function loadScoutBlurb(park, today, now) {
   const el = document.getElementById('scout-blurb');
   if (!el) return;
+  // No v1-status short-circuit — the v1 hour_status frequently disagrees
+  // with v2 scoring (e.g. v1='no_go' on a 70-scoring hour). The chat LLM
+  // has the full current conditions + bands in its system prompt and can
+  // frame appropriately (cautious vs upbeat). Per Franz 2026-05-27 LATE.
   const status = now?.hour_status ?? today?.day_status;
-  if (status === 'no_go') {
-    el.textContent = "Conditions are tough right now — try the cool hours or wait it out.";
-    el.classList.add('loaded'); _renderScoutCTA(park); return;
-  }
-  // Build question. Edge function's system prompt already has all the
-  // context; the question just asks for the narrative.
   const window = today?.best_window_label
     || (status === 'go' ? 'right now' : 'during operating hours');
   const question = `Write the Scout intro paragraph for visiting this dog park today. Bold the time window **${window}**.`;

@@ -562,6 +562,26 @@ async function processBeach(
     return { locationId: beach.location_id, ok: false, error: String(err), phases };
   }
 
+  // Phase v2-best-window: overwrite v1 best_window_label/start/end on
+  // each date with the v2-scored equivalent. Soft-fail so a bug here
+  // can't block the v1 daily pipeline. Mirrors the dog-park hook.
+  // beaches_gold.fid == beach_dog_policy.arena_group_id, so use that.
+  if (beach.arena_group_id != null) {
+    try {
+      for (const d of dates) {
+        const { error: rpcErr } = await supabase.rpc(
+          "apply_v2_best_window_to_beach_recommendations",
+          { p_fid: beach.arena_group_id, p_date: d },
+        );
+        if (rpcErr) console.warn(`[${beach.location_id}] v2 best window apply ${d}: ${rpcErr.message}`);
+      }
+      phases.apply_v2_window = "ok";
+    } catch (err) {
+      console.warn(`[${beach.location_id}] v2 best window apply error: ${err}`);
+      phases.apply_v2_window = "soft_error";
+    }
+  }
+
   console.log(`[${beach.location_id}] Refresh complete — ${dates.length} days`);
   return { locationId: beach.location_id, ok: true, daysProcessed: dates.length, phases };
 }

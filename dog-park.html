@@ -1363,7 +1363,7 @@ async function loadScoutBlurb(park, today, now) {
   const status = now?.hour_status ?? today?.day_status;
   const window = today?.best_window_label
     || (status === 'go' ? 'right now' : 'during operating hours');
-  const question = `Write the Scout intro paragraph for visiting this dog park today. Bold the time window **${window}**.`;
+  const question = `Write the Scout intro paragraph for visiting this dog park today. Don't restate the time window — it's already shown in the headline above your paragraph.`;
   try {
     const r = await fetch(`${SUPABASE_URL}/functions/v1/dog-park-chat`, {
       method: 'POST',

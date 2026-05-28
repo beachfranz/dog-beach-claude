@@ -230,7 +230,7 @@ function buildPrompt(
     `WRITING DIRECTIVES:`,
     `- ONE flowing conversational paragraph, 3-4 sentences. No headers, no bullets.`,
     `- LEAD WITH THE FUN — frame the window as a stoke moment, not a weather report.`,
-    `- BOLD THE TIME WINDOW by wrapping it in **markdown asterisks**, e.g. **${window}**. Don't bold anything else.`,
+    `- DO NOT restate the time window (e.g. "3pm-8pm") — it's already in the headline above the paragraph. Describe the vibe / what's happening, not the clock.`,
     `- Weave 2-3 activities naturally from this list — DON'T list them, DON'T invent new ones: ${activities.join(" · ")}.`,
     `- Weave 2-3 pack items concretely from this list — DON'T list them, DON'T invent gear: ${pack.join(" · ")}.`,
     `- Address active cautions with CONCRETE practical guidance (thresholds match v2 scoring bands):`,

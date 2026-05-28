@@ -1276,10 +1276,12 @@ function applyBeachHourlyV2(payload) {
   let current = hours.find(h => h.local_hour === nowH);
   if (!current) current = hours[0];
 
-  // Override the besttime headline with v2 best window (or closure-aware message).
+  // Set the besttime headline from v2 data. Card shell rendered "…" earlier;
+  // we always replace it here so the placeholder never sticks.
   const headlineEl = document.querySelector('.besttime-headline');
   if (headlineEl) {
     const isNowClosed = current?.status === 'closed' || current?.is_closed === true;
+    const SECTION_NOUN = { sand: 'Sand', water: 'Water', water_play: 'Water play' };
     if (isNowClosed) {
       let reopenLabel = null;
       const idx = hours.findIndex(h => h.local_hour === nowH);
@@ -1288,9 +1290,7 @@ function applyBeachHourlyV2(payload) {
           reopenLabel = hours[i].hour_label; break;
         }
       }
-      // Section-aware verb. sand → "Sand off-limits", global/unknown → "Closed".
       const section = (current.closed_section || '').toLowerCase();
-      const SECTION_NOUN = { sand: 'Sand', water: 'Water', water_play: 'Water play' };
       const verbNow = SECTION_NOUN[section]
         ? `${SECTION_NOUN[section]} off-limits right now`
         : 'Closed right now';
@@ -1302,6 +1302,19 @@ function applyBeachHourlyV2(payload) {
         : verbRest;
     } else if (payload.best_window_v2_label) {
       headlineEl.textContent = payload.best_window_v2_label;
+    } else {
+      // No v2 window picked. Distinguish "closed all day" from "open but mediocre".
+      const anyOpen = hours.some(h => h.status !== 'closed' && !h.is_closed);
+      if (!anyOpen) {
+        // All hours closed — usually dogs_allowed='no' beach.
+        const firstClosure = (payload.closures || [])[0];
+        const section = (firstClosure?.section || '').toLowerCase();
+        headlineEl.textContent = SECTION_NOUN[section]
+          ? `${SECTION_NOUN[section]} off-limits`
+          : (firstClosure?.reason === 'dogs_prohibited' ? 'Dogs prohibited' : 'Closed today');
+      } else {
+        headlineEl.textContent = 'Open all day';
+      }
     }
   }
 
@@ -2949,32 +2962,16 @@ function _formatHourRange(startH, endH) {
 }
 
 function buildBestTimeCard(today, dogPolicy, beachFid, hoursToday, beach, amenities) {
-  // Time-aware best window — recomputed from current local hour
-  // forward, using the same per-hour Overall the bar chart uses.
-  const nowWindow = _bestWindowFromNow(hoursToday, beach, amenities, dogPolicy);
-  const windowLabel = nowWindow ? _formatHourRange(nowWindow.start, nowWindow.end) : null;
-  const hasWindow = !!windowLabel;
-  const isNoDogs = !!dogPolicy && (
-    dogPolicy.dogs_allowed === 'no' ||
-    (dogPolicy.has_on_leash === false && dogPolicy.has_off_leash === false)
-  );
-  const isSandWaterProhibited = _sandOrWaterProhibited(dogPolicy?.zone_rules);
-  // Card shows when there's a window OR an apology to convey.
-  if (!hasWindow && !isNoDogs && !isSandWaterProhibited) return '';
-
-  // Clickable when hourly detail is available. day_status presence
-  // implies the hourly_scores row was computed, so detail.html will
-  // render. Skip the clickable affordance when there's no hourly.
+  // Always render the shell — v2 chart + window fill it asynchronously.
+  // Headline starts as "…" and gets replaced by applyBeachHourlyV2 with
+  // the v2 best window, "Closed right now — reopens at X", or similar.
+  // Per Franz 2026-05-28: v2 is the working standard, no v1 fallback.
   const clickable = !!(today && today.day_status);
   const clickAttr = clickable ? ' data-open-detail="1"' : '';
-
-  // Compact summary header: title left, time-range right. Hourly bars
-  // and Scout blurb moved to their own sibling card below.
-  const headlineText = windowLabel || (isNoDogs ? 'Not allowed' : 'No window');
   return `<section class="card besttime-card${clickable ? ' clickable' : ''}" data-fid="${beachFid}">
     <div class="besttime-header">
       <h2>Best Time</h2>
-      <div class="besttime-headline"${clickAttr}>${escHtml(headlineText)}</div>
+      <div class="besttime-headline"${clickAttr}>…</div>
     </div>
   </section>`;
 }
@@ -3131,7 +3128,7 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
     `Activities the zone rules ALLOW today (weave 2-3 of these naturally — DON'T invent, DON'T list all): ${actPhrases.join(' · ')}. ` +
     `Pack items to mention concretely (weave ${isCompact ? '1-2' : '2-3'} of these into the prose — DON'T invent gear): ${packPhrases.join(' · ')}. ` +
     lengthDirective +
-    `BOLD THE TIME WINDOW by wrapping it in **markdown asterisks**, e.g. **${windowLabel}**. Don't bold anything else. ` +
+    `DO NOT restate the time window in the paragraph (e.g. '${windowLabel}') — it's already shown in the headline above. Describe the vibe / activity / conditions, not the clock. ` +
     `Address active cautions for BOTH the dog AND the kahu with CONCRETE practical guidance. Examples of the framing we want: ` +
     `high tide → "tide's running high, less sand exposed — stick to the upper beach and watch for kids and dogs getting pushed toward the cliffs/rocks"; ` +
     `high UV (≥8) → "sun's punching hard — sunscreen for you and a shade break, pup's coat is its sunscreen"; ` +

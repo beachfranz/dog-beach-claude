@@ -2020,8 +2020,40 @@ def emit_migration_sql(jc: JurisdictionClassification, sc: ScopeCheck,
     if jc.polygon_table and jc.polygon_key is not None:
         polygon_key_column = "id" if jc.polygon_table != "counties" else "geoid"
         evidence = (cr.evidence_quote or cr.full_text or "")[:600]
+        # City-preemption guard for county-scope rules.
+        # When polygon_table='counties' we're attaching a county-level
+        # municipal_code or county-agency rule. County code only governs
+        # the UNINCORPORATED portion of the county — beaches in
+        # incorporated cities are governed by the city's own ordinance.
+        # The codify pipeline previously attached county rules to every
+        # beach in the county polygon without checking for incorporated-
+        # city overlap → 310+ beaches misattributed across CA/OR/WA/MD,
+        # surfaced 2026-05-30 via La Jolla Shores fid 8347. See pin
+        # [[codify-city-preemption]] and the demote migrations:
+        #   20260530_demote_county_code_in_city_beaches.sql
+        #   20260530_demote_coastal_edge_city_beaches.sql
+        #   20260530_demote_county_authority_supplementary.sql
+        # The guard uses ST_DWithin(jurisdictions.geom, b.geom, 200m)
+        # because TIGER place polygons for coastal cities stop at the
+        # high-water line while beach pins are 10-200m on the water side
+        # of that boundary. Strict ST_Contains under-counts coastal-edge
+        # beaches by ~30 across MVP+ states.
+        if jc.polygon_table == "counties":
+            city_preemption_guard = (
+                f"  AND NOT EXISTS (\n"
+                f"    SELECT 1 FROM public.jurisdictions j_city\n"
+                f"     WHERE j_city.state = {esc(jc.state)}\n"
+                f"       AND j_city.funcstat = 'A'\n"
+                f"       AND j_city.place_type LIKE 'C%'\n"
+                f"       AND ST_DWithin(j_city.geom, b.geom, 0.0018)  -- ~200m\n"
+                f"  )\n"
+            )
+        else:
+            city_preemption_guard = ""
         parts.append(
             f"-- beach_policy_source: spatial-join attach to all beaches in jurisdiction polygon\n"
+            f"-- (county-scope rules: excludes beaches in or within 200m of an incorporated city polygon\n"
+            f"--  per [[codify-city-preemption]] — county code only governs unincorporated territory)\n"
             f"INSERT INTO public.beach_policy_source\n"
             f"  (beach_fid, policy_source_id, section, rule, operative_status,\n"
             f"   evidence_verbatim, evidence_url, region_name, extracted_at, last_verified)\n"
@@ -2035,6 +2067,7 @@ def emit_migration_sql(jc: JurisdictionClassification, sc: ScopeCheck,
             f"WHERE ps.citation LIKE {esc(citation_prefix + '%')}\n"
             f"  AND b.is_active AND b.state = {esc(jc.state)}\n"
             f"  AND p.{polygon_key_column} = {esc(str(jc.polygon_key))}\n"
+            f"{city_preemption_guard}"
             f"ON CONFLICT (beach_fid, policy_source_id, section, (COALESCE(region_name, '__default__')), rule) DO NOTHING;\n"
         )
     else:

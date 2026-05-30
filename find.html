@@ -1054,18 +1054,14 @@
       }))
       .filter(c => matchesDistanceFilter(c.distance));
 
-    // Dog park cards
+    // Dog park cards — no leash chip filter. The off-/on-leash beach chips
+    // express a preference about BEACHES; they don't translate to dog parks,
+    // which are definitionally off-leash. Selecting "on-leash beaches +
+    // dog parks" means "leashed beaches AND any dog park", not "leashed
+    // beaches AND leashed dog parks" (the latter is not a meaningful
+    // category). Previously this filter rejected every park when the user
+    // dropped off_leash_beach but kept on_leash_beach + dog_park.
     const dpCards = (dps || [])
-      .filter(d => {
-        // Apply leash chip filter to dog parks too — only relevant when
-        // user selected on_leash_beach but NOT off_leash_beach + dog_park
-        // is also selected. Most dog parks are off-leash by default.
-        const off = wants.has('off_leash_beach');
-        const on = wants.has('on_leash_beach');
-        if (off && !on) return d.leash_policy === 'off_leash' || d.leash_policy === 'off_leash_voice_control';
-        if (on && !off) return d.leash_policy === 'on_leash';
-        return true;
-      })
       .filter(d => matchesDistanceFilter(d.distance_miles))
       .map(d => ({
         kind: 'dog_park',

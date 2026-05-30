@@ -3077,7 +3077,10 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
     (dogPolicy.has_on_leash === false && dogPolicy.has_off_leash === false)
   );
   const isSandWaterProhibited = _sandOrWaterProhibited(dogPolicy?.zone_rules);
-  const noGoodWindows = today && today.day_status === 'no_go';
+  // Prefer v2 day status; fall back to v1 during transition.
+  // Per Franz 2026-05-30 v1-retirement task #7.
+  const dayStatus = today && (today.day_status_v2 ?? today.day_status);
+  const noGoodWindows = dayStatus === 'no_go';
 
   if (isNoDogs) {
     el.textContent = "Sorry bud — dogs aren't allowed here. Check the alternatives below for a nearby spot that welcomes pups.";

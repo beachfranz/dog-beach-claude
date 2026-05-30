@@ -90,7 +90,8 @@ Deno.serve(async (req: Request) => {
     const hoursQuery = supabase
       .from("beach_day_hourly_scores")
       .select(
-        "arena_group_id, local_hour, hour_score, is_in_best_window, is_candidate_window, " +
+        "arena_group_id, local_hour, hour_score, hour_score_v2, " +
+        "is_in_best_window, is_candidate_window, " +
         "explainability, hour_status, " +
         "tide_status, wind_status, crowd_status, rain_status, temp_status, uv_status"
       )
@@ -107,6 +108,7 @@ Deno.serve(async (req: Request) => {
       arena_group_id: number;
       local_hour: number;
       hour_score: number;
+      hour_score_v2: number | null;
       is_in_best_window: boolean;
       is_candidate_window: boolean;
       explainability: Record<string, number>;
@@ -159,7 +161,10 @@ Deno.serve(async (req: Request) => {
       let composite = 0, tide = 0, wind = 0, crowd = 0, rain = 0, temp = 0;
       for (const h of windowHours) {
         const ex = h.explainability ?? {};
-        composite += Number(h.hour_score ?? 0);
+        // Prefer v2 score; fall back to v1 during transition when
+        // apply_v2_best_window_to_beach_recommendations hasn't backfilled
+        // this beach yet. Per Franz 2026-05-30 v1-retirement task #5.
+        composite += Number(h.hour_score_v2 ?? h.hour_score ?? 0);
         tide      += ex.tide_score  ?? 0;
         wind      += ex.wind_score  ?? 0;
         crowd     += ex.crowd_score ?? 0;
@@ -199,6 +204,8 @@ Deno.serve(async (req: Request) => {
         location_tier:      b.location_tier ?? null,
         distance_m:         b.distance_m ?? null,
         day_status:         b.day_status  ?? "no_data",
+        day_status_v2:      (b as Record<string, unknown>).day_status_v2 ?? null,
+        composite_score_v2: (b as Record<string, unknown>).composite_score_v2 ?? null,
         best_window_label:  bestWindowLabel  ?? null,
         best_window_status: bestWindowStatus ?? null,
         bacteria_risk:      b.bacteria_risk  ?? null,
@@ -272,7 +279,7 @@ function buildWindowLabel(startHour: number, endHour: number): string {
 }
 
 type CandidateHour = {
-  local_hour: number; hour_score: number;
+  local_hour: number; hour_score: number; hour_score_v2: number | null;
   tide_status: string | null; wind_status: string | null;
   rain_status: string | null; crowd_status: string | null;
   temp_status: string | null; uv_status: string | null;
@@ -285,9 +292,12 @@ function findBestRemainingWindow(hours: CandidateHour[]): {
 } | null {
   if (!hours.length) return null;
 
+  // Prefer v2 score; fall back to v1 during transition. Per Franz 2026-05-30.
+  const score = (h: CandidateHour) => Number(h.hour_score_v2 ?? h.hour_score ?? 0);
+
   const sorted    = [...hours].sort((a, b) => a.local_hour - b.local_hour);
-  const peak      = sorted.reduce((b, h) => Number(h.hour_score) > Number(b.hour_score) ? h : b);
-  const peakScore = Number(peak.hour_score);
+  const peak      = sorted.reduce((b, h) => score(h) > score(b) ? h : b);
+  const peakScore = score(peak);
   const peakIdx   = sorted.indexOf(peak);
 
   const STEP = 0.05;
@@ -301,13 +311,13 @@ function findBestRemainingWindow(hours: CandidateHour[]): {
     for (let i = peakIdx + 1; i < sorted.length; i++) {
       const h = sorted[i], prev = window[window.length - 1];
       if (h.local_hour !== prev.local_hour + 1) break;
-      if (Number(h.hour_score) < minScore)      break;
+      if (score(h) < minScore)                  break;
       window.push(h);
     }
     for (let i = peakIdx - 1; i >= 0; i--) {
       const h = sorted[i], next = window[0];
       if (next.local_hour !== h.local_hour + 1) break;
-      if (Number(h.hour_score) < minScore)       break;
+      if (score(h) < minScore)                  break;
       window.unshift(h);
     }
 

@@ -308,19 +308,51 @@ async function refreshNow(
     // — Scout blurb (reads stored value) and chart headline (reads live RPC)
     // disagree. Soft-fail: never block the NOW write on the rec update.
     // Per Franz 2026-05-30.
+    let hourScoreV2: number | null = null;
+    let hourStatusV2: string | null = null;
     if (beach.arena_group_id != null) {
       const { error: bwErr } = await supabase.rpc(
         "apply_v2_best_window_to_beach_recommendations",
         { p_fid: beach.arena_group_id, p_date: localDate },
       );
       if (bwErr) console.warn(`[${beach.location_id}] apply_v2 window soft-fail:`, bwErr.message);
+
+      // Read back the v2 fields that apply_v2 just populated, plus derive
+      // hour_status_v2 inline via the v2_compute_hour_status helper. find.html
+      // NOW mode (nowToDay) prefers these over v1 hour_score / hour_status
+      // when present. Per Franz 2026-05-30 task #5.
+      const { data: v2row } = await supabase
+        .from("beach_day_hourly_scores")
+        .select("hour_score_v2")
+        .eq("arena_group_id", beach.arena_group_id)
+        .eq("forecast_ts", row.forecast_ts)
+        .maybeSingle();
+      hourScoreV2 = (v2row?.hour_score_v2 as number | null) ?? null;
+
+      const { data: stRow } = await supabase.rpc("v2_compute_hour_status", {
+        p_uv:         row.uv_index ?? null,
+        p_asphalt:    row.asphalt_temp ?? null,
+        p_sand:       row.sand_temp ?? null,
+        p_tide:       row.tide_height ?? null,
+        p_wind:       row.wind_speed ?? null,
+        p_crowd:      row.busyness_score ?? null,
+        p_precip:     row.precip_chance ?? null,
+        p_feels_like: row.feels_like ?? null,
+        p_is_closed:  false,
+      });
+      hourStatusV2 = (stRow as unknown as string | null) ?? null;
     }
 
-    // Return row with tide direction for frontend display
+    // Return row with tide direction + v2 fields for frontend display
     return {
       locationId: beach.location_id,
       ok:         true,
-      row:        { ...row, tide_direction: tide.direction },
+      row:        {
+        ...row,
+        tide_direction: tide.direction,
+        hour_score_v2:  hourScoreV2,
+        hour_status_v2: hourStatusV2,
+      },
     };
 
   } catch (err) {

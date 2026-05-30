@@ -38,8 +38,11 @@ import psycopg2.extras
 from psycopg2.extras import Json
 
 
-def find_gap_beaches(cur, only_fid: int | None) -> list[tuple[int, str]]:
-    """Active scored CA beaches with no operative sand bps row."""
+DEFAULT_STATES = ("CA", "OR", "WA", "MD", "UT", "VA", "MA", "NH")
+
+
+def find_gap_beaches(cur, only_fid: int | None, states: tuple[str, ...] = DEFAULT_STATES) -> list[tuple[int, str]]:
+    """Active scored beaches with no operative sand bps row in the given states."""
     if only_fid is not None:
         cur.execute(
             "SELECT fid, COALESCE(display_name_override, name) AS name "
@@ -50,7 +53,7 @@ def find_gap_beaches(cur, only_fid: int | None) -> list[tuple[int, str]]:
     cur.execute("""
         SELECT bg.fid, COALESCE(bg.display_name_override, bg.name) AS name
           FROM beaches_gold bg
-         WHERE bg.state = 'CA' AND bg.is_active
+         WHERE bg.state = ANY(%s) AND bg.is_active
            AND bg.scoring_tier IN ('daily','hourly')
            AND NOT EXISTS (
              SELECT 1 FROM beach_policy_source bps
@@ -59,7 +62,7 @@ def find_gap_beaches(cur, only_fid: int | None) -> list[tuple[int, str]]:
                 AND bps.section = 'sand'
            )
          ORDER BY bg.fid;
-    """)
+    """, (list(states),))
     return [(r["fid"], r["name"]) for r in cur.fetchall()]
 
 
@@ -272,12 +275,15 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--fid", type=int, default=None)
+    ap.add_argument("--states", default=",".join(DEFAULT_STATES),
+                    help="Comma-separated state codes; default = all MVP+ states.")
     args = ap.parse_args()
 
     conn = connect()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    beaches = find_gap_beaches(cur, args.fid)
+    states = tuple(s.strip().upper() for s in args.states.split(",") if s.strip())
+    beaches = find_gap_beaches(cur, args.fid, states=states)
     print(f"Gap scope: {len(beaches)} beaches")
     if args.limit:
         beaches = beaches[:args.limit]

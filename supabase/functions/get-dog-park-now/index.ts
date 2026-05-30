@@ -291,15 +291,8 @@ function buildNowRow(
     precip_chance: h.precipChance,
     uv_index: h.uvIndex,
     asphalt_temp: h.asphaltTemp,
-    hour_status: h.hourStatus,
-    wind_status: h.metricStatuses.wind_status ?? null,
-    rain_status: h.metricStatuses.rain_status ?? null,
-    temp_status: h.metricStatuses.temp_status ?? null,
-    temp_cold_status: h.metricStatuses.temp_cold_status ?? null,
-    temp_hot_status: h.metricStatuses.temp_hot_status ?? null,
-    uv_status: h.metricStatuses.uv_status ?? null,
-    asphalt_status: h.metricStatuses.asphalt_status ?? null,
-    surface_status: h.metricStatuses.surface_status ?? null,
+    // hour_status + per-metric *_status columns retired per Franz
+    // 2026-05-30 v1-retirement task #11. Columns dropped by task #12.
     hour_score: h.hourScore,
     wind_score: h.componentScores.wind_score ?? null,
     rain_score: h.componentScores.rain_score ?? null,

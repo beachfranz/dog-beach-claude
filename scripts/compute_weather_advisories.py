@@ -91,7 +91,10 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     grp = ap.add_mutually_exclusive_group()
     grp.add_argument("--pilot", action="store_true", help="(default) pilot 30 CA")
-    grp.add_argument("--all-mvp", action="store_true")
+    grp.add_argument("--all-mvp", action="store_true", help="legacy: CA+OR+WA only")
+    grp.add_argument("--all-scored", action="store_true",
+                     help="every active beach with scoring_tier IN ('daily','hourly') — "
+                          "follows the actual scoring scope without hardcoded state lists")
     grp.add_argument("--state")
     grp.add_argument("--fid", type=int, help="single beach fid")
     ap.add_argument("--dry-run", action="store_true")
@@ -115,6 +118,12 @@ def main() -> int:
                 cur.execute("""
                     SELECT fid, location_id FROM public.beaches_gold
                      WHERE state IN ('CA','OR','WA') AND is_active AND scoring_tier IN ('daily','hourly')
+                       AND location_id IS NOT NULL
+                """)
+            elif args.all_scored:
+                cur.execute("""
+                    SELECT fid, location_id FROM public.beaches_gold
+                     WHERE is_active AND scoring_tier IN ('daily','hourly')
                        AND location_id IS NOT NULL
                 """)
             else:

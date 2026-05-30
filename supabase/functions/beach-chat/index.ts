@@ -102,7 +102,7 @@ Deno.serve(async (req: Request) => {
           .eq("is_active", true),
         supabase
           .from("beach_day_recommendations")
-          .select("location_id, local_date, day_status, best_window_label, best_window_text, avg_temp, avg_wind, avg_uv, avg_tide_height, lowest_tide_height, busyness_category, go_hours_count, caution_hours_count, no_go_hours_count, caution_text, risk_reason_codes, positive_reason_codes, summary_weather, bacteria_risk, precip_72h_mm")
+          .select("location_id, local_date, day_status_v2, composite_score_v2, best_window_label, best_window_text, avg_temp, avg_wind, avg_uv, avg_tide_height, lowest_tide_height, busyness_category, go_hours_count, caution_hours_count, no_go_hours_count, caution_text, risk_reason_codes, positive_reason_codes, summary_weather, bacteria_risk, precip_72h_mm")
           .gte("local_date", todayPacific)
           .order("local_date", { ascending: true })
           .order("location_id", { ascending: true })
@@ -214,7 +214,7 @@ Deno.serve(async (req: Request) => {
         .eq("location_id", location_id);
       const hourQuery = supabase
         .from("beach_day_hourly_scores")
-        .select("local_date, local_hour, hour_label, hour_status, hour_score, hour_score_v2, tide_height, wind_speed, temp_air, feels_like, sand_temp, asphalt_temp, busyness_score, precip_chance, uv_index, busyness_category, is_in_best_window, is_candidate_window, tide_status, wind_status, crowd_status, rain_status, temp_status, uv_status")
+        .select("local_date, local_hour, hour_label, hour_score_v2, tide_height, wind_speed, temp_air, feels_like, sand_temp, asphalt_temp, busyness_score, precip_chance, uv_index, busyness_category, is_in_best_window, is_candidate_window")
         .eq("location_id", location_id);
 
       const [{ data: days, error: daysErr }, { data: hours, error: hoursErr }] = await Promise.all([
@@ -496,7 +496,7 @@ function buildSystemPrompt(
                        : "";
 
     // Prefer v2 day status; fall back to v1 during transition.
-    const dayStatus = (d.day_status_v2 ?? d.day_status)?.toString().toUpperCase();
+    const dayStatus = (d.day_status_v2 as string | null)?.toString().toUpperCase();
     return `
   ${date} ${dayOfWeek.toUpperCase()} (${dayStatus}) ${isWeekend ? "[WEEKEND]" : "[WEEKDAY]"}
   Hours: ${d.go_hours_count ?? 0} go / ${d.caution_hours_count ?? 0} caution / ${d.no_go_hours_count ?? 0} no-go
@@ -736,7 +736,7 @@ function buildCrossBeachPrompt(
     const days = daysByBeach.get(b.location_id as string) ?? [];
     const dayLines = days.map((d) => {
       const risks = Array.isArray(d.risk_reason_codes) ? (d.risk_reason_codes as string[]).join(", ") : "";
-      return `    ${d.local_date} (${d.day_status?.toString().toUpperCase()}): window=${d.best_window_label ?? "none"} weather=${d.summary_weather ?? "?"} wind=${fmtNum(d.avg_wind, "mph")} temp=${fmtNum(d.avg_temp, "°F")} crowds=${d.busyness_category ?? "?"} go=${d.go_hours_count ?? 0}h${risks ? ` risks=${risks}` : ""}${d.caution_text ? ` caution="${d.caution_text}"` : ""}`;
+      return `    ${d.local_date} (${(d.day_status_v2 as string | null)?.toString().toUpperCase() ?? "?"}): window=${d.best_window_label ?? "none"} weather=${d.summary_weather ?? "?"} wind=${fmtNum(d.avg_wind, "mph")} temp=${fmtNum(d.avg_temp, "°F")} crowds=${d.busyness_category ?? "?"} go=${d.go_hours_count ?? 0}h${risks ? ` risks=${risks}` : ""}${d.caution_text ? ` caution="${d.caution_text}"` : ""}`;
     }).join("\n");
     return `\n${b.display_name} (${b.location_id}):\n${dayLines || "    (no data)"}`;
   }).join("\n");

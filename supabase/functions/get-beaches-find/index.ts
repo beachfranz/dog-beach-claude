@@ -90,10 +90,14 @@ Deno.serve(async (req: Request) => {
     const hoursQuery = supabase
       .from("beach_day_hourly_scores")
       .select(
-        "arena_group_id, local_hour, hour_score, hour_score_v2, " +
+        // v2-only after Franz 2026-05-30 task #12. v1 *_status columns
+        // dropped. Window-status rollup below uses raw values to derive
+        // per-hour v2 status via the inline TS port.
+        "arena_group_id, local_hour, hour_score_v2, " +
         "is_in_best_window, is_candidate_window, " +
-        "explainability, hour_status, " +
-        "tide_status, wind_status, crowd_status, rain_status, temp_status, uv_status"
+        "explainability, " +
+        "tide_height, wind_speed, precip_chance, busyness_score, " +
+        "feels_like, uv_index, sand_temp, asphalt_temp"
       )
       .in("arena_group_id", arenaGroupIds)
       .eq("local_date", date)
@@ -107,15 +111,14 @@ Deno.serve(async (req: Request) => {
     type HourRow = {
       arena_group_id: number;
       local_hour: number;
-      hour_score: number;
       hour_score_v2: number | null;
       is_in_best_window: boolean;
       is_candidate_window: boolean;
       explainability: Record<string, number>;
-      hour_status: string | null;
-      tide_status: string | null; wind_status: string | null;
-      crowd_status: string | null; rain_status: string | null;
-      temp_status: string | null; uv_status: string | null;
+      tide_height: number | null; wind_speed: number | null;
+      precip_chance: number | null; busyness_score: number | null;
+      feels_like: number | null; uv_index: number | null;
+      sand_temp: number | null; asphalt_temp: number | null;
     };
 
     // Group hours by arena_group_id
@@ -164,7 +167,7 @@ Deno.serve(async (req: Request) => {
         // Prefer v2 score; fall back to v1 during transition when
         // apply_v2_best_window_to_beach_recommendations hasn't backfilled
         // this beach yet. Per Franz 2026-05-30 v1-retirement task #5.
-        composite += Number(h.hour_score_v2 ?? h.hour_score ?? 0);
+        composite += Number(h.hour_score_v2 ?? 0);
         tide      += ex.tide_score  ?? 0;
         wind      += ex.wind_score  ?? 0;
         crowd     += ex.crowd_score ?? 0;
@@ -203,7 +206,8 @@ Deno.serve(async (req: Request) => {
         dogs_prohibited_start: b.dogs_prohibited_start ?? null,
         location_tier:      b.location_tier ?? null,
         distance_m:         b.distance_m ?? null,
-        day_status:         b.day_status  ?? "no_data",
+        // v2-only after Franz 2026-05-30 task #12.
+        day_status:         (b as Record<string, unknown>).day_status_v2 ?? "no_data",
         day_status_v2:      (b as Record<string, unknown>).day_status_v2 ?? null,
         composite_score_v2: (b as Record<string, unknown>).composite_score_v2 ?? null,
         best_window_label:  bestWindowLabel  ?? null,
@@ -279,10 +283,11 @@ function buildWindowLabel(startHour: number, endHour: number): string {
 }
 
 type CandidateHour = {
-  local_hour: number; hour_score: number; hour_score_v2: number | null;
-  tide_status: string | null; wind_status: string | null;
-  rain_status: string | null; crowd_status: string | null;
-  temp_status: string | null; uv_status: string | null;
+  local_hour: number; hour_score_v2: number | null;
+  tide_height: number | null; wind_speed: number | null;
+  precip_chance: number | null; busyness_score: number | null;
+  feels_like: number | null; uv_index: number | null;
+  sand_temp: number | null; asphalt_temp: number | null;
   [key: string]: unknown;
 };
 
@@ -292,8 +297,8 @@ function findBestRemainingWindow(hours: CandidateHour[]): {
 } | null {
   if (!hours.length) return null;
 
-  // Prefer v2 score; fall back to v1 during transition. Per Franz 2026-05-30.
-  const score = (h: CandidateHour) => Number(h.hour_score_v2 ?? h.hour_score ?? 0);
+  // v2-only after Franz 2026-05-30 task #12.
+  const score = (h: CandidateHour) => Number(h.hour_score_v2 ?? 0);
 
   const sorted    = [...hours].sort((a, b) => a.local_hour - b.local_hour);
   const peak      = sorted.reduce((b, h) => score(h) > score(b) ? h : b);
@@ -328,21 +333,59 @@ function findBestRemainingWindow(hours: CandidateHour[]): {
 
   if (window.length < 2) return null;
 
-  const statusRank: Record<string, number> = { go: 1, advisory: 2, caution: 3, no_go: 4 };
-  const worst = (a: string | null, b: string | null) => {
-    if (!a) return b; if (!b) return a;
-    return (statusRank[a] ?? 0) >= (statusRank[b] ?? 0) ? a : b;
-  };
-  const overallStatus = window.reduce(
-    (s, h) => worst(s, worst(worst(worst(h.tide_status, h.wind_status), worst(h.rain_status, h.crowd_status)), worst(h.temp_status, h.uv_status))),
-    null as string | null
-  ) ?? "go";
+  // Window status = worst per-hour v2 status across the window hours.
+  // Computed inline from raw values via v2StatusFor — v1 *_status columns
+  // dropped from the schema per Franz 2026-05-30 task #12.
+  const statusRank: Record<string, number> = { clear: 0, advisory: 1, caution: 2, no_go: 3 };
+  const overallStatus = window.reduce<string | null>((worst, h) => {
+    const hStatus = v2HourStatus(h);
+    if (worst === null) return hStatus;
+    return (statusRank[hStatus] ?? 0) >= (statusRank[worst] ?? 0) ? hStatus : worst;
+  }, null) ?? "clear";
 
   return {
     startHour: window[0].local_hour,
     endHour:   window[window.length - 1].local_hour,
-    avgScore:  window.reduce((s, h) => s + Number(h.hour_score), 0) / window.length,
+    avgScore:  window.reduce((s, h) => s + score(h), 0) / window.length,
     status:    overallStatus,
     hours:     window,
   };
+}
+
+// ─── v2 status helpers (inline port of public.v2_signal_status) ──────────
+// SQL truth-source: scoring_config_v2 + v2_signal_status. Pin
+// [[v2-signal-status-mapping]]. Keep in sync when bands change.
+type V2Status = "clear" | "advisory" | "caution" | "no_go";
+function v2StatusFor(signal: string, v: number | null | undefined): V2Status | null {
+  if (v == null) return null;
+  switch (signal) {
+    case "uv":         return v >= 11 ? "no_go" : v >= 9 ? "caution" : v >= 6 ? "advisory" : "clear";
+    case "asphalt":    return v >= 125 ? "no_go" : v >= 115 ? "advisory" : "clear";
+    case "sand":       return v >= 145 ? "no_go" : v >= 125 ? "caution" : v >= 115 ? "advisory" : "clear";
+    case "tide":       return v >= 7 ? "no_go" : v >= 5 ? "caution" : v >= 3 ? "advisory" : "clear";
+    case "wind":       return v >= 35 ? "no_go" : v >= 19 ? "caution" : v >= 13 ? "advisory" : "clear";
+    case "crowd":      return v >= 85 ? "no_go" : v >= 60 ? "caution" : v >= 30 ? "advisory" : "clear";
+    case "precip":     return v >= 80 ? "no_go" : v >= 50 ? "caution" : v >= 30 ? "advisory" : "clear";
+    case "feels_hot":  return v >= 125 ? "no_go" : v >= 95 ? "caution" : v >= 85 ? "advisory" : "clear";
+    case "feels_cold": return v <= 20 ? "no_go" : v <= 32 ? "caution" : v <= 50 ? "advisory" : "clear";
+    default:           return null;
+  }
+}
+function v2HourStatus(h: { tide_height: number | null; wind_speed: number | null;
+                          precip_chance: number | null; busyness_score: number | null;
+                          feels_like: number | null; uv_index: number | null;
+                          sand_temp: number | null; asphalt_temp: number | null }): V2Status {
+  const rank: Record<V2Status, number> = { clear: 0, advisory: 1, caution: 2, no_go: 3 };
+  let worst: V2Status = "clear";
+  const consider = (s: V2Status | null) => { if (s && rank[s] > rank[worst]) worst = s; };
+  consider(v2StatusFor("tide",       h.tide_height));
+  consider(v2StatusFor("wind",       h.wind_speed));
+  consider(v2StatusFor("precip",     h.precip_chance));
+  consider(v2StatusFor("crowd",      h.busyness_score));
+  consider(v2StatusFor("uv",         h.uv_index));
+  consider(v2StatusFor("sand",       h.sand_temp));
+  consider(v2StatusFor("asphalt",    h.asphalt_temp));
+  consider(v2StatusFor("feels_hot",  h.feels_like));
+  consider(v2StatusFor("feels_cold", h.feels_like));
+  return worst;
 }

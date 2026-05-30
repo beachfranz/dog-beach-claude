@@ -533,15 +533,10 @@ function buildHourlyRow(
     precip_chance: h.precipChance,
     uv_index: h.uvIndex,
     asphalt_temp: h.asphaltTemp,
-    hour_status: h.hourStatus,
-    wind_status: h.metricStatuses.wind_status ?? null,
-    rain_status: h.metricStatuses.rain_status ?? null,
-    temp_status: h.metricStatuses.temp_status ?? null,
-    temp_cold_status: h.metricStatuses.temp_cold_status ?? null,
-    temp_hot_status: h.metricStatuses.temp_hot_status ?? null,
-    uv_status: h.metricStatuses.uv_status ?? null,
-    asphalt_status: h.metricStatuses.asphalt_status ?? null,
-    surface_status: h.metricStatuses.surface_status ?? null,
+    // hour_status + per-metric *_status columns retired per Franz
+    // 2026-05-30 v1-retirement task #11. apply_v2 derives v2 statuses
+    // inline; hour_score_v2 + day_status_v2 + composite_score_v2 land
+    // on the row after the upsert. Columns dropped by task #12.
     hour_score: h.hourScore,
     wind_score: h.componentScores.wind_score ?? null,
     rain_score: h.componentScores.rain_score ?? null,
@@ -595,7 +590,9 @@ function buildDailyRow(
   return {
     dog_park_fid: park.fid,
     local_date: date,
-    day_status: dayStatus,
+    // day_status retired per Franz 2026-05-30 v1-retirement task #11.
+    // day_status_v2 + composite_score_v2 are written by
+    // apply_v2_best_window_to_recommendations after this upsert.
     best_window_start_ts: window?.startTs ?? null,
     best_window_end_ts: window?.endTs ?? null,
     best_window_label: window?.label ?? null,

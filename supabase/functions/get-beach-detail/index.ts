@@ -89,12 +89,14 @@ Deno.serve(async (req: Request) => {
       supabase
         .from("beach_day_hourly_scores")
         .select(
-          "local_hour, hour_label, hour_status, is_in_best_window, is_candidate_window, " +
+          // v2-only after Franz 2026-05-30 task #12. v1 *_status columns
+          // dropped from the schema. decorateV2 below computes per-metric
+          // statuses inline from raw values via the v2 TS port.
+          "local_hour, hour_label, is_in_best_window, is_candidate_window, " +
           "tide_height, wind_speed, temp_air, feels_like, precip_chance, busyness_score, " +
-          "uv_index, weather_code, hour_text, is_daylight, hour_score, hour_score_v2, " +
+          "uv_index, weather_code, hour_text, is_daylight, hour_score_v2, " +
           "tide_score, wind_score, crowd_score, rain_score, temp_score, uv_score, weather_score, " +
-          "tide_status, wind_status, crowd_status, rain_status, temp_status, uv_status, " +
-          "temp_cold_status, temp_hot_status, sand_temp, asphalt_temp, sand_status, asphalt_status"
+          "sand_temp, asphalt_temp"
         )
         .eq("arena_group_id", fid)
         .eq("local_date", date)

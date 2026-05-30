@@ -814,7 +814,10 @@ function buildHourlyRow(
     tide_height:           h.tideHeight,
     busyness_score:        h.busynessScore,
     busyness_category:     h.busynessCategory,
-    hour_status:           h.hourStatus,
+    // hour_status + per-metric *_status columns retired per Franz
+    // 2026-05-30 v1-retirement task #11. Raw values + hour_score are
+    // kept (downstream apply_v2 derives v2 statuses inline). Columns
+    // will be dropped from the schema by task #12.
     hour_score:            h.hourScore,
     positive_reason_codes: h.positiveReasonCodes,
     risk_reason_codes:     h.riskReasonCodes,
@@ -826,18 +829,8 @@ function buildHourlyRow(
     temp_score:            h.explainability.temp_score    ?? null,
     uv_score:              h.explainability.uv_score      ?? null,
     weather_score:         h.explainability.weather_score ?? null,
-    tide_status:           h.metricStatuses.tide_status     ?? null,
-    wind_status:           h.metricStatuses.wind_status     ?? null,
-    crowd_status:          h.metricStatuses.crowd_status    ?? null,
-    rain_status:           h.metricStatuses.rain_status     ?? null,
-    temp_status:           h.metricStatuses.temp_status     ?? null,
-    temp_cold_status:      h.metricStatuses.temp_cold_status ?? null,
-    temp_hot_status:       h.metricStatuses.temp_hot_status  ?? null,
-    uv_status:             h.metricStatuses.uv_status       ?? null,
     sand_temp:             h.sandTemp,
     asphalt_temp:          h.asphaltTemp,
-    sand_status:           h.metricStatuses.sand_status     ?? null,
-    asphalt_status:        h.metricStatuses.asphalt_status  ?? null,
     hour_text:             hourText,
     timezone:              beach.timezone,
     scoring_version:       config.scoring_version,
@@ -900,7 +893,10 @@ function buildDailyRow(
     location_id:           beach.location_id,
     arena_group_id:        beach.arena_group_id ?? null,
     local_date:            date,
-    day_status:            dayStatus,
+    // day_status retired per Franz 2026-05-30 v1-retirement task #11.
+    // day_status_v2 is the consumer-facing field; written by
+    // apply_v2_best_window_to_beach_recommendations after this upsert.
+    // Column dropped by task #12.
     best_window_start_ts:  window?.startTs ?? null,
     best_window_end_ts:    window?.endTs   ?? null,
     best_window_label:     window?.label   ?? null,

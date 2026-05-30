@@ -157,6 +157,7 @@ Deno.serve(async (req: Request) => {
   let tideWindowDays = 7;       // default: refresh fetches up to 7 days
   let forceTideRefresh = false; // default: skip NOAA when buffer is fresh
   let skipRecentHours: number | null = null;  // skip beaches refreshed within N hours
+  let limitBeaches: number | null = null;     // cap beaches processed per call
   // BestTime soft-removed 2026-05-25: human-presence signal clashes with
   // dog-centric brand, 95% null coverage was inconsistent, paid API with
   // marginal value. Crowd scoring falls back to 0.5 neutral via scoring.ts.
@@ -174,6 +175,9 @@ Deno.serve(async (req: Request) => {
     if (typeof body?.skip_besttime === "boolean") skipBesttime = body.skip_besttime;
     if (typeof body?.skip_recent_hours === "number" && body.skip_recent_hours > 0) {
       skipRecentHours = Math.min(body.skip_recent_hours, 168);  // cap at 1 week
+    }
+    if (typeof body?.limit === "number" && body.limit > 0) {
+      limitBeaches = Math.min(body.limit, 500);  // hard cap to keep one call safe
     }
   } catch { /* no body — refresh all with defaults */ }
 
@@ -305,6 +309,32 @@ Deno.serve(async (req: Request) => {
         message: `All beaches refreshed within skip_recent_hours=${skipRecentHours} — nothing to do`,
         results: [], skipped_recent: skippedRecent,
       }, 200, cors);
+    }
+
+    // 1c. Sort by oldest-rec-first and cap to `limit` so each chunked invocation
+    //     drains the stale queue safely (one call's worth fits under the worker
+    //     resource cap). Per Franz 2026-05-30: previously a no-limit fire on
+    //     the full ~2,900-beach stale pool hit WORKER_RESOURCE_LIMIT every time,
+    //     so no beach ever got marked recent and the queue never drained.
+    if (limitBeaches !== null && beaches.length > limitBeaches) {
+      const beachFids = beaches.map(b => b.arena_group_id);
+      const { data: ageRows, error: ageErr } = await supabase
+        .from("beach_day_recommendations")
+        .select("arena_group_id, updated_at")
+        .in("arena_group_id", beachFids);
+      if (ageErr) {
+        console.warn(`limit-sort age query failed: ${ageErr.message} — applying naive slice`);
+        beaches = beaches.slice(0, limitBeaches);
+      } else {
+        const ageBy: Record<number, number> = {};
+        for (const r of (ageRows ?? []) as { arena_group_id: number; updated_at: string | null }[]) {
+          ageBy[r.arena_group_id] = r.updated_at ? new Date(r.updated_at).getTime() : 0;
+        }
+        beaches.sort((a, b) => (ageBy[a.arena_group_id] ?? 0) - (ageBy[b.arena_group_id] ?? 0));
+        const before = beaches.length;
+        beaches = beaches.slice(0, limitBeaches);
+        console.log(`limit=${limitBeaches} → processing ${beaches.length}/${before} oldest-stale beaches`);
+      }
     }
 
     // 2. Load scoring config

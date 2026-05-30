@@ -92,6 +92,7 @@ Deno.serve(async (req: Request) => {
   // daily refresh after they launched.
   let stateFilters: string[] = ["CA", "OR", "WA", "MD", "UT"];
   let skipRecentHours: number | null = null;
+  let limitParks: number | null = null;
   try {
     const body = await req.json().catch(() => ({}));
     if (Array.isArray(body?.fids) && body.fids.length > 0) targetFids = body.fids;
@@ -102,11 +103,15 @@ Deno.serve(async (req: Request) => {
     if (typeof body?.skip_recent_hours === "number" && body.skip_recent_hours > 0) {
       skipRecentHours = Math.min(body.skip_recent_hours, 168);
     }
+    if (typeof body?.limit === "number" && body.limit > 0) {
+      limitParks = Math.min(body.limit, 500);
+    }
   } catch { /* no body — defaults */ }
 
   console.log("daily-dog-park-refresh — fids:", targetFids?.length ?? "all",
     "states:", stateFilters.length === 0 ? "ALL" : stateFilters.join(","),
-    "skip_recent_hours:", skipRecentHours);
+    "skip_recent_hours:", skipRecentHours,
+    "limit:", limitParks);
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
   const runAt = new Date();
@@ -177,6 +182,32 @@ Deno.serve(async (req: Request) => {
     const recentFids = new Set((recent ?? []).map((r: any) => r.dog_park_fid));
     toProcess = parks.filter((p) => !recentFids.has(p.fid));
     console.log(`Skipping ${parks.length - toProcess.length} parks refreshed within ${skipRecentHours}h`);
+  }
+
+  // 3b. Sort oldest-rec-first and cap to `limit` so each chunked invocation
+  //     drains under the worker resource cap. Mirrors beach-side fix
+  //     (Franz 2026-05-30). Without this, the full ~600-park pool hit
+  //     WORKER_RESOURCE_LIMIT every fire, no park got marked recent, the
+  //     skip-recent gate never engaged, queue never drained.
+  if (limitParks !== null && toProcess.length > limitParks) {
+    const fids = toProcess.map((p) => p.fid);
+    const { data: ageRows, error: ageErr } = await supabase
+      .from("dog_park_day_recommendations")
+      .select("dog_park_fid, updated_at")
+      .in("dog_park_fid", fids);
+    if (ageErr) {
+      console.warn(`limit-sort age query failed: ${ageErr.message} — applying naive slice`);
+      toProcess = toProcess.slice(0, limitParks);
+    } else {
+      const ageBy: Record<number, number> = {};
+      for (const r of (ageRows ?? []) as { dog_park_fid: number; updated_at: string | null }[]) {
+        ageBy[r.dog_park_fid] = r.updated_at ? new Date(r.updated_at).getTime() : 0;
+      }
+      toProcess.sort((a, b) => (ageBy[a.fid] ?? 0) - (ageBy[b.fid] ?? 0));
+      const before = toProcess.length;
+      toProcess = toProcess.slice(0, limitParks);
+      console.log(`limit=${limitParks} → processing ${toProcess.length}/${before} oldest-stale parks`);
+    }
   }
 
   // 4. Process serially (351 parks × ~1s/park ≈ 6 min wall clock)

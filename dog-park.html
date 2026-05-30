@@ -1335,8 +1335,10 @@ function buildOverviewBlurb(park) {
 
 function buildScoutCard(park, now, today) {
   // Headline derived from today's best_window_label OR live status.
+  // Prefer v2 hour status with v1 fallback. Per Franz 2026-05-30 v1-retirement.
+  const nowStatus = now?.hour_status_v2 ?? now?.hour_status;
   const headline = today?.best_window_label
-    || (now?.hour_status === 'go' ? 'Great right now' : 'Open dawn–dusk');
+    || (nowStatus === 'go' || nowStatus === 'clear' ? 'Great right now' : 'Open dawn–dusk');
   const verifiedHtml = (park.policy?.source === 'operator_posted'
     || park.policy?.source === 'operator_posted_v2')
     ? `<div><span class="verified-badge">✓ Operator-verified</span></div>` : '';
@@ -1360,7 +1362,8 @@ async function loadScoutBlurb(park, today, now) {
   // with v2 scoring (e.g. v1='no_go' on a 70-scoring hour). The chat LLM
   // has the full current conditions + bands in its system prompt and can
   // frame appropriately (cautious vs upbeat). Per Franz 2026-05-27 LATE.
-  const status = now?.hour_status ?? today?.day_status;
+  const status = (now?.hour_status_v2 ?? now?.hour_status)
+              ?? (today?.day_status_v2 ?? today?.day_status);
   const window = today?.best_window_label
     || (status === 'go' ? 'right now' : 'during operating hours');
   const question = `Write the Scout intro paragraph for visiting this dog park today. ALWAYS include the time window '${window}' as plain text in the paragraph — weave it in naturally (e.g. "${window} is your window", "hit it ${window}"). No need to bold it; the headline above already styles the window.`;

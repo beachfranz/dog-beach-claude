@@ -224,7 +224,41 @@ async function refreshNow(
       .upsert(row, { onConflict: "dog_park_fid,forecast_ts" });
     if (upsertErr) throw new Error(upsertErr.message);
 
-    return { fid: park.fid, ok: true, row };
+    // Re-apply v2 best window + day-level + per-hour v2 score so the
+    // recommendation row stays pegged to the latest hourly data. Soft-fail.
+    // Mirrors get-beach-now's wiring. Per Franz 2026-05-30 task #9.
+    const { error: bwErr } = await supabase.rpc(
+      "apply_v2_best_window_to_recommendations",
+      { p_fid: park.fid, p_date: row.local_date },
+    );
+    if (bwErr) console.warn(`[dog_park:${park.fid}] apply_v2 window soft-fail:`, bwErr.message);
+
+    // Read back v2 fields for response so dog-park.html NOW path has them
+    let hourScoreV2: number | null = null;
+    let hourStatusV2: string | null = null;
+    const { data: v2row } = await supabase
+      .from("dog_park_day_hourly_scores")
+      .select("hour_score_v2")
+      .eq("dog_park_fid", park.fid)
+      .eq("forecast_ts", row.forecast_ts)
+      .maybeSingle();
+    hourScoreV2 = (v2row?.hour_score_v2 as number | null) ?? null;
+
+    const { data: stRow } = await supabase.rpc("v2_compute_hour_status_dog_park", {
+      p_uv:         row.uv_index ?? null,
+      p_asphalt:    row.asphalt_temp ?? null,
+      p_wind:       row.wind_speed ?? null,
+      p_precip:     row.precip_chance ?? null,
+      p_feels_like: row.feels_like ?? null,
+      p_is_closed:  false,
+    });
+    hourStatusV2 = (stRow as unknown as string | null) ?? null;
+
+    return {
+      fid: park.fid,
+      ok: true,
+      row: { ...row, hour_score_v2: hourScoreV2, hour_status_v2: hourStatusV2 },
+    };
   } catch (err) {
     console.error(`[dog_park:${park.fid}] NOW refresh error:`, String(err));
     return { fid: park.fid, ok: false, error: String(err) };

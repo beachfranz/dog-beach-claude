@@ -1053,7 +1053,8 @@
         beach: b,
         day: beachToDay(b),
         distance: resolveDistanceMiles(b),
-        score: b.composite_score ?? 0,
+        // Prefer v2 score for cross-type sort. Per Franz 2026-05-30 task #9.
+        score: b.composite_score_v2 ?? b.composite_score ?? 0,
       }))
       .filter(c => matchesDistanceFilter(c.distance));
 

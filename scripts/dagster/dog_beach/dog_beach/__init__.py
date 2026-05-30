@@ -135,6 +135,7 @@ from .assets.scoring_and_audit import (
     codify_coverage_check,
     daily_refresh_fire,
     field_population_check,
+    weather_advisories_refresh,
 )
 from .assets.weather_grid import (
     refresh_weather_grid,
@@ -178,6 +179,7 @@ from .schedules.time_based import (
     daily_beach_refresh_schedule,
     hourly_now_refresh_schedule,
     weekly_pipeline_health_schedule,
+    daily_weather_advisories_schedule,
     hourly_weather_grid_schedule,
     daily_weather_grid_inventory_schedule,
     monthly_dog_park_coverage_schedule,
@@ -189,6 +191,7 @@ from .jobs import (
     llm_cascade_job,
     daily_refresh_job,
     pipeline_health_audit_job,
+    weather_advisories_job,
     rebuild_beach_evidence_job,
     weather_grid_refresh_job,
     weather_grid_inventory_job,
@@ -273,6 +276,7 @@ defs = Definitions(
         hourly_status_refresh,
         codify_coverage_check,
         daily_refresh_fire,
+        weather_advisories_refresh,
         field_population_check,
         # Weather reference layer (W1.5 + W1.8)
         refresh_weather_grid,
@@ -314,6 +318,7 @@ defs = Definitions(
         daily_beach_refresh_schedule,
         hourly_now_refresh_schedule,
         weekly_pipeline_health_schedule,
+        daily_weather_advisories_schedule,
         hourly_weather_grid_schedule,
         daily_weather_grid_inventory_schedule,
         monthly_dog_park_coverage_schedule,
@@ -325,6 +330,7 @@ defs = Definitions(
         llm_cascade_job,
         daily_refresh_job,
         pipeline_health_audit_job,
+        weather_advisories_job,
         rebuild_beach_evidence_job,
         weather_grid_refresh_job,
         weather_grid_inventory_job,

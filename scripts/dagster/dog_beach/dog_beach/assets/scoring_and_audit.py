@@ -453,6 +453,104 @@ def codify_gap_clone(
 
 
 # ════════════════════════════════════════════════════════════════════════
+#  Phase 32.8 — dog_park_data_quality_audit (cross-state, weekly)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Surfaces structural inconsistencies in dog_park_dog_policy that the
+# extractor occasionally produces and the consensus engine can't easily
+# untangle on its own. Current checks:
+#
+#   lighting + dawn-dusk hours — parks marked with lighting=true but
+#     hours_text indicates dawn-to-dusk / sunrise-to-sunset. Lights
+#     are pointless without after-dark access; one of the two fields
+#     is wrong. Resolved on 2026-05-30 by re-extracting with hardened
+#     prompt and flipping lighting=false where the new extraction
+#     found no explicit "evening lighting / open until X PM" evidence.
+#
+# Raises on any detected conflict so it surfaces in the UI — fix path:
+#   1. python scripts/extract_dog_park_amenities.py --apply --fids <fids> \
+#        --include-no-website --workers 4
+#   2. Inspect the new BEP rows' claimed_values + cite_quote
+#   3. UPDATE dog_park_dog_policy SET lighting=false WHERE dog_park_fid
+#      IN (...) for those without explicit evidence; keep true for the
+#      few that genuinely have "Evening Lighting" or similar in the quote.
+#
+# This check is small + cross-state, so a single non-partitioned asset
+# is the right shape.
+
+@asset(
+    group_name="phase_29_to_33_per_fid",
+    description=(
+        "Weekly — counts dog parks with structurally inconsistent amenity "
+        "data (currently: lighting=true + dawn-dusk hours). Raises on any "
+        "detection. Resolved by extract_dog_park_amenities.py --fids ..."
+    ),
+)
+def dog_park_data_quality_audit(
+    context: AssetExecutionContext,
+    postgres: PostgresPoolerResource,
+) -> MaterializeResult:
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            # Check 1: lighting=true + dawn-dusk hours
+            cur.execute("""
+                SELECT g.fid, g.state,
+                       COALESCE(g.display_name_override, g.name) AS name,
+                       p.hours_text
+                  FROM public.dog_parks_gold g
+                  JOIN public.dog_park_dog_policy p ON p.dog_park_fid = g.fid
+                 WHERE g.is_active
+                   AND p.lighting = true
+                   AND (p.hours_text ILIKE '%%dawn%%dusk%%'
+                        OR p.hours_text ILIKE '%%sunrise%%sunset%%'
+                        OR p.hours_text ILIKE 'dawn-dusk'
+                        OR p.hours_text ILIKE 'dawn to dusk')
+                 ORDER BY g.state, g.fid
+            """)
+            lit_dusk_conflicts = cur.fetchall()
+    finally:
+        conn.close()
+
+    by_state: dict[str, int] = {}
+    sample = []
+    for fid, state, name, hours_text in lit_dusk_conflicts:
+        by_state[state] = by_state.get(state, 0) + 1
+        if len(sample) < 10:
+            sample.append(f"  fid {fid} {state} {name[:35]:<35} hours=\"{hours_text}\"")
+
+    n = len(lit_dusk_conflicts)
+    context.log.info(f"Lighting + dawn-dusk conflicts: {n}")
+    for line in sample:
+        context.log.info(line)
+    if n > 10:
+        context.log.info(f"  ... ({n - 10} more)")
+
+    metadata = {
+        "lighting_dawn_dusk_conflicts": MetadataValue.int(n),
+        "by_state": MetadataValue.json(by_state),
+        "sample": MetadataValue.text("\n".join(sample) or "(clean)"),
+    }
+
+    if n > 0:
+        # Surface but don't kill the daemon — soft-fail via metadata flag
+        # and a noisy log message. Per Franz [[regular-data-quality-audits]]
+        # the goal is surveillance, not crisis forensics.
+        context.log.warning(
+            f"FOUND {n} dog parks with lighting=true + dawn-dusk hours. "
+            f"Fix: python scripts/extract_dog_park_amenities.py --apply "
+            f"--fids {','.join(str(f[0]) for f in lit_dusk_conflicts)} "
+            f"--include-no-website --workers 4"
+        )
+        raise RuntimeError(
+            f"dog_park_data_quality_audit: {n} lighting+dawn-dusk conflicts. "
+            f"See run log for fid list + remediation."
+        )
+
+    return MaterializeResult(metadata=metadata)
+
+
+# ════════════════════════════════════════════════════════════════════════
 #  Phase 33 — field_population_check (per-state, end-of-pipeline audit)
 # ════════════════════════════════════════════════════════════════════════
 

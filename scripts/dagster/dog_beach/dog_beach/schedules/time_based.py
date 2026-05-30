@@ -27,6 +27,7 @@ from ..jobs import (
     weather_advisories_job,
     codify_coverage_audit_job,
     codify_gap_clone_job,
+    dog_park_data_quality_audit_job,
     weather_grid_refresh_job,
     weather_grid_inventory_job,
     dog_park_coverage_job,
@@ -122,6 +123,22 @@ def daily_weather_advisories_schedule(context: ScheduleEvaluationContext):
 def daily_codify_coverage_audit_schedule(context: ScheduleEvaluationContext):
     yield RunRequest(
         run_key=f"codify-audit-{context.scheduled_execution_time.date().isoformat()}",
+    )
+
+
+@schedule(
+    cron_schedule="30 13 * * 1",  # 13:30 UTC Mondays — after codify gap clone
+    job=dog_park_data_quality_audit_job,
+    default_status=DefaultScheduleStatus.STOPPED,
+    description=(
+        "Weekly — surfaces dog-park amenity inconsistencies (lighting "
+        "+ dawn-dusk hours). Raises on any detection so new inconsistencies "
+        "from amenity re-extractions surface immediately."
+    ),
+)
+def weekly_dog_park_data_quality_audit_schedule(context: ScheduleEvaluationContext):
+    yield RunRequest(
+        run_key=f"dp-dq-{context.scheduled_execution_time.date().isoformat()}",
     )
 
 

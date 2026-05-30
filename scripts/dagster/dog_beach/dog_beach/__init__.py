@@ -138,6 +138,7 @@ from .assets.scoring_and_audit import (
     weather_advisories_refresh,
     codify_coverage_audit,
     codify_gap_clone,
+    dog_park_data_quality_audit,
 )
 from .assets.weather_grid import (
     refresh_weather_grid,
@@ -184,6 +185,7 @@ from .schedules.time_based import (
     daily_weather_advisories_schedule,
     daily_codify_coverage_audit_schedule,
     weekly_codify_gap_clone_schedule,
+    weekly_dog_park_data_quality_audit_schedule,
     hourly_weather_grid_schedule,
     daily_weather_grid_inventory_schedule,
     monthly_dog_park_coverage_schedule,
@@ -198,6 +200,7 @@ from .jobs import (
     weather_advisories_job,
     codify_coverage_audit_job,
     codify_gap_clone_job,
+    dog_park_data_quality_audit_job,
     rebuild_beach_evidence_job,
     weather_grid_refresh_job,
     weather_grid_inventory_job,
@@ -285,6 +288,7 @@ defs = Definitions(
         weather_advisories_refresh,
         codify_coverage_audit,
         codify_gap_clone,
+        dog_park_data_quality_audit,
         field_population_check,
         # Weather reference layer (W1.5 + W1.8)
         refresh_weather_grid,
@@ -329,6 +333,7 @@ defs = Definitions(
         daily_weather_advisories_schedule,
         daily_codify_coverage_audit_schedule,
         weekly_codify_gap_clone_schedule,
+        weekly_dog_park_data_quality_audit_schedule,
         hourly_weather_grid_schedule,
         daily_weather_grid_inventory_schedule,
         monthly_dog_park_coverage_schedule,
@@ -343,6 +348,7 @@ defs = Definitions(
         weather_advisories_job,
         codify_coverage_audit_job,
         codify_gap_clone_job,
+        dog_park_data_quality_audit_job,
         rebuild_beach_evidence_job,
         weather_grid_refresh_job,
         weather_grid_inventory_job,

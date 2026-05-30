@@ -143,6 +143,7 @@ from .assets.scoring_and_audit import (
     daily_refresh_fire, field_population_check,
     weather_advisories_refresh,
     codify_coverage_audit, codify_gap_clone,
+    dog_park_data_quality_audit,
 )
 from .assets.weather_grid import (
     refresh_weather_grid, rebuild_weather_grid_inventory,
@@ -322,6 +323,16 @@ codify_gap_clone_job = define_asset_job(
         "states. Catches newly-added beaches in already-codified cities."
     ),
     selection=AssetSelection.assets(codify_gap_clone),
+)
+
+dog_park_data_quality_audit_job = define_asset_job(
+    name="dog_park_data_quality_audit_job",
+    description=(
+        "Phase 32.8 — surfaces dog-park amenity inconsistencies "
+        "(currently: lighting=true + dawn-dusk hours). Raises on any "
+        "detection."
+    ),
+    selection=AssetSelection.assets(dog_park_data_quality_audit),
 )
 
 

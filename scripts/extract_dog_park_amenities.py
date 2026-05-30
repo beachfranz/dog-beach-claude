@@ -111,7 +111,7 @@ PARK: {name} ({city}, CA)
 
 Extract the following 17 fields about THIS specific dog park. Return null if not stated. For booleans, only true/false when the page explicitly says so.
 
-Hints for the new amenity booleans:
+Hints for the amenity booleans:
   - has_shade:        meaningful tree canopy, shade sails, or shaded structures
                       covering some of the play area. Casual "a few trees"
                       mentions don't qualify; needs intentional shade.
@@ -122,6 +122,17 @@ Hints for the new amenity booleans:
                       bowls alone do NOT count (those are has_drinking_water).
   - has_picnic_tables:picnic tables (not just benches) where owners can sit
                       and eat. Single benches alone don't qualify.
+  - lighting:         INSTALLED light fixtures for evening/night USE — NOT
+                      a templated amenity checkbox. Requires explicit phrasing
+                      that the park is usable after dark: "lit at night",
+                      "evening hours", "night lighting", "open until 10 PM",
+                      or hours that explicitly extend past sunset (e.g.
+                      "6am-10pm"). When hours_text is dawn-to-dusk /
+                      sunrise-to-sunset, lighting=true requires an additional
+                      explicit "lit after dusk for X" or "evening events"
+                      statement — otherwise lighting=false or null. A bare
+                      "Features: lighting" checkbox without context is null,
+                      not true.
 
 Return JSON exactly in this flat shape (no nested blocks):
 {{

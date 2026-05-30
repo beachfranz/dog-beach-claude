@@ -635,6 +635,27 @@
 
   // ── Render ────────────────────────────────────────────────────────
   function render({ beach, day, hours, metadata, zone_rules, dog_policy, alternatives, photos }) {
+    // ── v2 status normalization ────────────────────────────────────
+    // get-beach-detail returns both v1 *_status and v2 *_status_v2 fields.
+    // Alias v2 values onto the original v1 keys so all downstream metric
+    // definitions + reasonFns automatically read v2 without per-call
+    // changes. v1 fallback preserved during transition. Per Franz
+    // 2026-05-30 v1-retirement (detail.html migration).
+    const V2_KEYS = ['tide','wind','rain','crowd','temp','uv','sand','asphalt','temp_hot','temp_cold','hour'];
+    for (const h of hours) {
+      for (const k of V2_KEYS) {
+        const v2 = h[`${k}_status_v2`];
+        if (v2 != null) h[`${k}_status`] = v2;
+      }
+      // hour_score → hour_score_v2 when present
+      if (h.hour_score_v2 != null) h.hour_score = h.hour_score_v2;
+    }
+    // Also alias day-level
+    if (day) {
+      if (day.day_status_v2 != null) day.day_status = day.day_status_v2;
+      if (day.composite_score_v2 != null) day.composite_score = day.composite_score_v2;
+    }
+
     // Header
     const dateObj  = new Date(date + 'T12:00:00');
     const dayName  = dateObj.toLocaleDateString('en-US', { weekday: 'long' });

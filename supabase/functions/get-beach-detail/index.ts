@@ -91,7 +91,7 @@ Deno.serve(async (req: Request) => {
         .select(
           "local_hour, hour_label, hour_status, is_in_best_window, is_candidate_window, " +
           "tide_height, wind_speed, temp_air, feels_like, precip_chance, busyness_score, " +
-          "uv_index, weather_code, hour_text, is_daylight, hour_score, " +
+          "uv_index, weather_code, hour_text, is_daylight, hour_score, hour_score_v2, " +
           "tide_score, wind_score, crowd_score, rain_score, temp_score, uv_score, weather_score, " +
           "tide_status, wind_status, crowd_status, rain_status, temp_status, uv_status, " +
           "temp_cold_status, temp_hot_status, sand_temp, asphalt_temp, sand_status, asphalt_status"
@@ -207,7 +207,11 @@ Deno.serve(async (req: Request) => {
     }
 
     if (photosErr) console.warn("photos fetch failed:", photosErr.message);
-    return json({ beach, day: finalDay, hours: finalHours, metadata,
+    // Decorate hours with v2 status fields. Inline TS so we don't need
+    // an RPC per hour; mirrors get_beach_info RPC behavior. Per Franz
+    // 2026-05-30 v1-retirement detail.html migration.
+    const decoratedHours = (finalHours as Record<string, unknown>[]).map(decorateV2);
+    return json({ beach, day: finalDay, hours: decoratedHours, metadata,
                   zone_rules: zoneRules, dog_policy: dogPolicy, alternatives,
                   photos: photos ?? [] });
 
@@ -222,12 +226,103 @@ function formatHour(hour: number): string {
   return hour < 12 ? `${hour}am` : `${hour - 12}pm`;
 }
 
+// ─── v2 status mapping ─────────────────────────────────────────────────────
+// Inline copy of public.v2_signal_status thresholds. SQL truth-source is
+// scoring_config_v2 / v2_signal_status. Pin: [[v2-signal-status-mapping]].
+// Keep in sync when bands change. Mirrors the TS port in beach-chat/index.ts.
+type V2Status = "clear" | "advisory" | "caution" | "no_go";
+function v2StatusFor(signal: string, v: number | null | undefined): V2Status | null {
+  if (v == null) return null;
+  switch (signal) {
+    case "uv":
+      if (v >= 11) return "no_go";
+      if (v >= 9)  return "caution";
+      if (v >= 6)  return "advisory";
+      return "clear";
+    case "asphalt":
+      if (v >= 125) return "no_go";
+      if (v >= 115) return "advisory";
+      return "clear";
+    case "sand":
+      if (v >= 145) return "no_go";
+      if (v >= 125) return "caution";
+      if (v >= 115) return "advisory";
+      return "clear";
+    case "tide":
+      if (v >= 7) return "no_go";
+      if (v >= 5) return "caution";
+      if (v >= 3) return "advisory";
+      return "clear";
+    case "wind":
+      if (v >= 35) return "no_go";
+      if (v >= 19) return "caution";
+      if (v >= 13) return "advisory";
+      return "clear";
+    case "crowd":
+      if (v >= 85) return "no_go";
+      if (v >= 60) return "caution";
+      if (v >= 30) return "advisory";
+      return "clear";
+    case "precip":
+      if (v >= 80) return "no_go";
+      if (v >= 50) return "caution";
+      if (v >= 30) return "advisory";
+      return "clear";
+    case "feels_hot":
+      if (v >= 125) return "no_go";
+      if (v >= 95)  return "caution";
+      if (v >= 85)  return "advisory";
+      return "clear";
+    case "feels_cold":
+      if (v <= 20) return "no_go";
+      if (v <= 32) return "caution";
+      if (v <= 50) return "advisory";
+      return "clear";
+    default:
+      return null;
+  }
+}
+function v2Worst(a: V2Status | null, b: V2Status | null): V2Status | null {
+  const rank = (s: V2Status | null) =>
+    s === "no_go" ? 3 : s === "caution" ? 2 : s === "advisory" ? 1 : s === "clear" ? 0 : -1;
+  return rank(a) >= rank(b) ? a : b;
+}
+function decorateV2(h: Record<string, unknown>): Record<string, unknown> {
+  const num = (k: string) => h[k] as number | null;
+  const sTide    = v2StatusFor("tide",       num("tide_height"));
+  const sWind    = v2StatusFor("wind",       num("wind_speed"));
+  const sRain    = v2StatusFor("precip",     num("precip_chance"));
+  const sCrowd   = v2StatusFor("crowd",      num("busyness_score"));
+  const sUv      = v2StatusFor("uv",         num("uv_index"));
+  const sSand    = v2StatusFor("sand",       num("sand_temp"));
+  const sAsphalt = v2StatusFor("asphalt",    num("asphalt_temp"));
+  const sFeelsH  = v2StatusFor("feels_hot",  num("feels_like"));
+  const sFeelsC  = v2StatusFor("feels_cold", num("feels_like"));
+  const sTemp    = v2Worst(sFeelsH, sFeelsC);
+  const worst    = [sTide, sWind, sRain, sCrowd, sUv, sSand, sAsphalt, sTemp]
+                    .reduce<V2Status | null>((w, s) => v2Worst(w, s), null) ?? "clear";
+  return {
+    ...h,
+    tide_status_v2:       sTide,
+    wind_status_v2:       sWind,
+    rain_status_v2:       sRain,
+    crowd_status_v2:      sCrowd,
+    uv_status_v2:         sUv,
+    sand_status_v2:       sSand,
+    asphalt_status_v2:    sAsphalt,
+    temp_hot_status_v2:   sFeelsH,
+    temp_cold_status_v2:  sFeelsC,
+    temp_status_v2:       sTemp,
+    hour_status_v2:       worst,
+  };
+}
+
 function buildWindowLabel(startHour: number, endHour: number): string {
   return `${formatHour(startHour)}–${formatHour(endHour + 1)}`;
 }
 
 type CandidateHour = {
-  local_hour: number; hour_score: number;
+  local_hour: number; hour_score: number; hour_score_v2?: number | null;
   tide_status: string | null; wind_status: string | null;
   rain_status: string | null; crowd_status: string | null;
   temp_status: string | null; uv_status: string | null;
@@ -240,9 +335,12 @@ function findBestRemainingWindow(hours: CandidateHour[]): {
 } | null {
   if (!hours.length) return null;
 
+  // Prefer v2 score; fall back to v1 during transition. Per Franz 2026-05-30.
+  const score = (h: CandidateHour) => Number(h.hour_score_v2 ?? h.hour_score ?? 0);
+
   const sorted    = [...hours].sort((a, b) => a.local_hour - b.local_hour);
-  const peak      = sorted.reduce((b, h) => Number(h.hour_score) > Number(b.hour_score) ? h : b);
-  const peakScore = Number(peak.hour_score);
+  const peak      = sorted.reduce((b, h) => score(h) > score(b) ? h : b);
+  const peakScore = score(peak);
   const peakIdx   = sorted.indexOf(peak);
 
   const STEP = 0.05;
@@ -256,13 +354,13 @@ function findBestRemainingWindow(hours: CandidateHour[]): {
     for (let i = peakIdx + 1; i < sorted.length; i++) {
       const h = sorted[i], prev = window[window.length - 1];
       if (h.local_hour !== prev.local_hour + 1) break;
-      if (Number(h.hour_score) < minScore)      break;
+      if (score(h) < minScore)                  break;
       window.push(h);
     }
     for (let i = peakIdx - 1; i >= 0; i--) {
       const h = sorted[i], next = window[0];
       if (next.local_hour !== h.local_hour + 1) break;
-      if (Number(h.hour_score) < minScore)       break;
+      if (score(h) < minScore)                   break;
       window.unshift(h);
     }
 
@@ -286,7 +384,7 @@ function findBestRemainingWindow(hours: CandidateHour[]): {
   return {
     startHour: window[0].local_hour,
     endHour:   window[window.length - 1].local_hour,
-    avgScore:  window.reduce((s, h) => s + Number(h.hour_score), 0) / window.length,
+    avgScore:  window.reduce((s, h) => s + score(h), 0) / window.length,
     status:    overallStatus,
     hours:     window,
   };

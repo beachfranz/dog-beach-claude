@@ -54,7 +54,7 @@ Deno.serve(async (req: Request) => {
   // Day recommendations for these beaches on this date — keyed on arena_group_id
   const { data: days, error: daysErr } = await supabase
     .from("beach_day_recommendations")
-    .select("arena_group_id, day_status, best_window_label, go_hours_count, avg_wind, avg_tide_height, busyness_category, summary_weather")
+    .select("arena_group_id, day_status, day_status_v2, composite_score_v2, best_window_label, go_hours_count, avg_wind, avg_tide_height, busyness_category, summary_weather")
     .in("arena_group_id", fids)
     .eq("local_date", date);
 
@@ -63,7 +63,7 @@ Deno.serve(async (req: Request) => {
   // Hourly scores for best window hours — keyed on arena_group_id
   const { data: hours, error: hoursErr } = await supabase
     .from("beach_day_hourly_scores")
-    .select("arena_group_id, hour_score, explainability, hour_status")
+    .select("arena_group_id, hour_score, hour_score_v2, explainability, hour_status")
     .in("arena_group_id", fids)
     .eq("local_date", date)
     .eq("is_in_best_window", true);
@@ -89,7 +89,8 @@ Deno.serve(async (req: Request) => {
     s.crowd     += ex.crowd_score ?? 0;
     s.rain      += ex.rain_score  ?? 0;
     s.temp      += ex.temp_score  ?? 0;
-    s.composite += Number(h.hour_score ?? 0);
+    // Prefer v2 hour score with v1 fallback. Per Franz 2026-05-30 v1-retirement.
+    s.composite += Number(h.hour_score_v2 ?? h.hour_score ?? 0);
   }
 
   // Average them
@@ -117,7 +118,10 @@ Deno.serve(async (req: Request) => {
       display_name:      beach.display_name_override ?? beach.name,
       latitude:          beach.lat,
       longitude:         beach.lon,
-      day_status:        day?.day_status ?? "no_data",
+      // Prefer v2 day status; fall back to v1 during transition.
+      day_status:        day?.day_status_v2 ?? day?.day_status ?? "no_data",
+      day_status_v1:     day?.day_status ?? "no_data",
+      composite_score_v2: day?.composite_score_v2 ?? null,
       best_window_label: day?.best_window_label ?? null,
       go_hours_count:    day?.go_hours_count ?? 0,
       busyness_category: day?.busyness_category ?? null,

@@ -82,6 +82,14 @@ HOURLY_METRICS = [
      "Hot day (feels like {observed}°F) — dawn or dusk, plenty of water.", "{:.0f}°F", "max"),
     ("temp_cold_status","feels_like_cold", "feels_like",    "Cold",        "🥶", "cold_paws",
      "Cold (feels like {observed}°F) — short coats may need a jacket.", "{:.0f}°F", "min"),
+    # Car-safety advisories (ASPCA-aligned). Uses temp_air (NOT feels_like)
+    # because interior car heating/cooling depends on actual ambient + solar
+    # load, not wind chill. Thresholds in scoring_config_v2 car_heat_neg /
+    # car_cold_neg bands.
+    ("car_heat_status", "car_heat_neg",    "temp_air",      "Hot car",     "🚗", "skip_car",
+     "{observed}°F outside — don't leave your dog in a parked car. Interior climbs to 100°F+ within 10 min, fatal heatstroke risk in 15.", "{:.0f}°F", "max"),
+    ("car_cold_status", "car_cold_neg",    "temp_air",      "Cold car",    "🥶", "skip_car",
+     "{observed}°F outside — don't leave your dog in a parked car. Interior cools to ambient quickly; hypothermia risk for short coats.", "{:.0f}°F", "min"),
     ("crowd_status",    "crowd_neg",       "busyness_score","Crowded",     "👥", "review_required",
      "Beach is busy (score {observed}) — reactive dogs may struggle.", "{:.0f}", "max"),
 ]
@@ -148,6 +156,7 @@ def main() -> int:
                 SELECT local_date, local_hour, forecast_ts,
                        sand_temp, asphalt_temp, uv_index, wind_speed,
                        tide_height, precip_chance, feels_like, busyness_score,
+                       temp_air,
                        public.v2_signal_status('beach','sand_temp_neg',   sand_temp::numeric)   AS sand_temp_v2,
                        public.v2_signal_status('beach','asphalt_neg',     asphalt_temp::numeric) AS asphalt_v2,
                        public.v2_signal_status('beach','uv_neg',          uv_index::numeric)    AS uv_v2,
@@ -156,7 +165,9 @@ def main() -> int:
                        public.v2_signal_status('beach','precip_chance',   precip_chance::numeric) AS precip_v2,
                        public.v2_signal_status('beach','feels_like_hot',  feels_like::numeric)  AS feels_hot_v2,
                        public.v2_signal_status('beach','feels_like_cold', feels_like::numeric)  AS feels_cold_v2,
-                       public.v2_signal_status('beach','crowd_neg',       busyness_score::numeric) AS crowd_v2
+                       public.v2_signal_status('beach','crowd_neg',       busyness_score::numeric) AS crowd_v2,
+                       public.v2_signal_status('beach','car_heat_neg',    temp_air::numeric)    AS car_heat_v2,
+                       public.v2_signal_status('beach','car_cold_neg',    temp_air::numeric)    AS car_cold_v2
                   FROM public.beach_day_hourly_scores
                  WHERE location_id = %s
                    AND local_date >= (now() at time zone 'UTC')::date
@@ -183,6 +194,8 @@ def main() -> int:
                 "feels_like_hot":  "feels_hot_v2",
                 "feels_like_cold": "feels_cold_v2",
                 "crowd_neg":       "crowd_v2",
+                "car_heat_neg":    "car_heat_v2",
+                "car_cold_neg":    "car_cold_v2",
             }
 
             # Time-aware filter: advisories matter only for the rest of

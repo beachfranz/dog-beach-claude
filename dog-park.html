@@ -743,6 +743,8 @@ async function load() {
   } else {
     loadScoutBlurb(data.dog_park, data.days?.[0], data.now);
   }
+  // Stash park tz so applyHourlyV2 can compute park-local "now".
+  window.__parkTimezone = data.dog_park?.timezone || 'America/Los_Angeles';
   // Hourly v2 — async fill the header badge with current-hour score + render
   // vertical bar chart inside the Best-time card.
   _fetchHourlyV2(fid).then(payload => {
@@ -757,8 +759,10 @@ function applyHourlyV2(payload) {
   const hours = payload.hours || [];
   if (!hours.length) return;
 
-  // Pick the bar for the current local hour (closest match in the open->close set).
-  const nowH = new Date().getHours();
+  // Pick the bar for the current local hour, in the park's timezone
+  // (not the browser's). Avoids drift for users viewing parks in other tz.
+  const parkTz = window.__parkTimezone || 'America/Los_Angeles';
+  const nowH = _currentLocalHourDP(parkTz) ?? new Date().getHours();
   let current = hours.find(h => h.local_hour === nowH);
   if (!current) {
     if (nowH < payload.open_hour) current = hours[0];
@@ -787,7 +791,18 @@ function applyHourlyV2(payload) {
         ? `Closed right now — reopens ${reopenLabel}`
         : 'Closed for the rest of today';
     } else if (payload.best_window_v2_label) {
-      headlineEl.textContent = payload.best_window_v2_label;
+      // Today's stored best_window_v2_label is full-day. Recompute from
+      // current park-local hour forward so a 7am view of a "6am-9am"
+      // window shows "7am-9am", and a 10am view of a passed window
+      // shows "Today's window has passed". Per Franz 2026-05-30:
+      // "when looking at the current day, we look only at the current
+      // hour forward — true of all location types."
+      const remaining = _bestWindowFromNowV2DP(hours, nowH);
+      if (remaining?.label) {
+        headlineEl.textContent = remaining.label;
+      } else {
+        headlineEl.textContent = "Today's window has passed";
+      }
     } else {
       // No qualifying best window today (e.g. fully-closed day)
       const anyOpen = hours.some(h => h.status !== 'closed' && !h.is_closed);
@@ -809,6 +824,69 @@ function applyHourlyV2(payload) {
   if (!target) return;
   target.insertAdjacentHTML('beforeend', renderHourlyBars(payload, nowH));
 }
+
+function _currentLocalHourDP(timezone) {
+  const tz = timezone || 'America/Los_Angeles';
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, hour: '2-digit', hour12: false,
+    }).formatToParts(new Date());
+    const h = parts.find(p => p.type === 'hour')?.value;
+    return h != null ? (parseInt(h, 10) % 24) : null;
+  } catch { return null; }
+}
+
+// Best contiguous run of open hours from `fromHour` forward. Returns
+// { label } or null. Mirrors the SQL _find_best_window_v2 picker but
+// operates on the v2 hourly payload.
+function _bestWindowFromNowV2DP(hours, fromHour) {
+  if (!Array.isArray(hours) || hours.length === 0) return null;
+  const eligible = hours
+    .filter(h =>
+      typeof h.local_hour === 'number'
+      && h.local_hour >= fromHour
+      && h.status !== 'closed'
+      && h.is_closed !== true
+      && Number.isFinite(Number(h.score)))
+    .sort((a, b) => a.local_hour - b.local_hour);
+  if (eligible.length < 2) return null;
+  const runs = [];
+  let cur = [eligible[0]];
+  for (let i = 1; i < eligible.length; i++) {
+    if (eligible[i].local_hour === cur[cur.length - 1].local_hour + 1) {
+      cur.push(eligible[i]);
+    } else {
+      if (cur.length >= 2) runs.push(cur);
+      cur = [eligible[i]];
+    }
+  }
+  if (cur.length >= 2) runs.push(cur);
+  if (runs.length === 0) return null;
+  const MAX_LEN = 5;
+  let best = null;
+  for (const run of runs) {
+    if (run.length <= MAX_LEN) {
+      const avg = run.reduce((s, h) => s + Number(h.score), 0) / run.length;
+      if (!best || avg > best.avg) best = { slice: run, avg };
+    } else {
+      for (let i = 0; i + MAX_LEN <= run.length; i++) {
+        const slice = run.slice(i, i + MAX_LEN);
+        const avg = slice.reduce((s, h) => s + Number(h.score), 0) / slice.length;
+        if (!best || avg > best.avg) best = { slice, avg };
+      }
+    }
+  }
+  if (!best) return null;
+  const startHour = best.slice[0].local_hour;
+  const endHour = best.slice[best.slice.length - 1].local_hour;
+  const fmt = h => {
+    if (h === 0) return '12am';
+    if (h === 12) return '12pm';
+    return h < 12 ? `${h}am` : `${h - 12}pm`;
+  };
+  return { label: `${fmt(startHour)}–${fmt((endHour + 1) % 24)}` };
+}
+
 
 function renderHourlyBars(p, nowH) {
   // Tug-of-war chart: positives stack UP from a center axis, negatives

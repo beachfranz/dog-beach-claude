@@ -1275,7 +1275,11 @@ async function _fetchBeachHourlyV2(fid) {
 function applyBeachHourlyV2(payload, todayRec) {
   const hours = payload.hours || [];
   if (!hours.length) return;
-  const nowH = new Date().getHours();
+  // Use beach timezone (not browser) so a user in a different tz still
+  // sees the beach's local "now". _currentLocalHour falls back to LA
+  // when timezone is missing.
+  const beachTz = window.__beachTimezone || 'America/Los_Angeles';
+  const nowH = _currentLocalHour(beachTz) ?? new Date().getHours();
   let current = hours.find(h => h.local_hour === nowH);
   if (!current) current = hours[0];
 
@@ -1310,7 +1314,19 @@ function applyBeachHourlyV2(payload, todayRec) {
         ? `${verbNow} — reopens ${reopenLabel}`
         : verbRest;
     } else if (todayRec?.best_window_label) {
-      headlineEl.textContent = todayRec.best_window_label;
+      // Today's stored best_window_label is full-day. Recompute from
+      // current hour forward so a 7am view of a "6am-9am" window
+      // shows "7am-9am", and a 10am view of a passed window shows
+      // "no good window remaining today" rather than a stale label.
+      // Per Franz 2026-05-30: "when looking at the current day, we
+      // look only at the current hour forward — true of all location
+      // types."
+      const remaining = _bestWindowFromNowV2(hours, nowH);
+      if (remaining?.label) {
+        headlineEl.textContent = remaining.label;
+      } else {
+        headlineEl.textContent = "Today's window has passed";
+      }
     } else {
       // No v2 window picked. Distinguish "closed all day" from "open but mediocre".
       const anyOpen = hours.some(h => h.status !== 'closed' && !h.is_closed);
@@ -1335,6 +1351,70 @@ function applyBeachHourlyV2(payload, todayRec) {
   if (existing) existing.remove();
   target.insertAdjacentHTML('beforeend', renderHourlyBarsV2(payload, nowH));
 }
+
+// Find best contiguous run of open, non-closed hours from `fromHour`
+// forward. Returns { label, startHour, endHour, avgScore } or null when
+// no qualifying run of length >= 2 exists. Mirrors the SQL
+// _find_best_window_v2 picker but operates on the per-hour payload.
+function _bestWindowFromNowV2(hours, fromHour) {
+  if (!Array.isArray(hours) || hours.length === 0) return null;
+  const eligible = hours
+    .filter(h =>
+      typeof h.local_hour === 'number'
+      && h.local_hour >= fromHour
+      && h.status !== 'closed'
+      && h.is_closed !== true
+      && Number.isFinite(Number(h.score)))
+    .sort((a, b) => a.local_hour - b.local_hour);
+  if (eligible.length < 2) return null;
+
+  // Greedy: find contiguous runs (consecutive local_hour), pick the one
+  // with highest avg score, capped at 5 hours. Mirrors the SQL helper.
+  const runs = [];
+  let cur = [eligible[0]];
+  for (let i = 1; i < eligible.length; i++) {
+    if (eligible[i].local_hour === cur[cur.length - 1].local_hour + 1) {
+      cur.push(eligible[i]);
+    } else {
+      if (cur.length >= 2) runs.push(cur);
+      cur = [eligible[i]];
+    }
+  }
+  if (cur.length >= 2) runs.push(cur);
+  if (runs.length === 0) return null;
+
+  // Pick the run with the highest avg score; cap at 5 hours by sliding
+  // a 5-wide window inside the run to pick the best slice.
+  const MAX_LEN = 5;
+  let best = null;
+  for (const run of runs) {
+    if (run.length <= MAX_LEN) {
+      const avg = run.reduce((s, h) => s + Number(h.score), 0) / run.length;
+      if (!best || avg > best.avg) best = { slice: run, avg };
+    } else {
+      for (let i = 0; i + MAX_LEN <= run.length; i++) {
+        const slice = run.slice(i, i + MAX_LEN);
+        const avg = slice.reduce((s, h) => s + Number(h.score), 0) / slice.length;
+        if (!best || avg > best.avg) best = { slice, avg };
+      }
+    }
+  }
+  if (!best) return null;
+  const startHour = best.slice[0].local_hour;
+  const endHour = best.slice[best.slice.length - 1].local_hour;
+  const fmt = h => {
+    if (h === 0) return '12am';
+    if (h === 12) return '12pm';
+    return h < 12 ? `${h}am` : `${h - 12}pm`;
+  };
+  // Display end is the START of the hour AFTER the window's last hour
+  // (matches the SQL _format_hour_range convention).
+  return {
+    label: `${fmt(startHour)}–${fmt((endHour + 1) % 24)}`,
+    startHour, endHour, avg: best.avg,
+  };
+}
+
 
 function _currentLocalHour(timezone) {
   const tz = timezone || 'America/Los_Angeles';
@@ -1510,6 +1590,8 @@ function render(data, beachFid) {
   // V2 tug-of-war chart — fetched in parallel with photos/scout/etc.
   // Mounts inside the besttime-card (if present) and overrides the
   // v1-derived headline with the v2 best window when available.
+  // Stash beach tz so applyBeachHourlyV2 can compute beach-local "now".
+  window.__beachTimezone = beach.timezone || 'America/Los_Angeles';
   _fetchBeachHourlyV2(beachFid).then(payload => {
     if (payload && !payload.error) applyBeachHourlyV2(payload, data.today);
   });

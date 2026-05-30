@@ -718,13 +718,13 @@
     days.push({ iso, label });
   }
 
-  let selectedDate = 'now';
+  let selectedDate = days[0].iso;
 
   const pillsEl = document.getElementById('day-pills');
 
   // NOW pill first
   const nowBtn = document.createElement('button');
-  nowBtn.className = 'day-pill active';
+  nowBtn.className = 'day-pill';
   nowBtn.textContent = 'NOW';
   nowBtn.onclick = () => {
     document.querySelectorAll('.day-pill').forEach(p => p.classList.remove('active'));
@@ -1185,12 +1185,16 @@
   //   - beach chip(s) only  → existing beach render with leashFilter from chips
   //   - dog_park + beach    → blended render (parallel fetch, merge by score)
   async function sortAndRender() {
+    // Re-derive leashFilter from current chips BEFORE any branch reads it.
+    // Was set after the DP-only return below, which left it stale when the
+    // user dropped from on-leash-beach + dog-park → dog-park-only — the
+    // DP filter then rejected every park (definitionally off-leash) because
+    // leashFilter was still 'on_leash' from the previous chip state.
+    leashFilter = effectiveBeachLeash();
     if (wantsDogParks() && !wantsBeaches()) {
       await sortAndRenderDogParks();
       return;
     }
-    // Set leash filter from chips before the beach render reads it
-    leashFilter = effectiveBeachLeash();
     // Beach (or blended) flow — restore day pills + chips that DP mode hides
     document.getElementById('day-pills').style.display = '';
     if (wantsDogParks() && wantsBeaches()) {

@@ -311,6 +311,27 @@ function buildSystemPrompt(
     hoursByDate.set(date, arr);
   }
 
+  // Off-leash availability gates fetch/retrieve tips: you cannot play fetch
+  // with a leashed dog. Walk zone_rules first; fall back to the legacy
+  // has_off_leash boolean. Tips that plant "fetch" in Scout's context will
+  // make Scout suggest "leashed fetch" — incoherent, so suppress them.
+  let _anyOffLeash = false;
+  const _zr = (dogPolicy?.zone_rules ?? null) as Record<string, unknown> | null;
+  const _regions = Array.isArray(_zr?.regions) ? _zr!.regions as Record<string, unknown>[]
+    : Array.isArray((_zr as Record<string, unknown>)?.seasons)
+      ? ((_zr as Record<string, unknown>).seasons as Record<string, unknown>[]).flatMap(s => (s?.regions as Record<string, unknown>[]) || [])
+      : [];
+  for (const reg of _regions) {
+    const secs = (reg?.sections ?? {}) as Record<string, Record<string, unknown>>;
+    for (const sd of Object.values(secs)) {
+      if (sd?.rule === "off_leash") { _anyOffLeash = true; break; }
+      const tws = (sd?.time_windows ?? []) as Record<string, unknown>[];
+      if (tws.some(tw => tw?.rule === "off_leash")) { _anyOffLeash = true; break; }
+    }
+    if (_anyOffLeash) break;
+  }
+  if (!_anyOffLeash && dogPolicy?.has_off_leash === true) _anyOffLeash = true;
+
   const daysContext = days.map((d) => {
     const date = d.local_date as string;
     const dayHours = hoursByDate.get(date) ?? [];
@@ -353,7 +374,11 @@ function buildSystemPrompt(
 
     // Dog essentials
     tips.push("fresh water and a bowl for the dog");
-    if (lowestTide !== null && lowestTide <= 1.0) tips.push("low tide = great fetch/swim — bring a ball and towel for the dog");
+    if (lowestTide !== null && lowestTide <= 1.0) {
+      tips.push(_anyOffLeash
+        ? "low tide = great fetch/swim — bring a ball and towel for the dog"
+        : "low tide = wide leashed walk with tide pools to sniff — bring a towel");
+    }
     if (avgUv !== null && avgUv >= 6) tips.push(`dog sunscreen for nose/ears (UV ${Math.round(avgUv)})`);
     if (avgTemp !== null && avgTemp >= 80) tips.push("hot sand — dog booties or arrive early before it heats up");
     if (d.busyness_category === "dog_party" || d.busyness_category === "too_crowded") tips.push("long leash for crowded beach");
@@ -529,7 +554,8 @@ ${scopedDate
 - When giving pack advice, lead with the dog's needs (water, towel, fetch ball, sunscreen, booties, leash) — but the kahu (the human handler) is ALSO a body on the beach. When cautions are active (high UV, heat, cold, wind, high tide, bacteria), address kahu safety + comfort alongside the dog's: sunscreen for the kahu when UV's punching, a layer when it's chilly, hydration in heat, "stick to the upper beach, watch for kids and dogs being pushed toward the cliffs" on high tide. The dog comes first; the kahu is a close second.
 - Always assume the user is bringing their dog; frame all advice through that lens
 - LIFEGUARDS ARE SEASONAL — never say "lifeguards on duty" or "lifeguards on staff" (implies year-round staffing, which is false at almost every US beach). Say "seasonal lifeguards" or just "lifeguards". If a specific window is needed, default to "roughly Memorial Day to Labor Day" unless the data above explicitly gives one.
-- DOG POLICY is non-negotiable — never suggest activities that violate the leash rule or "no dogs on sand" rule above. If the policy says leash required, the dog stays leashed; if dogs aren't allowed on sand, point the user to the allowed zone (parking lot / multi-use trail) and make the most of that. Don't argue with the policy or hedge — Scout knows the local rules cold and respects them.`;
+- DOG POLICY is non-negotiable — never suggest activities that violate the leash rule or "no dogs on sand" rule above. If the policy says leash required, the dog stays leashed; if dogs aren't allowed on sand, point the user to the allowed zone (parking lot / multi-use trail) and make the most of that. Don't argue with the policy or hedge — Scout knows the local rules cold and respects them.
+- FETCH AND RETRIEVE ARE OFF-LEASH ACTIVITIES. You cannot throw a ball for a leashed dog — the leash physically prevents it. Never suggest fetch, "leashed fetch", chase-the-ball, frisbee, retrieve, or any throw-and-chase game when the dog must be leashed. Swimming is similarly off-leash unless the dog is in shallow shore-break under direct restraint. Leashed-dog activities are: walks, sniff-tours, tide-pool exploring, sit-with-you-on-the-towel, wade in ankle-deep water with a long lead.`;
 }
 
 function trim(s: string, n: number): string {

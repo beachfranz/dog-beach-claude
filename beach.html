@@ -1269,15 +1269,21 @@ async function _fetchBeachHourlyV2(fid) {
   }
 }
 
-function applyBeachHourlyV2(payload) {
+function applyBeachHourlyV2(payload, todayRec) {
   const hours = payload.hours || [];
   if (!hours.length) return;
   const nowH = new Date().getHours();
   let current = hours.find(h => h.local_hour === nowH);
   if (!current) current = hours[0];
 
-  // Set the besttime headline from v2 data. Card shell rendered "…" earlier;
-  // we always replace it here so the placeholder never sticks.
+  // Set the besttime headline. For the open-window case use the STORED
+  // best_window_label from beach_day_recommendations (already v2-applied
+  // by daily-beach-refresh) so headline + Scout blurb agree. The live RPC
+  // computes a fresh window that can disagree with the stored one — using
+  // it here led to "6am-9am" in the Scout body and a contradictory "2pm-7pm"
+  // (or similar) in the headline. Per Franz 2026-05-30.
+  // Closed/reopen states still come from the per-hour chart payload
+  // (they're time-sensitive and not pre-stored).
   const headlineEl = document.querySelector('.besttime-headline');
   if (headlineEl) {
     const isNowClosed = current?.status === 'closed' || current?.is_closed === true;
@@ -1300,8 +1306,8 @@ function applyBeachHourlyV2(payload) {
       headlineEl.textContent = reopenLabel
         ? `${verbNow} — reopens ${reopenLabel}`
         : verbRest;
-    } else if (payload.best_window_v2_label) {
-      headlineEl.textContent = payload.best_window_v2_label;
+    } else if (todayRec?.best_window_label) {
+      headlineEl.textContent = todayRec.best_window_label;
     } else {
       // No v2 window picked. Distinguish "closed all day" from "open but mediocre".
       const anyOpen = hours.some(h => h.status !== 'closed' && !h.is_closed);
@@ -1502,7 +1508,7 @@ function render(data, beachFid) {
   // Mounts inside the besttime-card (if present) and overrides the
   // v1-derived headline with the v2 best window when available.
   _fetchBeachHourlyV2(beachFid).then(payload => {
-    if (payload && !payload.error) applyBeachHourlyV2(payload);
+    if (payload && !payload.error) applyBeachHourlyV2(payload, data.today);
   });
 
   // _renderZoneRulesBlock removed — zone info is now in the Amenities
@@ -3129,7 +3135,7 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
     `Activities the zone rules ALLOW today (weave 2-3 of these naturally — DON'T invent, DON'T list all): ${actPhrases.join(' · ')}. ` +
     `Pack items to mention concretely (weave ${isCompact ? '1-2' : '2-3'} of these into the prose — DON'T invent gear): ${packPhrases.join(' · ')}. ` +
     lengthDirective +
-    `DO NOT restate the time window in the paragraph (e.g. '${windowLabel}') — it's already shown in the headline above. Describe the vibe / activity / conditions, not the clock. ` +
+    `ALWAYS include the best time window '${windowLabel}' as plain text somewhere in the paragraph (no need to bold it — the headline above already styles it). Weave it in naturally — e.g. "${windowLabel} is your window", "hit it ${windowLabel}", "${windowLabel} is firing" — not as a forecast restatement. ` +
     `Address active cautions for BOTH the dog AND the kahu with CONCRETE practical guidance. Examples of the framing we want: ` +
     `high tide → "tide's running high, less sand exposed — stick to the upper beach and watch for kids and dogs getting pushed toward the cliffs/rocks"; ` +
     `high UV (≥8) → "sun's punching hard — sunscreen for you and a shade break, pup's coat is its sunscreen"; ` +

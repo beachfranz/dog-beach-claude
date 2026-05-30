@@ -2116,10 +2116,10 @@ function buildBestTimeCard(today, dogPolicy, beachFid, hoursToday, beach, amenit
   // Card shows when there's a window OR an apology to convey.
   if (!hasWindow && !isNoDogs && !isSandWaterProhibited) return '';
 
-  // Clickable when hourly detail is available. day_status presence
-  // implies the hourly_scores row was computed, so detail.html will
-  // render. Skip the clickable affordance when there's no hourly.
-  const clickable = !!(today && today.day_status);
+  // Clickable when hourly detail is available. Either day_status
+  // implies the hourly_scores row was computed and detail.html will
+  // render. Accept v2 OR v1 for the presence check during transition.
+  const clickable = !!(today && (today.day_status_v2 ?? today.day_status));
   const clickAttr = clickable ? ' data-open-detail="1"' : '';
 
   // Compact summary header: title left, time-range right. Hourly bars
@@ -2247,18 +2247,35 @@ function _cautionItems(today, dogPolicy, hoursToday, beach) {
     }
   }
 
-  // Per-metric time-block items from hours_today
+  // Per-metric time-block items from hours_today.
+  // statusKey reader prefers *_status_v2 with v1 fallback during the
+  // v1-retirement transition. Per Franz 2026-05-30 task #4. Temp is the
+  // worst of feels_like_hot + feels_like_cold under v2 (v1 had a unified
+  // temp_status that combined both).
   const METRICS = [
-    { icon: '🌊',  label: 'Tide',    statusKey: 'tide_status',    valueKey: 'tide_height',    fmt: v => v != null ? `${v.toFixed(1)} ft` : '—' },
-    { icon: '💨',  label: 'Wind',    statusKey: 'wind_status',    valueKey: 'wind_speed',     fmt: v => v != null ? `${Math.round(v)} mph` : '—' },
-    { icon: '🌧️', label: 'Rain',    statusKey: 'rain_status',    valueKey: 'precip_chance',  fmt: v => v != null ? `${Math.round(v)}%` : '—' },
-    { icon: '👥',  label: 'Crowd',   statusKey: 'crowd_status',   valueKey: 'busyness_score', fmt: v => v != null ? `${Math.round(v)}/100` : '—' },
-    { icon: '🌡',  label: 'Temp',    statusKey: 'temp_status',    valueKey: 'temp_air',       fmt: v => v != null ? `${Math.round(v)}°F` : '—' },
-    { icon: '☀️',  label: 'UV',      statusKey: 'uv_status',      valueKey: 'uv_index',       fmt: v => v != null ? `UV ${v.toFixed(1)}` : '—' },
-    { icon: '🏖️', label: 'Sand',    statusKey: 'sand_status',    valueKey: 'sand_temp',      fmt: v => v != null ? `${Math.round(v)}°F` : '—' },
-    { icon: '🚶',  label: 'Asphalt', statusKey: 'asphalt_status', valueKey: 'asphalt_temp',   fmt: v => v != null ? `${Math.round(v)}°F` : '—' },
+    { icon: '🌊',  label: 'Tide',    statusKeys: ['tide_status_v2',    'tide_status'],    valueKey: 'tide_height',    fmt: v => v != null ? `${v.toFixed(1)} ft` : '—' },
+    { icon: '💨',  label: 'Wind',    statusKeys: ['wind_status_v2',    'wind_status'],    valueKey: 'wind_speed',     fmt: v => v != null ? `${Math.round(v)} mph` : '—' },
+    { icon: '🌧️', label: 'Rain',    statusKeys: ['rain_status_v2',    'rain_status'],    valueKey: 'precip_chance',  fmt: v => v != null ? `${Math.round(v)}%` : '—' },
+    { icon: '👥',  label: 'Crowd',   statusKeys: ['crowd_status_v2',   'crowd_status'],   valueKey: 'busyness_score', fmt: v => v != null ? `${Math.round(v)}/100` : '—' },
+    { icon: '🌡',  label: 'Temp',    statusKeys: ['temp_hot_status_v2','temp_cold_status_v2','temp_status'], valueKey: 'feels_like', valueFallbackKey: 'temp_air', fmt: v => v != null ? `${Math.round(v)}°F` : '—' },
+    { icon: '☀️',  label: 'UV',      statusKeys: ['uv_status_v2',      'uv_status'],      valueKey: 'uv_index',       fmt: v => v != null ? `UV ${v.toFixed(1)}` : '—' },
+    { icon: '🏖️', label: 'Sand',    statusKeys: ['sand_status_v2',    'sand_status'],    valueKey: 'sand_temp',      fmt: v => v != null ? `${Math.round(v)}°F` : '—' },
+    { icon: '🚶',  label: 'Asphalt', statusKeys: ['asphalt_status_v2', 'asphalt_status'], valueKey: 'asphalt_temp',   fmt: v => v != null ? `${Math.round(v)}°F` : '—' },
   ];
-  const STATUS_RANK = { no_go: 3, caution: 2, advisory: 1 };
+  const STATUS_RANK = { no_go: 3, caution: 2, advisory: 1, clear: 0 };
+  // Worst-of fallback resolver — walks statusKeys left-to-right, takes
+  // the worst non-null/non-clear status. Lets the Temp tile combine
+  // feels_like_hot and feels_like_cold under v2.
+  const readStatus = (h, keys) => {
+    let worst = null, worstRank = -1;
+    for (const k of keys) {
+      const s = h[k];
+      if (s == null) continue;
+      const r = STATUS_RANK[s] ?? -1;
+      if (r > worstRank) { worst = s; worstRank = r; }
+    }
+    return worst;
+  };
   const fmtH = h => h === 0 ? '12am' : h === 12 ? '12pm' : (h < 12 ? `${h}am` : `${h-12}pm`);
   const getBlocks = flagged => {
     if (!flagged.length) return [];
@@ -2275,7 +2292,11 @@ function _cautionItems(today, dogPolicy, hoursToday, beach) {
     for (const m of METRICS) {
       // Cautions card surfaces only caution + no_go (advisory excluded).
       // Source is `remainingHours` — past-hour cautions are already dropped.
-      const flagged = remainingHours.filter(h => h[m.statusKey] === 'caution' || h[m.statusKey] === 'no_go');
+      // readStatus prefers v2 with v1 fallback per Franz 2026-05-30 task #4.
+      const flagged = remainingHours.filter(h => {
+        const s = readStatus(h, m.statusKeys);
+        return s === 'caution' || s === 'no_go';
+      });
       if (!flagged.length) continue;
       let blocks = getBlocks(flagged);
       if (blocks.length >= 3) {
@@ -2284,10 +2305,11 @@ function _cautionItems(today, dogPolicy, hoursToday, beach) {
       }
       const allHours = blocks.flat();
       const worst = allHours.reduce((w, h) => {
-        const s = h[m.statusKey];
+        const s = readStatus(h, m.statusKeys);
         return (STATUS_RANK[s] ?? 0) > (STATUS_RANK[w] ?? 0) ? s : w;
       }, 'caution');
-      const vals = allHours.map(h => h[m.valueKey]).filter(v => v != null);
+      const readVal = h => h[m.valueKey] ?? (m.valueFallbackKey ? h[m.valueFallbackKey] : null);
+      const vals = allHours.map(readVal).filter(v => v != null);
       const worstVal = vals.length
         ? (m.label === 'Temp' ? vals.reduce((a, b) => Math.abs(b - 72) > Math.abs(a - 72) ? b : a, vals[0])
                               : Math.max(...vals))
@@ -2335,7 +2357,9 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
     (dogPolicy.has_on_leash === false && dogPolicy.has_off_leash === false)
   );
   const isSandWaterProhibited = _sandOrWaterProhibited(dogPolicy?.zone_rules);
-  const noGoodWindows = today && today.day_status === 'no_go';
+  // Prefer v2 day status; fall back to v1 during transition.
+  // Per Franz 2026-05-30 v1-retirement task #4.
+  const noGoodWindows = today && (today.day_status_v2 ?? today.day_status) === 'no_go';
 
   // Hide the BEACH card during apology cases — single message in NOW.
   const hideBeach = () => {

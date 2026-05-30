@@ -177,9 +177,16 @@ function buildPrompt(
     if (today.summary_weather)  conditions.push(`weather: ${today.summary_weather}`);
   }
 
+  // Prefer v2 hour/day status with v1 fallback. Per Franz 2026-05-30
+  // v1-retirement task #8. Dog-park v2 columns added by task #9 — when
+  // backing data isn't there yet, falls through to v1 cleanly.
   const window = today?.best_window_label
-    ?? (now?.hour_status === "go" ? "right now" : "during operating hours");
-  const status = now?.hour_status ?? today?.day_status ?? "unknown";
+    ?? ((now?.hour_status_v2 ?? now?.hour_status) === "go" || (now?.hour_status_v2 ?? now?.hour_status) === "clear"
+        ? "right now"
+        : "during operating hours");
+  const status = (now?.hour_status_v2 ?? now?.hour_status)
+              ?? (today?.day_status_v2 ?? today?.day_status)
+              ?? "unknown";
 
   // Pack-list suggestions — concrete items the LLM can name.
   // Dog park staples + condition-triggered extras.

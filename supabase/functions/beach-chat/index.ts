@@ -214,7 +214,7 @@ Deno.serve(async (req: Request) => {
         .eq("location_id", location_id);
       const hourQuery = supabase
         .from("beach_day_hourly_scores")
-        .select("local_date, local_hour, hour_label, hour_status, hour_score, tide_height, wind_speed, temp_air, precip_chance, uv_index, busyness_category, is_in_best_window, is_candidate_window, tide_status, wind_status, crowd_status, rain_status, temp_status, uv_status")
+        .select("local_date, local_hour, hour_label, hour_status, hour_score, hour_score_v2, tide_height, wind_speed, temp_air, feels_like, sand_temp, asphalt_temp, busyness_score, precip_chance, uv_index, busyness_category, is_in_best_window, is_candidate_window, tide_status, wind_status, crowd_status, rain_status, temp_status, uv_status")
         .eq("location_id", location_id);
 
       const [{ data: days, error: daysErr }, { data: hours, error: hoursErr }] = await Promise.all([
@@ -283,6 +283,72 @@ async function sha256Hex(s: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return Array.from(new Uint8Array(buf))
     .map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// ─── v2 status mapping ─────────────────────────────────────────────────────
+// Inline copy of public.v2_signal_status thresholds so we don't need an
+// RPC roundtrip per hour to flag risks for Scout's prompt. Single source
+// of truth on the DB side is public.scoring_config_v2 / v2_signal_status
+// (migration 20260530_v2_signal_status_helper.sql). Pin:
+// [[v2-signal-status-mapping]]. Keep this in sync when bands change.
+type V2Status = "clear" | "advisory" | "caution" | "no_go";
+function v2StatusFor(signal: string, v: number | null | undefined): V2Status | null {
+  if (v == null) return null;
+  switch (signal) {
+    case "uv":
+      if (v >= 11) return "no_go";
+      if (v >= 9)  return "caution";    // 9-10 ≥ 34% of max-band 8
+      if (v >= 6)  return "advisory";   // 6-8 advisory band
+      return "clear";
+    case "asphalt":
+      if (v >= 125) return "no_go";     // gate
+      if (v >= 115) return "advisory";  // 115-125 advisory; gate sits at 125
+      return "clear";
+    case "sand":
+      if (v >= 145) return "no_go";
+      if (v >= 135) return "caution";   // 135-145 score 8 / max 10 = 80% no_go-leaning; call caution to leave headroom
+      if (v >= 125) return "caution";
+      if (v >= 115) return "advisory";
+      return "clear";
+    case "tide":
+      if (v >= 7) return "no_go";
+      if (v >= 5) return "caution";     // 5-7 score 6/10 = 60% caution
+      if (v >= 3) return "advisory";
+      return "clear";
+    case "wind":
+      if (v >= 35) return "no_go";
+      if (v >= 19) return "caution";    // 19-25 score 4/10 = 40% caution
+      if (v >= 13) return "advisory";
+      return "clear";
+    case "crowd":
+      if (v >= 85) return "no_go";
+      if (v >= 60) return "caution";    // 60-85 score 3/5 = 60% caution
+      if (v >= 30) return "advisory";
+      return "clear";
+    case "precip":
+      if (v >= 80) return "no_go";
+      if (v >= 50) return "caution";
+      if (v >= 30) return "advisory";
+      return "clear";
+    case "feels_hot":
+      if (v >= 125) return "no_go";
+      if (v >= 95)  return "caution";
+      if (v >= 85)  return "advisory";
+      return "clear";
+    case "feels_cold":
+      if (v <= 20) return "no_go";
+      if (v <= 32) return "caution";
+      if (v <= 50) return "advisory";
+      return "clear";
+    default:
+      return null;
+  }
+}
+// Worst-of two statuses, used for hour-level rollup
+function v2Worst(a: V2Status | null, b: V2Status | null): V2Status | null {
+  const rank = (s: V2Status | null) =>
+    s === "no_go" ? 3 : s === "caution" ? 2 : s === "advisory" ? 1 : s === "clear" ? 0 : -1;
+  return rank(a) >= rank(b) ? a : b;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -390,19 +456,37 @@ function buildSystemPrompt(
     const positives = Array.isArray(d.positive_reason_codes) ? (d.positive_reason_codes as string[]).join(", ") : "";
     const risks     = Array.isArray(d.risk_reason_codes)     ? (d.risk_reason_codes     as string[]).join(", ") : "";
 
-    // all daylight hours with status flags
+    // All daylight hours with v2 status flags. Switched from v1 *_status
+    // columns to v2-derived statuses per Franz 2026-05-30 v1-retirement
+    // task #8 — v1 noise (e.g. asphalt 111°F "advisory") was producing
+    // false-positive cautions in Scout's prompt and narration.
     const allDaylightHours = dayHours.filter((h) => h.is_candidate_window || h.is_in_best_window);
     const hourLines = allDaylightHours.map((h) => {
+      const sTide    = v2StatusFor("tide",       (h.tide_height as number | null));
+      const sWind    = v2StatusFor("wind",       (h.wind_speed as number | null));
+      const sRain    = v2StatusFor("precip",     (h.precip_chance as number | null));
+      const sCrowd   = v2StatusFor("crowd",      (h.busyness_score as number | null));
+      const sFeelsH  = v2StatusFor("feels_hot",  (h.feels_like as number | null));
+      const sFeelsC  = v2StatusFor("feels_cold", (h.feels_like as number | null));
+      const sUv      = v2StatusFor("uv",         (h.uv_index as number | null));
+      const sSand    = v2StatusFor("sand",       (h.sand_temp as number | null));
+      const sAsphalt = v2StatusFor("asphalt",    (h.asphalt_temp as number | null));
+      const sTemp    = v2Worst(sFeelsH, sFeelsC);
+      const hourV2   = [sTide, sWind, sRain, sCrowd, sTemp, sUv, sSand, sAsphalt]
+                        .reduce<V2Status | null>((w, s) => v2Worst(w, s), null) ?? "clear";
+      const notClear = (s: V2Status | null) => s && s !== "clear";
       const flags = [
-        h.tide_status  !== "go" && h.tide_status  ? `tide:${h.tide_status}`   : null,
-        h.wind_status  !== "go" && h.wind_status  ? `wind:${h.wind_status}`   : null,
-        h.rain_status  !== "go" && h.rain_status  ? `rain:${h.rain_status}`   : null,
-        h.crowd_status !== "go" && h.crowd_status ? `crowd:${h.crowd_status}` : null,
-        h.temp_status  !== "go" && h.temp_status  ? `temp:${h.temp_status}`   : null,
-        h.uv_status    !== "go" && h.uv_status    ? `uv:${h.uv_status}`       : null,
+        notClear(sTide)    ? `tide:${sTide}`       : null,
+        notClear(sWind)    ? `wind:${sWind}`       : null,
+        notClear(sRain)    ? `rain:${sRain}`       : null,
+        notClear(sCrowd)   ? `crowd:${sCrowd}`     : null,
+        notClear(sTemp)    ? `temp:${sTemp}`       : null,
+        notClear(sUv)      ? `uv:${sUv}`           : null,
+        notClear(sSand)    ? `sand:${sSand}`       : null,
+        notClear(sAsphalt) ? `asphalt:${sAsphalt}` : null,
       ].filter(Boolean).join(", ");
       const marker = h.is_in_best_window ? " ★" : "";
-      return `    ${h.hour_label}${marker}: tide=${fmtNum(h.tide_height, "ft")} wind=${fmtNum(h.wind_speed, "mph")} temp=${fmtNum(h.temp_air, "°F")} rain=${fmtNum(h.precip_chance, "%")} crowd=${h.busyness_category ?? "?"} [${h.hour_status}]${flags ? ` flags: ${flags}` : ""}`;
+      return `    ${h.hour_label}${marker}: tide=${fmtNum(h.tide_height, "ft")} wind=${fmtNum(h.wind_speed, "mph")} feels=${fmtNum(h.feels_like, "°F")} rain=${fmtNum(h.precip_chance, "%")} crowd=${h.busyness_category ?? "?"} [${hourV2}]${flags ? ` flags: ${flags}` : ""}`;
     }).join("\n");
 
     const bacteriaRisk = d.bacteria_risk ?? "none";
@@ -411,8 +495,10 @@ function buildSystemPrompt(
                        : bacteriaRisk === "low"      ? `  Note: ${d.precip_72h_mm ?? 0}mm rain in past 72h (below advisory threshold)`
                        : "";
 
+    // Prefer v2 day status; fall back to v1 during transition.
+    const dayStatus = (d.day_status_v2 ?? d.day_status)?.toString().toUpperCase();
     return `
-  ${date} ${dayOfWeek.toUpperCase()} (${d.day_status?.toString().toUpperCase()}) ${isWeekend ? "[WEEKEND]" : "[WEEKDAY]"}
+  ${date} ${dayOfWeek.toUpperCase()} (${dayStatus}) ${isWeekend ? "[WEEKEND]" : "[WEEKDAY]"}
   Hours: ${d.go_hours_count ?? 0} go / ${d.caution_hours_count ?? 0} caution / ${d.no_go_hours_count ?? 0} no-go
   Best window: ${d.best_window_label ?? "none"} | Weather: ${d.summary_weather ?? "unknown"} | Tide: ${fmtNum(d.avg_tide_height, "ft")} avg, ${fmtNum(lowestTide, "ft")} low, ${tideDirection} | Wind: ${fmtNum(d.avg_wind, "mph")} | Temp: ${fmtNum(d.avg_temp, "°F")}${feelsLike !== null ? ` (feels ${feelsLike}°F)` : ""} | UV: ${fmtNum(d.avg_uv, "")} | Crowds: ${d.busyness_category ?? "unknown"}
   ${positives ? `Positives: ${positives}` : ""}

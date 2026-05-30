@@ -242,6 +242,59 @@ def codify_coverage_check(
 
 
 # ════════════════════════════════════════════════════════════════════════
+#  Phase 32.5 — weather_advisories_refresh (post-scoring, cross-state)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Runs scripts/compute_weather_advisories.py --all-scored, which derives
+# beach_advisory rows from beach_day_hourly_scores + beach_day_recommendations:
+#   * per-metric deterministic_weather rows (UV, tide, sand, asphalt, wind, ...)
+#   * bacteria_risk rows from precip_72h-driven daily field
+#
+# beach.html reads beach_advisory directly via loadWaterConditionAdvisories()
+# to render the Cautions card. Without this asset firing daily, the card
+# stays empty for beaches scored after the last manual run — confirmed
+# via fid 8347 La Jolla Shores on 2026-05-30 (bacteria_risk='moderate'
+# in beach_day_recommendations but no advisory written; Scout LLM mentioned
+# bacteria in narrative text but caution pill never appeared).
+#
+# NOT partitioned — script handles cross-state scope via --all-scored
+# (filter scoring_tier IN ('daily','hourly')). Single run covers everyone.
+
+@asset(
+    group_name="phase_29_to_33_per_fid",
+    deps=[daily_refresh_fire],
+    description=(
+        "Daily — derives beach_advisory rows from beach_day_hourly_scores + "
+        "beach_day_recommendations for every active+scored beach. Powers the "
+        "Cautions card on beach.html (loadWaterConditionAdvisories). "
+        "Runs compute_weather_advisories.py --all-scored."
+    ),
+)
+def weather_advisories_refresh(
+    context: AssetExecutionContext,
+    subproc: SubprocessResource,
+) -> MaterializeResult:
+    result = subproc.run(
+        "scripts/compute_weather_advisories.py",
+        args=["--all-scored"],
+        timeout=1800,  # 30 min — ~600 CA beaches at ~1s each + other states
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"compute_weather_advisories.py failed (exit {result.returncode}): "
+            f"{(result.stderr or '')[-500:]}"
+        )
+    # Tail line typically reads "Done. Deterministic advisories upserted: N · retired: M"
+    tail = (result.stdout or "").strip().splitlines()[-1] if result.stdout else ""
+    return MaterializeResult(
+        metadata={
+            "summary": MetadataValue.text(tail),
+            "log_tail": MetadataValue.text((result.stdout or "")[-3000:]),
+        }
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════
 #  Phase 33 — field_population_check (per-state, end-of-pipeline audit)
 # ════════════════════════════════════════════════════════════════════════
 

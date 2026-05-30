@@ -141,6 +141,7 @@ from .assets.photos_and_vision import (
 from .assets.scoring_and_audit import (
     hourly_status_refresh, codify_coverage_check,
     daily_refresh_fire, field_population_check,
+    weather_advisories_refresh,
 )
 from .assets.weather_grid import (
     refresh_weather_grid, rebuild_weather_grid_inventory,
@@ -286,6 +287,19 @@ pipeline_health_audit_job = define_asset_job(
     name="pipeline_health_audit_job",
     description="Phase 33 only — runs state_population_audit.py per state.",
     selection=AssetSelection.assets(field_population_check),
+)
+
+
+# ── Weather advisories refresh (Phase 32.5, cross-state) ─────────────
+
+weather_advisories_job = define_asset_job(
+    name="weather_advisories_job",
+    description=(
+        "Phase 32.5 — derives beach_advisory rows for every scored beach "
+        "across all states. Runs compute_weather_advisories.py --all-scored. "
+        "Powers the Cautions card on beach.html."
+    ),
+    selection=AssetSelection.assets(weather_advisories_refresh),
 )
 
 

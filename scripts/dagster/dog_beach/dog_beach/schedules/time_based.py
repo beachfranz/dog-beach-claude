@@ -24,6 +24,7 @@ from dagster import (
 from ..jobs import (
     daily_refresh_job,
     pipeline_health_audit_job,
+    weather_advisories_job,
     weather_grid_refresh_job,
     weather_grid_inventory_job,
     dog_park_coverage_job,
@@ -82,6 +83,26 @@ def weekly_pipeline_health_schedule(context: ScheduleEvaluationContext):
             partition_key=state,
             run_key=f"health-{state}-{context.scheduled_execution_time.date().isoformat()}",
         )
+
+
+# ── Weather advisories refresh (Phase 32.5) ──────────────────────────
+
+@schedule(
+    cron_schedule="0 12 * * *",  # 12:00 UTC daily — 5am Pacific, 8am Eastern
+    job=weather_advisories_job,
+    default_status=DefaultScheduleStatus.STOPPED,
+    description=(
+        "Daily — derives beach_advisory rows for every scored beach. Runs "
+        "compute_weather_advisories.py --all-scored. Fires at 12:00 UTC, "
+        "after daily-beach-refresh has populated beach_day_recommendations "
+        "and the hourly_status v2 substrate. Powers the Cautions card on "
+        "beach.html via loadWaterConditionAdvisories()."
+    ),
+)
+def daily_weather_advisories_schedule(context: ScheduleEvaluationContext):
+    yield RunRequest(
+        run_key=f"advisories-{context.scheduled_execution_time.date().isoformat()}",
+    )
 
 
 # ── Weather grid (W1.7 + W1.8) ────────────────────────────────────────

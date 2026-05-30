@@ -142,6 +142,7 @@ from .assets.scoring_and_audit import (
     hourly_status_refresh, codify_coverage_check,
     daily_refresh_fire, field_population_check,
     weather_advisories_refresh,
+    codify_coverage_audit, codify_gap_clone,
 )
 from .assets.weather_grid import (
     refresh_weather_grid, rebuild_weather_grid_inventory,
@@ -300,6 +301,27 @@ weather_advisories_job = define_asset_job(
         "Powers the Cautions card on beach.html."
     ),
     selection=AssetSelection.assets(weather_advisories_refresh),
+)
+
+
+# ── Codify coverage audit + gap clone (Phases 32.6 + 32.7) ──────────
+
+codify_coverage_audit_job = define_asset_job(
+    name="codify_coverage_audit_job",
+    description=(
+        "Phase 32.6 — per-state structured-codify coverage audit. Raises "
+        "when any state drops below the threshold; logs gap-by-jurisdiction."
+    ),
+    selection=AssetSelection.assets(codify_coverage_audit),
+)
+
+codify_gap_clone_job = define_asset_job(
+    name="codify_gap_clone_job",
+    description=(
+        "Phase 32.7 — runs codify_clone_gap_beaches.py across all MVP+ "
+        "states. Catches newly-added beaches in already-codified cities."
+    ),
+    selection=AssetSelection.assets(codify_gap_clone),
 )
 
 

@@ -25,6 +25,8 @@ from ..jobs import (
     daily_refresh_job,
     pipeline_health_audit_job,
     weather_advisories_job,
+    codify_coverage_audit_job,
+    codify_gap_clone_job,
     weather_grid_refresh_job,
     weather_grid_inventory_job,
     dog_park_coverage_job,
@@ -102,6 +104,41 @@ def weekly_pipeline_health_schedule(context: ScheduleEvaluationContext):
 def daily_weather_advisories_schedule(context: ScheduleEvaluationContext):
     yield RunRequest(
         run_key=f"advisories-{context.scheduled_execution_time.date().isoformat()}",
+    )
+
+
+# ── Codify coverage audit + gap clone (Phases 32.6 + 32.7) ───────────
+
+@schedule(
+    cron_schedule="30 12 * * *",  # 12:30 UTC daily — after daily refresh + advisories
+    job=codify_coverage_audit_job,
+    default_status=DefaultScheduleStatus.STOPPED,
+    description=(
+        "Daily — audits structured-codify coverage by state. Raises on "
+        "regression below threshold so a state launch that adds beaches "
+        "faster than the codify pipeline catches up surfaces quickly."
+    ),
+)
+def daily_codify_coverage_audit_schedule(context: ScheduleEvaluationContext):
+    yield RunRequest(
+        run_key=f"codify-audit-{context.scheduled_execution_time.date().isoformat()}",
+    )
+
+
+@schedule(
+    cron_schedule="0 13 * * 1",  # 13:00 UTC Mondays — after daily audit
+    job=codify_gap_clone_job,
+    default_status=DefaultScheduleStatus.STOPPED,
+    description=(
+        "Weekly — runs codify_clone_gap_beaches.py across all MVP+ states. "
+        "Picks up newly-added beaches that fall into already-codified "
+        "cities (clone from sibling). Reports unhandled list of "
+        "research-needed jurisdictions for follow-up."
+    ),
+)
+def weekly_codify_gap_clone_schedule(context: ScheduleEvaluationContext):
+    yield RunRequest(
+        run_key=f"codify-clone-{context.scheduled_execution_time.date().isoformat()}",
     )
 
 

@@ -295,6 +295,164 @@ def weather_advisories_refresh(
 
 
 # ════════════════════════════════════════════════════════════════════════
+#  Phase 32.6 — codify_coverage_audit (cross-state, daily)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Audits how much of the scored beach catalog has structured dog-policy
+# rules wired in beach_policy_source + beach_policy_source_temporal.
+# beach.html / find.html consume zone_rules emitted from this layer.
+#
+# Reports per-state coverage % and lists the top jurisdictions with gaps
+# so that follow-up codify work (manual per-city or the clone tool) can
+# be scoped. Raises on regression below COVERAGE_THRESHOLD_PCT — catches
+# the case where a state launch adds beaches faster than the codify
+# pipeline catches up.
+#
+# Architecture pin: structured time_windows live in
+# beach_policy_source_temporal (NOT beach_enrichment_provenance.claimed_values).
+# See [[codify-cascade-reads-bps-not-bep]].
+
+CODIFY_COVERAGE_THRESHOLD_PCT = 80
+
+
+@asset(
+    group_name="phase_29_to_33_per_fid",
+    deps=[daily_refresh_fire],
+    description=(
+        "Daily — counts scored beaches per state with vs without an operative "
+        "sand-section beach_policy_source row. Raises on regression below "
+        f"{CODIFY_COVERAGE_THRESHOLD_PCT}% coverage."
+    ),
+)
+def codify_coverage_audit(
+    context: AssetExecutionContext,
+    postgres: PostgresPoolerResource,
+) -> MaterializeResult:
+    conn = postgres.get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                WITH scope AS (
+                  SELECT bg.fid, bg.state
+                    FROM public.beaches_gold bg
+                   WHERE bg.is_active
+                     AND bg.scoring_tier IN ('daily','hourly')
+                )
+                SELECT s.state,
+                       COUNT(*) AS total_scored,
+                       COUNT(*) FILTER (WHERE EXISTS (
+                         SELECT 1 FROM public.beach_policy_source bps
+                          WHERE bps.beach_fid = s.fid
+                            AND bps.operative_status = 'operative'
+                            AND bps.section = 'sand'
+                       )) AS with_sand_bps,
+                       COUNT(*) FILTER (WHERE EXISTS (
+                         SELECT 1 FROM public.beach_policy_source bps
+                          JOIN public.beach_policy_source_temporal bpst ON bpst.bps_id = bps.id
+                          WHERE bps.beach_fid = s.fid AND bpst.section = 'sand'
+                            AND bps.operative_status = 'operative'
+                       )) AS with_temporal
+                  FROM scope s
+                 GROUP BY s.state
+                 ORDER BY s.state;
+            """)
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    by_state = {}
+    total_scored = 0
+    total_with_bps = 0
+    worst_state = None
+    worst_pct = 101.0
+    for state, total, with_bps, with_temporal in rows:
+        pct = round(100.0 * with_bps / max(total, 1), 1)
+        by_state[state] = {
+            "scored": total,
+            "with_sand_bps": with_bps,
+            "with_temporal": with_temporal,
+            "pct": pct,
+        }
+        total_scored += total
+        total_with_bps += with_bps
+        if pct < worst_pct:
+            worst_pct = pct
+            worst_state = state
+        context.log.info(
+            f"  {state}: {with_bps}/{total} sand bps ({pct}%), "
+            f"{with_temporal} with time_windows"
+        )
+
+    overall_pct = round(100.0 * total_with_bps / max(total_scored, 1), 1)
+    context.log.info(f"OVERALL: {total_with_bps}/{total_scored} = {overall_pct}%")
+
+    if worst_state is not None and worst_pct < CODIFY_COVERAGE_THRESHOLD_PCT:
+        raise RuntimeError(
+            f"codify coverage regression: {worst_state}={worst_pct}% < "
+            f"{CODIFY_COVERAGE_THRESHOLD_PCT}% threshold. Run codify_gap_clone "
+            f"or manual per-city codify (see scripts/one_off/"
+            f"close_sd_city_codify_gap.py as a worked example)."
+        )
+
+    return MaterializeResult(
+        metadata={
+            "overall_pct": MetadataValue.float(overall_pct),
+            "total_scored": MetadataValue.int(total_scored),
+            "total_with_sand_bps": MetadataValue.int(total_with_bps),
+            "worst_state": MetadataValue.text(f"{worst_state}={worst_pct}%"),
+            "by_state": MetadataValue.json(by_state),
+        }
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════
+#  Phase 32.7 — codify_gap_clone (cross-state, weekly)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Runs scripts/codify_clone_gap_beaches.py across all MVP+ states.
+# For each beach with no operative sand bps, finds a sibling beach in
+# the same city (or CDPR park unit) that IS codified, and copies its
+# rule structure. Catches newly-added beaches that fall into already-
+# codified cities — keeps coverage from drifting downward as state
+# inventory grows.
+#
+# What this DOESN'T handle: beaches in jurisdictions with no existing
+# codify (no wired sibling). Those need per-city research codify per
+# the close_sd_city_codify_gap.py pattern.
+
+@asset(
+    group_name="phase_29_to_33_per_fid",
+    deps=[codify_coverage_audit],
+    description=(
+        "Weekly — clones operative sand bps + temporal rows to gap beaches "
+        "from siblings in the same jurisdiction or CDPR park unit. Falls "
+        "back gracefully when no sibling exists (reports unhandled list)."
+    ),
+)
+def codify_gap_clone(
+    context: AssetExecutionContext,
+    subproc: SubprocessResource,
+) -> MaterializeResult:
+    result = subproc.run(
+        "scripts/codify_clone_gap_beaches.py",
+        args=[],  # default --states = all MVP+
+        timeout=1800,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"codify_clone_gap_beaches.py failed (exit {result.returncode}): "
+            f"{(result.stderr or '')[-500:]}"
+        )
+    tail = (result.stdout or "").strip().splitlines()[-1] if result.stdout else ""
+    return MaterializeResult(
+        metadata={
+            "summary": MetadataValue.text(tail),
+            "log_tail": MetadataValue.text((result.stdout or "")[-3000:]),
+        }
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════
 #  Phase 33 — field_population_check (per-state, end-of-pipeline audit)
 # ════════════════════════════════════════════════════════════════════════
 

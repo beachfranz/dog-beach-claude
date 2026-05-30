@@ -1049,6 +1049,7 @@ function showError(msg) {
   document.getElementById('beach-name').textContent = 'Beach';
   document.getElementById('main-content').innerHTML = `
     <div class="state"><div class="state-icon">🐕</div><div>${escHtml(msg)}</div></div>`;
+  if (window.Loader) Loader.stop();
 }
 
 function render(data, beachFid) {
@@ -3247,7 +3248,6 @@ function _flatTopAmenities(amenities, dogPolicy, limit) {
     const c = ({off_leash_voice_control:'off_leash', on_leash_or_voice:'on_leash'})[r] || r;
     return ['off_leash','on_leash','not_allowed'].includes(c) ? c : 'unknown';
   };
-  const allRegs = (dogPolicy?.zone_rules?.regions || []);
   const sectionHasVariation = {};
   for (const reg of allRegs) {
     for (const [sn, sd] of Object.entries(reg?.sections || {})) {

@@ -53,6 +53,7 @@
     }
     /* Narrow-column overrides for blocks designed for wider layouts. */
     #left-rail .amenity-grid { grid-template-columns: repeat(2, 1fr); }
+    #left-rail .caution-grid { grid-template-columns: repeat(2, 1fr); }
     #left-rail .zr-sections  { grid-template-columns: 1fr; }
     #left-rail .zr-card { margin: 8px 0; padding: 10px 12px; }
   }
@@ -878,6 +879,8 @@
     /* Appeal chip group on h1 — keep the badge proportionate */
     .left-rail .amenity-grid,
     #left-rail .amenity-grid { grid-template-columns: repeat(2, 1fr); gap: 4px; }
+    .left-rail .caution-grid,
+    #left-rail .caution-grid { grid-template-columns: repeat(2, 1fr); gap: 4px; }
   }
 
   /* Location card — full-width map in main content. */
@@ -3767,16 +3770,23 @@ async function loadWaterConditionAdvisories(beachFid) {
     moderate: 'sev-caution', minor: 'sev-advisory',
   };
 
-  // Compact tiles — same shape as amenities (icon + short label).
-  // Detail text shows below the grid on click.
+  // Compact tiles — same shape as amenities (icon + label stacked with
+  // optional time-window sub-line). Detail text shows below the grid
+  // on click. Per Franz 2026-05-30: time window inline on the tile,
+  // tile width matches amenity tiles (2-col in left-rail).
   const tiles = items.map((a, i) => {
-    const cls   = sevToClass[a.severity] || 'sev-caution';
-    const icon  = a.icon || '⚠️';
-    const label = a.label || a.event_type || 'Advisory';
+    const cls    = sevToClass[a.severity] || 'sev-caution';
+    const icon   = a.icon || '⚠️';
+    const label  = a.label || a.event_type || 'Advisory';
+    const window = _formatAdvisoryWindow(a.valid_from, a.valid_to);
+    const sub    = window ? `<span class="amenity-sub">${escHtml(window)}</span>` : '';
     return `<button type="button" class="caution-tile ${cls}"
                     data-cidx="${i}" aria-expanded="false">
       <span class="amenity-icon">${icon}</span>
-      <span class="amenity-label">${escHtml(label)}</span>
+      <span class="amenity-text">
+        <span class="amenity-label">${escHtml(label)}</span>
+        ${sub}
+      </span>
     </button>`;
   }).join('');
 

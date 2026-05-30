@@ -75,6 +75,7 @@ def main() -> int:
     grp.add_argument("--pilot", action="store_true", help="(default) pilot 30 CA")
     grp.add_argument("--all-mvp", action="store_true")
     grp.add_argument("--state")
+    grp.add_argument("--fid", type=int, help="single beach fid")
     ap.add_argument("--horizon-hours", type=int, default=48)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
@@ -82,7 +83,9 @@ def main() -> int:
     conn = connect()
     try:
         with conn.cursor() as cur:
-            if args.state:
+            if args.fid:
+                cur.execute("SELECT fid FROM public.beaches_gold WHERE fid=%s", (args.fid,))
+            elif args.state:
                 cur.execute("""
                     SELECT fid FROM public.beaches_gold
                      WHERE state=%s AND is_active AND scoring_tier IN ('daily','hourly')

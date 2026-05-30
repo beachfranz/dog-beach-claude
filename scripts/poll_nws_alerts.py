@@ -226,6 +226,7 @@ def main() -> int:
                      help="Pilot scope: top 30 tier-1 CA beaches by catchment_score (default)")
     grp.add_argument("--state", help="All scoreable beaches in one state")
     grp.add_argument("--all-mvp", action="store_true", help="All MVP+ (CA + OR + WA)")
+    grp.add_argument("--fid", type=int, help="single beach fid")
     ap.add_argument("--dry-run", action="store_true",
                     help="Fetch + PIP, print matches, no writes")
     args = ap.parse_args()
@@ -234,7 +235,15 @@ def main() -> int:
     try:
         # Resolve beach scope
         with conn.cursor() as cur:
-            if args.state:
+            if args.fid:
+                cur.execute("SELECT state FROM public.beaches_gold WHERE fid=%s", (args.fid,))
+                row = cur.fetchone()
+                if not row:
+                    print(f"fid {args.fid} not found")
+                    return 1
+                states = [row[0]]
+                cur.execute("SELECT fid FROM public.beaches_gold WHERE fid=%s", (args.fid,))
+            elif args.state:
                 cur.execute("""
                     SELECT fid FROM public.beaches_gold
                      WHERE state = %s AND is_active = true

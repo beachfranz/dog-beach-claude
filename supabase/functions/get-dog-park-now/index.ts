@@ -40,9 +40,9 @@ Deno.serve(async (req: Request) => {
 
   let targetFids: number[] | null = null;
   let skipRecentHours: number | null = null;
-  // MVP+ scope (Franz 2026-05-30): CA + MD + UT. Body.state overrides:
-  //   "ALL" → every state ; "OR" / "WA" / etc → just that state.
-  let stateFilters: string[] = ["CA", "MD", "UT"];
+  // MVP+ scope (Franz 2026-05-30): CA + OR + WA + MD + UT. Body.state overrides:
+  //   "ALL" → every state ; "MD" / etc → just that state.
+  let stateFilters: string[] = ["CA", "OR", "WA", "MD", "UT"];
 
   if (req.method === "GET") {
     const fid = new URL(req.url).searchParams.get("fid");

@@ -86,11 +86,11 @@ Deno.serve(async (req: Request) => {
   if (authFail) return authFail;
 
   let targetFids: number[] | null = null;
-  // MVP+ scope (Franz 2026-05-30): CA + MD + UT. Override via body.state:
-  //   "ALL" → all states ; "OR" / "WA" / etc → that single state.
+  // MVP+ scope (Franz 2026-05-30): CA + OR + WA + MD + UT. Override via body.state:
+  //   "ALL" → all states ; "MD" / etc → that single state.
   // The old default was "CA" which silently starved every other state's
   // daily refresh after they launched.
-  let stateFilters: string[] = ["CA", "MD", "UT"];
+  let stateFilters: string[] = ["CA", "OR", "WA", "MD", "UT"];
   let skipRecentHours: number | null = null;
   try {
     const body = await req.json().catch(() => ({}));

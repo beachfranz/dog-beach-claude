@@ -86,19 +86,27 @@ Deno.serve(async (req: Request) => {
   if (authFail) return authFail;
 
   let targetFids: number[] | null = null;
-  let stateFilter = "CA";
+  // MVP+ scope (Franz 2026-05-30): CA + MD + UT. Override via body.state:
+  //   "ALL" → all states ; "OR" / "WA" / etc → that single state.
+  // The old default was "CA" which silently starved every other state's
+  // daily refresh after they launched.
+  let stateFilters: string[] = ["CA", "MD", "UT"];
   let skipRecentHours: number | null = null;
   try {
     const body = await req.json().catch(() => ({}));
     if (Array.isArray(body?.fids) && body.fids.length > 0) targetFids = body.fids;
-    if (typeof body?.state === "string") stateFilter = body.state.toUpperCase();
+    if (typeof body?.state === "string") {
+      const s = body.state.toUpperCase();
+      stateFilters = s === "ALL" ? [] : [s];
+    }
     if (typeof body?.skip_recent_hours === "number" && body.skip_recent_hours > 0) {
       skipRecentHours = Math.min(body.skip_recent_hours, 168);
     }
   } catch { /* no body — defaults */ }
 
   console.log("daily-dog-park-refresh — fids:", targetFids?.length ?? "all",
-    "state:", stateFilter, "skip_recent_hours:", skipRecentHours);
+    "states:", stateFilters.length === 0 ? "ALL" : stateFilters.join(","),
+    "skip_recent_hours:", skipRecentHours);
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
   const runAt = new Date();
@@ -126,7 +134,7 @@ Deno.serve(async (req: Request) => {
     `)
     .eq("is_active", true)
     .eq("is_scoreable", true);
-  if (stateFilter !== "ALL") q = q.eq("state", stateFilter);
+  if (stateFilters.length > 0) q = q.in("state", stateFilters);
   if (targetFids) q = q.in("fid", targetFids);
 
   const { data: parksRaw, error: parksErr } = await q;

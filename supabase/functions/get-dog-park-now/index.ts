@@ -40,6 +40,9 @@ Deno.serve(async (req: Request) => {
 
   let targetFids: number[] | null = null;
   let skipRecentHours: number | null = null;
+  // MVP+ scope (Franz 2026-05-30): CA + MD + UT. Body.state overrides:
+  //   "ALL" → every state ; "OR" / "WA" / etc → just that state.
+  let stateFilters: string[] = ["CA", "MD", "UT"];
 
   if (req.method === "GET") {
     const fid = new URL(req.url).searchParams.get("fid");
@@ -50,6 +53,10 @@ Deno.serve(async (req: Request) => {
       targetFids = body.fids
         .map((x: unknown) => typeof x === "number" ? x : parseInt(String(x), 10))
         .filter(Number.isFinite);
+    }
+    if (typeof body?.state === "string") {
+      const s = body.state.toUpperCase();
+      stateFilters = s === "ALL" ? [] : [s];
     }
     if (typeof body?.skip_recent_hours === "number" && body.skip_recent_hours > 0) {
       skipRecentHours = Math.min(body.skip_recent_hours, 24);
@@ -65,7 +72,7 @@ Deno.serve(async (req: Request) => {
     .eq("is_active", true)
     .eq("is_scoreable", true);
   if (targetFids?.length) q = q.in("fid", targetFids);
-  else q = q.eq("state", "CA"); // default to CA-only for cron (per v1 scope)
+  else if (stateFilters.length > 0) q = q.in("state", stateFilters);
 
   const [parksRes, configRes] = await Promise.all([
     q,

@@ -222,9 +222,12 @@ def main():
                     j.name                           AS jurisdiction_name
                 FROM public.dog_parks_gold g
                 LEFT JOIN public.counties c    ON ST_Intersects(g.geom, c.geom)
+                -- 200m DWithin for jurisdictions (TIGER places) per
+                -- [[pip-for-places-uses-200m]] — coastal-city polygons
+                -- stop at high-water line; waterfront parks just outside.
                 LEFT JOIN public.jurisdictions j
                   ON j.place_type LIKE 'C%%'
-                  AND ST_Intersects(g.geom, j.geom)
+                  AND ST_DWithin(g.geom, j.geom, 0.0018)
                 WHERE g.is_active = true
             """
             params: tuple = ()

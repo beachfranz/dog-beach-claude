@@ -109,7 +109,7 @@ def dp_preflight(context: AssetExecutionContext) -> MaterializeResult:
     partitions_def=DOG_PARK_STATES,
     group_name="dog_park_coverage",
     deps=[dp_preflight],
-    description="PIP-fill dog_parks_gold.address_city via ST_Contains(jurisdictions.geom).",
+    description="PIP-fill dog_parks_gold.address_city via ST_DWithin(jurisdictions.geom, 200m) per [[pip-for-places-uses-200m]].",
 )
 def dp_pip_address_city(context: AssetExecutionContext) -> MaterializeResult:
     state = context.partition_key

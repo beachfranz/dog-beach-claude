@@ -16,11 +16,15 @@ def pip_address_city_backfill(state: str) -> dict:
     conn = connect(); conn.set_client_encoding("UTF8")
     try:
         cur = conn.cursor()
+        # 200m DWithin instead of strict ST_Contains per
+        # [[pip-for-places-uses-200m]]. TIGER place polygons for coastal
+        # cities terminate at the high-water line; waterfront / shoreline
+        # parks can sit just outside the polygon yet be city territory.
         cur.execute("""
             WITH pip AS (
               SELECT DISTINCT ON (dpg.fid) dpg.fid, j.name AS jur_name
                 FROM public.dog_parks_gold dpg
-                JOIN public.jurisdictions j ON ST_Contains(j.geom, dpg.geom)
+                JOIN public.jurisdictions j ON ST_DWithin(j.geom, dpg.geom, 0.0018)
                WHERE dpg.state = %s AND dpg.is_active
                  AND dpg.address_city IS NULL
                  AND dpg.geom IS NOT NULL

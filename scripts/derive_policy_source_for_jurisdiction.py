@@ -2634,11 +2634,16 @@ def list_state_jurisdictions(state: str, pilot: int | None = None,
     """
     params: list = [state]
     if require_beach:
+        # 200m DWithin instead of strict ST_Intersects per
+        # [[pip-for-places-uses-200m]]. TIGER place polygons for coastal
+        # cities terminate at the high-water line; coastal beach pins
+        # sit 10-200m on the water side. Strict containment under-counts
+        # by ~30 coastal-edge beaches across MVP+ states.
         sql += """
           AND EXISTS (
             SELECT 1 FROM public.beaches_gold g
             WHERE g.state = %s AND g.is_active
-              AND ST_Intersects(g.geom, j.geom)
+              AND ST_DWithin(g.geom, j.geom, 0.0018)
           )
         """
         params.append(state)

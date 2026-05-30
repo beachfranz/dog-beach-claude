@@ -302,6 +302,20 @@ async function refreshNow(
 
     if (upsertErr) throw new Error(upsertErr.message);
 
+    // Re-apply v2 best window so the recommendation row stays pegged to the
+    // freshly-updated hourly_scores. Without this, the stored
+    // best_window_label drifts every hour as NOW overwrites individual hours
+    // — Scout blurb (reads stored value) and chart headline (reads live RPC)
+    // disagree. Soft-fail: never block the NOW write on the rec update.
+    // Per Franz 2026-05-30.
+    if (beach.arena_group_id != null) {
+      const { error: bwErr } = await supabase.rpc(
+        "apply_v2_best_window_to_beach_recommendations",
+        { p_fid: beach.arena_group_id, p_date: localDate },
+      );
+      if (bwErr) console.warn(`[${beach.location_id}] apply_v2 window soft-fail:`, bwErr.message);
+    }
+
     // Return row with tide direction for frontend display
     return {
       locationId: beach.location_id,

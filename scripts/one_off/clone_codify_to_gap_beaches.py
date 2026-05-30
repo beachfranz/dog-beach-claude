@@ -72,8 +72,26 @@ def smallest_jurisdiction(cur, fid: int) -> str | None:
     return r["name"] if r else None
 
 
+def nearest_cdpr_unit(cur, fid: int) -> str | None:
+    """For offshore/unincorporated beaches, find the nearest CDPR-managed
+    CPAD unit within 200m. Returns the unit_name or None."""
+    cur.execute("""
+        SELECT cu.unit_name
+          FROM cpad_units cu
+          JOIN beaches_gold bg ON bg.fid = %s
+         WHERE ST_DWithin(bg.geom::geography, cu.geom::geography, 200)
+           AND (cu.mng_agncy ILIKE '%%Department of Parks%%'
+                OR cu.mng_agncy ILIKE '%%CDPR%%'
+                OR cu.mng_agncy ILIKE '%%State Parks%%')
+         ORDER BY ST_Distance(bg.geom::geography, cu.geom::geography) ASC
+         LIMIT 1
+    """, (fid,))
+    r = cur.fetchone()
+    return r["unit_name"] if r else None
+
+
 def find_template_sibling(cur, jurisdiction: str, target_fid: int) -> int | None:
-    """Pick a sibling beach in the same jurisdiction that has operative sand bps.
+    """Pick a sibling beach in the same jurisdiction with operative sand bps.
 
     Prefers the sibling with the most operative bps rows (most complete codify).
     """
@@ -91,6 +109,28 @@ def find_template_sibling(cur, jurisdiction: str, target_fid: int) -> int | None
          ORDER BY bps_count DESC, bps.beach_fid ASC
          LIMIT 1;
     """, (target_fid, jurisdiction))
+    r = cur.fetchone()
+    return r["beach_fid"] if r else None
+
+
+def find_template_sibling_cdpr(cur, cdpr_unit: str, target_fid: int) -> int | None:
+    """Same as find_template_sibling but matches by CPAD unit name instead
+    of jurisdiction. Used for state-park beaches in unincorporated coast."""
+    cur.execute("""
+        SELECT bps.beach_fid, COUNT(*) AS bps_count
+          FROM beach_policy_source bps
+          JOIN beaches_gold sibling ON sibling.fid = bps.beach_fid
+         WHERE bps.operative_status = 'operative'
+           AND bps.beach_fid <> %s
+           AND EXISTS (
+             SELECT 1 FROM cpad_units cu
+              WHERE cu.unit_name = %s
+                AND ST_DWithin(sibling.geom::geography, cu.geom::geography, 200)
+           )
+         GROUP BY bps.beach_fid
+         ORDER BY bps_count DESC, bps.beach_fid ASC
+         LIMIT 1;
+    """, (target_fid, cdpr_unit))
     r = cur.fetchone()
     return r["beach_fid"] if r else None
 
@@ -250,28 +290,40 @@ def main() -> int:
 
     for fid, name in beaches:
         juri = smallest_jurisdiction(cur, fid)
-        if juri is None:
-            unhandled_by_juri.setdefault("(unincorporated/offshore)", []).append((fid, name))
-            n_unhandled += 1
-            continue
-        template = find_template_sibling(cur, juri, fid)
+        template = None
+        match_kind = None
+        match_label = None
+        if juri:
+            template = find_template_sibling(cur, juri, fid)
+            if template is not None:
+                match_kind = "juri"
+                match_label = juri
         if template is None:
-            unhandled_by_juri.setdefault(juri, []).append((fid, name))
+            # Fall back to CDPR unit match for offshore / unincorporated coast.
+            cdpr = nearest_cdpr_unit(cur, fid)
+            if cdpr:
+                template = find_template_sibling_cdpr(cur, cdpr, fid)
+                if template is not None:
+                    match_kind = "cdpr"
+                    match_label = cdpr
+        if template is None:
+            label = juri or "(unincorporated/offshore)"
+            unhandled_by_juri.setdefault(label, []).append((fid, name))
             n_unhandled += 1
             continue
         if args.dry_run:
-            print(f"  DRY  fid={fid:<6} {name[:45]:<45}  juri={juri[:18]:<18}  template_fid={template}")
+            print(f"  DRY  fid={fid:<6} {name[:45]:<45}  {match_kind}={match_label[:25]:<25}  template_fid={template}")
             continue
         try:
             n_bps, n_t = clone_codify(cur, template, fid)
             cur.execute("SELECT public._promote_zone_rules_for_fid(%s) AS r", (fid,))
             conn.commit()
             n_cloned += 1
-            print(f"  OK   fid={fid:<6} {name[:45]:<45}  juri={juri[:18]:<18}  bps+={n_bps} temp+={n_t}")
+            print(f"  OK   fid={fid:<6} {name[:45]:<45}  {match_kind}={match_label[:25]:<25}  bps+={n_bps} temp+={n_t}")
         except Exception as e:
             conn.rollback()
             n_failed += 1
-            print(f"  FAIL fid={fid:<6} {name[:45]:<45}  juri={juri[:18]:<18}")
+            print(f"  FAIL fid={fid:<6} {name[:45]:<45}  {match_kind}={match_label[:25] if match_label else None}")
             traceback.print_exc()
 
     print(f"\nDone. cloned={n_cloned} unhandled={n_unhandled} failed={n_failed}")

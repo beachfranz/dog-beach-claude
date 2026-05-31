@@ -1352,6 +1352,59 @@ function applyBeachHourlyV2(payload, todayRec) {
   target.insertAdjacentHTML('beforeend', renderHourlyBarsV2(payload, nowH));
 }
 
+// hoursToday shape variant of _bestWindowFromNowV2. Operates on rows
+// from beach_day_hourly_scores (hour_score_v2 column) instead of the
+// compute_beach_hourly_v2 RPC payload (score column). Used by Scout
+// blurb to anchor the LLM's "best window remaining" reference to the
+// actual remaining slice, not the full-day stored label.
+function _bestWindowFromNowV2Hours(hours, fromHour) {
+  if (!Array.isArray(hours) || hours.length === 0) return null;
+  const eligible = hours
+    .filter(h =>
+      typeof h.local_hour === 'number'
+      && h.local_hour >= fromHour
+      && h.hour_score_v2 != null
+      && Number(h.hour_score_v2) > 0)
+    .sort((a, b) => a.local_hour - b.local_hour);
+  if (eligible.length < 2) return null;
+  const runs = [];
+  let cur = [eligible[0]];
+  for (let i = 1; i < eligible.length; i++) {
+    if (eligible[i].local_hour === cur[cur.length - 1].local_hour + 1) {
+      cur.push(eligible[i]);
+    } else {
+      if (cur.length >= 2) runs.push(cur);
+      cur = [eligible[i]];
+    }
+  }
+  if (cur.length >= 2) runs.push(cur);
+  if (runs.length === 0) return null;
+  const MAX_LEN = 5;
+  let best = null;
+  for (const run of runs) {
+    if (run.length <= MAX_LEN) {
+      const avg = run.reduce((s, h) => s + Number(h.hour_score_v2), 0) / run.length;
+      if (!best || avg > best.avg) best = { slice: run, avg };
+    } else {
+      for (let i = 0; i + MAX_LEN <= run.length; i++) {
+        const slice = run.slice(i, i + MAX_LEN);
+        const avg = slice.reduce((s, h) => s + Number(h.hour_score_v2), 0) / slice.length;
+        if (!best || avg > best.avg) best = { slice, avg };
+      }
+    }
+  }
+  if (!best) return null;
+  const startHour = best.slice[0].local_hour;
+  const endHour = best.slice[best.slice.length - 1].local_hour;
+  const fmt = h => {
+    if (h === 0) return '12am';
+    if (h === 12) return '12pm';
+    return h < 12 ? `${h}am` : `${h - 12}pm`;
+  };
+  return { label: `${fmt(startHour)}–${fmt((endHour + 1) % 24)}`, startHour, endHour };
+}
+
+
 // Find best contiguous run of open, non-closed hours from `fromHour`
 // forward. Returns { label, startHour, endHour, avgScore } or null when
 // no qualifying run of length >= 2 exists. Mirrors the SQL
@@ -3186,14 +3239,18 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
     el.classList.add('loaded'); return;
   }
 
-  // Best window for the day — pulled from today.best_window_label which by
-  // now is the v2-applied value (apply_v2_best_window_to_beach_recommendations
-  // runs in daily-beach-refresh). Dropped the v1 _bestWindowFromNow
-  // short-circuit that printed "today's good windows have already passed"
-  // — it used a v1 threshold of 70 that's no longer how we score and
-  // gated Scout incorrectly on beaches whose best hours are still ahead.
-  // Per Franz 2026-05-28: v2 is the working standard.
-  const windowLabel = today.best_window_label || 'today';
+  // Best window for the day. Stored today.best_window_label is the
+  // full-day v2 pick — we want the CURRENT-HOUR-FORWARD slice so the
+  // LLM doesn't see a window whose START is already in the past and
+  // mistakenly suggest tomorrow morning. Per Franz 2026-05-30: "we
+  // shouldn't needlessly deprive users of a great experience today".
+  // Falls back to the stored label when no hours_today data is
+  // available (rare; the recs cron lags occasionally).
+  const nowH_scout = _currentLocalHour(beach?.timezone) ?? new Date().getHours();
+  const remainingScout = _bestWindowFromNowV2Hours(hoursToday || [], nowH_scout);
+  const windowLabel = remainingScout?.label
+                    || today.best_window_label
+                    || 'today';
   const windowStatus = today.best_window_status ?? 'go';
   const signals = [
     today.lowest_tide_height != null ? `tide ${parseFloat(today.lowest_tide_height).toFixed(1)}ft` : null,

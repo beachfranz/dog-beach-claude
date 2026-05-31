@@ -295,6 +295,48 @@ def weather_advisories_refresh(
 
 
 # ════════════════════════════════════════════════════════════════════════
+#  Phase 32.5b — dog_park_advisories_refresh (parallel of beach side)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Parallel of weather_advisories_refresh. Runs
+# scripts/compute_dog_park_advisories.py --all-scored. Writes to
+# dog_park_advisory (mirror of beach_advisory) for car-safety + hot
+# asphalt + UV pills. dog-park.html surfaces inline tiles for car
+# safety; the table is the canonical anchor for future find-page
+# filtering + parallel consumer renderer.
+
+@asset(
+    group_name="phase_29_to_33_per_fid",
+    deps=[daily_refresh_fire],
+    description=(
+        "Daily — derives dog_park_advisory rows for every active+scored "
+        "dog park. Pairs with weather_advisories_refresh on the beach side."
+    ),
+)
+def dog_park_advisories_refresh(
+    context: AssetExecutionContext,
+    subproc: SubprocessResource,
+) -> MaterializeResult:
+    result = subproc.run(
+        "scripts/compute_dog_park_advisories.py",
+        args=["--all-scored"],
+        timeout=1800,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"compute_dog_park_advisories.py failed (exit {result.returncode}): "
+            f"{(result.stderr or '')[-500:]}"
+        )
+    tail = (result.stdout or "").strip().splitlines()[-1] if result.stdout else ""
+    return MaterializeResult(
+        metadata={
+            "summary": MetadataValue.text(tail),
+            "log_tail": MetadataValue.text((result.stdout or "")[-3000:]),
+        }
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════
 #  Phase 32.6 — codify_coverage_audit (cross-state, daily)
 # ════════════════════════════════════════════════════════════════════════
 #

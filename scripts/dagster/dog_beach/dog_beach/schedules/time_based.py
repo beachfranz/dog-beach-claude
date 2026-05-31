@@ -25,6 +25,7 @@ from ..jobs import (
     daily_refresh_job,
     pipeline_health_audit_job,
     weather_advisories_job,
+    dog_park_advisories_job,
     codify_coverage_audit_job,
     codify_gap_clone_job,
     dog_park_data_quality_audit_job,
@@ -105,6 +106,22 @@ def weekly_pipeline_health_schedule(context: ScheduleEvaluationContext):
 def daily_weather_advisories_schedule(context: ScheduleEvaluationContext):
     yield RunRequest(
         run_key=f"advisories-{context.scheduled_execution_time.date().isoformat()}",
+    )
+
+
+@schedule(
+    cron_schedule="15 12 * * *",  # 12:15 UTC daily — 15min after beach advisories
+    job=dog_park_advisories_job,
+    default_status=DefaultScheduleStatus.STOPPED,
+    description=(
+        "Daily — derives dog_park_advisory rows (car safety + hot asphalt "
+        "+ UV) for every scored park. Parallel of daily_weather_advisories. "
+        "Powers car-safety tile on dog-park.html."
+    ),
+)
+def daily_dog_park_advisories_schedule(context: ScheduleEvaluationContext):
+    yield RunRequest(
+        run_key=f"dp-advisories-{context.scheduled_execution_time.date().isoformat()}",
     )
 
 

@@ -750,6 +750,8 @@ async function load() {
   _fetchHourlyV2(fid).then(payload => {
     if (payload && !payload.error) applyHourlyV2(payload);
   });
+  // Cautions card — async fill from dog_park_advisory (mirrors beach pattern).
+  loadDogParkAdvisories(fid);
 }
 
 // Apply hourly v2: status-colored badge (no number) + vertical bar chart
@@ -1281,50 +1283,142 @@ function amenityTile(icon, label, ruleClass, sub) {
 }
 
 function buildCautionsSection(now, today, park) {
-  const tiles = [];
-  const pol = park.policy ?? {};
-
-  // Live conditions — derive from `now`
-  if (now) {
-    if (now.asphalt_temp != null && now.asphalt_temp >= 105) {
-      const sev = now.asphalt_temp >= 125 ? 'no_go' : now.asphalt_temp >= 115 ? 'caution' : 'advisory';
-      tiles.push(cautionTile('🐾', 'Hot pavement', sev,
-        `Asphalt ~${Math.round(now.asphalt_temp)}°F — risk of paw burns. Walk on grass or wait for cooler hours.`));
-    }
-    if (now.uv_index != null && now.uv_index >= 6) {
-      const sev = now.uv_index >= 11 ? 'no_go' : now.uv_index >= 8 ? 'caution' : 'advisory';
-      tiles.push(cautionTile('☀️', `UV ${now.uv_index.toFixed(0)}`, sev,
-        `UV index ${now.uv_index.toFixed(1)} — bring shade for the dog; consider sunscreen for short-haired breeds.`));
-    }
-    if (now.wind_speed != null && now.wind_speed >= 15) {
-      const sev = now.wind_speed >= 25 ? 'caution' : 'advisory';
-      tiles.push(cautionTile('💨', `${Math.round(now.wind_speed)}mph wind`, sev,
-        `Wind ~${Math.round(now.wind_speed)}mph — secure leashes when leaving, dusty conditions likely.`));
-    }
-    if (now.feels_like != null) {
-      if (now.feels_like >= 95) {
-        tiles.push(cautionTile('🌡️', `${Math.round(now.feels_like)}°F`, 'caution',
-          `Feels like ${Math.round(now.feels_like)}°F — heat stress risk. Short visits + plenty of water.`));
-      } else if (now.feels_like < 32) {
-        tiles.push(cautionTile('❄️', `${Math.round(now.feels_like)}°F`, 'advisory',
-          `Feels like ${Math.round(now.feels_like)}°F — short coats may need a jacket.`));
-      }
-    }
-  }
-
-  // Park-level caveats
-  const fence = pol.has_fence ?? park.has_fence;
-  if (fence === false) {
-    tiles.push(cautionTile('⚠️', 'Unfenced', 'caution',
-      `This park has no perimeter fence. Recall-trained dogs only; consider a long line.`));
-  }
-
-  if (!tiles.length) return '';
-
-  return `<section class="card cautions-card"><h2>Cautions</h2>
-    <div class="caution-grid">${tiles.join('')}</div>
-    <div class="caution-detail" id="caution-detail" hidden></div></section>`;
+  // All cautions now come from dog_park_advisory table via
+  // loadDogParkAdvisories() (async). This function just emits an empty
+  // mount; loadDogParkAdvisories populates / hides it based on RPC
+  // response. Mirrors beach.html's buildCautionsSection pattern post
+  // 2026-05-19 unification.
+  //
+  // Weather metrics (asphalt, UV, wind, rain, heat/cold, car safety)
+  // come from compute_dog_park_advisories.py. Structural attrs
+  // (unfenced) come from the same script's static_attribute write.
+  void now; void today; void park;
+  return `<section class="card cautions-card" style="display:none"></section>`;
 }
+
+// Async loader that fetches active+upcoming advisories from
+// dog_park_advisory and appends to the existing Cautions card. Mirrors
+// beach.html's loadWaterConditionAdvisories pattern exactly so the
+// look/placement/interaction is identical between beach.html and
+// dog-park.html. Direct PostgREST select (no RPC wrapper) — RLS allows
+// anon SELECT on dog_park_advisory.
+async function loadDogParkAdvisories(parkFid) {
+  const card = document.querySelector('.cautions-card');
+  if (!card) return;
+  let items = [];
+  try {
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/dog_park_advisory`
+        + `?select=event_type,severity,label,value,icon,dog_impact_text,valid_from,valid_to`
+        + `&dog_park_fid=eq.${parseInt(parkFid, 10)}`
+        + `&valid_to=gt.${new Date().toISOString()}`
+        + `&order=severity.asc`,
+      { headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } }
+    );
+    if (!r.ok) return;
+    items = await r.json();
+  } catch { return; }
+
+  // Today-only filter (user's local time). Drop advisories that don't
+  // start until after end-of-day today. Mirrors beach behavior.
+  if (Array.isArray(items)) {
+    const eod = new Date(); eod.setHours(23, 59, 59, 999);
+    items = items.filter(a => {
+      if (!a.valid_from) return true;
+      const from = new Date(a.valid_from);
+      return isNaN(from.getTime()) || from <= eod;
+    });
+  }
+  if (!Array.isArray(items) || items.length === 0) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+
+  const sevToClass = {
+    extreme: 'sev-no_go',   severe: 'sev-no_go',
+    moderate: 'sev-caution', minor: 'sev-advisory',
+  };
+
+  const tiles = items.map((a, i) => {
+    const cls    = sevToClass[a.severity] || 'sev-caution';
+    const icon   = a.icon || '⚠️';
+    const label  = a.label || a.event_type || 'Advisory';
+    const window = _formatDPAdvisoryWindow(a.valid_from, a.valid_to);
+    const sub    = window ? `<span class="amenity-sub">${escHtml(window)}</span>` : '';
+    return `<button type="button" class="caution-tile ${cls}"
+                    data-cidx="${i}" aria-expanded="false">
+      <span class="amenity-icon">${icon}</span>
+      <span class="amenity-text">
+        <span class="amenity-label">${escHtml(label)}</span>
+        ${sub}
+      </span>
+    </button>`;
+  }).join('');
+
+  card.innerHTML = `<h2>Cautions</h2>
+    <div class="caution-grid">${tiles}</div>
+    <div class="caution-detail" id="caution-detail" hidden></div>`;
+
+  const grid   = card.querySelector('.caution-grid');
+  const detail = card.querySelector('#caution-detail');
+  grid.addEventListener('click', (e) => {
+    const btn = e.target.closest('.caution-tile');
+    if (!btn) return;
+    const wasOpen = btn.getAttribute('aria-expanded') === 'true';
+    grid.querySelectorAll('.caution-tile[aria-expanded="true"]')
+        .forEach(t => t.setAttribute('aria-expanded', 'false'));
+    if (wasOpen) {
+      detail.hidden = true;
+      detail.innerHTML = '';
+      return;
+    }
+    btn.setAttribute('aria-expanded', 'true');
+    const a = items[parseInt(btn.dataset.cidx, 10)];
+    const text = a.dog_impact_text || a.label || a.event_type || '';
+    const value = a.value || a.event_type || '';
+    const window = _formatDPAdvisoryWindow(a.valid_from, a.valid_to);
+    detail.innerHTML = `
+      <div style="font-weight:600; margin-bottom:2px;">
+        ${escHtml(a.label || a.event_type || 'Advisory')}
+        ${value ? `<span style="font-weight:500; color:var(--text-muted); margin-left:6px;">${escHtml(value)}</span>` : ''}
+      </div>
+      <div>${escHtml(text)}</div>
+      ${window ? `<div style="margin-top:4px; color:var(--text-muted); font-size:11px;">${escHtml(window)}</div>` : ''}`;
+    detail.hidden = false;
+  });
+}
+
+// Friendly time-window for a dog_park_advisory row. Mirrors beach's
+// _formatAdvisoryWindow. Suppresses very long windows (static "Unfenced"
+// advisory's 1-year valid_to would otherwise read as a garish date).
+function _formatDPAdvisoryWindow(fromIso, toIso) {
+  if (!toIso) return '';
+  const to = new Date(toIso);
+  const from = fromIso ? new Date(fromIso) : null;
+  if (isNaN(to.getTime())) return '';
+  const now = new Date();
+  // Multi-day-spanning static advisory → no window label
+  if (from && (to.getTime() - from.getTime()) > 7 * 86400000) return '';
+  const fmtT = d => {
+    const h = d.getHours(); const m = d.getMinutes();
+    const ap = h >= 12 ? 'pm' : 'am';
+    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return m ? `${h12}:${String(m).padStart(2,'0')}${ap}` : `${h12}${ap}`;
+  };
+  const sameDay = (a, b) => a.toDateString() === b.toDateString();
+  const dayLabel = d => sameDay(d, now) ? 'today'
+                    : sameDay(d, new Date(now.getTime() + 86400000)) ? 'tomorrow'
+                    : d.toLocaleDateString(undefined, { weekday: 'short' });
+  if (from && from <= now) {
+    return sameDay(to, now) ? `Until ${fmtT(to)}` : `Until ${dayLabel(to)} ${fmtT(to)}`;
+  }
+  if (from && sameDay(from, to)) {
+    return `${fmtT(from)}–${fmtT(to)}`;
+  }
+  return '';
+}
+
 
 function cautionTile(icon, label, sev, detail) {
   return `<button class="caution-tile sev-${sev}" type="button" aria-expanded="false"

@@ -141,7 +141,7 @@ from .assets.photos_and_vision import (
 from .assets.scoring_and_audit import (
     hourly_status_refresh, codify_coverage_check,
     daily_refresh_fire, field_population_check,
-    weather_advisories_refresh,
+    weather_advisories_refresh, dog_park_advisories_refresh,
     codify_coverage_audit, codify_gap_clone,
     dog_park_data_quality_audit,
 )
@@ -302,6 +302,15 @@ weather_advisories_job = define_asset_job(
         "Powers the Cautions card on beach.html."
     ),
     selection=AssetSelection.assets(weather_advisories_refresh),
+)
+
+dog_park_advisories_job = define_asset_job(
+    name="dog_park_advisories_job",
+    description=(
+        "Phase 32.5b — parallel of weather_advisories_job. Runs "
+        "compute_dog_park_advisories.py --all-scored. Writes dog_park_advisory."
+    ),
+    selection=AssetSelection.assets(dog_park_advisories_refresh),
 )
 
 

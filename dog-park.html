@@ -1319,14 +1319,18 @@ async function loadDogParkAdvisories(parkFid) {
     items = await r.json();
   } catch { return; }
 
-  // Today-only filter (user's local time). Drop advisories that don't
-  // start until after end-of-day today. Mirrors beach behavior.
+  // Next-24h horizon (NOT today-only as beach does). Dog parks are
+  // drive-to-destination — tomorrow morning's "Hot car 95°F" forecast
+  // is exactly what a user planning their evening or next-day visit
+  // needs to see. Beach decision 2026-05-19 was today-only; dog parks
+  // intentionally diverge here. Filter drops only advisories that start
+  // > 24h out (anything further is too speculative).
   if (Array.isArray(items)) {
-    const eod = new Date(); eod.setHours(23, 59, 59, 999);
+    const horizon = Date.now() + 24 * 3600 * 1000;
     items = items.filter(a => {
       if (!a.valid_from) return true;
-      const from = new Date(a.valid_from);
-      return isNaN(from.getTime()) || from <= eod;
+      const from = new Date(a.valid_from).getTime();
+      return isNaN(from) || from <= horizon;
     });
   }
   if (!Array.isArray(items) || items.length === 0) {

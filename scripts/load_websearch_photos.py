@@ -215,6 +215,13 @@ def replace_websearch(fid: int, images: list[dict], results: list[dict],
                 "host": host,
                 "rank": i,
             },
+            # Always include lat/lng/distance_m so the batch POST has
+            # uniform keys (Supabase PGRST102 requires all batch rows
+            # to share the same key set). Populated below when the
+            # name-match test passes.
+            "lat":            None,
+            "lng":            None,
+            "distance_m":     None,
         }
         # Tight-match centroid attribution. Without ALL distinctive name
         # tokens present in haystack (desc+page_url+host), photo stays

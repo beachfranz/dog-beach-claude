@@ -269,6 +269,13 @@ def main():
                 parts.append(kw)
             if b.get("city"):  parts.append(b["city"])
             if b.get("state"): parts.append(b["state"])
+            # Dog-content bias for DPs (Franz 2026-06-01 [[dp-photos-are-dog-only]]).
+            # The literal name "Dog Park" doesn't constrain Tavily's image search to
+            # photos containing dogs — at Toad Hollow the top hits were freight trains
+            # near the parking lot. Appending a visual-content cue ("dogs playing")
+            # shifts the LLM-augmented relevance toward dog imagery.
+            if args.entity == "dog_park":
+                parts.append("dogs playing")
             query = " ".join(parts)
 
             r = tavily_image_search(query, k=args.per_entity)

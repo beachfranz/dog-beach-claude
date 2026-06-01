@@ -1,0 +1,125 @@
+name: Dog Park Coverage Refresh
+
+# External runner for the monthly_dog_park_coverage orch_jobs catalog row.
+# Runs the 8-op dog_park_pipeline package (preflight → pip_address_city →
+# reclassify_junk → generic_display_names → walk_catalogs → ingest_queue →
+# run_extractor → retry_no_match) per state.
+#
+# Triggers:
+#   - workflow_dispatch (manual + dispatched by the Supabase orch_jobs
+#     `dispatch-github-workflow` edge function)
+#   - schedule: monthly on the 1st at 08:00 UTC as a backstop in case the
+#     orchestrator dispatch fails or shadow_mode stays on
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   SUPABASE_URL
+#   SUPABASE_SERVICE_KEY
+#   SUPABASE_DB_PASSWORD
+#   ANTHROPIC_API_KEY
+#   ADMIN_SECRET
+#   GOOGLE_PLACES_API_KEY    (optional — used by ingest_queue for geocoding)
+#
+# Cost / runtime expectations: ~10-15 min + $5-15 LLM per state. MVP+ (5 states)
+# = ~1h wall + ~$25-75 LLM. Comfortably under GitHub free-tier limits
+# (2000 min/month for private; unlimited for public).
+
+on:
+  workflow_dispatch:
+    inputs:
+      states:
+        description: 'Comma-separated MVP+ states; default = CA,OR,WA,MD,UT'
+        required: false
+        default: 'CA,OR,WA,MD,UT'
+      only_ops:
+        description: 'Comma-separated op names to run (others skipped); blank = all'
+        required: false
+        default: ''
+  schedule:
+    - cron: '0 8 1 * *'   # 1st of month at 08:00 UTC
+
+# Avoid clobbering an in-flight run if a manual dispatch fires while a
+# scheduled run is still going.
+concurrency:
+  group: dp-coverage
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          # Inline deps (pipeline requirements.txt is sparse; package
+          # imports include anthropic, psycopg2, playwright).
+          pip install \
+            psycopg2-binary \
+            python-dotenv \
+            anthropic \
+            httpx[http2] \
+            beautifulsoup4 \
+            lxml \
+            rapidfuzz \
+            tenacity \
+            tqdm \
+            requests \
+            playwright
+
+      - name: Install Playwright Chromium
+        run: |
+          python -m playwright install --with-deps chromium
+
+      - name: Write env file
+        env:
+          SUPABASE_URL:           ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY:   ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_DB_PASSWORD:   ${{ secrets.SUPABASE_DB_PASSWORD }}
+          ANTHROPIC_API_KEY:      ${{ secrets.ANTHROPIC_API_KEY }}
+          ADMIN_SECRET:           ${{ secrets.ADMIN_SECRET }}
+          GOOGLE_PLACES_API_KEY:  ${{ secrets.GOOGLE_PLACES_API_KEY }}
+        run: |
+          mkdir -p scripts/pipeline
+          cat > scripts/pipeline/.env <<EOF
+          SUPABASE_URL=$SUPABASE_URL
+          SUPABASE_SERVICE_KEY=$SUPABASE_SERVICE_KEY
+          SUPABASE_DB_PASSWORD=$SUPABASE_DB_PASSWORD
+          ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
+          ADMIN_SECRET=$ADMIN_SECRET
+          GOOGLE_PLACES_API_KEY=$GOOGLE_PLACES_API_KEY
+          EOF
+          # Pooler URL is needed by scripts/common/db.py
+          mkdir -p supabase/.temp
+          # Use the project pooler URL pattern — the project ref is public
+          # and the password lives in env above. Match supabase/.temp/pooler-url.
+          PROJECT_REF=ehlzbwtrsxaaukurekau
+          echo "postgresql://postgres.${PROJECT_REF}@aws-1-us-east-1.pooler.supabase.com:5432/postgres" \
+            > supabase/.temp/pooler-url
+
+      - name: Run pipeline per state
+        env:
+          STATES:   ${{ inputs.states || 'CA,OR,WA,MD,UT' }}
+          ONLY_OPS: ${{ inputs.only_ops || '' }}
+        run: |
+          set -e
+          IFS=',' read -ra STATE_ARR <<< "$STATES"
+          ONLY_ARG=""
+          if [ -n "$ONLY_OPS" ]; then ONLY_ARG="--only $ONLY_OPS"; fi
+          OVERALL_RC=0
+          for st in "${STATE_ARR[@]}"; do
+            echo
+            echo "============================================================="
+            echo "  STATE: $st"
+            echo "============================================================="
+            python -m scripts.dog_park_pipeline.run --state "$st" $ONLY_ARG || OVERALL_RC=$?
+          done
+          echo
+          echo "Overall exit code: $OVERALL_RC"
+          exit $OVERALL_RC

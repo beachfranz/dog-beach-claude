@@ -67,8 +67,14 @@ def find_gap_beaches(cur, only_fid: int | None, states: tuple[str, ...] = DEFAUL
 
 
 def smallest_jurisdiction(cur, fid: int) -> str | None:
+    # Use 200m-buffered jurisdictions layer per [[pip-for-places-uses-200m]] —
+    # coastal beach pins sit 10-200m on the water side of TIGER place polygons,
+    # strict ST_Intersects misses them. ST_Area tie-break uses the source geom.
     cur.execute("""
-        SELECT j.name FROM jurisdictions j JOIN beaches_gold bg ON ST_Intersects(j.geom, bg.geom)
+        SELECT j.name
+          FROM beaches_gold bg
+          JOIN jurisdictions_buf200m jb ON ST_Contains(jb.geom, bg.geom)
+          JOIN jurisdictions j ON j.id = jb.id
          WHERE bg.fid = %s ORDER BY ST_Area(j.geom) ASC LIMIT 1
     """, (fid,))
     r = cur.fetchone()

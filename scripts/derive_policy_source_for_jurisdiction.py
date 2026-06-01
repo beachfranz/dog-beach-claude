@@ -2033,19 +2033,20 @@ def emit_migration_sql(jc: JurisdictionClassification, sc: ScopeCheck,
         #   20260530_demote_county_code_in_city_beaches.sql
         #   20260530_demote_coastal_edge_city_beaches.sql
         #   20260530_demote_county_authority_supplementary.sql
-        # The guard uses ST_DWithin(jurisdictions.geom, b.geom, 200m)
-        # because TIGER place polygons for coastal cities stop at the
-        # high-water line while beach pins are 10-200m on the water side
-        # of that boundary. Strict ST_Contains under-counts coastal-edge
-        # beaches by ~30 across MVP+ states.
+        # The guard uses jurisdictions_buf200m (200m pre-buffered TIGER
+        # places) because TIGER place polygons for coastal cities stop at
+        # the high-water line while beach pins are 10-200m on the water
+        # side of that boundary. Strict ST_Contains under-counts coastal-
+        # edge beaches by ~30 across MVP+ states.
         if jc.polygon_table == "counties":
             city_preemption_guard = (
                 f"  AND NOT EXISTS (\n"
-                f"    SELECT 1 FROM public.jurisdictions j_city\n"
+                f"    SELECT 1 FROM public.jurisdictions_buf200m jb_city\n"
+                f"     JOIN public.jurisdictions j_city ON j_city.id = jb_city.id\n"
                 f"     WHERE j_city.state = {esc(jc.state)}\n"
                 f"       AND j_city.funcstat = 'A'\n"
                 f"       AND j_city.place_type LIKE 'C%'\n"
-                f"       AND ST_DWithin(j_city.geom, b.geom, 0.0018)  -- ~200m\n"
+                f"       AND ST_Contains(jb_city.geom, b.geom)\n"
                 f"  )\n"
             )
         else:
@@ -2634,16 +2635,18 @@ def list_state_jurisdictions(state: str, pilot: int | None = None,
     """
     params: list = [state]
     if require_beach:
-        # 200m DWithin instead of strict ST_Intersects per
+        # Use jurisdictions_buf200m (pre-buffered 200m) per
         # [[pip-for-places-uses-200m]]. TIGER place polygons for coastal
         # cities terminate at the high-water line; coastal beach pins
         # sit 10-200m on the water side. Strict containment under-counts
-        # by ~30 coastal-edge beaches across MVP+ states.
+        # by ~30 coastal-edge beaches across MVP+ states. The buffered
+        # layer makes the spatial join a clean ST_Contains.
         sql += """
           AND EXISTS (
             SELECT 1 FROM public.beaches_gold g
+            JOIN public.jurisdictions_buf200m jb ON jb.id = j.id
             WHERE g.state = %s AND g.is_active
-              AND ST_DWithin(g.geom, j.geom, 0.0018)
+              AND ST_Contains(jb.geom, g.geom)
           )
         """
         params.append(state)

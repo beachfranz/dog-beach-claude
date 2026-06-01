@@ -632,15 +632,17 @@ def dp_photos_curate(
                      AND p.curated_at IS NULL
                      AND p.hidden_at IS NULL
                      AND (
-                       -- v4 prompt direct signal (2026-06-01) — Haiku answers
+                       -- v4 prompt direct signal — Haiku answers
                        -- "does this photo show a recognizable off-leash dog area?"
-                       -- This replaces the previous scene-gymnastics.
                        (p.source_meta -> 'vision' ->> 'is_dog_park_relevant')::boolean = true
-                       -- Fallback signals so we don't regress for v3-tagged rows
-                       -- (no is_dog_park_relevant field): broad scene set + has_dog.
-                       OR (p.source_meta -> 'vision' ->> 'has_dog')::boolean = true
-                       OR (p.source_meta -> 'vision' ->> 'scene') IN
-                          ('beach_with_sand', 'urban', 'interior', 'other')
+                       -- v3 fallback: only when dp_rel field absent. Trust has_dog
+                       -- as a proxy. (Tightened 2026-06-01 after the scene-fallback
+                       -- — IN ('urban','interior','other') — was found letting in
+                       -- roads/trains/wildflower meadows.)
+                       OR (
+                         (p.source_meta -> 'vision' ->> 'is_dog_park_relevant') IS NULL
+                         AND (p.source_meta -> 'vision' ->> 'has_dog')::boolean = true
+                       )
                      )
                      AND COALESCE(p.source_meta -> 'vision' ->> 'quality_issue', 'none') = 'none'
                 )

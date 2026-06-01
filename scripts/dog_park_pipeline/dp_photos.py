@@ -169,16 +169,20 @@ def dp_photos_vision_tag(state: str, budget_usd: float = 50.0, **kw) -> dict:
 def dp_photos_curate(state: str, **kw) -> dict:
     """Pick top-3 best photos per DP via the v4 vision-aware gate.
 
-    Gate (matches Dagster `dp_photos_curate` asset + the v4 backfill
-    migration `20260601_dp_curate_v4_apply.sql`):
+    Gate (matches Dagster `dp_photos_curate` asset + the gate-tightening
+    migration `20260601_dp_curate_tighten_gate.sql`):
 
       curated_at IS NULL  AND  hidden_at IS NULL
       AND (
         vision.is_dog_park_relevant = true                     -- v4 primary
-        OR vision.has_dog = true                               -- v3 fallback
-        OR vision.scene IN ('beach_with_sand','urban','interior','other')
+        OR (vision.is_dog_park_relevant IS NULL                -- v3 fallback
+            AND vision.has_dog = true)
       )
       AND COALESCE(vision.quality_issue, 'none') = 'none'
+
+    Earlier rounds included a scene fallback that Haiku assigned too
+    loosely (roads tagged 'urban', gardens tagged 'interior'); dropped
+    2026-06-01.
 
     Stamps curated_at=now(), curated_by='vision-auto', match_quality='medium'.
     Idempotent — only operates on uncurated rows; existing 'vision-auto'
@@ -201,9 +205,10 @@ def dp_photos_curate(state: str, **kw) -> dict:
                    AND p.hidden_at IS NULL
                    AND (
                      (p.source_meta -> 'vision' ->> 'is_dog_park_relevant')::boolean = true
-                     OR (p.source_meta -> 'vision' ->> 'has_dog')::boolean = true
-                     OR (p.source_meta -> 'vision' ->> 'scene') IN
-                        ('beach_with_sand', 'urban', 'interior', 'other')
+                     OR (
+                       (p.source_meta -> 'vision' ->> 'is_dog_park_relevant') IS NULL
+                       AND (p.source_meta -> 'vision' ->> 'has_dog')::boolean = true
+                     )
                    )
                    AND COALESCE(p.source_meta -> 'vision' ->> 'quality_issue', 'none') = 'none'
               )

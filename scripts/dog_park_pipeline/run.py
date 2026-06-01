@@ -30,10 +30,17 @@ from . import (
     run_extractor,
     retry_no_match,
     write_run_metric,
+    dp_photos_load_flickr,
+    dp_photos_load_wikimedia,
+    dp_photos_load_websearch,
+    dp_photos_vision_tag,
+    dp_photos_curate,
 )
 
 
 # Optimal order — CA proof point 2026-05-25 LATE: 0% → 79.5%.
+# Photo ops appended 2026-06-01: load → vision-tag → curate runs AFTER
+# retry_no_match so the catalog is complete before per-DP photo work.
 OPS = [
     ("preflight",            lambda s: preflight_check(s)),
     ("pip_address_city",     lambda s: pip_address_city_backfill(s)),
@@ -43,6 +50,11 @@ OPS = [
     ("ingest_queue",         lambda s: ingest_discovery_queue(s, apply=True)),
     ("run_extractor",        lambda s: run_extractor(s, workers=6, include_no_website=True, apply=True)),
     ("retry_no_match",       lambda s: retry_no_match(s, workers=6, apply=True)),
+    ("dp_photos_load_flickr",    lambda s: dp_photos_load_flickr(s)),
+    ("dp_photos_load_wikimedia", lambda s: dp_photos_load_wikimedia(s)),
+    ("dp_photos_load_websearch", lambda s: dp_photos_load_websearch(s)),
+    ("dp_photos_vision_tag",     lambda s: dp_photos_vision_tag(s)),
+    ("dp_photos_curate",         lambda s: dp_photos_curate(s)),
 ]
 
 

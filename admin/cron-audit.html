@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cron audit · Dog Beach Scout</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0;
+               font-family: 'DM Sans', -apple-system, system-ui, sans-serif;
+               background: #f1f5f9; color: #0f2742; font-size: 13px; }
+  header {
+    padding: 14px 24px; background: #0f2742; color: #fff;
+    display: flex; align-items: center; gap: 16px;
+    border-bottom: 3px solid #fbbf24;
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: 0.02em; }
+  header .subtitle { color: #94a3b8; font-size: 12px; }
+  header .right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+  header select, header button {
+    padding: 6px 12px; background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.14); color: #cbd5e1;
+    border-radius: 6px; font-size: 12px; cursor: pointer;
+  }
+  header button:hover, header select:hover { background: rgba(255,255,255,0.15); color: #fff; }
+
+  .container { padding: 16px 24px; max-width: 1400px; margin: 0 auto; }
+
+  .summary {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px; margin-bottom: 20px;
+  }
+  .pill {
+    background: #fff; padding: 12px 14px; border-radius: 8px;
+    border-left: 4px solid #94a3b8;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .pill .n { font-size: 22px; font-weight: 700; line-height: 1; }
+  .pill .lbl { color: #64748b; font-size: 11px; text-transform: uppercase;
+               letter-spacing: 0.04em; margin-top: 4px; }
+  .pill.succeeded, .pill.fired { border-left-color: #16a34a; }
+  .pill.failed                  { border-left-color: #ef4444; }
+  .pill.shadow                  { border-left-color: #38bdf8; }
+  .pill.timeout                 { border-left-color: #f97316; }
+  .pill.window                  { border-left-color: #94a3b8; }
+
+  h2 { font-size: 14px; font-weight: 700; margin: 24px 0 10px;
+       color: #1e293b; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  table {
+    width: 100%; background: #fff; border-collapse: separate; border-spacing: 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04); border-radius: 8px; overflow: hidden;
+  }
+  th, td { padding: 8px 12px; text-align: left; font-size: 12px;
+           border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+  th { background: #f8fafc; color: #475569; font-weight: 600;
+       text-transform: uppercase; letter-spacing: 0.04em; font-size: 10px;
+       white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: none; }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px;
+           font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
+           text-transform: uppercase; }
+  .badge.shadow { background: #e0f2fe; color: #0369a1; }
+  .badge.live   { background: #dcfce7; color: #166534; }
+  .badge.fired, .badge.succeeded { background: #dcfce7; color: #166534; }
+  .badge.failed, .badge.timeout  { background: #fee2e2; color: #991b1b; }
+  .badge.skipped_cron_window     { background: #f1f5f9; color: #64748b; }
+  .badge.skipped_dependency      { background: #fef3c7; color: #92400e; }
+  .badge.skipped_cost            { background: #fef3c7; color: #92400e; }
+  .badge.skipped_already_running { background: #fef3c7; color: #92400e; }
+  .badge.skipped_disabled        { background: #f1f5f9; color: #64748b; }
+
+  .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Monaco, monospace;
+          font-size: 11px; }
+  .dim { color: #94a3b8; }
+  .err { color: #991b1b; font-size: 11px; max-width: 600px; white-space: pre-wrap;
+         font-family: ui-monospace, SFMono-Regular, "SF Mono", Monaco, monospace; }
+  .row-failed { background: #fef2f2; }
+  .row-stale  { background: #fff7ed; }
+
+  #status { color: #94a3b8; font-size: 12px; }
+  #error  { color: #991b1b; padding: 12px; background: #fef2f2; border-radius: 6px;
+            margin: 12px 0; display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Cron audit</h1>
+  <span class="subtitle">orch_jobs state · orch_runs window</span>
+  <div class="right">
+    <span id="status">loading…</span>
+    <select id="hours">
+      <option value="1">last 1h</option>
+      <option value="6">last 6h</option>
+      <option value="24" selected>last 24h</option>
+      <option value="72">last 72h</option>
+      <option value="168">last 7d</option>
+    </select>
+    <button id="reload">Refresh</button>
+    <button id="reset-secret">Reset secret</button>
+  </div>
+</header>
+
+<div class="container">
+  <div id="error"></div>
+
+  <h2>Summary (window)</h2>
+  <div class="summary" id="summary"></div>
+
+  <h2>Jobs</h2>
+  <table id="jobs-table">
+    <thead><tr>
+      <th>Job</th><th>Mode</th><th>Cadence</th><th>Last succeeded</th>
+      <th>Last failed</th><th>Last error / skip reason</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>Recent fires + failures (window)</h2>
+  <table id="runs-table">
+    <thead><tr>
+      <th>When</th><th>Job</th><th>Status</th><th>Duration</th><th>Reason / error</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+const ADMIN_KEY    = 'db_admin_secret';
+
+function getAdminSecret() {
+  let s = localStorage.getItem(ADMIN_KEY);
+  if (!s) {
+    s = (prompt('Admin secret:') || '').trim();
+    if (s) localStorage.setItem(ADMIN_KEY, s);
+  }
+  return s;
+}
+function clearAdminSecret() { localStorage.removeItem(ADMIN_KEY); }
+
+async function fetchStatus(hours) {
+  const secret = getAdminSecret();
+  if (!secret) throw new Error('Admin secret required');
+  const url = `${SUPABASE_URL}/functions/v1/admin-orch-status?hours=${hours}`;
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${ANON_KEY}`,
+      apikey: ANON_KEY,
+      'x-admin-secret': secret,
+      'Content-Type': 'application/json',
+    },
+    body: '{}',
+  });
+  if (r.status === 401) {
+    clearAdminSecret();
+    throw new Error('Admin secret rejected — refresh and re-enter');
+  }
+  if (!r.ok) {
+    throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0,200)}`);
+  }
+  return r.json();
+}
+
+function fmtRelTime(iso) {
+  if (!iso) return '—';
+  const t = new Date(iso).getTime();
+  const dt = Date.now() - t;
+  const s = Math.floor(dt / 1000);
+  if (s < 60)        return `${s}s ago`;
+  if (s < 3600)      return `${Math.floor(s/60)}m ago`;
+  if (s < 86400)     return `${Math.floor(s/3600)}h ago`;
+  return `${Math.floor(s/86400)}d ago`;
+}
+
+function fmtAbsTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toISOString().slice(0,16).replace('T', ' ') + ' UTC';
+}
+
+function fmtCadence(job) {
+  if (job.cadence_kind === 'every_n_minutes') return `every ${job.cadence_param} min`;
+  if (job.cadence_kind === 'hourly_at')       return `hourly :${String(job.cadence_param).padStart(2,'0')}`;
+  if (job.cadence_kind === 'daily_at')        return `daily ${job.cadence_param}`;
+  if (job.cadence_kind === 'weekly_on_at')    return `weekly ${job.cadence_param}`;
+  if (job.cadence_kind === 'monthly_on_at')   return `monthly ${job.cadence_param}`;
+  if (job.cadence_kind === 'custom_cron')     return `cron \`${job.cron_expr}\``;
+  return job.cadence_kind;
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+function renderSummary(summary, hours) {
+  const order = ['fired','succeeded','failed','timeout','shadow',
+                 'skipped_cron_window','skipped_dependency','skipped_cost',
+                 'skipped_already_running','skipped_disabled'];
+  const totals = order
+    .filter(k => summary[k])
+    .map(k => ({ k, n: summary[k] }));
+
+  // Also surface anything unknown
+  Object.keys(summary).forEach(k => {
+    if (!order.includes(k) && summary[k]) totals.push({ k, n: summary[k] });
+  });
+
+  const sumPills = totals.map(({k, n}) => {
+    let cls = 'pill';
+    if (k === 'succeeded' || k === 'fired') cls += ' succeeded';
+    else if (k === 'failed' || k === 'timeout') cls += ' failed';
+    else if (k === 'shadow') cls += ' shadow';
+    else if (k === 'skipped_cron_window') cls += ' window';
+    return `<div class="${cls}">
+      <div class="n">${n}</div>
+      <div class="lbl">${k.replace('skipped_', 'skip · ')}</div>
+    </div>`;
+  }).join('');
+
+  const empty = totals.length === 0
+    ? `<div class="pill"><div class="n">0</div><div class="lbl">No events in ${hours}h</div></div>`
+    : '';
+
+  document.getElementById('summary').innerHTML = sumPills + empty;
+}
+
+function renderJobs(jobs) {
+  const tbody = document.querySelector('#jobs-table tbody');
+  tbody.innerHTML = jobs.map(j => {
+    const mode = j.shadow_mode
+      ? '<span class="badge shadow">SHADOW</span>'
+      : '<span class="badge live">LIVE</span>';
+    const succ = j.last_succeeded_at
+      ? `<span title="${fmtAbsTime(j.last_succeeded_at)}">${fmtRelTime(j.last_succeeded_at)}</span>`
+      : '<span class="dim">never</span>';
+    const fail = j.last_failed_at
+      ? `<span title="${fmtAbsTime(j.last_failed_at)}">${fmtRelTime(j.last_failed_at)}</span>`
+      : '<span class="dim">—</span>';
+    const isFailed = j.last_failed_at && (!j.last_succeeded_at ||
+                     new Date(j.last_failed_at) > new Date(j.last_succeeded_at));
+    const errOrSkip = j.last_error
+      ? `<div class="err">${escapeHtml(j.last_error).slice(0,400)}</div>`
+      : j.last_skip_reason
+        ? `<span class="dim">${escapeHtml(j.last_skip_reason).slice(0,200)}</span>`
+        : '';
+    const rowCls = isFailed ? 'row-failed' : '';
+    return `<tr class="${rowCls}">
+      <td><strong>${escapeHtml(j.job_name)}</strong><br>
+          <span class="dim mono">${escapeHtml(j.worker_kind)} · ${escapeHtml(j.worker_target).slice(0,60)}</span>
+      </td>
+      <td>${mode}</td>
+      <td class="mono">${escapeHtml(fmtCadence(j))}</td>
+      <td>${succ}</td>
+      <td>${fail}</td>
+      <td>${errOrSkip}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderRuns(runs) {
+  const tbody = document.querySelector('#runs-table tbody');
+  if (!runs.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="dim" style="padding:24px;text-align:center;">
+      No fires or failures in window. All quiet.
+    </td></tr>`;
+    return;
+  }
+  tbody.innerHTML = runs.map(r => {
+    const cls = `badge ${r.status}`;
+    const rowCls = (r.status === 'failed' || r.status === 'timeout') ? 'row-failed' : '';
+    const dur = r.duration_ms != null ? `${(r.duration_ms/1000).toFixed(1)}s` : '';
+    const detail = r.error_msg
+      ? `<div class="err">${escapeHtml(r.error_msg).slice(0,400)}</div>`
+      : r.skip_reason
+        ? `<span class="dim">${escapeHtml(r.skip_reason).slice(0,200)}</span>`
+        : '';
+    return `<tr class="${rowCls}">
+      <td title="${fmtAbsTime(r.started_at)}">${fmtRelTime(r.started_at)}</td>
+      <td><strong>${escapeHtml(r.job_name)}</strong></td>
+      <td><span class="${cls}">${r.status}</span></td>
+      <td>${dur}</td>
+      <td>${detail}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function load() {
+  const hours = parseInt(document.getElementById('hours').value, 10);
+  const errBox = document.getElementById('error');
+  const statusEl = document.getElementById('status');
+  errBox.style.display = 'none';
+  statusEl.textContent = 'loading…';
+  try {
+    const data = await fetchStatus(hours);
+    renderSummary(data.summary || {}, hours);
+    renderJobs(data.jobs || []);
+    renderRuns(data.runs || []);
+    statusEl.textContent = `as of ${new Date(data.generated_at).toLocaleTimeString()} · window ${hours}h`;
+  } catch (e) {
+    errBox.textContent = e.message;
+    errBox.style.display = 'block';
+    statusEl.textContent = 'error';
+  }
+}
+
+document.getElementById('reload').addEventListener('click', load);
+document.getElementById('hours').addEventListener('change', load);
+document.getElementById('reset-secret').addEventListener('click', () => {
+  clearAdminSecret();
+  location.reload();
+});
+
+load();
+// Auto-refresh every 60s
+setInterval(load, 60000);
+</script>
+</body>
+</html>

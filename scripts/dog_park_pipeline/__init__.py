@@ -33,7 +33,6 @@ from .dp_photos import (
     dp_photos_load_flickr,
     dp_photos_load_wikimedia,
     dp_photos_load_websearch,
-    dp_photos_vision_tag,
     dp_photos_curate,
 )
 
@@ -52,6 +51,5 @@ __all__ = [
     "dp_photos_load_flickr",
     "dp_photos_load_wikimedia",
     "dp_photos_load_websearch",
-    "dp_photos_vision_tag",
     "dp_photos_curate",
 ]

@@ -33,14 +33,15 @@ from . import (
     dp_photos_load_flickr,
     dp_photos_load_wikimedia,
     dp_photos_load_websearch,
-    dp_photos_vision_tag,
     dp_photos_curate,
 )
 
 
 # Optimal order — CA proof point 2026-05-25 LATE: 0% → 79.5%.
-# Photo ops appended 2026-06-01: load → vision-tag → curate runs AFTER
-# retry_no_match so the catalog is complete before per-DP photo work.
+# Photo ops appended 2026-06-01 (post DE experiment): load (biased
+# Tavily for DPs) → curate (additive, top-3 by sort_order, no vision).
+# Vision tagging dropped for DPs — Tavily's LLM-augmented relevance
+# is the sort signal. See [[dp-loader-dog-bias]].
 OPS = [
     ("preflight",            lambda s: preflight_check(s)),
     ("pip_address_city",     lambda s: pip_address_city_backfill(s)),
@@ -53,7 +54,6 @@ OPS = [
     ("dp_photos_load_flickr",    lambda s: dp_photos_load_flickr(s)),
     ("dp_photos_load_wikimedia", lambda s: dp_photos_load_wikimedia(s)),
     ("dp_photos_load_websearch", lambda s: dp_photos_load_websearch(s)),
-    ("dp_photos_vision_tag",     lambda s: dp_photos_vision_tag(s)),
     ("dp_photos_curate",         lambda s: dp_photos_curate(s)),
 ]
 

@@ -602,13 +602,14 @@ def dp_photo_vision_tags(
 
 @asset(
     partitions_def=state_partitions,
-    deps=[dp_photo_vision_tags],
+    deps=[dp_photos_websearch],
     group_name="phase_31_dp_photos",
     description=(
-        "Vision-gated curation for dog parks. Top 3 photos per park ranked "
-        "by sort_order, filtered to those whose vision tag passes "
-        "(has_dog=true OR scene in outdoor/park/beach) AND no quality_issue. "
-        "Marks curated_at=now() so they render via anon RLS."
+        "Additive curation for dog parks. Top 3 websearch photos per park "
+        "ranked by Tavily's own relevance order (sort_order). NO vision "
+        "tagging — biased Tavily query already returns dog content directly. "
+        "Only operates on parks with ZERO existing curated photos; existing "
+        "picks are preserved. See [[dp-loader-dog-bias]]."
     ),
 )
 def dp_photos_curate(
@@ -620,27 +621,32 @@ def dp_photos_curate(
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                WITH ranked AS (
+                WITH gap_parks AS (
+                  SELECT g.fid
+                    FROM public.dog_parks_gold g
+                   WHERE g.state = %s AND g.is_active AND g.is_scoreable
+                     AND NOT EXISTS (
+                       SELECT 1 FROM public.dog_park_photos p
+                        WHERE p.dog_park_fid = g.fid
+                          AND p.curated_at IS NOT NULL
+                          AND p.hidden_at IS NULL
+                     )
+                ),
+                ranked AS (
                   SELECT p.id, p.dog_park_fid,
                          ROW_NUMBER() OVER (
                            PARTITION BY p.dog_park_fid
                            ORDER BY p.sort_order ASC NULLS LAST, p.id ASC
                          ) AS rk
                     FROM public.dog_park_photos p
-                    JOIN public.dog_parks_gold g ON g.fid = p.dog_park_fid
-                   WHERE g.state = %s
+                    JOIN gap_parks gp ON gp.fid = p.dog_park_fid
+                   WHERE p.source = 'websearch'
                      AND p.curated_at IS NULL
                      AND p.hidden_at IS NULL
-                     -- Policy 2026-06-01 [[dp-photos-are-dog-only]]:
-                     -- DP photos must show a visible dog. is_dog_park_relevant
-                     -- captures fences / equipment / signage which are valid
-                     -- DP content but not what users want to see.
-                     AND (p.source_meta -> 'vision' ->> 'has_dog')::boolean = true
-                     AND COALESCE(p.source_meta -> 'vision' ->> 'quality_issue', 'none') = 'none'
                 )
                 UPDATE public.dog_park_photos p
                    SET curated_at = now(),
-                       curated_by = 'vision-auto',
+                       curated_by = 'loader-bias',
                        match_quality = 'medium'
                   FROM ranked r
                  WHERE p.id = r.id AND r.rk <= 3

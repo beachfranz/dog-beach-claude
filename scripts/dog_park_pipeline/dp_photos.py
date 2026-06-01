@@ -118,68 +118,25 @@ def dp_photos_load_websearch(state: str, **kw) -> dict:
     return out
 
 
-def dp_photos_vision_tag(state: str, budget_usd: float = 50.0, **kw) -> dict:
-    """Two-pass Haiku vision tagger for DP photos.
-
-    Schema v4 (added is_dog_park_relevant). Chunks at 50 photos / call, up
-    to 20 chunks per state (~1,000 photos cap per state-launch — generous
-    for typical state DP populations of ~100-200 parks × ~5 photos each).
-
-    Cost: ~$0.005 per photo; ~$50 max per state at the cap.
-    """
-    started = datetime.now(timezone.utc)
-    fids = _state_dp_fids(state)
-    if not fids:
-        return {"op": "dp_photos_vision_tag", "state": state, "fids": 0,
-                "tagged": 0, "chunks_done": 0, "chunks_failed": 0,
-                "skipped_reason": "no_dp_fids"}
-    repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    total = done = failed = 0
-    max_chunks = 20
-    for ci in range(max_chunks):
-        args = [sys.executable, "scripts/load_photo_vision_tags.py",
-                "--entity", "dog_park", "--state", state,
-                "--chunk-size", "50", "--workers", "4",
-                "--budget-usd", str(budget_usd)]
-        try:
-            result = subprocess.run(args, cwd=repo, capture_output=True,
-                                    text=True, timeout=900)
-        except subprocess.TimeoutExpired:
-            failed += 1
-            print(f"    vision chunk {ci+1} timed out", flush=True)
-            break
-        if result.returncode != 0:
-            failed += 1
-            tail = (result.stderr or "")[-300:]
-            print(f"    vision chunk {ci+1} failed: {tail}", flush=True)
-            break
-        m = re.search(r"ok=(\d+)", result.stdout or "")
-        if not m:
-            break
-        n = int(m.group(1))
-        total += n
-        done += 1
-        if n == 0:
-            # Nothing else to tag — schema_version freshness gate kicked in
-            break
-    return {"op": "dp_photos_vision_tag", "state": state, "fids": len(fids),
-            "tagged": total, "chunks_done": done, "chunks_failed": failed}
-
-
 def dp_photos_curate(state: str, **kw) -> dict:
-    """Pick top-3 best photos per DP via the v4 vision-aware gate.
+    """Pick top-3 photos per DP via Tavily's own relevance order.
 
-    Gate (matches Dagster `dp_photos_curate` asset + the dog-only
-    policy migration `20260601_dp_curate_dog_only.sql`):
+    NO VISION TAGGING. The DE proof-of-concept (2026-06-01) showed
+    that the biased Tavily query ("<name> dog park <city> <state>
+    dogs playing") returns dog-content directly in relevance order;
+    the post-load Haiku vision-tag + has_dog gate was redundant.
 
+    Gate (no vision required):
       curated_at IS NULL  AND  hidden_at IS NULL
-      AND vision.has_dog = true
-      AND COALESCE(vision.quality_issue, 'none') = 'none'
+      AND source = 'websearch'
 
-    Per [[dp-photos-are-dog-only]] (Franz 2026-06-01): DP photos must
-    show a visible dog. is_dog_park_relevant / scene tags captured
-    valid but non-canine DP content (fences, signage, equipment) that
-    users didn't want to see.
+    ADDITIVE — only operates on parks with ZERO existing curated
+    photos. Existing curated picks (vision-auto, Curated:Human,
+    experiment:no-vision) are preserved. Once a park has loader-bias
+    picks this is a no-op on it. Per Franz directive 2026-06-01:
+    "I do not want you to wipe out what I've already curated."
+
+    See [[dp-loader-dog-bias]] and [[dp-photos-are-dog-only]].
 
     Stamps curated_at=now(), curated_by='vision-auto', match_quality='medium'.
     Idempotent — only operates on uncurated rows; existing 'vision-auto'
@@ -189,23 +146,32 @@ def dp_photos_curate(state: str, **kw) -> dict:
     try:
         with conn.cursor() as cur:
             cur.execute("""
-              WITH ranked AS (
+              WITH gap_parks AS (
+                SELECT g.fid
+                  FROM public.dog_parks_gold g
+                 WHERE g.state = %s AND g.is_active AND g.is_scoreable
+                   AND NOT EXISTS (
+                     SELECT 1 FROM public.dog_park_photos p
+                      WHERE p.dog_park_fid = g.fid
+                        AND p.curated_at IS NOT NULL
+                        AND p.hidden_at IS NULL
+                   )
+              ),
+              ranked AS (
                 SELECT p.id, p.dog_park_fid,
                        ROW_NUMBER() OVER (
                          PARTITION BY p.dog_park_fid
                          ORDER BY p.sort_order ASC NULLS LAST, p.id ASC
                        ) AS rk
                   FROM public.dog_park_photos p
-                  JOIN public.dog_parks_gold g ON g.fid = p.dog_park_fid
-                 WHERE g.state = %s
+                  JOIN gap_parks gp ON gp.fid = p.dog_park_fid
+                 WHERE p.source = 'websearch'
                    AND p.curated_at IS NULL
                    AND p.hidden_at IS NULL
-                   AND (p.source_meta -> 'vision' ->> 'has_dog')::boolean = true
-                   AND COALESCE(p.source_meta -> 'vision' ->> 'quality_issue', 'none') = 'none'
               )
               UPDATE public.dog_park_photos p
                  SET curated_at    = now(),
-                     curated_by    = 'vision-auto',
+                     curated_by    = 'loader-bias',
                      match_quality = 'medium'
                 FROM ranked r
                WHERE p.id = r.id AND r.rk <= 3

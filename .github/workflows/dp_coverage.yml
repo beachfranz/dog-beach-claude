@@ -34,8 +34,10 @@ on:
         description: 'Comma-separated op names to run (others skipped); blank = all'
         required: false
         default: ''
-  schedule:
-    - cron: '0 8 1 * *'   # 1st of month at 08:00 UTC
+  # The monthly schedule lives in public.orch_jobs (cadence monthly_on_at
+  # '1:08:00') instead of here, to keep the GH workflow as a single-source
+  # responder and avoid double-fire alongside the orchestrator. Re-add a
+  # `schedule:` block if you ever decommission orch_jobs.
 
 # Avoid clobbering an in-flight run if a manual dispatch fires while a
 # scheduled run is still going.

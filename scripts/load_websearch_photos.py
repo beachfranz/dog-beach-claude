@@ -229,7 +229,11 @@ def replace_websearch(fid: int, images: list[dict], results: list[dict],
         # web-search hits like "Pinterest pin titled 'beach'".
         if can_centroid:
             haystack = " ".join(filter(None, [desc or "", page_url or "", host or ""]))
-            if tight_name_match(entity_name, haystack):
+            # Per Franz 2026-06-01: dog-bias lessens (does not eliminate)
+            # tight_name_match strictness. Loader-bias queries narrow the
+            # result set with a dog cue; majority of distinctive tokens
+            # is enough evidence to centroid-stamp.
+            if tight_name_match(entity_name, haystack, strictness="majority"):
                 row["lat"] = entity_lat
                 row["lng"] = entity_lon
                 row["distance_m"] = 0
@@ -284,10 +288,11 @@ def main():
             if args.entity == "dog_park":
                 parts.append("dogs playing")
             # Beach-content bias (Franz 2026-06-01 [[apply-loader-bias-to-beach-photos]]).
-            # Mirrors the DP win on a smaller dial — broad scenic cue; the downstream
-            # vision tagger + diverse selector still decide which photos surface.
+            # First attempt used "scenic beach view" — returned scenic content but
+            # zero dogs. This is a DOG-beach app; the bias must be dog-centric
+            # like the DP version. Mirroring the DP cue verbatim.
             elif args.entity == "beach":
-                parts.append("scenic beach view")
+                parts.append("dogs playing")
             query = " ".join(parts)
 
             r = tavily_image_search(query, k=args.per_entity)

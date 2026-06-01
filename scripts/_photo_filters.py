@@ -68,20 +68,30 @@ def is_wrong_beach(alt_text: str, target_tokens: set[str]) -> bool:
     return True  # Caption names a different specific beach
 
 
-def tight_name_match(entity_name: str, haystack: str) -> bool:
-    """Strict centroid-attribution gate for non-geo photo sources
-    (websearch, unsplash). Returns True iff the haystack (description +
-    page_url + host) contains ALL distinctive tokens from entity_name.
-
-    "Distinctive" = name tokens minus _GENERIC_TOKENS (beach/park/bay/etc).
-    If the name has zero distinctive tokens (e.g., "Main Beach"), returns
-    False — the name is too generic to safely centroid-attribute.
+def tight_name_match(entity_name: str, haystack: str,
+                     *, strictness: str = "all") -> bool:
+    """Centroid-attribution gate for non-geo photo sources (websearch,
+    unsplash). Returns True iff the haystack (description + page_url +
+    host) contains enough of the distinctive tokens from entity_name.
 
     Used by load_websearch_photos + backfill scripts to decide whether
     to stamp the beach's centroid (lat/lng/distance_m=0) on a photo
     whose source didn't supply GPS. Without this gate we'd happily
     attribute Pinterest pins of random beaches to whatever fid we
     happened to query for.
+
+    "Distinctive" = name tokens minus _GENERIC_TOKENS (beach/park/bay/etc).
+    If the name has zero distinctive tokens (e.g., "Main Beach"), returns
+    False — the name is too generic to safely centroid-attribute.
+
+    strictness:
+      'all'      — require every distinctive token (default; back-compat).
+      'majority' — require strictly more than half of distinctive tokens.
+                   Use when the caller is fid-scoped AND the query
+                   includes a content-disambiguating cue ("dogs playing")
+                   that lessens the cross-beach mis-attribution risk.
+                   Per Franz directive 2026-06-01: dog-bias LESSENS the
+                   strictness, doesn't eliminate it.
     """
     if not entity_name or not haystack:
         return False
@@ -89,7 +99,15 @@ def tight_name_match(entity_name: str, haystack: str) -> bool:
     if not tokens:
         return False
     hay_words = {w.lower() for w in re.findall(r"[A-Za-z]+", haystack)}
-    return tokens.issubset(hay_words)
+    matched = len(tokens & hay_words)
+    n = len(tokens)
+    if strictness == "all":
+        return matched == n
+    elif strictness == "majority":
+        # > N/2; for N=1 still requires the lone token (1/1)
+        return matched > (n / 2)
+    else:
+        raise ValueError(f"unknown strictness={strictness!r}")
 
 
 def haversine_m(la1: float, lo1: float, la2: float, lo2: float) -> float:

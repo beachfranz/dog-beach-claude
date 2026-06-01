@@ -41,6 +41,12 @@ def main():
     grp.add_argument("--state", help="2-letter state code")
     grp.add_argument("--full", action="store_true")
     grp.add_argument("--fids", help="Comma-separated entity fids")
+    ap.add_argument("--strictness", default="all", choices=["all", "majority"],
+                    help="tight_name_match strictness. 'all' (default, every "
+                         "distinctive token must appear) or 'majority' (>N/2 "
+                         "tokens). Use 'majority' for dog-biased fid-scoped "
+                         "loads per [[no-unilateral-architectural-decisions]] "
+                         "+ [[this-is-a-dog-app]].")
     ap.add_argument("--dry-run", action="store_true",
                     help="Report counts; no UPDATE")
     args = ap.parse_args()
@@ -93,7 +99,7 @@ def main():
         desc = meta.get("description") or ""
         host = meta.get("host") or ""
         haystack = " ".join(filter(None, [desc, page_url or "", host]))
-        if not tight_name_match(name, haystack):
+        if not tight_name_match(name, haystack, strictness=args.strictness):
             skipped_nomatch += 1
             by_source[source]["skipped"] += 1
             continue

@@ -1,0 +1,1120 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>30 dog parks · auto-curated</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0;
+    font-family: 'DM Sans', -apple-system, system-ui, sans-serif;
+    background:#f1f5f9; color:#0f2742; font-size:13px;
+  }
+  header.page {
+    padding:14px 24px; background:#0f2742; color:#fff;
+    display:flex; align-items:center; gap:16px; border-bottom:3px solid #fbbf24;
+  }
+  header.page h1 { margin:0; font-size:18px; font-weight:700; letter-spacing:0.02em; }
+  header.page .subtitle { color:#94a3b8; font-size:12px; }
+  header.page .filters { margin-left:auto; display:flex; gap:6px; }
+  .filter {
+    padding:6px 12px; background:rgba(255,255,255,0.08);
+    border:1px solid rgba(255,255,255,0.14); color:#cbd5e1;
+    border-radius:6px; font-size:12px; cursor:pointer;
+  }
+  .filter:hover, .filter.active { background:rgba(255,255,255,0.2); color:#fff; }
+  main { padding:18px 24px; max-width:1600px; margin:0 auto; }
+  .grid {
+    display:grid; gap:14px;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  }
+  .card {
+    background:#fff; border-radius:8px; overflow:hidden;
+    box-shadow:0 1px 3px rgba(0,0,0,0.04);
+    border:1px solid #e2e8f0;
+    transition: box-shadow 0.15s ease;
+  }
+  .card:hover { box-shadow:0 4px 12px rgba(0,0,0,0.08); }
+  .card.hidden { display:none; }
+  .card header { padding:10px 12px 8px; border-bottom:1px solid #f1f5f9; }
+  .card .name { font-size:14px; font-weight:700; color:#0f172a; line-height:1.25; }
+  .card .loc { font-size:11px; color:#475569; margin-top:2px; }
+  .dim { color:#94a3b8; }
+  .strip {
+    display:grid; grid-template-columns: repeat(3, 1fr);
+    gap:2px; background:#f1f5f9;
+  }
+  .photo {
+    position:relative; aspect-ratio: 1 / 1; overflow:hidden;
+    background:#e2e8f0; display:block; text-decoration:none; color:inherit;
+  }
+  .photo img {
+    width:100%; height:100%; object-fit:cover; display:block;
+    transition: transform 0.25s ease;
+  }
+  .photo:hover img { transform:scale(1.03); }
+  .photo .ph-attr {
+    position:absolute; bottom:0; left:0; right:0;
+    background: linear-gradient(to top, rgba(0,0,0,0.75), rgba(0,0,0,0));
+    color:#fff; padding: 16px 6px 4px;
+    font-size: 9px; line-height:1.2;
+    opacity:0; transition:opacity 0.15s ease;
+  }
+  .photo:hover .ph-attr { opacity:1; }
+  .ph-src {
+    display:inline-block; padding:1px 4px; background:rgba(255,255,255,0.15);
+    border-radius:3px; font-weight:600; margin-right:4px;
+  }
+  .ph-by { opacity:0.9; }
+  .stats { color:#64748b; font-size:12px; }
+  .stats strong { color:#0f172a; }
+</style>
+</head>
+<body>
+<header class="page">
+  <h1>30 dog parks · auto-curated</h1>
+  <span class="subtitle">10 each in CA · OR · WA · top 3 photos per park · hover for attribution</span>
+  <div class="filters">
+    <button class="filter active" data-state="ALL">All <span class="dim">(30)</span></button>
+    <button class="filter" data-state="CA">CA <span class="dim">(10)</span></button>
+    <button class="filter" data-state="OR">OR <span class="dim">(10)</span></button>
+    <button class="filter" data-state="WA">WA <span class="dim">(10)</span></button>
+  </div>
+</header>
+
+<main>
+  <div class="grid" id="grid">
+      <article class="card" data-state="CA">
+        <header>
+          <div class="name">Miyuki Dog Park</div>
+          <div class="loc">San Jose, CA · <span class="dim">fid 333 · 12 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/28156071@N00/6139164226" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/6088/6139164226_d723e99176_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/6088/6139164226_d723e99176_b.jpg'"
+                 alt="Miyuki Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© donjd2 / CC-BY-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/28156071@N00/6138613691" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/6178/6138613691_daa10416fa_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/6178/6138613691_daa10416fa_b.jpg'"
+                 alt="Miyuki Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© donjd2 / CC-BY-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/28156071@N00/6139163610" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/6161/6139163610_f845a82b2c_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/6161/6139163610_f845a82b2c_b.jpg'"
+                 alt="Miyuki Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© donjd2 / CC-BY-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="CA">
+        <header>
+          <div class="name">San Mateo Dog Park</div>
+          <div class="loc">San Mateo, CA · <span class="dim">fid 334 · 12 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/64184609@N00/53170778524" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/53170778524_6bb7002898_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/53170778524_6bb7002898_b.jpg'"
+                 alt="San Mateo Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Ted Drake / CC-BY-ND-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/64184609@N00/53165629913" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/53165629913_aa4a620cd8_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/53165629913_aa4a620cd8_b.jpg'"
+                 alt="San Mateo Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Ted Drake / CC-BY-ND-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/64184609@N00/53165145861" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/53165145861_4c3774269c_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/53165145861_4c3774269c_b.jpg'"
+                 alt="San Mateo Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Ted Drake / CC-BY-ND-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="CA">
+        <header>
+          <div class="name">Off-leash Dog Area</div>
+          <div class="loc">San Francisco, CA · <span class="dim">fid 367 · 12 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/43982795@N03/49843710922" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/49843710922_3930ede752_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/49843710922_3930ede752_b.jpg'"
+                 alt="Off-leash Dog Area">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© mksfca / CC-BY-NC-ND-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/43982795@N03/49843405276" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/49843405276_9422a2b60d_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/49843405276_9422a2b60d_b.jpg'"
+                 alt="Off-leash Dog Area">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© mksfca / CC-BY-NC-ND-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/43982795@N03/49843709227" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/49843709227_70256220dd_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/49843709227_70256220dd_b.jpg'"
+                 alt="Off-leash Dog Area">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© mksfca / CC-BY-NC-ND-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="CA">
+        <header>
+          <div class="name">Bear Dog Park</div>
+          <div class="loc">Roseville, CA · <span class="dim">fid 345 · 10 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/12385792@N00/34005487703" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/4271/34005487703_10811e5b7e_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/4271/34005487703_10811e5b7e_b.jpg'"
+                 alt="Bear Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Tom Dibble / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/12385792@N00/34682409851" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/4155/34682409851_4b6e9ec478_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/4155/34682409851_4b6e9ec478_b.jpg'"
+                 alt="Bear Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Tom Dibble / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/12385792@N00/34428759950" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/4274/34428759950_ccd46da1e0_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/4274/34428759950_ccd46da1e0_b.jpg'"
+                 alt="Bear Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Tom Dibble / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="CA">
+        <header>
+          <div class="name">Huntington Beach Dog Park</div>
+          <div class="loc">Huntington Beach, CA · <span class="dim">fid 517 · 10 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/17726320@N03/54007550866" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/54007550866_f32fbe9d24_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/54007550866_f32fbe9d24_b.jpg'"
+                 alt="Huntington Beach Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Kalboz / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/17726320@N03/54007779173" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/54007779173_56c74c7322_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/54007779173_56c74c7322_b.jpg'"
+                 alt="Huntington Beach Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Kalboz / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/17726320@N03/54007881254" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/54007881254_62698870b5_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/54007881254_62698870b5_b.jpg'"
+                 alt="Huntington Beach Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Kalboz / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="CA">
+        <header>
+          <div class="name">Toad Hollow Dog Park</div>
+          <div class="loc">Davis, CA · <span class="dim">fid 331 · 9 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/9048128@N07/52979206176" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/52979206176_a15bae110e_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/52979206176_a15bae110e_b.jpg'"
+                 alt="Toad Hollow Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Petr Kosina / CC-BY-NC-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/9048128@N07/52979353184" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/52979353184_21bcdcb411_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/52979353184_21bcdcb411_b.jpg'"
+                 alt="Toad Hollow Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Petr Kosina / CC-BY-NC-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/9048128@N07/52979206041" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/52979206041_01b542c1aa_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/52979206041_01b542c1aa_b.jpg'"
+                 alt="Toad Hollow Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Petr Kosina / CC-BY-NC-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="CA">
+        <header>
+          <div class="name">Centennial Dog Park</div>
+          <div class="loc">South San Francisco, CA · <span class="dim">fid 349 · 9 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/79107734@N00/54558717885" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/54558717885_6242b1972b_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/54558717885_6242b1972b_b.jpg'"
+                 alt="Centennial Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Seth Tisue / CC-BY-SA-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/79107734@N00/54558568894" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/54558568894_05ca9c8ba5_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/54558568894_05ca9c8ba5_b.jpg'"
+                 alt="Centennial Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Seth Tisue / CC-BY-SA-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/79107734@N00/54558568854" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/54558568854_23e85a23dd_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/54558568854_23e85a23dd_b.jpg'"
+                 alt="Centennial Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Seth Tisue / CC-BY-SA-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="CA">
+        <header>
+          <div class="name">Hap Magee Ranch Dog Park</div>
+          <div class="loc">Alamo, CA · <span class="dim">fid 355 · 9 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/12078789@N00/11370928014" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/3805/11370928014_fe4823d048_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/3805/11370928014_fe4823d048_b.jpg'"
+                 alt="Hap Magee Ranch Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Dan Harrelson / CC-BY-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/12078789@N00/14273997290" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/3854/14273997290_babbe07f24_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/3854/14273997290_babbe07f24_b.jpg'"
+                 alt="Hap Magee Ranch Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Dan Harrelson / CC-BY-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/12078789@N00/14273725920" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/5573/14273725920_46e12cae34_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/5573/14273725920_46e12cae34_b.jpg'"
+                 alt="Hap Magee Ranch Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Dan Harrelson / CC-BY-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="CA">
+        <header>
+          <div class="name">City Hall Dog Park</div>
+          <div class="loc">San Carlos, CA · <span class="dim">fid 364 · 9 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/51035555243@N01/53917767391" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/53917767391_c58317b73b_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/53917767391_c58317b73b_b.jpg'"
+                 alt="City Hall Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Thomas Hawk / CC-BY-NC-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/51035555243@N01/54130324931" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/54130324931_86657f904a_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/54130324931_86657f904a_b.jpg'"
+                 alt="City Hall Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Thomas Hawk / CC-BY-NC-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/51035555243@N01/53893044209" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/53893044209_40f2d314b8_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/53893044209_40f2d314b8_b.jpg'"
+                 alt="City Hall Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Thomas Hawk / CC-BY-NC-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="CA">
+        <header>
+          <div class="name">Main Street Dog Park</div>
+          <div class="loc">Alameda, CA · <span class="dim">fid 368 · 9 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/51035555243@N01/54419467528" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/54419467528_70f237c7ac_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/54419467528_70f237c7ac_b.jpg'"
+                 alt="Main Street Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Thomas Hawk / CC-BY-NC-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/51035555243@N01/54349390663" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/54349390663_11c4c43218_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/54349390663_11c4c43218_b.jpg'"
+                 alt="Main Street Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Thomas Hawk / CC-BY-NC-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/51035555243@N01/54437857324" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/54437857324_db6350a755_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/54437857324_db6350a755_b.jpg'"
+                 alt="Main Street Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Thomas Hawk / CC-BY-NC-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="OR">
+        <header>
+          <div class="name">Medford Dog Park</div>
+          <div class="loc">Medford, OR · <span class="dim">fid 23 · 9 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/38235069@N00/26237037720" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/1629/26237037720_617a054282_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/1629/26237037720_617a054282_b.jpg'"
+                 alt="Medford Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© PDQuesnell / CC-BY-NC-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/38235069@N00/25907028873" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/1669/25907028873_f237fb90d2_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/1669/25907028873_f237fb90d2_b.jpg'"
+                 alt="Medford Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© PDQuesnell / CC-BY-NC-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/99357189@N00/49754996553" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/49754996553_6ee272c05c_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/49754996553_6ee272c05c_b.jpg'"
+                 alt="Medford Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© dolanh / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="OR">
+        <header>
+          <div class="name">Alton Baker Dog Park</div>
+          <div class="loc">Eugene, OR · <span class="dim">fid 27 · 9 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/167430854@N07/53112327760" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/53112327760_9f747c3d94_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/53112327760_9f747c3d94_b.jpg'"
+                 alt="Alton Baker Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Al Case / CC-BY-NC-ND-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/167430854@N07/48838759541" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/48838759541_54084b6dfb_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/48838759541_54084b6dfb_b.jpg'"
+                 alt="Alton Baker Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Al Case / CC-BY-NC-ND-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/12846252@N07/51416187074" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/51416187074_c2caaa085d_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/51416187074_c2caaa085d_b.jpg'"
+                 alt="Alton Baker Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© C.P. Kirkie / CC0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="OR">
+        <header>
+          <div class="name">Pet Exercise Area</div>
+          <div class="loc">OR · <span class="dim">fid 56 · 9 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/46052415@N08/48531965386" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/48531965386_2d659df87f_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/48531965386_2d659df87f_b.jpg'"
+                 alt="Pet Exercise Area">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Rick Obst / CC-BY-NC-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/46052415@N08/48513273582" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/48513273582_cf3bf51c2c_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/48513273582_cf3bf51c2c_b.jpg'"
+                 alt="Pet Exercise Area">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Rick Obst / CC-BY-NC-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/46052415@N08/48532225167" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/48532225167_8835e950e6_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/48532225167_8835e950e6_b.jpg'"
+                 alt="Pet Exercise Area">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Rick Obst / CC-BY-NC-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="OR">
+        <header>
+          <div class="name">Wallace Park Off-Leash Area</div>
+          <div class="loc">Portland, OR · <span class="dim">fid 70 · 9 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/90692748@N04/54232768738" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/54232768738_193cffcbc8_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/54232768738_193cffcbc8_b.jpg'"
+                 alt="Wallace Park Off-Leash Area">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© docoverachiever / CC-BY-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/74642755@N00/53975996308" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/53975996308_8cb1c42b78_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/53975996308_8cb1c42b78_b.jpg'"
+                 alt="Wallace Park Off-Leash Area">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© jdo83 / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/74642755@N00/53975996068" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/53975996068_a8a45dfc80_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/53975996068_a8a45dfc80_b.jpg'"
+                 alt="Wallace Park Off-Leash Area">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© jdo83 / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="OR">
+        <header>
+          <div class="name">Riverbend Dog Park</div>
+          <div class="loc">Bend, OR · <span class="dim">fid 98 · 9 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/64051964@N02/51361701544" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/51361701544_95ce0ce557_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/51361701544_95ce0ce557_b.jpg'"
+                 alt="Riverbend Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Gail Langellotto / CC-BY-NC-ND-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/64051964@N02/51361702259" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/51361702259_e96ef9619b_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/51361702259_e96ef9619b_b.jpg'"
+                 alt="Riverbend Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Gail Langellotto / CC-BY-NC-ND-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/64051964@N02/51361195733" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/51361195733_84e009d5e4_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/51361195733_84e009d5e4_b.jpg'"
+                 alt="Riverbend Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Gail Langellotto / CC-BY-NC-ND-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="OR">
+        <header>
+          <div class="name">Firehouse Park</div>
+          <div class="loc">The Dalles, OR · <span class="dim">fid 35 · 8 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/84134129@N00/13229236873" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/7086/13229236873_24b0662d72_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/7086/13229236873_24b0662d72_b.jpg'"
+                 alt="Firehouse Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© jordanpattern / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/84767053@N00/34382841683" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/4277/34382841683_96acb0f0a1_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/4277/34382841683_96acb0f0a1_b.jpg'"
+                 alt="Firehouse Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© DB&#x27;s travels / CC-BY-NC-ND-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/84767053@N00/35152077186" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/4232/35152077186_b7b9f02f4e_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/4232/35152077186_b7b9f02f4e_b.jpg'"
+                 alt="Firehouse Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© DB&#x27;s travels / CC-BY-NC-ND-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="OR">
+        <header>
+          <div class="name">Gold Hill Dog Park</div>
+          <div class="loc">Gold Hill, OR · <span class="dim">fid 77 · 8 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/23487245@N08/51050770866" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/51050770866_dbc825e2ba_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/51050770866_dbc825e2ba_b.jpg'"
+                 alt="Gold Hill Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© waterarchives / CC-BY-SA-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/23487245@N08/51050765651" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/51050765651_af1f74f251_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/51050765651_af1f74f251_b.jpg'"
+                 alt="Gold Hill Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© waterarchives / CC-BY-SA-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/22409393@N03/34057498021" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/2882/34057498021_024a335564_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/2882/34057498021_024a335564_b.jpg'"
+                 alt="Gold Hill Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© dcosand / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="OR">
+        <header>
+          <div class="name">Ash Avenue Dog Park</div>
+          <div class="loc">Tigard, OR · <span class="dim">fid 14 · 7 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/35459775@N04/31144932906" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/5805/31144932906_e10ef619eb_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/5805/31144932906_e10ef619eb_b.jpg'"
+                 alt="Ash Avenue Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Portland Seminary / CC-BY-SA-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/40522857@N07/22599255983" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/598/22599255983_c3d2a44054_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/598/22599255983_c3d2a44054_b.jpg'"
+                 alt="Ash Avenue Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© lorenkerns / CC-BY-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/40522857@N07/12207540775" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/7325/12207540775_2c6c83db85_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/7325/12207540775_2c6c83db85_b.jpg'"
+                 alt="Ash Avenue Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© lorenkerns / CC-BY-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="OR">
+        <header>
+          <div class="name">Talent Bark Park</div>
+          <div class="loc">Talent, OR · <span class="dim">fid 31 · 7 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/28364885@N02/51192902322" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/51192902322_2d052f9ecb_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/51192902322_2d052f9ecb_b.jpg'"
+                 alt="Talent Bark Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© OregonDOT / CC-BY-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/28364885@N02/51208216372" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/51208216372_e28d487b2a_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/51208216372_e28d487b2a_b.jpg'"
+                 alt="Talent Bark Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© OregonDOT / CC-BY-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.cityoftalent.org/parks/page/bark-park-rules" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://www.cityoftalent.org/sites/g/files/vyhlif13561/files/media/parks/image/2791/tunnel3.jpg"
+                 onerror="this.src='https://www.cityoftalent.org/sites/g/files/vyhlif13561/files/media/parks/image/2791/tunnel3.jpg'"
+                 alt="Talent Bark Park">
+            <div class="ph-attr">
+              <span class="ph-src">Web</span>
+              <span class="ph-by">via web image search (www.cityoftalent.org)</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="OR">
+        <header>
+          <div class="name">Ashland Dog Park</div>
+          <div class="loc">Ashland, OR · <span class="dim">fid 39 · 6 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/29997002@N00/7052085069" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/7221/7052085069_d2b92cacec_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/7221/7052085069_d2b92cacec_z.jpg'"
+                 alt="Ashland Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Adam Walker Cleaveland / CC-BY-NC-ND-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://ashlandoregon.gov/297/Dog-Friendly-Areas" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://ashlandoregon.gov/ImageRepository/Document?documentID=67"
+                 onerror="this.src='https://ashlandoregon.gov/ImageRepository/Document?documentID=67'"
+                 alt="Ashland Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Web</span>
+              <span class="ph-by">via web image search (ashlandoregon.gov)</span>
+            </div>
+          </a>
+          <a class="photo" href="https://photos.bringfido.com/posted/2022/07/03/image_QyB24XS.jpg?size=tile&amp;density=2x" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://photos.bringfido.com/posted/2022/07/03/image_QyB24XS.jpg?size=tile&amp;density=2x"
+                 onerror="this.src='https://photos.bringfido.com/posted/2022/07/03/image_QyB24XS.jpg?size=tile&amp;density=2x'"
+                 alt="Ashland Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Web</span>
+              <span class="ph-by">via web image search (photos.bringfido.com)</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="WA">
+        <header>
+          <div class="name">Regrade Park</div>
+          <div class="loc">Seattle, WA · <span class="dim">fid 2 · 9 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/14136614@N03/54510000920" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/54510000920_d48a4a5e4d_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/54510000920_d48a4a5e4d_b.jpg'"
+                 alt="Regrade Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© wiredforlego / CC-BY-NC-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/44082511@N08/14351900820" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/2900/14351900820_fb5f25b313_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/2900/14351900820_fb5f25b313_b.jpg'"
+                 alt="Regrade Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© ScottElliottSmithson / CC-BY-NC-ND-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/14136614@N03/54509848324" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/54509848324_d1df865990_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/54509848324_d1df865990_b.jpg'"
+                 alt="Regrade Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© wiredforlego / CC-BY-NC-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="WA">
+        <header>
+          <div class="name">Howe Farm Off Leash Area</div>
+          <div class="loc">Port Orchard, WA · <span class="dim">fid 4 · 9 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/66855284@N03/53962451505" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/53962451505_8c60c31f7c_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/53962451505_8c60c31f7c_b.jpg'"
+                 alt="Howe Farm Off Leash Area">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© davidseibold / CC-BY-NC-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/66855284@N03/53962450860" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/53962450860_bcd76c916a_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/53962450860_bcd76c916a_b.jpg'"
+                 alt="Howe Farm Off Leash Area">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© davidseibold / CC-BY-NC-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/66855284@N03/53962449425" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/53962449425_2cdef8f405_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/53962449425_2cdef8f405_b.jpg'"
+                 alt="Howe Farm Off Leash Area">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© davidseibold / CC-BY-NC-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="WA">
+        <header>
+          <div class="name">Chambers Creek Dog Park</div>
+          <div class="loc">University Place, WA · <span class="dim">fid 20 · 9 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/88346879@N00/51705841383" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/51705841383_066fa05305_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/51705841383_066fa05305_b.jpg'"
+                 alt="Chambers Creek Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© smohundro / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/11881702@N00/54198508276" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/54198508276_12784a91d6_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/54198508276_12784a91d6_b.jpg'"
+                 alt="Chambers Creek Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Frank Fujimoto / CC-BY-NC-ND-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/88346879@N00/51679483867" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/51679483867_3b66ca158d_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/51679483867_3b66ca158d_b.jpg'"
+                 alt="Chambers Creek Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© smohundro / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="WA">
+        <header>
+          <div class="name">Three Forks Off Leash Dog Area</div>
+          <div class="loc">Snoqualmie, WA · <span class="dim">fid 26 · 9 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/44082511@N08/53081756688" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/53081756688_92e7aa33b7_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/53081756688_92e7aa33b7_b.jpg'"
+                 alt="Three Forks Off Leash Dog Area">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© ScottElliottSmithson / CC-BY-NC-ND-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/44082511@N08/51851012322" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/51851012322_029d213e3c_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/51851012322_029d213e3c_b.jpg'"
+                 alt="Three Forks Off Leash Dog Area">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© ScottElliottSmithson / CC-BY-NC-ND-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/44082511@N08/51852632980" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/51852632980_66810ba022_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/51852632980_66810ba022_b.jpg'"
+                 alt="Three Forks Off Leash Dog Area">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© ScottElliottSmithson / CC-BY-NC-ND-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="WA">
+        <header>
+          <div class="name">Off Leash Area Edmonds</div>
+          <div class="loc">Edmonds, WA · <span class="dim">fid 37 · 9 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/88823436@N00/54273664292" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/54273664292_21856ca04e_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/54273664292_21856ca04e_b.jpg'"
+                 alt="Off Leash Area Edmonds">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© alans1948 / CC-BY-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/88823436@N00/54274795964" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/54274795964_6a3243ee3c_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/54274795964_6a3243ee3c_b.jpg'"
+                 alt="Off Leash Area Edmonds">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© alans1948 / CC-BY-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/88823436@N00/54274792353" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/54274792353_1dc9dde6f6_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/54274792353_1dc9dde6f6_b.jpg'"
+                 alt="Off Leash Area Edmonds">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© alans1948 / CC-BY-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="WA">
+        <header>
+          <div class="name">Beaver Lake Off-Leash Dog Park</div>
+          <div class="loc">Sammamish, WA · <span class="dim">fid 53 · 9 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/33469998@N00/21983796552" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/592/21983796552_f7f8b55ce2_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/592/21983796552_f7f8b55ce2_b.jpg'"
+                 alt="Beaver Lake Off-Leash Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© Reed0 / CC-BY-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/34425642@N00/7354896224" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/7097/7354896224_3605e7b8e3_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/7097/7354896224_3605e7b8e3_b.jpg'"
+                 alt="Beaver Lake Off-Leash Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© gbrake / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/34425642@N00/7354893938" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/8027/7354893938_281d04f975_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/8027/7354893938_281d04f975_b.jpg'"
+                 alt="Beaver Lake Off-Leash Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© gbrake / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="WA">
+        <header>
+          <div class="name">Mercer Island Small Dog Area</div>
+          <div class="loc">Mercer Island, WA · <span class="dim">fid 57 · 9 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/29043563@N00/49996198417" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/49996198417_81e953ef68_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/49996198417_81e953ef68_b.jpg'"
+                 alt="Mercer Island Small Dog Area">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© lamblukas / CC-BY-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/17974268@N00/31791668430" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/5606/31791668430_a50ecc9776_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/5606/31791668430_a50ecc9776_b.jpg'"
+                 alt="Mercer Island Small Dog Area">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© bgreenlee / CC-BY-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/29043563@N00/49945255203" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/49945255203_8017818b8c_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/49945255203_8017818b8c_b.jpg'"
+                 alt="Mercer Island Small Dog Area">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© lamblukas / CC-BY-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="WA">
+        <header>
+          <div class="name">FIDO dog park</div>
+          <div class="loc">Anacortes, WA · <span class="dim">fid 47 · 8 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/34529785@N04/8360698702" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/8056/8360698702_b55d30eb8e_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/8056/8360698702_b55d30eb8e_b.jpg'"
+                 alt="FIDO dog park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© FlyingColors (i) Contact / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/49786280@N00/3331535126" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/3594/3331535126_dc1ccc727e_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/3594/3331535126_dc1ccc727e_b.jpg'"
+                 alt="FIDO dog park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© otakuchick / CC-BY-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/49786280@N00/3331525838" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/3576/3331525838_fcb7f53b78_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/3576/3331525838_fcb7f53b78_b.jpg'"
+                 alt="FIDO dog park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© otakuchick / CC-BY-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="WA">
+        <header>
+          <div class="name">Woof</div>
+          <div class="loc">WA · <span class="dim">fid 60 · 8 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/35423702@N08/19127932899" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/256/19127932899_b85fe789ba_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/256/19127932899_b85fe789ba_b.jpg'"
+                 alt="Woof">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© kirknelson / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/35423702@N08/19314089185" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/484/19314089185_f7bfd68528_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/484/19314089185_f7bfd68528_b.jpg'"
+                 alt="Woof">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© kirknelson / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/93815673@N00/51208002040" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/51208002040_30bbb95199_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/51208002040_30bbb95199_b.jpg'"
+                 alt="Woof">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© jimculp@live.com / CC-BY-NC-ND-2.0</span>
+            </div>
+          </a></div>
+      </article>
+      <article class="card" data-state="WA">
+        <header>
+          <div class="name">Cedar River Dog Park</div>
+          <div class="loc">Renton, WA · <span class="dim">fid 17 · 7 curated</span></div>
+        </header>
+        <div class="strip">
+          <a class="photo" href="https://www.flickr.com/photos/105592384@N07/44890378211" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/1916/44890378211_5c7c170a6d_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/1916/44890378211_5c7c170a6d_b.jpg'"
+                 alt="Cedar River Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© takenji1989 / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/105592384@N07/43078073730" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/1971/43078073730_b3c0d71d82_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/1971/43078073730_b3c0d71d82_b.jpg'"
+                 alt="Cedar River Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© takenji1989 / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a>
+          <a class="photo" href="https://www.flickr.com/photos/105592384@N07/51411478428" target="_blank" rel="noopener">
+            <img loading="lazy" src="https://live.staticflickr.com/65535/51411478428_a6c397b0c0_n.jpg"
+                 onerror="this.src='https://live.staticflickr.com/65535/51411478428_a6c397b0c0_b.jpg'"
+                 alt="Cedar River Dog Park">
+            <div class="ph-attr">
+              <span class="ph-src">Flickr</span>
+              <span class="ph-by">© takenji1989 / CC-BY-NC-SA-2.0</span>
+            </div>
+          </a></div>
+      </article>
+  </div>
+</main>
+
+<script>
+const buttons = document.querySelectorAll('.filter');
+buttons.forEach(btn => btn.addEventListener('click', () => {
+  buttons.forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const s = btn.dataset.state;
+  document.querySelectorAll('.card').forEach(c => {
+    c.classList.toggle('hidden', s !== 'ALL' && c.dataset.state !== s);
+  });
+}));
+</script>
+</body></html>

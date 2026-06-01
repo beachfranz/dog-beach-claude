@@ -283,6 +283,11 @@ def main():
             # shifts the LLM-augmented relevance toward dog imagery.
             if args.entity == "dog_park":
                 parts.append("dogs playing")
+            # Beach-content bias (Franz 2026-06-01 [[apply-loader-bias-to-beach-photos]]).
+            # Mirrors the DP win on a smaller dial — broad scenic cue; the downstream
+            # vision tagger + diverse selector still decide which photos surface.
+            elif args.entity == "beach":
+                parts.append("scenic beach view")
             query = " ".join(parts)
 
             r = tavily_image_search(query, k=args.per_entity)

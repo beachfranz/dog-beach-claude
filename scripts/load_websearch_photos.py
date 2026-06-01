@@ -63,6 +63,9 @@ MAX_DESC_LEN = 400        # Truncate Tavily descriptions for source_meta
 # triggered AVG; existing 14 photos hidden via SQL the same day.
 HOST_BLOCKLIST = (
     "barkparkfinder.com",
+    # Session-bound CDNs that never render hot-linked (no referrer/cookies):
+    "lookaside.fbsbx.com",       # Facebook static
+    "lookaside.instagram.com",   # Instagram static
 )
 
 

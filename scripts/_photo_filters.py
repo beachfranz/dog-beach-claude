@@ -11,12 +11,19 @@ import re
 
 # Drop these tokens when extracting distinctive parts of a beach name.
 # "Coronado Dog Beach" -> distinctive: ["coronado", "dog"]
-# "Crescent Bay Beach" -> ["crescent", "bay"]
+# "Crescent Bay Beach" -> ["crescent", "bay"] -> ["crescent"] (bay generic)
 # "Aliso Beach" -> ["aliso"]
+# "Hubbard Creek" -> ["hubbard", "creek"] -> ["hubbard"] (creek generic)
+# Per Franz directive 2026-06-01: strip generic geographic-feature words so
+# match focuses on the proper name only.
 _GENERIC_TOKENS = {
     "beach", "park", "state", "city", "the", "pet",
     "north", "south", "east", "west", "main", "cove", "point",
     "harbor", "bay", "sands", "dunes", "of", "and",
+    # Geographic-feature tokens (added 2026-06-01 per Franz):
+    "creek", "lake", "river", "lagoon", "bar", "area",
+    # Modifier words common in beach names but non-disambiguating:
+    "rec", "memorial",
 }
 
 # Match "X Beach" / "X Y Beach" / "X Y Z Beach" — up to 3 capitalized words

@@ -232,11 +232,11 @@ def replace_websearch(fid: int, images: list[dict], results: list[dict],
         # web-search hits like "Pinterest pin titled 'beach'".
         if can_centroid:
             haystack = " ".join(filter(None, [desc or "", page_url or "", host or ""]))
-            # Per Franz 2026-06-01: dog-bias lessens (does not eliminate)
-            # tight_name_match strictness. Loader-bias queries narrow the
-            # result set with a dog cue; majority of distinctive tokens
-            # is enough evidence to centroid-stamp.
-            if tight_name_match(entity_name, haystack, strictness="majority"):
+            # Franz 2026-06-01: with geographic-feature tokens stripped from
+            # _GENERIC_TOKENS, the distinctive token set is the proper-noun
+            # name. Strict-all match (default) is now appropriate; majority
+            # was a band-aid for the broader-token problem we just fixed.
+            if tight_name_match(entity_name, haystack):
                 row["lat"] = entity_lat
                 row["lng"] = entity_lon
                 row["distance_m"] = 0

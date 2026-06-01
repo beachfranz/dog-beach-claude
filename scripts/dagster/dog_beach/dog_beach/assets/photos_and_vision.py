@@ -632,14 +632,13 @@ def dp_photos_curate(
                      AND p.curated_at IS NULL
                      AND p.hidden_at IS NULL
                      AND (
-                       (p.source_meta -> 'vision' ->> 'has_dog')::boolean = true
-                       -- The original gate listed ('outdoor','park','beach') which were never
-                       -- in the prompt's SCENES enum, so it matched 0 rows. Real DP-relevant
-                       -- scenes are below: 'interior' covers fenced enclosures (Haiku reads
-                       -- the fence/walls as interior), 'urban' covers city parks, 'other'
-                       -- catches generic outdoor park shots, 'beach_with_sand' covers beach DPs.
-                       -- Excluded: water_only / wildlife_only / coast_no_sand / food /
-                       -- screenshot_or_map — not DP content. (2026-06-01)
+                       -- v4 prompt direct signal (2026-06-01) — Haiku answers
+                       -- "does this photo show a recognizable off-leash dog area?"
+                       -- This replaces the previous scene-gymnastics.
+                       (p.source_meta -> 'vision' ->> 'is_dog_park_relevant')::boolean = true
+                       -- Fallback signals so we don't regress for v3-tagged rows
+                       -- (no is_dog_park_relevant field): broad scene set + has_dog.
+                       OR (p.source_meta -> 'vision' ->> 'has_dog')::boolean = true
                        OR (p.source_meta -> 'vision' ->> 'scene') IN
                           ('beach_with_sand', 'urban', 'interior', 'other')
                      )

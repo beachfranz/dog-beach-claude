@@ -59,7 +59,13 @@ MODEL = HAIKU
 #   v1: initial schema
 #   v2: added has_surfing + has_active_people, dropped "people" from subjects
 #   v3: added has_path + has_vehicle (Franz 2026-05-19 photo curation v3)
+#   v4: DP-only — added is_dog_park_relevant (2026-06-01); beach stays v3.
+SCHEMA_VERSION_BY_ENTITY = {"beach": "v3", "dog_park": "v4"}
+# Back-compat default (call sites that don't know the entity).
 SCHEMA_VERSION = "v3"
+
+def schema_version_for(entity: str) -> str:
+    return SCHEMA_VERSION_BY_ENTITY.get(entity, SCHEMA_VERSION)
 
 # Anthropic per-1M-tokens (Haiku 4.5): input $1, output $5, image ~1500 tok.
 # Two-pass per photo ≈ 3000 in + 350 out ≈ $0.005. Budget guard below.
@@ -278,11 +284,24 @@ def _describe(image_url: str, entity_name: str, entity_label: str = "beach") -> 
     return text, msg.usage.input_tokens, msg.usage.output_tokens
 
 
-_EXTRACT_PROMPT = f"""You are tagging a beach photo for a search/sort system.
+def _extract_prompt_for(entity: str) -> str:
+    label = "dog park" if entity == "dog_park" else "beach"
+    # DP-only fields (added v4, 2026-06-01). Cleaner signal than the
+    # scene-gymnastics that read fenced enclosures as "interior".
+    dp_extra = (
+        "  is_dog_park_relevant: true|false  (does this photo show a recognizable "
+        "off-leash dog area — fenced enclosure, dog-friendly grass field, agility "
+        "equipment, paw-themed signage, dogs playing in a park setting, etc. "
+        "A close-up portrait of just a dog with no surrounding context = false. "
+        "A street view of a building, sign, or map = false. A photo from a "
+        "non-park location like a dog show or pet store = false.)\n"
+        if entity == "dog_park" else ""
+    )
+    return f"""You are tagging a {label} photo for a search/sort system.
 Given the photo and an initial description, return a JSON object with these fields:
 
   has_dog: true|false  (dogs, puppies — any breed)
-  has_birds: true|false  (shorebirds, gulls, raptors, any bird — but not when they are a tiny dot in the distance)
+{dp_extra}  has_birds: true|false  (shorebirds, gulls, raptors, any bird — but not when they are a tiny dot in the distance)
   has_surfing: true|false  (visible surfers riding waves, OR surfboards/paddleboards/wetsuits being carried or in use. Just calm flat water with no surf activity = false.)
   has_active_people: true|false  (people doing things on the beach — playing, walking, swimming, picnicking, kids, families. Not just one tiny figure in the distance, but a recognizable beachgoer present and engaged. A close-up portrait counts as active_people=false; use has_human_face_closeup for that.)
   has_human_face_closeup: true|false  (a person's face dominates the frame — selfie or portrait shot)
@@ -302,10 +321,15 @@ Given the photo and an initial description, return a JSON object with these fiel
 Return ONLY the JSON object, no prose, no markdown fences."""
 
 
+# Back-compat: keep the module-level constant for any direct importers.
+_EXTRACT_PROMPT = _extract_prompt_for("beach")
+
+
 def _extract(image_url: str, entity_name: str, description: str,
              entity_label: str = "beach") -> tuple[dict, int, int]:
     """Pass 2: structured extraction. Returns (parsed, in_tok, out_tok)."""
     label_titlecase = entity_label.title()   # "Beach" / "Dog Park"
+    entity_key = "dog_park" if entity_label == "dog park" else "beach"
     msg = _client.messages.create(
         model=MODEL,
         max_tokens=400,
@@ -317,7 +341,7 @@ def _extract(image_url: str, entity_name: str, description: str,
                  "text": (
                     f"{label_titlecase} context: {entity_name}\n"
                     f"Initial description: {description}\n\n"
-                    + _EXTRACT_PROMPT
+                    + _extract_prompt_for(entity_key)
                  )},
             ],
         }],
@@ -381,9 +405,12 @@ def _extract_batch(specs: list[dict], descriptions: list[str]
             f"[Image {i}] {label_tc} context: {s['name']}. "
             f"Initial description: {descriptions[i]}")})
         content.append({"type": "image", "source": _image_source(s["url"])})
+    # All specs in a batch share the same entity (batches are built per-run).
+    batch_entity = ("dog_park" if specs and specs[0].get("label") == "dog park"
+                    else "beach")
     content.append({"type": "text", "text": (
         f"Above are {len(specs)} images, each with context + initial description. "
-        + _EXTRACT_PROMPT + "\n\n"
+        + _extract_prompt_for(batch_entity) + "\n\n"
         f"Return ONLY a JSON array of {len(specs)} objects in image order, "
         '[{"i":0, ...tag fields...}, {"i":1, ...}, ...]. No prose, no markdown fences.')})
     msg = _client.messages.create(
@@ -416,7 +443,9 @@ def tag_batch(specs: list[dict], retries: int = 2
                 tags = tags_list[i]
                 tags["description"] = descs[i]
                 tags["model"] = MODEL
-                tags["schema_version"] = SCHEMA_VERSION
+                tags["schema_version"] = schema_version_for(
+                    "dog_park" if s.get("label") == "dog park" else "beach"
+                )
                 tags["tagged_at"] = datetime.now(timezone.utc).isoformat()
                 out.append((tags,
                             {"input_tokens": per_in, "output_tokens": per_out},
@@ -461,7 +490,9 @@ def tag_photo(image_url: str, entity_name: str, retries: int = 3,
             tags, in2, out2 = _extract(image_url, entity_name, desc, entity_label)
             tags["description"] = desc
             tags["model"] = MODEL
-            tags["schema_version"] = SCHEMA_VERSION
+            tags["schema_version"] = schema_version_for(
+                "dog_park" if entity_label == "dog park" else "beach"
+            )
             tags["tagged_at"] = datetime.now(timezone.utc).isoformat()
             usage = {"input_tokens": in1 + in2, "output_tokens": out1 + out2}
             return tags, usage
@@ -570,6 +601,9 @@ def main():
             source_params = source_params + (fid_list,)
         v3_skipped_filter = ("" if args.include_v3_skipped
                               else "and coalesce(source_meta ->> 'v3_skipped', 'false') != 'true'")
+        # Per-entity SCHEMA_VERSION so bumping the DP version doesn't
+        # invalidate beach photos (and vice-versa).
+        current_schema = schema_version_for(args.entity)
         cur.execute(f"""
             select bp.id, bp.image_url, bp.thumb_url, bp.source_meta,
                    coalesce(g.display_name_override, g.name) as entity_name
@@ -581,7 +615,7 @@ def main():
                {fid_filter}
                and (source_meta -> 'vision' ->> 'model' is null
                     or source_meta -> 'vision' ->> 'model' != '{MODEL}'
-                    or coalesce(source_meta -> 'vision' ->> 'schema_version', 'v1') != '{SCHEMA_VERSION}')
+                    or coalesce(source_meta -> 'vision' ->> 'schema_version', 'v1') != '{current_schema}')
                {v3_skipped_filter}
              order by bp.id
              limit %s

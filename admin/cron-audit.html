@@ -79,6 +79,24 @@
   .row-failed { background: #fef2f2; }
   .row-stale  { background: #fff7ed; }
 
+  .health {
+    margin-bottom: 20px; padding: 14px 18px; border-radius: 8px;
+    border-left: 5px solid #94a3b8; background: #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .health.ok    { border-left-color: #16a34a; background: #f0fdf4; }
+  .health.fail  { border-left-color: #ef4444; background: #fef2f2; }
+  .health.stale { border-left-color: #f97316; background: #fff7ed; }
+  .health .title { font-weight: 700; font-size: 14px; color: #0f172a;
+                   display: flex; align-items: center; gap: 10px; }
+  .health .title .when { color: #64748b; font-weight: 400; font-size: 12px; }
+  .health .msg { margin-top: 8px; white-space: pre-wrap;
+                 font-family: ui-monospace, SFMono-Regular, "SF Mono", Monaco, monospace;
+                 font-size: 12px; color: #475569; }
+  .health.fail .msg { color: #991b1b; }
+  .health ul { margin: 8px 0 0; padding-left: 20px; }
+  .health li { margin: 2px 0; font-size: 12px; line-height: 1.5; }
+
   #status { color: #94a3b8; font-size: 12px; }
   #error  { color: #991b1b; padding: 12px; background: #fef2f2; border-radius: 6px;
             margin: 12px 0; display: none; }
@@ -104,6 +122,8 @@
 
 <div class="container">
   <div id="error"></div>
+
+  <div id="health"></div>
 
   <h2>Summary (window)</h2>
   <div class="summary" id="summary"></div>
@@ -230,6 +250,65 @@ function renderSummary(summary, hours) {
   document.getElementById('summary').innerHTML = sumPills + empty;
 }
 
+function renderHealth(jobs) {
+  const el = document.getElementById('health');
+  const job = jobs.find(j => j.job_name === 'pipeline_health');
+  if (!job) {
+    el.innerHTML = `<div class="health"><div class="title">Pipeline health</div>
+      <div class="msg dim">No pipeline_health job found.</div></div>`;
+    return;
+  }
+
+  const lastSucc = job.last_succeeded_at ? new Date(job.last_succeeded_at) : null;
+  const lastFail = job.last_failed_at    ? new Date(job.last_failed_at)    : null;
+  const lastAttempt = job.last_attempted_at ? new Date(job.last_attempted_at) : null;
+
+  const isFailing  = lastFail && (!lastSucc || lastFail > lastSucc);
+  const neverRan   = !lastSucc && !lastFail;
+  const stale      = lastSucc && (Date.now() - lastSucc.getTime() > 8 * 86400 * 1000);
+
+  let cls = 'health';
+  let titleText = 'Pipeline health';
+  let titleWhen = '';
+  let body = '';
+
+  if (isFailing) {
+    cls += ' fail';
+    titleText = 'Pipeline health — FAILING';
+    titleWhen = `last failed ${fmtRelTime(job.last_failed_at)}`;
+    // Pretty-print the multi-issue message (typical format: "...: a | b | c")
+    const msg = job.last_error || '(no message)';
+    const splitIdx = msg.indexOf(': ');
+    const head = splitIdx > -1 ? msg.slice(0, splitIdx + 1) : '';
+    const tail = splitIdx > -1 ? msg.slice(splitIdx + 2) : msg;
+    const items = tail.split(' | ').map(s => s.trim()).filter(Boolean);
+    body = items.length > 1
+      ? `<div class="msg">${escapeHtml(head)}</div><ul>${
+          items.map(i => `<li>${escapeHtml(i)}</li>`).join('')
+        }</ul>`
+      : `<div class="msg">${escapeHtml(msg)}</div>`;
+  } else if (neverRan) {
+    cls += ' stale';
+    titleText = 'Pipeline health — never run';
+    body = `<div class="msg dim">Weekly check; will fire on its next cadence window.</div>`;
+  } else if (stale) {
+    cls += ' stale';
+    titleText = 'Pipeline health — stale';
+    titleWhen = `last succeeded ${fmtRelTime(job.last_succeeded_at)}`;
+    body = `<div class="msg dim">Weekly job hasn't succeeded in over 8 days. Check the schedule.</div>`;
+  } else {
+    cls += ' ok';
+    titleText = 'Pipeline health — all checks passing';
+    titleWhen = `last succeeded ${fmtRelTime(job.last_succeeded_at)}`;
+  }
+
+  el.innerHTML = `<div class="${cls}">
+    <div class="title">${escapeHtml(titleText)}
+      <span class="when">${escapeHtml(titleWhen)}</span></div>
+    ${body}
+  </div>`;
+}
+
 function renderJobs(jobs) {
   const tbody = document.querySelector('#jobs-table tbody');
   tbody.innerHTML = jobs.map(j => {
@@ -298,6 +377,7 @@ async function load() {
   statusEl.textContent = 'loading…';
   try {
     const data = await fetchStatus(hours);
+    renderHealth(data.jobs || []);
     renderSummary(data.summary || {}, hours);
     renderJobs(data.jobs || []);
     renderRuns(data.runs || []);

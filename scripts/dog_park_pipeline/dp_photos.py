@@ -169,20 +169,17 @@ def dp_photos_vision_tag(state: str, budget_usd: float = 50.0, **kw) -> dict:
 def dp_photos_curate(state: str, **kw) -> dict:
     """Pick top-3 best photos per DP via the v4 vision-aware gate.
 
-    Gate (matches Dagster `dp_photos_curate` asset + the gate-tightening
-    migration `20260601_dp_curate_tighten_gate.sql`):
+    Gate (matches Dagster `dp_photos_curate` asset + the dog-only
+    policy migration `20260601_dp_curate_dog_only.sql`):
 
       curated_at IS NULL  AND  hidden_at IS NULL
-      AND (
-        vision.is_dog_park_relevant = true                     -- v4 primary
-        OR (vision.is_dog_park_relevant IS NULL                -- v3 fallback
-            AND vision.has_dog = true)
-      )
+      AND vision.has_dog = true
       AND COALESCE(vision.quality_issue, 'none') = 'none'
 
-    Earlier rounds included a scene fallback that Haiku assigned too
-    loosely (roads tagged 'urban', gardens tagged 'interior'); dropped
-    2026-06-01.
+    Per [[dp-photos-are-dog-only]] (Franz 2026-06-01): DP photos must
+    show a visible dog. is_dog_park_relevant / scene tags captured
+    valid but non-canine DP content (fences, signage, equipment) that
+    users didn't want to see.
 
     Stamps curated_at=now(), curated_by='vision-auto', match_quality='medium'.
     Idempotent — only operates on uncurated rows; existing 'vision-auto'
@@ -203,13 +200,7 @@ def dp_photos_curate(state: str, **kw) -> dict:
                  WHERE g.state = %s
                    AND p.curated_at IS NULL
                    AND p.hidden_at IS NULL
-                   AND (
-                     (p.source_meta -> 'vision' ->> 'is_dog_park_relevant')::boolean = true
-                     OR (
-                       (p.source_meta -> 'vision' ->> 'is_dog_park_relevant') IS NULL
-                       AND (p.source_meta -> 'vision' ->> 'has_dog')::boolean = true
-                     )
-                   )
+                   AND (p.source_meta -> 'vision' ->> 'has_dog')::boolean = true
                    AND COALESCE(p.source_meta -> 'vision' ->> 'quality_issue', 'none') = 'none'
               )
               UPDATE public.dog_park_photos p

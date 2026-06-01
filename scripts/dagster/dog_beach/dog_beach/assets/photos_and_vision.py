@@ -631,19 +631,11 @@ def dp_photos_curate(
                    WHERE g.state = %s
                      AND p.curated_at IS NULL
                      AND p.hidden_at IS NULL
-                     AND (
-                       -- v4 prompt direct signal — Haiku answers
-                       -- "does this photo show a recognizable off-leash dog area?"
-                       (p.source_meta -> 'vision' ->> 'is_dog_park_relevant')::boolean = true
-                       -- v3 fallback: only when dp_rel field absent. Trust has_dog
-                       -- as a proxy. (Tightened 2026-06-01 after the scene-fallback
-                       -- — IN ('urban','interior','other') — was found letting in
-                       -- roads/trains/wildflower meadows.)
-                       OR (
-                         (p.source_meta -> 'vision' ->> 'is_dog_park_relevant') IS NULL
-                         AND (p.source_meta -> 'vision' ->> 'has_dog')::boolean = true
-                       )
-                     )
+                     -- Policy 2026-06-01 [[dp-photos-are-dog-only]]:
+                     -- DP photos must show a visible dog. is_dog_park_relevant
+                     -- captures fences / equipment / signage which are valid
+                     -- DP content but not what users want to see.
+                     AND (p.source_meta -> 'vision' ->> 'has_dog')::boolean = true
                      AND COALESCE(p.source_meta -> 'vision' ->> 'quality_issue', 'none') = 'none'
                 )
                 UPDATE public.dog_park_photos p

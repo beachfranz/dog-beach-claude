@@ -620,17 +620,25 @@ def dp_photos_curate(
     conn = postgres.get_connection()
     try:
         with conn.cursor() as cur:
+            # Cross-source additive top-6 per Franz 2026-06-02. Mirrors
+            # the beach pipeline's strict-curate pattern; brings ~5,000
+            # Flickr DP photos into eligibility that were previously
+            # blocked by the source='websearch' filter.
             cur.execute("""
-                WITH gap_parks AS (
-                  SELECT g.fid
-                    FROM public.dog_parks_gold g
+                WITH existing_count AS (
+                  SELECT p.dog_park_fid, count(*) AS n_curated
+                    FROM public.dog_park_photos p
+                    JOIN public.dog_parks_gold g ON g.fid = p.dog_park_fid
                    WHERE g.state = %s AND g.is_active AND g.is_scoreable
-                     AND NOT EXISTS (
-                       SELECT 1 FROM public.dog_park_photos p
-                        WHERE p.dog_park_fid = g.fid
-                          AND p.curated_at IS NOT NULL
-                          AND p.hidden_at IS NULL
-                     )
+                     AND p.curated_at IS NOT NULL AND p.hidden_at IS NULL
+                   GROUP BY 1
+                ),
+                needed AS (
+                  SELECT g.fid, 6 - COALESCE(ec.n_curated, 0) AS need
+                    FROM public.dog_parks_gold g
+                    LEFT JOIN existing_count ec ON ec.dog_park_fid = g.fid
+                   WHERE g.state = %s AND g.is_active AND g.is_scoreable
+                     AND 6 - COALESCE(ec.n_curated, 0) > 0
                 ),
                 ranked AS (
                   SELECT p.id, p.dog_park_fid,
@@ -639,18 +647,17 @@ def dp_photos_curate(
                            ORDER BY p.sort_order ASC NULLS LAST, p.id ASC
                          ) AS rk
                     FROM public.dog_park_photos p
-                    JOIN gap_parks gp ON gp.fid = p.dog_park_fid
-                   WHERE p.source = 'websearch'
-                     AND p.curated_at IS NULL
+                    JOIN needed n ON n.fid = p.dog_park_fid
+                   WHERE p.curated_at IS NULL
                      AND p.hidden_at IS NULL
                 )
                 UPDATE public.dog_park_photos p
                    SET curated_at = now(),
                        curated_by = 'loader-bias',
                        match_quality = 'medium'
-                  FROM ranked r
-                 WHERE p.id = r.id AND r.rk <= 3
-            """, (state,))
+                  FROM ranked r JOIN needed n ON n.fid = r.dog_park_fid
+                 WHERE p.id = r.id AND r.rk <= n.need
+            """, (state, state))
             n_curated = cur.rowcount
             conn.commit()
             cur.execute("""

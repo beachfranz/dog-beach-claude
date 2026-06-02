@@ -119,43 +119,45 @@ def dp_photos_load_websearch(state: str, **kw) -> dict:
 
 
 def dp_photos_curate(state: str, **kw) -> dict:
-    """Pick top-3 photos per DP via Tavily's own relevance order.
+    """Cross-source additive top-6 curate per DP.
 
-    NO VISION TAGGING. The DE proof-of-concept (2026-06-01) showed
-    that the biased Tavily query ("<name> dog park <city> <state>
-    dogs playing") returns dog-content directly in relevance order;
-    the post-load Haiku vision-tag + has_dog gate was redundant.
+    Per Franz directive 2026-06-02 mirroring the beach pipeline:
+      - cross-source (was: source='websearch' only)
+      - additive top-up to 6 per park (was: gap-only top-3)
 
-    Gate (no vision required):
+    The cross-source change was prompted by ~5,000 Flickr DP photos
+    sitting uncurated despite being lat-stamped by Flickr at load.
+    The top-3 -> top-6 brings DP gallery size in line with beach.
+
+    Gate:
       curated_at IS NULL  AND  hidden_at IS NULL
-      AND source = 'websearch'
+      (any source; DPs are loader-bound so no lat filter needed —
+       see [[dp-curate-vision-only-beach-curate-lat-gated]])
 
-    ADDITIVE — only operates on parks with ZERO existing curated
-    photos. Existing curated picks (vision-auto, Curated:Human,
-    experiment:no-vision) are preserved. Once a park has loader-bias
-    picks this is a no-op on it. Per Franz directive 2026-06-01:
-    "I do not want you to wipe out what I've already curated."
+    HUMAN ALWAYS WINS: operates only on uncurated rows. Existing
+    curated picks (Curated:Human, vision-auto, loader-bias) preserved.
+    Idempotent — re-runs top up to 6, don't replace.
 
     See [[dp-loader-dog-bias]] and [[dp-photos-are-dog-only]].
-
-    Stamps curated_at=now(), curated_by='vision-auto', match_quality='medium'.
-    Idempotent — only operates on uncurated rows; existing 'vision-auto'
-    selections stay put.
     """
     conn = connect()
     try:
         with conn.cursor() as cur:
             cur.execute("""
-              WITH gap_parks AS (
-                SELECT g.fid
-                  FROM public.dog_parks_gold g
+              WITH existing_count AS (
+                SELECT p.dog_park_fid, count(*) AS n_curated
+                  FROM public.dog_park_photos p
+                  JOIN public.dog_parks_gold g ON g.fid = p.dog_park_fid
                  WHERE g.state = %s AND g.is_active AND g.is_scoreable
-                   AND NOT EXISTS (
-                     SELECT 1 FROM public.dog_park_photos p
-                      WHERE p.dog_park_fid = g.fid
-                        AND p.curated_at IS NOT NULL
-                        AND p.hidden_at IS NULL
-                   )
+                   AND p.curated_at IS NOT NULL AND p.hidden_at IS NULL
+                 GROUP BY 1
+              ),
+              needed AS (
+                SELECT g.fid, 6 - COALESCE(ec.n_curated, 0) AS need
+                  FROM public.dog_parks_gold g
+                  LEFT JOIN existing_count ec ON ec.dog_park_fid = g.fid
+                 WHERE g.state = %s AND g.is_active AND g.is_scoreable
+                   AND 6 - COALESCE(ec.n_curated, 0) > 0
               ),
               ranked AS (
                 SELECT p.id, p.dog_park_fid,
@@ -164,18 +166,17 @@ def dp_photos_curate(state: str, **kw) -> dict:
                          ORDER BY p.sort_order ASC NULLS LAST, p.id ASC
                        ) AS rk
                   FROM public.dog_park_photos p
-                  JOIN gap_parks gp ON gp.fid = p.dog_park_fid
-                 WHERE p.source = 'websearch'
-                   AND p.curated_at IS NULL
+                  JOIN needed n ON n.fid = p.dog_park_fid
+                 WHERE p.curated_at IS NULL
                    AND p.hidden_at IS NULL
               )
               UPDATE public.dog_park_photos p
                  SET curated_at    = now(),
                      curated_by    = 'loader-bias',
                      match_quality = 'medium'
-                FROM ranked r
-               WHERE p.id = r.id AND r.rk <= 3
-            """, (state,))
+                FROM ranked r JOIN needed n ON n.fid = r.dog_park_fid
+               WHERE p.id = r.id AND r.rk <= n.need
+            """, (state, state))
             n_curated = cur.rowcount
             conn.commit()
             cur.execute("""

@@ -533,6 +533,17 @@ def main():
                     help="Photos per run (default 50)")
     ap.add_argument("--no-skip-existing", action="store_true",
                     help="Reprocess photos that already have vision tags")
+    ap.add_argument("--require-lat", dest="require_lat", action="store_true",
+                    default=True,
+                    help="Skip photos where lat IS NULL (default: on). For non-geo "
+                         "sources (websearch, unsplash), lat=NULL means the photo "
+                         "failed tight_name_match at load time and won't reach the "
+                         "consumer surface — tagging it wastes Haiku spend. Geo "
+                         "sources (Flickr, Wikimedia) always have lat, so this is "
+                         "a no-op for them.")
+    ap.add_argument("--no-require-lat", dest="require_lat", action="store_false",
+                    help="Tag ALL photos including name-match orphans. Use when "
+                         "building a complete tag dataset for inspection / analytics.")
     ap.add_argument("--budget-usd", type=float, default=DEFAULT_BUDGET_USD,
                     help=f"Hard stop if est cost exceeds (default ${DEFAULT_BUDGET_USD})")
     ap.add_argument("--workers", type=int, default=1,
@@ -604,6 +615,12 @@ def main():
         # Per-entity SCHEMA_VERSION so bumping the DP version doesn't
         # invalidate beach photos (and vice-versa).
         current_schema = schema_version_for(args.entity)
+        # Per Franz 2026-06-02: by default skip photos with lat IS NULL.
+        # For non-geo sources (websearch/unsplash) these are name-match
+        # orphans that can't reach the consumer surface; tagging them
+        # is wasted Haiku spend. Geo sources (Flickr/Wikimedia) always
+        # have lat so this is a no-op for them.
+        lat_filter = "and bp.lat is not null" if args.require_lat else ""
         cur.execute(f"""
             select bp.id, bp.image_url, bp.thumb_url, bp.source_meta,
                    coalesce(g.display_name_override, g.name) as entity_name
@@ -613,6 +630,7 @@ def main():
                {source_filter}
                {state_filter}
                {fid_filter}
+               {lat_filter}
                and (source_meta -> 'vision' ->> 'model' is null
                     or source_meta -> 'vision' ->> 'model' != '{MODEL}'
                     or coalesce(source_meta -> 'vision' ->> 'schema_version', 'v1') != '{current_schema}')

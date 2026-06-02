@@ -948,6 +948,31 @@ PHASES = [
             "select d.n done, t.n total from d, t",
     },
     {
+        # 2026-06-02: biased Tavily websearch photo loader. Per
+        # [[dp-loader-dog-bias]] + [[apply-loader-bias-to-beach-photos]]
+        # the dog-content cue ("dogs playing") produces dog-centric
+        # results. tight_name_match (proper-name tokens only after
+        # generic-feature stripping) gates centroid stamping inline.
+        # MVP+ gap-beach pilot proof 2026-06-02: 229 photos / 74 CA
+        # beaches passed name-match from a 372-photo Tavily haul.
+        'key': 'photos_websearch',
+        'kind': 'python',
+        'action': 'photos_websearch',
+        'criterion': "select true",  # Tavily coverage varies by beach name
+        'criterion_text': 'biased Tavily websearch ran (per-entity 10, dogs-playing cue)',
+        'progress_sql':
+            "with t as (select count(*)::int n from public.beaches_gold g "
+            "             join public.beach_dog_policy bdp on bdp.arena_group_id=g.fid "
+            "             where g.state=$STATE and g.is_active "
+            "               and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "                   in ('1_off-leash','2_on-leash')), "
+            "     d as (select count(distinct bp.arena_group_id)::int n "
+            "             from public.beach_photos bp "
+            "             join public.beaches_gold g on g.fid=bp.arena_group_id "
+            "            where g.state=$STATE and g.is_active and bp.source='websearch') "
+            "select d.n done, t.n total from d, t",
+    },
+    {
         # 2026-05-21: state-conditional agency photo loaders.
         #   NPS (always, --state filter)
         #   CDPR + CCC (CA only)
@@ -1080,18 +1105,19 @@ PHASES = [
     # depending on label corpus + photo count. Idempotent: re-running
     # produces a fresh model + fresh predictions, both stored under a
     # new model_id timestamp.
+    # 2026-06-02: photos_predict phase REMOVED. The Tier 2 keep_prob
+    # gate (predicted_keep_prob >= 0.65) was the consumer-curate
+    # selector's threshold for considering a photo. The new strict
+    # cross-source curate gates on lat IS NOT NULL only — keep_prob
+    # no longer participates. The model + scorer
+    # (scripts/train_photo_model.py / score_from_pkl.py) remain
+    # available for ad-hoc use.
     {
-        'key': 'photos_predict',
-        'kind': 'python',
-        'action': 'photos_predict',
-        'criterion': "select true",  # script exit code is the gate; trust on rc=0
-        'criterion_text': 'no exception (Tier 2 model trained + keep_prob written for all '
-                          'vision-tagged photos catalog-wide)',
-    },
-    {
-        # 2026-05-21: auto-curate N best+diverse photos per beach using
-        # the vision-tag-aware diverse selector. HUMAN ALWAYS WINS: skips
-        # any beach where a manual curator already picked photos.
+        # 2026-06-02: strict cross-source curate.
+        # Replaces auto_curate.py per Franz directive after MVP+ gap
+        # pilot proved out top-6-by-sort_order across all sources where
+        # lat IS NOT NULL. HUMAN ALWAYS WINS: only operates on
+        # curated_at IS NULL rows.
         'key': 'photos_curate',
         'kind': 'python',
         'action': 'photos_curate',
@@ -2696,27 +2722,47 @@ def action_photos_predict(state: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+def action_photos_websearch(state: str) -> int:
+    """Biased Tavily websearch beach photos. Per the 2026-06-02 MVP+
+    gap pilot, "dogs playing" cue + tight_name_match centroid stamping
+    inline lifted gap-beach coverage from 0 to 98 of 255 ($2 spend).
+
+    Chunked at 50 fids/subprocess (Tavily handles parallel queries well
+    via the loader's 8-worker default; chunk size matches load_flickr).
+    """
+    fids = _state_tier12_fids(state)
+    if not fids:
+        return 0
+    return _chunked_subprocess(
+        'scripts/load_websearch_photos.py', fids,
+        flag_name='--fids', chunk_size=50, per_chunk_timeout=900,
+        extra_args=['--per-entity', '10'],
+        parse_fn=_parse_photos_saved,
+    )
+
+
 def action_photos_curate(state: str) -> int:
-    """Auto-curate (pick N best+diverse photos per beach).
+    """Strict cross-source curate (pick top-N by sort_order where
+    lat IS NOT NULL).
 
-    Per Franz 2026-05-21 photo curation v3. Runs AFTER photos_tag so
-    the diverse-photo selector can use vision tags as ranking inputs;
-    runs BEFORE descriptions so the description generator sees the
-    curated gallery. Per HARD pin (feedback_auto_curate_default_broad)
-    auto-curate is safe broad: skipped_human guard prevents stomping
-    manual selections.
+    Replaces auto_curate.py per Franz directive 2026-06-02 after the
+    MVP+ gap-beach pilot proved out this pattern. Runs AFTER photos_tag
+    so the badges/audit can see tags; runs BEFORE descriptions so the
+    description generator sees the curated gallery.
 
-    Chunked at 100 fids/subprocess (DB-only, no LLM cost).
+    HUMAN ALWAYS WINS: the underlying SQL only operates on
+    curated_at IS NULL rows. Existing Curated:Human picks are
+    preserved; existing Curated:AI picks are preserved (re-runs
+    top up to N total per beach, not replace).
 
-    Uses _state_tier12_fids_ranked_by_photos so --limit N picks fids
-    that actually have photos to curate (gap #20)."""
+    Chunked at 100 fids per call (DB-only, no LLM cost)."""
     fids = _state_tier12_fids_ranked_by_photos(state)
     if not fids:
         return 0
     return _chunked_subprocess(
-        'scripts/auto_curate.py', fids,
-        flag_name='--fids', chunk_size=100, per_chunk_timeout=600,
-        extra_args=['--skip-if-fresh-within', '7'],
+        'scripts/curate_beach_photos_strict.py', fids,
+        flag_name='--fids', chunk_size=100, per_chunk_timeout=300,
+        extra_args=['--n', '6'],
         parse_fn=_parse_auto_curated,
     )
 
@@ -3125,10 +3171,12 @@ PYTHON_ACTIONS = {
     'hourly_status_refresh':   action_hourly_status_refresh,
     'photos_wikimedia':        action_photos_wikimedia,
     'photos_flickr':           action_photos_flickr,
+    'photos_websearch':        action_photos_websearch,
     'state_photo_galleries':   action_state_photo_galleries,
     'photo_centroid_backfill': action_photo_centroid_backfill,
     'photos_tag':              action_photos_tag,
-    'photos_predict':          action_photos_predict,
+    # 'photos_predict' removed from active dispatch 2026-06-02; action
+    # function retained for ad-hoc use but no phase references it.
     'photos_curate':           action_photos_curate,
     'harvest_park_text':       action_harvest_park_text,
     'descriptions':            action_descriptions,

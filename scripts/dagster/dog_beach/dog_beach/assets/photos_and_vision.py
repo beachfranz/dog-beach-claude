@@ -658,6 +658,34 @@ def dp_photos_curate(
                   FROM ranked r JOIN needed n ON n.fid = r.dog_park_fid
                  WHERE p.id = r.id AND r.rk <= n.need
             """, (state, state))
+            # Source-priority sort_order rebase (Franz 2026-06-02).
+            # Keeps the dog-biased websearch picks ahead of geo-radius
+            # Flickr/Wikimedia in the showcase ordering.
+            cur.execute("""
+                WITH ranked AS (
+                  SELECT p.id,
+                         ROW_NUMBER() OVER (
+                           PARTITION BY p.dog_park_fid
+                           ORDER BY CASE p.source
+                             WHEN 'manual'    THEN 0
+                             WHEN 'websearch' THEN 1
+                             WHEN 'flickr'    THEN 4
+                             WHEN 'wikimedia' THEN 5
+                             WHEN 'unsplash'  THEN 6
+                             ELSE 99
+                           END,
+                           p.sort_order ASC NULLS LAST, p.id ASC
+                         ) AS new_so
+                    FROM public.dog_park_photos p
+                    JOIN public.dog_parks_gold g ON g.fid = p.dog_park_fid
+                   WHERE g.state = %s AND g.is_active AND g.is_scoreable
+                     AND p.curated_at IS NOT NULL AND p.hidden_at IS NULL
+                )
+                UPDATE public.dog_park_photos p
+                   SET sort_order = r.new_so
+                  FROM ranked r
+                 WHERE p.id = r.id AND p.sort_order IS DISTINCT FROM r.new_so
+            """, (state,))
             n_curated = cur.rowcount
             conn.commit()
             cur.execute("""

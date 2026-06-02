@@ -91,6 +91,41 @@ def strict_curate_for_fids(conn, fids: list[int], n: int) -> dict:
             (fids, n, fids, n),
         )
         rows = cur.fetchall()
+        # Source-priority sort_order rebase (Franz 2026-06-02). Keeps
+        # the dog-biased websearch picks ahead of geo-radius Flickr /
+        # Wikimedia / agency sources in the showcase ordering.
+        cur.execute(
+            """
+            WITH ranked AS (
+              SELECT p.id,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY p.arena_group_id
+                       ORDER BY CASE p.source
+                         WHEN 'manual'    THEN 0
+                         WHEN 'websearch' THEN 1
+                         WHEN 'ccc'       THEN 2
+                         WHEN 'cdpr'      THEN 3
+                         WHEN 'nps'       THEN 3
+                         WHEN 'wsprc'     THEN 3
+                         WHEN 'oprd'      THEN 3
+                         WHEN 'flickr'    THEN 4
+                         WHEN 'wikimedia' THEN 5
+                         WHEN 'unsplash'  THEN 6
+                         ELSE 99
+                       END,
+                       p.sort_order ASC NULLS LAST, p.id ASC
+                     ) AS new_so
+                FROM public.beach_photos p
+               WHERE p.arena_group_id = ANY(%s)
+                 AND p.curated_at IS NOT NULL AND p.hidden_at IS NULL
+            )
+            UPDATE public.beach_photos p
+               SET sort_order = r.new_so
+              FROM ranked r
+             WHERE p.id = r.id AND p.sort_order IS DISTINCT FROM r.new_so
+            """,
+            (fids,),
+        )
     conn.commit()
     beaches = {r[0] for r in rows}
     return {

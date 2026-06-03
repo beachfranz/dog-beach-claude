@@ -18,6 +18,9 @@ from __future__ import annotations
 
 import json
 import os
+import random
+import time
+import urllib.error
 import urllib.request
 from typing import Any
 
@@ -51,6 +54,43 @@ def sdk_client():
 
 ANTHROPIC_API = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
+
+# ─── Retry / backoff for 429s + transient 5xx ────────────────────────
+#
+# Anthropic 429s come from ITPM / RPM caps; without this helper, every
+# 429 surfaces as an immediate hard error and counts as a rate-limit
+# trip on the org dashboard. Exponential backoff with jitter + respect
+# for the Retry-After header absorbs short bursts silently.
+
+_RETRY_STATUSES = {429, 500, 502, 503, 504, 529}
+_DEFAULT_MAX_RETRIES = 5
+_BACKOFF_BASE_SECONDS = 2.0
+_BACKOFF_CAP_SECONDS = 60.0
+
+
+def _post_with_retry(req: urllib.request.Request, timeout: int) -> dict[str, Any]:
+    """POST an Anthropic request, retrying 429 + transient 5xx with
+    exponential backoff + jitter. Honors `retry-after` header when
+    Anthropic sends one."""
+    attempt = 0
+    while True:
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            if e.code not in _RETRY_STATUSES or attempt >= _DEFAULT_MAX_RETRIES:
+                raise
+            retry_after = e.headers.get("retry-after") if e.headers else None
+            if retry_after:
+                try:
+                    delay = float(retry_after)
+                except ValueError:
+                    delay = _BACKOFF_BASE_SECONDS * (2 ** attempt)
+            else:
+                delay = _BACKOFF_BASE_SECONDS * (2 ** attempt)
+            delay = min(delay, _BACKOFF_CAP_SECONDS) + random.uniform(0, 0.5)
+            time.sleep(delay)
+            attempt += 1
 
 
 def call(
@@ -97,8 +137,7 @@ def call(
     req.add_header("x-api-key", os.environ["ANTHROPIC_API_KEY"])
     req.add_header("anthropic-version", ANTHROPIC_VERSION)
     req.add_header("content-type", "application/json")
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        resp = json.loads(r.read().decode("utf-8"))
+    resp = _post_with_retry(req, timeout)
     text = "".join(b.get("text", "") for b in resp.get("content", []))
     usage = resp.get("usage", {})
     return {
@@ -143,8 +182,7 @@ def call_user_only(
     req.add_header("x-api-key", os.environ["ANTHROPIC_API_KEY"])
     req.add_header("anthropic-version", ANTHROPIC_VERSION)
     req.add_header("content-type", "application/json")
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        resp = json.loads(r.read().decode("utf-8"))
+    resp = _post_with_retry(req, timeout)
     text = "".join(p.get("text", "") for p in resp.get("content", []) if p.get("type") == "text").strip()
     return text, resp.get("usage", {})
 

@@ -643,8 +643,9 @@ def main() -> int:
     ap.add_argument("--retry-failed", action="store_true",
                     help="Target parks where the most recent BEP row is a sentinel "
                          "(per_park_amenities_v1_no_result) — i.e. previous extraction failed.")
-    ap.add_argument("--workers", type=int, default=6,
-                    help="Parallel worker threads. Cap at <15 per [[supabase-pool-cap-vs-dagster-concurrency]]; default 6.")
+    ap.add_argument("--workers", type=int, default=3,
+                    help="Parallel worker threads. Default 3 to keep Sonnet ITPM headroom; "
+                         "cap at <15 per [[supabase-pool-cap-vs-dagster-concurrency]].")
     ap.add_argument("--include-no-website", action="store_true",
                     help="Also process parks without OSM website tag (uses web_search with city + name).")
     args = ap.parse_args()

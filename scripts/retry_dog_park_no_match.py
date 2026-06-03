@@ -172,7 +172,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--limit", type=int, default=None)
-    ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--workers", type=int, default=3,
+                    help="Parallel worker threads. Lowered to 3 to keep Sonnet ITPM headroom "
+                         "(web_search calls balloon per-request tokens).")
     ap.add_argument("--state", type=str, default="CA", help="State filter (default CA)")
     args = ap.parse_args()
 

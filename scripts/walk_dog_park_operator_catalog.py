@@ -784,8 +784,8 @@ def main() -> int:
                     help="State filter for auto-discovery (default CA).")
     ap.add_argument("--min-parks", type=int, default=3,
                     help="Operator must have ≥N active parks in state to be a target.")
-    ap.add_argument("--workers", type=int, default=2,
-                    help="Per-park parallel workers. Default 2 to keep Sonnet ITPM headroom; "
+    ap.add_argument("--workers", type=int, default=3,
+                    help="Per-park parallel workers. Default 3 — core dog-park coverage script; "
                          "cap < 12 per [[supabase-pool-cap-vs-dagster-concurrency]].")
     ap.add_argument("--chunk", type=int, default=3,
                     help="Process operators in chunks of N, sleeping between (T5 tuning).")

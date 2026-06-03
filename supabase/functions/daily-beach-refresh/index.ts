@@ -279,10 +279,17 @@ Deno.serve(async (req: Request) => {
     }
 
     // 1b. Optional skip_recent_hours filter — drop beaches whose today's
-    //     beach_day_recommendations row was updated within the cutoff.
+    //     beach_day_recommendations row was GENERATED within the cutoff.
     //     Lets pg_cron / failed-batch retries / ad-hoc fires be idempotent
     //     without client-side dedup. Mirrors --skip-recent semantics from
     //     the LLM extractors.
+    //
+    //     Filters on `generated_at`, NOT `updated_at`. The NOW refresh
+    //     (get-beach-now) calls apply_v2_best_window_to_beach_recommendations
+    //     hourly which bumps updated_at on existing rec rows; using
+    //     updated_at here would silently hide any beach with hourly NOW
+    //     traffic from daily-refresh forever (HB Dog Beach fid 6212 stuck
+    //     for 9 days; root-caused 2026-06-03).
     let skippedRecent = 0;
     if (skipRecentHours !== null) {
       const cutoffIso = new Date(runAt.getTime() - skipRecentHours * 3600 * 1000).toISOString();
@@ -291,7 +298,7 @@ Deno.serve(async (req: Request) => {
         .from("beach_day_recommendations")
         .select("arena_group_id")
         .in("arena_group_id", beachFids)
-        .gte("updated_at", cutoffIso);
+        .gte("generated_at", cutoffIso);
       if (recentErr) {
         console.warn(`skip_recent_hours query failed: ${recentErr.message} — proceeding without skip`);
       } else {

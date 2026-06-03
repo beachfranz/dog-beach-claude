@@ -37,6 +37,11 @@ Deno.serve(async (req: Request) => {
   // hours OK (e.g. 0.9 = 54 min — pairs well with hourly pg_cron + a 6 min
   // grace buffer). Capped at 24h.
   let skipRecentHours: number | null = null;
+  // chunked-drain cap. 2026-06-03: Promise.all over 711 hourly-tier beaches
+  // hits WORKER_RESOURCE_LIMIT (HTTP 546). Cron now fires every 5 min with
+  // limit=100, mirroring daily-beach-refresh's chunked pattern. Hard-capped
+  // at 500 to keep one call safe.
+  let limitBeaches: number | null = null;
 
   if (req.method === "GET") {
     const params = new URL(req.url).searchParams;
@@ -56,6 +61,9 @@ Deno.serve(async (req: Request) => {
     }
     if (typeof body?.skip_recent_hours === "number" && body.skip_recent_hours > 0) {
       skipRecentHours = Math.min(body.skip_recent_hours, 24);
+    }
+    if (typeof body?.limit === "number" && body.limit > 0) {
+      limitBeaches = Math.min(body.limit, 500);
     }
   }
 
@@ -180,6 +188,31 @@ Deno.serve(async (req: Request) => {
       beaches = beaches.filter(b => !recentSet.has(b.arena_group_id));
       skippedRecent = before - beaches.length;
       console.log(`skip_recent_hours=${skipRecentHours} → skipped ${skippedRecent}/${before}; ${beaches.length} remaining`);
+    }
+  }
+
+  // Sort by oldest-NOW-first and cap to `limit`. Mirrors the chunked-drain
+  // pattern in daily-beach-refresh: each fire processes the stalest
+  // beaches first, so the chunked cron drains the pool fairly.
+  if (limitBeaches !== null && beaches.length > limitBeaches) {
+    const beachFids = beaches.map(b => b.arena_group_id);
+    const { data: ageRows, error: ageErr } = await supabase
+      .from("beach_day_hourly_scores")
+      .select("arena_group_id, updated_at")
+      .eq("is_now", true)
+      .in("arena_group_id", beachFids);
+    if (ageErr) {
+      console.warn(`limit-sort age query failed: ${ageErr.message} — applying naive slice`);
+      beaches = beaches.slice(0, limitBeaches);
+    } else {
+      const ageBy: Record<number, number> = {};
+      for (const r of (ageRows ?? []) as { arena_group_id: number; updated_at: string | null }[]) {
+        ageBy[r.arena_group_id] = r.updated_at ? new Date(r.updated_at).getTime() : 0;
+      }
+      beaches.sort((a, b) => (ageBy[a.arena_group_id] ?? 0) - (ageBy[b.arena_group_id] ?? 0));
+      const before = beaches.length;
+      beaches = beaches.slice(0, limitBeaches);
+      console.log(`limit=${limitBeaches} → processing ${beaches.length}/${before} oldest-NOW beaches`);
     }
   }
 

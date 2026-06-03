@@ -40,6 +40,11 @@ Deno.serve(async (req: Request) => {
 
   let targetFids: number[] | null = null;
   let skipRecentHours: number | null = null;
+  // chunked-drain cap. 2026-06-03: Promise.all over 2,589 scoreable parks
+  // hits WORKER_RESOURCE_LIMIT (HTTP 546). Cron now fires every 5 min with
+  // limit=100, mirroring daily-dog-park-refresh's chunked pattern. Hard-
+  // capped at 500 to keep one call safe.
+  let limitParks: number | null = null;
   // MVP+ scope (Franz 2026-05-30): CA + OR + WA + MD + UT. Body.state overrides:
   //   "ALL" → every state ; "MD" / etc → just that state.
   let stateFilters: string[] = ["CA", "OR", "WA", "MD", "UT"];
@@ -60,6 +65,9 @@ Deno.serve(async (req: Request) => {
     }
     if (typeof body?.skip_recent_hours === "number" && body.skip_recent_hours > 0) {
       skipRecentHours = Math.min(body.skip_recent_hours, 24);
+    }
+    if (typeof body?.limit === "number" && body.limit > 0) {
+      limitParks = Math.min(body.limit, 500);
     }
   }
 
@@ -121,6 +129,29 @@ Deno.serve(async (req: Request) => {
     const before = parks.length;
     parks = parks.filter((p) => !recentSet.has(p.fid));
     skippedRecent = before - parks.length;
+  }
+
+  // Sort oldest-NOW-first and cap to `limit`. Mirrors the chunked-drain
+  // pattern in daily-dog-park-refresh.
+  if (limitParks !== null && parks.length > limitParks) {
+    const { data: ageRows, error: ageErr } = await supabase
+      .from("dog_park_day_hourly_scores")
+      .select("dog_park_fid, updated_at")
+      .eq("is_now", true)
+      .in("dog_park_fid", parks.map((p) => p.fid));
+    if (ageErr) {
+      console.warn(`limit-sort age query failed: ${ageErr.message} — applying naive slice`);
+      parks = parks.slice(0, limitParks);
+    } else {
+      const ageBy: Record<number, number> = {};
+      for (const r of (ageRows ?? []) as { dog_park_fid: number; updated_at: string | null }[]) {
+        ageBy[r.dog_park_fid] = r.updated_at ? new Date(r.updated_at).getTime() : 0;
+      }
+      parks.sort((a, b) => (ageBy[a.fid] ?? 0) - (ageBy[b.fid] ?? 0));
+      const before = parks.length;
+      parks = parks.slice(0, limitParks);
+      console.log(`limit=${limitParks} → processing ${parks.length}/${before} oldest-NOW parks`);
+    }
   }
 
   const config = configRes.data as DogParkScoringConfig;

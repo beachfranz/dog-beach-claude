@@ -176,10 +176,12 @@ Installed at `~/scoop/shims/supabase` (v2.90.0+). Project linked to **dog-beach-
 ```bash
 supabase db query --linked -f supabase/migrations/<file>.sql   # apply migration
 supabase db query --linked "SELECT count(*) FROM public.beaches_gold WHERE is_scoreable"   # ad-hoc
-supabase functions deploy <fn-name> --no-verify-jwt           # deploy edge function
+scripts/deploy_edge_function.sh <fn-name>                      # canonical deploy (always --no-verify-jwt)
+scripts/deploy_edge_function.sh --cron                          # redeploy all cron-targeted functions
+scripts/deploy_edge_function.sh --all                           # redeploy every function
 ```
 
-`--no-verify-jwt` is required because the `sb_publishable_` anon key format does not pass Supabase JWT verification.
+**Always deploy edge functions through `scripts/deploy_edge_function.sh`.** A bare `supabase functions deploy <name>` will succeed but the function returns 401 `UNAUTHORIZED_INVALID_JWT_FORMAT` on every call — `sb_publishable_` is not a JWT, so the missing `--no-verify-jwt` flag breaks the function silently. This pattern took out `daily-beach-refresh` for 4 days (2026-05-30 → 2026-06-03) before being caught by the new orch response reconciler.
 
 For Python scripts: `scripts/pipeline/.env` carries `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_DB_PASSWORD`, `ADMIN_SECRET`, `ANTHROPIC_API_KEY`. Pooler URL at `supabase/.temp/pooler-url`. **Always check existing stores before asking for a new key** (`feedback_check_secrets_first.md`). When appending to `.env` check for trailing newline first (`feedback_env_append_check_newline.md`).
 

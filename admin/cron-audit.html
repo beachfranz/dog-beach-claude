@@ -61,8 +61,9 @@
   .badge { display: inline-block; padding: 2px 8px; border-radius: 10px;
            font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
            text-transform: uppercase; }
-  .badge.shadow { background: #e0f2fe; color: #0369a1; }
-  .badge.live   { background: #dcfce7; color: #166534; }
+  .badge.shadow   { background: #e0f2fe; color: #0369a1; }
+  .badge.live     { background: #dcfce7; color: #166534; }
+  .badge.disabled { background: #e2e8f0; color: #475569; }
   .badge.fired, .badge.succeeded { background: #dcfce7; color: #166534; }
   .badge.failed, .badge.timeout  { background: #fee2e2; color: #991b1b; }
   .badge.skipped_cron_window     { background: #f1f5f9; color: #64748b; }
@@ -297,9 +298,11 @@ function renderJobs(jobs, runs) {
 
   const tbody = document.querySelector('#jobs-table tbody');
   tbody.innerHTML = jobs.map(j => {
-    const mode = j.shadow_mode
-      ? '<span class="badge shadow">SHADOW</span>'
-      : '<span class="badge live">LIVE</span>';
+    const mode = j.enabled === false
+      ? '<span class="badge disabled">DISABLED</span>'
+      : j.shadow_mode
+        ? '<span class="badge shadow">SHADOW</span>'
+        : '<span class="badge live">LIVE</span>';
     // ✓ marks whichever of (last_succeeded, last_failed) is the more recent
     // outcome — gives an at-a-glance read of "is this job currently OK?"
     const isFailed = j.last_failed_at && (!j.last_succeeded_at ||

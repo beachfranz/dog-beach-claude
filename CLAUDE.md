@@ -291,6 +291,9 @@ Candidate hours = daylight + `hour_status != 'no_go'` + `hour_score >= window_sc
 ### `index.html` — Home / 7-Day Forecast
 Reads `get-beach-summary?fid=...`. Renders NOW card (live `get-beach-now`) + 7 day cards. Tapping a card → `detail.html?fid=...&date=...`. Location switcher dropdown from `allBeaches`.
 
+### `beach.html` — Beach Page (dog-policy focused)
+Accepts `?fid=<n>` or `?location_id=<slug>` (resolves slug → fid via PostgREST `beaches_gold`). The dog-policy-focused beach view — reads from `beach_dog_policy` (curated overlay) for the leashy verdict, plus the photo block + zone-rules block. This is the page to verify after cascade work: tonight's `compute_beach_field_consensus` + `promote_canonical_dogs_to_beach_dog_policy` propagation flows directly to what this page renders.
+
 ### `detail.html` — Hour-by-Hour Detail
 Reads `get-beach-detail?fid=...&date=...`. Sticky header with best window + Scout blurb. Status board (left) lists only metrics with ≥1 non-go hour, with time-range blocks. Bar charts (right) dynamically picked: Score first, active metrics by severity, Temp last. Tapping a bar opens tooltip with reason + component scores. Scout chat panel at the bottom.
 

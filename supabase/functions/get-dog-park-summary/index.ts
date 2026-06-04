@@ -45,7 +45,7 @@ Deno.serve(async (req: Request) => {
             surface_overlay, description_overlay,
             source, source_url, operator_id, consensus_confidence
           ),
-          operator:inferred_operator_id(id, name, web_url)
+          operator:inferred_operator_id(id, canonical_name, web_url)
         `)
         .eq("fid", fid)
         .single(),
@@ -90,7 +90,7 @@ Deno.serve(async (req: Request) => {
         area_m2: park.area_m2,
         website: park.website,
         description: park.description,
-        operator: op ? { id: op.id, name: op.name, web_url: op.web_url } : null,
+        operator: op ? { id: op.id, name: op.canonical_name, web_url: op.web_url } : null,
         // Policy overlay — consumer-side coalesces overlay ?? raw
         policy: dp ? {
           dogs_allowed: dp.dogs_allowed,

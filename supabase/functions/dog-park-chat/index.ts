@@ -62,7 +62,7 @@ Deno.serve(async (req: Request) => {
             surface_overlay, description_overlay,
             source, source_url
           ),
-          operator:inferred_operator_id(name, web_url)
+          operator:inferred_operator_id(canonical_name, web_url)
         `)
         .eq("fid", dog_park_fid)
         .maybeSingle(),

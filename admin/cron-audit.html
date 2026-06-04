@@ -267,14 +267,18 @@ function renderJobs(jobs) {
     const mode = j.shadow_mode
       ? '<span class="badge shadow">SHADOW</span>'
       : '<span class="badge live">LIVE</span>';
-    const succ = j.last_succeeded_at
-      ? `<span title="${fmtAbsTime(j.last_succeeded_at)}">${fmtRelTime(j.last_succeeded_at)}</span>`
-      : '<span class="dim">never</span>';
-    const fail = j.last_failed_at
-      ? `<span title="${fmtAbsTime(j.last_failed_at)}">${fmtRelTime(j.last_failed_at)}</span>`
-      : '<span class="dim">—</span>';
+    // ✓ marks whichever of (last_succeeded, last_failed) is the more recent
+    // outcome — gives an at-a-glance read of "is this job currently OK?"
     const isFailed = j.last_failed_at && (!j.last_succeeded_at ||
                      new Date(j.last_failed_at) > new Date(j.last_succeeded_at));
+    const succMark = (!isFailed && j.last_succeeded_at) ? '✓ ' : '';
+    const failMark = isFailed ? '✓ ' : '';
+    const succ = j.last_succeeded_at
+      ? `<span title="${fmtAbsTime(j.last_succeeded_at)}">${succMark}${fmtRelTime(j.last_succeeded_at)}</span>`
+      : '<span class="dim">never</span>';
+    const fail = j.last_failed_at
+      ? `<span title="${fmtAbsTime(j.last_failed_at)}">${failMark}${fmtRelTime(j.last_failed_at)}</span>`
+      : '<span class="dim">—</span>';
     const errOrSkip = j.last_error
       ? `<div class="err">${escapeHtml(j.last_error).slice(0,400)}</div>`
       : j.last_skip_reason

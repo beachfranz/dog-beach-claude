@@ -57,7 +57,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       .gte("started_at", sinceIso)
       .not("status", "like", "skipped_%")
       .order("started_at", { ascending: false })
-      .limit(500),
+      .limit(5000),  // bumped 2026-06-04 so per-job 24h+48h success rates
+                     // see full window (was 500, undersampled high-freq jobs)
   ]);
 
   if (jobsRes.error || runsRes.error) {

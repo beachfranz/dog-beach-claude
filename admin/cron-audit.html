@@ -122,7 +122,7 @@
   <table id="jobs-table">
     <thead><tr>
       <th>Phase</th><th>Mode</th><th>Cadence</th><th>Last succeeded</th>
-      <th>Last failed</th><th>Last error / skip reason</th>
+      <th>Last failed</th><th>24h</th><th>48h</th><th>Last error / skip reason</th>
     </tr></thead>
     <tbody></tbody>
   </table>
@@ -148,7 +148,8 @@ async function fetchStatus() {
   if (!secret) throw new Error('Admin secret required');
   // Window is fixed at 24h — the page doesn't render run history any more,
   // but the backend still expects an hours param to scope its job lookups.
-  const url = `${SUPABASE_URL}/functions/v1/admin-orch-status?hours=24`;
+  // Fetch 48h window — dashboard derives 24h success rate as a subset.
+  const url = `${SUPABASE_URL}/functions/v1/admin-orch-status?hours=48`;
   const r = await fetch(url, {
     method: 'POST',
     headers: {
@@ -261,7 +262,35 @@ function renderHealth(jobs) {
   </div>`;
 }
 
-function renderJobs(jobs) {
+// Success rate over a window: succeeded+fired / (succeeded+fired+failed+timeout).
+// 'fired' covers fire-and-forget dispatches that the engine never failed.
+// Skipped runs are pre-filtered by the API. Returns either "N%" or "—".
+function successRate(runsForJob, windowMs) {
+  if (!runsForJob || runsForJob.length === 0) return '—';
+  const cutoff = Date.now() - windowMs;
+  let ok = 0, bad = 0;
+  for (const r of runsForJob) {
+    const t = r.started_at ? new Date(r.started_at).getTime() : 0;
+    if (t < cutoff) continue;
+    if (r.status === 'succeeded' || r.status === 'fired') ok += 1;
+    else if (r.status === 'failed' || r.status === 'timeout') bad += 1;
+  }
+  const total = ok + bad;
+  if (total === 0) return '—';
+  return `${Math.round(100 * ok / total)}%`;
+}
+
+function renderJobs(jobs, runs) {
+  // Index runs by job_name once for cheap per-row success-rate computation.
+  const runsByJob = new Map();
+  for (const r of (runs || [])) {
+    let arr = runsByJob.get(r.job_name);
+    if (!arr) { arr = []; runsByJob.set(r.job_name, arr); }
+    arr.push(r);
+  }
+  const MS_24H = 24 * 3600 * 1000;
+  const MS_48H = 48 * 3600 * 1000;
+
   const tbody = document.querySelector('#jobs-table tbody');
   tbody.innerHTML = jobs.map(j => {
     const mode = j.shadow_mode
@@ -285,6 +314,9 @@ function renderJobs(jobs) {
         ? `<span class="dim">${escapeHtml(j.last_skip_reason).slice(0,200)}</span>`
         : '';
     const rowCls = isFailed ? 'row-failed' : '';
+    const jobRuns = runsByJob.get(j.job_name);
+    const rate24 = successRate(jobRuns, MS_24H);
+    const rate48 = successRate(jobRuns, MS_48H);
     return `<tr class="${rowCls}">
       <td><strong>${escapeHtml(j.job_name)}</strong><br>
           <span class="dim mono">${escapeHtml(j.worker_kind)} · ${escapeHtml(j.worker_target).slice(0,60)}</span>
@@ -293,6 +325,8 @@ function renderJobs(jobs) {
       <td class="mono">${escapeHtml(fmtCadence(j))}</td>
       <td>${succ}</td>
       <td>${fail}</td>
+      <td class="mono">${rate24}</td>
+      <td class="mono">${rate48}</td>
       <td>${errOrSkip}</td>
     </tr>`;
   }).join('');
@@ -306,7 +340,7 @@ async function load() {
   try {
     const data = await fetchStatus();
     renderHealth(data.jobs || []);
-    renderJobs(data.jobs || []);
+    renderJobs(data.jobs || [], data.runs || []);
     statusEl.textContent = `as of ${new Date(data.generated_at).toLocaleTimeString()}`;
   } catch (e) {
     errBox.textContent = e.message;

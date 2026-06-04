@@ -78,6 +78,10 @@
          font-family: ui-monospace, SFMono-Regular, "SF Mono", Monaco, monospace; }
   .row-failed { background: #fef2f2; }
   .row-stale  { background: #fff7ed; }
+  /* Disabled jobs: keep them in the table for visibility but visually
+   * de-emphasize so failing live jobs don't get drowned in dormant noise. */
+  .row-disabled td { opacity: 0.45; }
+  .row-disabled .err { color: #64748b; }
 
   .health {
     margin-bottom: 20px; padding: 14px 18px; border-radius: 8px;
@@ -313,7 +317,11 @@ function renderJobs(jobs, runs) {
       : j.last_skip_reason
         ? `<span class="dim">${escapeHtml(j.last_skip_reason).slice(0,200)}</span>`
         : '';
-    const rowCls = isFailed ? 'row-failed' : '';
+    // Disabled overrides failing — a dormant row's stale failures aren't
+    // actionable, so gray it out instead of red-tinting it.
+    const rowCls = j.enabled === false ? 'row-disabled'
+                 : isFailed             ? 'row-failed'
+                 : '';
     const jobRuns = runsByJob.get(j.job_name);
     const rate24 = successRate(jobRuns, MS_24H);
     const rate48 = successRate(jobRuns, MS_48H);

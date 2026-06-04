@@ -737,19 +737,33 @@ async function load() {
   render(data);
   loadPhotos(fid);
   loadWeather(data);
+  // Stash park tz so applyHourlyV2 can compute park-local "now".
+  window.__parkTimezone = data.dog_park?.timezone || 'America/Los_Angeles';
   // onfetch returns scout_blurb inline; skip the separate LLM call.
   if (useOnFetch && data.scout_blurb) {
     paintScoutBlurb(data.scout_blurb, data.dog_park);
   } else {
-    loadScoutBlurb(data.dog_park, data.days?.[0], data.now);
+    // Fetch hourly v2 FIRST so the live "best window from now" drives both
+    // the headline AND the LLM prompt. Previously loadScoutBlurb fired
+    // immediately with today.best_window_label (full-day stored window) and
+    // _fetchHourlyV2 only narrowed the headline — leaving a header/blurb
+    // mismatch (header "1pm-6pm" but Scout text says "3pm-8pm").
+    // Per Franz 2026-06-04: live-refresh drives the headline, NOT the other way around.
+    _fetchHourlyV2(fid).then(payload => {
+      let liveWindowLabel = null;
+      if (payload && !payload.error) {
+        applyHourlyV2(payload);
+        const parkTz = window.__parkTimezone;
+        const nowH = _currentLocalHourDP(parkTz) ?? new Date().getHours();
+        const remaining = _bestWindowFromNowV2DP(payload.hours || [], nowH);
+        liveWindowLabel = remaining?.label || null;
+      }
+      loadScoutBlurb(data.dog_park, data.days?.[0], data.now, liveWindowLabel);
+    }).catch(err => {
+      console.warn('_fetchHourlyV2 failed, falling back to stored window:', err);
+      loadScoutBlurb(data.dog_park, data.days?.[0], data.now, null);
+    });
   }
-  // Stash park tz so applyHourlyV2 can compute park-local "now".
-  window.__parkTimezone = data.dog_park?.timezone || 'America/Los_Angeles';
-  // Hourly v2 — async fill the header badge with current-hour score + render
-  // vertical bar chart inside the Best-time card.
-  _fetchHourlyV2(fid).then(payload => {
-    if (payload && !payload.error) applyHourlyV2(payload);
-  });
   // Cautions card — async fill from dog_park_advisory (mirrors beach pattern).
   loadDogParkAdvisories(fid);
 }
@@ -1531,7 +1545,12 @@ function buildScoutCard(park, now, today) {
 
 // Async-fill the Scout narrative via dog-park-chat. Mirrors beach.html's
 // loadScoutBlurb. Same markdown-bold rendering, same CTA wiring.
-async function loadScoutBlurb(park, today, now) {
+//
+// liveWindowOverride: the live "best window from now" computed from the
+// hourly v2 payload — supersedes today.best_window_label (which is the
+// full-day stored window). Caller should fetch hourly v2 first and pass
+// the narrowed window so the LLM sees the same value as the headline.
+async function loadScoutBlurb(park, today, now, liveWindowOverride) {
   const el = document.getElementById('scout-blurb');
   if (!el) return;
   // No v1-status short-circuit — the v1 hour_status frequently disagrees
@@ -1540,9 +1559,10 @@ async function loadScoutBlurb(park, today, now) {
   // frame appropriately (cautious vs upbeat). Per Franz 2026-05-27 LATE.
   const status = (now?.hour_status_v2 ?? now?.hour_status)
               ?? (today?.day_status_v2 ?? today?.day_status);
-  const window = today?.best_window_label
+  const window = liveWindowOverride
+    || today?.best_window_label
     || (status === 'go' ? 'right now' : 'during operating hours');
-  const question = `Write the Scout intro paragraph for visiting this dog park today. ALWAYS include the time window '${window}' as plain text in the paragraph — weave it in naturally (e.g. "${window} is your window", "hit it ${window}"). No need to bold it; the headline above already styles the window.`;
+  const question = `Write the Scout intro paragraph for visiting this dog park today. The best time window is '${window}'. Use this EXACT window verbatim in your paragraph — do NOT generate or substitute a different time range. Weave '${window}' naturally into the prose (e.g. "${window} is your window", "hit it ${window}", "${window} is firing"). No need to bold it; the headline above already styles the window.`;
   try {
     const r = await fetch(`${SUPABASE_URL}/functions/v1/dog-park-chat`, {
       method: 'POST',

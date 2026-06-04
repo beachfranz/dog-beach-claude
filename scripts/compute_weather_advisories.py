@@ -66,7 +66,7 @@ V2_RANK = {"clear": 0, "advisory": 1, "caution": 2, "no_go": 3}
 # Fields: (advisory_event_type, signal_key, raw_col, label, icon, dog_impact_class,
 #          text_tmpl, unit_fmt, aggregate)
 HOURLY_METRICS = [
-    ("sand_status",     "sand_temp_neg",   "sand_temp",     "Hot sand",    "🏖️", "paws_warning",
+    ("sand_status",     "sand_temp_neg",   "sand_temp",     "Hot sand",    "🪣", "paws_warning",
      "Sand will hit {observed}°F — paws will burn. Go dawn or dusk.", "{:.0f}°F", "max"),
     ("asphalt_status",  "asphalt_neg",     "asphalt_temp",  "Hot asphalt", "🚶", "paws_warning",
      "Parking-lot asphalt {observed}°F — booties for the walk in.", "{:.0f}°F", "max"),

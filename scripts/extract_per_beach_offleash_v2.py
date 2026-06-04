@@ -50,6 +50,19 @@ ANTHROPIC = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 ANTHROPIC_KEY = os.environ["ANTHROPIC_API_KEY"]
 
 
+# ── Phase 10b corpus extension — state-park-listing URLs ───────────────
+# Loaded once at module init from scripts/state_park_urls.json. Used by
+# candidates_for_beach() as a state-park fallback when the beach is in a
+# state-park context (mng_agncy=state-parks agency or name contains
+# "State Beach" / "State Park" / "State Recreation").
+try:
+    _STATE_PARK_URLS_PATH = Path(__file__).resolve().parent / "state_park_urls.json"
+    with open(_STATE_PARK_URLS_PATH, encoding="utf-8") as _f:
+        _STATE_PARK_URLS = json.load(_f)
+except (FileNotFoundError, json.JSONDecodeError):
+    _STATE_PARK_URLS = {}
+
+
 # ── P3 — Richer AUTH_DOMAINS (port codify's wider list) ────────────────
 AUTH_DOMAINS = dict(RV2_AUTH)
 AUTH_DOMAINS.update({
@@ -267,6 +280,44 @@ def candidates_for_beach(beach: dict) -> list[dict]:
     mng = (beach.get('mng_agncy') or '').lower()
     city = beach.get('city_name') or ''
     cands: list[dict] = []
+
+    # ─── Phase 10b — operator-source-URL candidates ────────────────────
+    # Pre-loaded by main() from operator_dogs_policy.source_url for each
+    # operator attributed to this beach via entity_operator. These URLs
+    # already passed Phase 10's policy_found gate — they're known to
+    # contain dog-policy text. Auth=5 (highest) because operator-published
+    # + already-vetted. The per-beach name_match gate filters to beaches
+    # whose name actually appears on the page (applies_to_all=false ops
+    # often have a URL specific to ONE of their beaches; this naturally
+    # selects that beach and writes no_match for the others).
+    for url in (beach.get('op_source_urls') or []):
+        if url:
+            cands.append({
+                "url": url,
+                "platform": "op_dogs_policy_source",
+                "auth": 5,
+            })
+
+    # ─── Phase 10b — state-park-listing fallback ───────────────────────
+    # For beaches in a state-park context (name suggests state ownership
+    # or mng_agncy is a state-parks agency), include the canonical
+    # state-parks-listing URL from scripts/state_park_urls.json. Auth=3
+    # — useful but lower-priority than operator-specific URLs.
+    name_lc = name.lower()
+    is_state_park_beach = (
+        "state park" in name_lc
+        or "state beach" in name_lc
+        or "state recreation" in name_lc
+        or "state seashore" in name_lc
+    )
+    if is_state_park_beach and state in _STATE_PARK_URLS:
+        entry = _STATE_PARK_URLS[state]
+        if isinstance(entry, dict) and entry.get("url"):
+            cands.append({
+                "url": entry["url"],
+                "platform": f"state_parks_listing_{state.lower()}",
+                "auth": 3,
+            })
 
     # ─── CDPR (California Dept of Parks and Recreation) ────────────────
     # Per-park pages live at parks.ca.gov/?page_id=N. N is per-park and not
@@ -560,13 +611,28 @@ def main() -> int:
     conn.set_client_encoding("UTF8")
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
+    # Phase 10b: also pull operator_dogs_policy.source_url per beach via
+    # entity_operator. Some beaches have 0 attributed ops with URLs; some
+    # have 1+. Array-aggregated to a single column.
     cur.execute("""
         SELECT g.fid, g.name, g.county_name, g.state, g.lat, g.lon,
-               cu.mng_agncy, j.name AS city_name
+               cu.mng_agncy, j.name AS city_name,
+               array_remove(
+                 array_agg(DISTINCT odp.source_url),
+                 NULL
+               ) AS op_source_urls
           FROM public.beaches_gold g
           LEFT JOIN public.cpad_units cu ON cu.unit_id = g.cpad_unit_id
           LEFT JOIN public.jurisdictions j ON j.id = g.c1_jurisdiction_id
+          LEFT JOIN public.entity_operator eo
+                 ON eo.entity_type = 'beach' AND eo.entity_id = g.fid
+          LEFT JOIN public.operator_dogs_policy odp
+                 ON odp.operator_id = eo.operator_id
+                AND odp.policy_found = true
+                AND odp.source_url IS NOT NULL
          WHERE g.fid = ANY(%s)
+         GROUP BY g.fid, g.name, g.county_name, g.state, g.lat, g.lon,
+                  cu.mng_agncy, j.name
     """, (target_fids,))
     beaches = {b['fid']: b for b in cur.fetchall()}
 

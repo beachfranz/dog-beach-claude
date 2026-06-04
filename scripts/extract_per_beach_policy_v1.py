@@ -210,7 +210,8 @@ def find_or_insert_policy_source(cur, op_id: int | None, op_name: str,
         """, (source_url,))
     row = cur.fetchone()
     if row:
-        return row[0]
+        # RealDictCursor returns dict; fall back to tuple access for plain cursor
+        return row['id'] if isinstance(row, dict) else row[0]
 
     citation = f"{op_name} — per-beach policy (v1)" if op_name else \
                "Per-beach policy (v1, no operator)"
@@ -222,7 +223,8 @@ def find_or_insert_policy_source(cur, op_id: int | None, op_name: str,
                 now())
         RETURNING id
     """, (op_id, citation, source_url))
-    return cur.fetchone()[0]
+    inserted = cur.fetchone()
+    return inserted['id'] if isinstance(inserted, dict) else inserted[0]
 
 
 def _derive_dominant_sand_rule(answer: dict) -> str | None:
@@ -282,7 +284,7 @@ def write_bep_success(cur, fid: int, source_url: str, answer: dict) -> None:
     cur.execute("""
         INSERT INTO public.beach_enrichment_provenance
           (gold_fid, field_group, source, source_url, claimed_values, is_canonical, notes)
-        VALUES (%s, 'dog_policy', 'per_beach_policy_v1', %s, %s::jsonb,
+        VALUES (%s, 'dogs', 'per_beach_policy_v1', %s, %s::jsonb,
                 true,
                 'extract_per_beach_policy_v1.py — full zone-aware response')
     """, (fid, source_url, json.dumps(answer)))
@@ -298,7 +300,7 @@ def write_sentinel(cur, fid: int, url: str | None, why: str) -> None:
     cur.execute("""
         INSERT INTO public.beach_enrichment_provenance
           (gold_fid, field_group, source, source_url, claimed_values, is_canonical, notes)
-        VALUES (%s, 'dog_policy', 'per_beach_policy_v1_no_result', %s, %s::jsonb,
+        VALUES (%s, 'dogs', 'per_beach_policy_v1_no_result', %s, %s::jsonb,
                 false,
                 'extract_per_beach_policy_v1.py — sentinel; no useful extraction')
     """, (fid, url, json.dumps(payload)))
@@ -536,7 +538,9 @@ def main() -> int:
             if args.apply:
                 conn.commit()
         except Exception as e:
-            print(f"    [!] write error: {e}")
+            import traceback
+            print(f"    [!] write error: {type(e).__name__}: {e}")
+            traceback.print_exc()
             conn.rollback()
 
     print(f"\n{'='*60}\nSUMMARY:")

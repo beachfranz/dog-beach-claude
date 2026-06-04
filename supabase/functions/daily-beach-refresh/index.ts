@@ -571,14 +571,14 @@ async function processBeach(
 
   // h. Upsert daily rows — same fid-drift handling as hourly.
   try {
-    const dailyRows = dates.map((date) => {
+    const dailyRows = await Promise.all(dates.map(async (date) => {
       const dayHours     = scoredHours.filter((h) => h.localDate === date);
       const window       = windows.get(date) ?? null;
-      const recentPrecip = computePrecipForDay(rawHours, weatherResult.hours, date);
+      const recentPrecip = await computePrecipForDay(supabase, beach, rawHours, weatherResult.hours, date);
       const bacteriaRisk = deriveBacteriaRisk(recentPrecip.precip72hMm, cautionMm, nogoMm);
       console.log(`[${beach.location_id}] ${date}: 72h=${recentPrecip.precip72hMm}mm → ${bacteriaRisk}`);
       return buildDailyRow(beach, date, dayHours, window, config, runAt, recentPrecip, bacteriaRisk);
-    });
+    }));
     if (dailyRows.length > 0) {
       const { error: delErr } = await supabase
         .from("beach_day_recommendations")
@@ -635,28 +635,46 @@ async function processBeach(
  * the beach. Anchoring at start-of-day gives a clean, per-day rolling
  * total that matches how SoCal advisories are issued.
  */
-function computePrecipForDay(
+// precip_72h reads from precipitation_history via precip_72h_for_point() RPC.
+// precip_24h stays inline because daily-beach-refresh's fetched weather hours
+// already cover the 24h trailing window — no need to round-trip the DB.
+async function computePrecipForDay(
+  supabase: ReturnType<typeof createClient>,
+  beach: Beach,
   rawHours: RawHourData[],
   weatherHours: Awaited<ReturnType<typeof fetchWeather>>["hours"],
   localDate: string,
-): { precip24hMm: number; precip72hMm: number } {
+): Promise<{ precip24hMm: number; precip72hMm: number }> {
+  // 24h: inline from fetched weather hours (forecast window covers this).
+  let precip24h = 0;
   const firstIdx = rawHours.findIndex((h) => h.localDate === localDate);
-  if (firstIdx < 0) return { precip24hMm: 0, precip72hMm: 0 };
+  if (firstIdx >= 0) {
+    const anchorMs = new Date(rawHours[firstIdx].forecastTs).getTime();
+    const ms24h    = 24 * 3_600_000;
+    const len      = Math.min(rawHours.length, weatherHours.length);
+    for (let i = 0; i < len; i++) {
+      const tsMs = new Date(rawHours[i].forecastTs).getTime();
+      if (tsMs >= anchorMs) continue;
+      if (anchorMs - tsMs <= ms24h) {
+        precip24h += weatherHours[i].precipitation ?? 0;
+      }
+    }
+  }
 
-  const anchorMs = new Date(rawHours[firstIdx].forecastTs).getTime();
-  const ms24h    = 24 * 3_600_000;
-  const ms72h    = 72 * 3_600_000;
-  let precip24h  = 0;
-  let precip72h  = 0;
-
-  const len = Math.min(rawHours.length, weatherHours.length);
-  for (let i = 0; i < len; i++) {
-    const tsMs = new Date(rawHours[i].forecastTs).getTime();
-    if (tsMs >= anchorMs) continue;
-    const ageMs = anchorMs - tsMs;
-    const mm    = weatherHours[i].precipitation ?? 0;
-    if (ageMs <= ms72h) precip72h += mm;
-    if (ageMs <= ms24h) precip24h += mm;
+  // 72h: via precip_72h_for_point() against precipitation_history (3-day
+  // rollup, maintained by _refresh_precipitation_history_from_grid()).
+  let precip72h = 0;
+  const { data: rpcVal, error: rpcErr } = await supabase.rpc("precip_72h_for_point", {
+    p_lat:         beach.latitude,
+    p_lng:         beach.longitude,
+    p_anchor_date: localDate,
+  });
+  if (rpcErr) {
+    console.warn(`[${beach.location_id}] precip_72h_for_point failed: ${rpcErr.message}`);
+  } else if (typeof rpcVal === "number") {
+    precip72h = rpcVal;
+  } else if (typeof rpcVal === "string") {
+    precip72h = parseFloat(rpcVal) || 0;
   }
 
   return {

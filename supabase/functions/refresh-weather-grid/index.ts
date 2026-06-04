@@ -45,9 +45,12 @@ const HOURLY_FIELDS = [
   "is_day",
 ].join(",");
 
-const BATCH_SIZE = 100;          // cells per Open-Meteo call
+const BATCH_SIZE = 50;           // cells per Open-Meteo call (down from 100 — smaller payload, finer-grained 5xx scope)
 const DEFAULT_LIMIT = 200;       // cells per invocation
 const UPSERT_CHUNK = 500;        // rows per UPSERT statement
+const FETCH_TIMEOUT_MS = 30_000; // per-attempt timeout
+const FETCH_MAX_RETRIES = 3;     // total attempts incl. first try
+const FETCH_BACKOFF_MS = [0, 1000, 4000];  // delay before attempt N
 
 interface StaleCell {
   grid_lat: number;
@@ -184,22 +187,38 @@ Deno.serve(async (req: Request): Promise<Response> => {
     url.searchParams.set("past_days", String(cfg.pastDays));
     url.searchParams.set("forecast_days", String(cfg.forecastDays));
 
+    // Retry on 5xx/timeout/network. Open-Meteo intermittently 502s under load;
+    // 4xx (client errors) bail immediately. 2026-06-04 outage: 4h of 502s
+    // failed every T2 fire before retry was added.
     let data: BatchResponse[] = [];
-    try {
-      const resp = await fetch(url.toString(), {
-        signal: AbortSignal.timeout(60_000),
-      });
-      if (!resp.ok) {
-        const txt = await resp.text();
-        errors.push(`batch ${bStart}: HTTP ${resp.status}: ${txt.slice(0, 200)}`);
-        failedCells += batch.length;
-        continue;
+    let batchOk = false;
+    let lastBatchErr = "";
+    for (let attempt = 0; attempt < FETCH_MAX_RETRIES; attempt++) {
+      if (FETCH_BACKOFF_MS[attempt] > 0) {
+        await new Promise(r => setTimeout(r, FETCH_BACKOFF_MS[attempt]));
       }
-      apiCalls += 1;
-      const j = await resp.json();
-      data = Array.isArray(j) ? j : [j];
-    } catch (e) {
-      errors.push(`batch ${bStart}: ${(e as Error).message}`);
+      try {
+        const resp = await fetch(url.toString(), {
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        });
+        if (!resp.ok) {
+          const txt = await resp.text();
+          lastBatchErr = `HTTP ${resp.status}: ${txt.slice(0, 120)}`;
+          if (resp.status >= 400 && resp.status < 500) break;  // 4xx — don't retry
+          continue;  // 5xx — retry
+        }
+        const j = await resp.json();
+        data = Array.isArray(j) ? j : [j];
+        batchOk = true;
+        apiCalls += 1;
+        break;
+      } catch (e) {
+        lastBatchErr = (e as Error).message;
+        // Retry on timeout/network errors
+      }
+    }
+    if (!batchOk) {
+      errors.push(`batch ${bStart}: ${lastBatchErr} (after ${FETCH_MAX_RETRIES} attempts)`);
       failedCells += batch.length;
       continue;
     }

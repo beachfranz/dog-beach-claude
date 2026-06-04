@@ -1,31 +1,27 @@
 // refresh-weather-grid/index.ts
 //
-// TS port of scripts/dagster/dog_beach/dog_beach/assets/weather_grid.py
-// (refresh_weather_grid asset). Fetches Open-Meteo hourly weather for
-// stale cells in public.weather_grid and upserts into public.weather_grid_hourly.
+// Tiered weather-grid refresh — per-cell forecast-horizon staleness model.
 //
-// Replaces the laptop-bound Dagster execution so the orchestrator
-// (orch_jobs) can fire this server-side via net.http_post.
+// Three crons own disjoint forecast windows so we don't redundantly refresh
+// hours another tier handles:
 //
-// Logic:
-//   1. SELECT stale cells from public.weather_grid with tier-based
-//      threshold (hourly-tier beach -> hot 1h; daily/DP -> warm 6h;
-//      orphan -> cold 24h)
-//   2. Process in batches of 100 cells via Open-Meteo multi-location
-//      GET requests
-//   3. Upsert hourly rows into public.weather_grid_hourly
+//   t1  next 48h          every 1h   forecast_days=2, past_days=0
+//   t2  hours 48-96       every 6h   forecast_days=4, past_days=0, upsert ts>=now+48h
+//   t3  hours 96-168      every 12h  forecast_days=7, past_days=3, upsert ts>=now+96h
+//                         + past_days=3 observations (sole owner)
 //
-// Per-invocation cell cap (default 200) keeps the function under the
-// Supabase Edge 150s hard timeout. Repeat the call until result.skipped=true.
-// The orchestrator handles cadence via cron schedule.
+// Picker is a flat scan of weather_grid on the tier's last_fetched_tX column
+// (sub-100ms). Each batch's bumper updates that column for the cells whose
+// Open-Meteo fetch succeeded so the next picker sees them as fresh.
+//
+// Per-invocation cell cap (default 200) keeps the function under Supabase
+// Edge 150s. Repeats until result.skipped=true (cron orchestrator).
 //
 // Knobs (POST body):
-//   { "limit": 200 }            cells per invocation (default 200)
-//   { "force_full": true }      bypass stale filter (force refresh all)
-//   { "state_filter": "CA" }    restrict to one state
-//   { "hot_h": 1, "warm_h": 6, "cold_h": 24 }   stale thresholds
-//
-// Source-of-truth Python remains in repo for local dev / debugging.
+//   { "tier": "t1" | "t2" | "t3" }   required
+//   { "limit": 200 }                 cells per invocation (default 200)
+//   { "force_full": true }           bypass stale filter
+//   { "state_filter": "CA" }         restrict to one state
 
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -100,9 +96,36 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const limit: number       = Math.min(Number(body.limit ?? DEFAULT_LIMIT), 1000);
   const forceFull: boolean  = !!body.force_full;
   const stateFilter: string | null = body.state_filter ?? null;
-  const hotH:  number = Number(body.hot_h  ?? 1);
-  const warmH: number = Number(body.warm_h ?? 6);
-  const coldH: number = Number(body.cold_h ?? 24);
+  const tier: string        = String(body.tier ?? "t1");
+
+  if (!["t1", "t2", "t3"].includes(tier)) {
+    return new Response(
+      JSON.stringify({ error: "invalid_tier", detail: `tier must be one of t1, t2, t3 (got '${tier}')` }),
+      { status: 400, headers: { ...headers, "Content-Type": "application/json" } },
+    );
+  }
+
+  // Tier config — what each cron owns. forecastDays/pastDays drive the
+  // Open-Meteo request; upsertMinFutureH defines the lower bound of forecast
+  // hours we WRITE (t2 skips first 48h because t1 owns them; t3 skips first
+  // 96h because t1+t2 own them). t3 is the only tier that writes past
+  // observations.
+  const TIER_CONFIG: Record<string, {
+    forecastDays:     number;
+    pastDays:         number;
+    upsertMinFutureH: number;  // skip forecast hours where (ts - now) < this many hours
+    writeObserved:    boolean;
+    pickerRpc:        string;
+    bumpColumn:       string;
+  }> = {
+    t1: { forecastDays: 2, pastDays: 0, upsertMinFutureH: 0,  writeObserved: false,
+          pickerRpc: "_orch_pick_stale_weather_cells_t1", bumpColumn: "last_fetched_t1" },
+    t2: { forecastDays: 4, pastDays: 0, upsertMinFutureH: 48, writeObserved: false,
+          pickerRpc: "_orch_pick_stale_weather_cells_t2", bumpColumn: "last_fetched_t2" },
+    t3: { forecastDays: 7, pastDays: 3, upsertMinFutureH: 96, writeObserved: true,
+          pickerRpc: "_orch_pick_stale_weather_cells_t3", bumpColumn: "last_fetched_t3" },
+  };
+  const cfg = TIER_CONFIG[tier];
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
     auth: { persistSession: false },
@@ -110,15 +133,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const t0 = Date.now();
 
-  // ─── 1. Pick stale cells ────────────────────────────────────────────
+  // ─── 1. Pick stale cells for this tier ───────────────────────────────
   const { data: staleCells, error: queryErr } = await supabase
-    .rpc("_orch_pick_stale_weather_cells", {
-      p_hot_h:    hotH,
-      p_warm_h:   warmH,
-      p_cold_h:   coldH,
-      p_force:    forceFull,
-      p_state:    stateFilter,
-      p_limit:    limit,
+    .rpc(cfg.pickerRpc, {
+      p_limit: limit,
+      p_state: stateFilter,
+      p_force: forceFull,
     });
 
   if (queryErr) {
@@ -131,7 +151,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const cells: StaleCell[] = (staleCells ?? []).map((r: any) => ({
     grid_lat: Number(r.grid_lat),
     grid_lon: Number(r.grid_lon),
-    stale_threshold_hours: Number(r.stale_threshold_hours),
+    stale_threshold_hours: 0,  // unused under tiered model
   }));
 
   if (cells.length === 0) {
@@ -161,8 +181,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     url.searchParams.set("windspeed_unit", "mph");
     url.searchParams.set("precipitation_unit", "mm");
     url.searchParams.set("timezone", "UTC");
-    url.searchParams.set("past_days", "3");
-    url.searchParams.set("forecast_days", "7");
+    url.searchParams.set("past_days", String(cfg.pastDays));
+    url.searchParams.set("forecast_days", String(cfg.forecastDays));
 
     let data: BatchResponse[] = [];
     try {
@@ -188,8 +208,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
       errors.push(`batch ${bStart}: got ${data.length} responses for ${batch.length} cells`);
     }
 
-    // ─── 3. Parse + collect rows ─────────────────────────────────────
+    // ─── 3. Parse + collect rows (filtered by tier window) ──────────
+    // Per-tier filter:
+    //   t1: all future hours up to +48h (forecast_days=2 limits this naturally)
+    //   t2: only hours where (ts - now) >= 48h  (t1 owns the first 48h)
+    //   t3: only hours where (ts - now) >= 96h FOR FORECASTS, plus all past
+    //       observed hours (t3 is the sole owner of past_days=3)
+    const minFutureMs = cfg.upsertMinFutureH * 3_600_000;
     const rows: any[] = [];
+    const successfulCellIdx: number[] = [];
     for (let ci = 0; ci < batch.length; ci++) {
       const cell = batch[ci];
       const cellData = data[ci] ?? {};
@@ -199,10 +226,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
         failedCells += 1;
         continue;
       }
+      successfulCellIdx.push(ci);
       for (let i = 0; i < times.length; i++) {
         // "YYYY-MM-DDTHH:MM" in UTC (timezone=UTC param)
         const forecastTs = new Date(times[i] + "Z");
-        const isObserved = forecastTs.getTime() < nowUtcMs;
+        const tsMs = forecastTs.getTime();
+        const isObserved = tsMs < nowUtcMs;
+
+        // Filter: write only the hours this tier owns.
+        if (isObserved) {
+          if (!cfg.writeObserved) continue;  // only t3 writes past hours
+        } else {
+          if (tsMs - nowUtcMs < minFutureMs) continue;  // future hour outside this tier's window
+        }
+
         rows.push({
           grid_lat:      cell.grid_lat,
           grid_lon:      cell.grid_lon,
@@ -218,7 +255,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
           cloud_cover:   hourly.cloud_cover?.[i]               ?? null,
           is_day:        hourly.is_day?.[i] === 1 ? true
                        : hourly.is_day?.[i] === 0 ? false : null,
-          // Explicit so ON CONFLICT DO UPDATE refreshes the staleness clock
           fetched_at:    new Date().toISOString(),
         });
       }
@@ -236,6 +272,25 @@ Deno.serve(async (req: Request): Promise<Response> => {
         totalUpserted += chunk.length;
       }
     }
+
+    // ─── 5. Bump the tier's last_fetched timestamp on processed cells ──
+    // One UPDATE per batch covering all cells whose Open-Meteo response
+    // succeeded (regardless of whether the rows filter kept anything).
+    if (successfulCellIdx.length > 0) {
+      const bumpPairs = successfulCellIdx.map(ci => batch[ci]);
+      const nowIso = new Date().toISOString();
+      // Use a server-side update via RPC-free approach: chunked upsert into
+      // weather_grid would replace all columns. Instead, do one composite
+      // OR'd filter via Supabase's .or() builder. For 100 cells this is OK.
+      const orFilter = bumpPairs
+        .map(c => `and(grid_lat.eq.${c.grid_lat},grid_lon.eq.${c.grid_lon})`)
+        .join(",");
+      const { error: bumpErr } = await supabase
+        .from("weather_grid")
+        .update({ [cfg.bumpColumn]: nowIso })
+        .or(orFilter);
+      if (bumpErr) errors.push(`bump ${cfg.bumpColumn} batch=${bStart}: ${bumpErr.message.slice(0, 200)}`);
+    }
   }
 
   const elapsedMs = Date.now() - t0;
@@ -248,8 +303,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       api_calls:         apiCalls,
       elapsed_ms:        elapsedMs,
       errors_sample:     errors.slice(0, 5),
-      knobs: { limit, force_full: forceFull, state_filter: stateFilter,
-               hot_h: hotH, warm_h: warmH, cold_h: coldH },
+      knobs: { tier, limit, force_full: forceFull, state_filter: stateFilter },
     }),
     { status: 200, headers: { ...headers, "Content-Type": "application/json" } },
   );

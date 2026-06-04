@@ -337,7 +337,7 @@ Weather is a **reference layer** in the same shape as `jurisdictions` / `cpad_un
 - **`weather_grid_hourly`** — 168-hour rolling forecast per cell + past 3 days observed. PK `(grid_lat, grid_lon, forecast_ts)`. `is_observed=true` for past hours (bacteria-grade), `false` for forecast.
 - **`weather_for_point(lat, lng, start_ts, end_ts)`** — primary consumer read entry point. Returns hourly weather rows for the cell containing the point within a time window.
 - **`weather_grid_bin_lat(lat)` / `weather_grid_bin_lon(lng)`** — bin-floor helpers used by the entity-table triggers + consumers.
-- **`precip_72h_for_point(lat, lng, anchor_date)`** — convenience for bacteria-risk + dog-park mud caution.
+- **`precip_72h_for_point(lat, lng, anchor_date)`** — convenience for bacteria-risk.
 - **`precipitation_history`** (view) — daily SUM(precip_mm) over observed hours per cell × date. Replaces inline 72h precip computation in daily-beach-refresh.
 
 ### Materialization
@@ -365,7 +365,7 @@ Multi-location batched Open-Meteo fetch (~100 cells per API call). Schedule: hou
 
 Four edge functions read from grid instead of fetching Open-Meteo:
 - `daily-beach-refresh` (W2.1) — `fetchWeatherFromGrid()` replaces `fetchWeather()`. NOAA also gated to cache-only (only weekly cron fetches).
-- `daily-dog-park-refresh` (W2.2) — same swap + mud-caution check via `precip_72h_for_point` for dirt-surface parks.
+- `daily-dog-park-refresh` (W2.2) — same swap.
 - `get-beach-now` (W2.3) — `fetchCurrentWeatherFromGrid()` replaces `fetchCurrentWeather()`.
 - `get-dog-park-now` (W2.4) — same swap.
 

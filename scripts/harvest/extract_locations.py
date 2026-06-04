@@ -80,9 +80,11 @@ def fetch_for_extract(url: str, shape: str | None) -> tuple[str | None, str | No
 
 def fetch_targets(conn, content_type: str, operator_id: int | None, force: bool):
     sql = """
-      SELECT op.id, op.name, ols.source_url, ols.shape
+      SELECT op.id, op.canonical_name AS name, ols.source_url, ols.shape
         FROM public.operator_location_sources ols
-        JOIN public.operator op ON op.id = ols.operator_id
+        JOIN public.operators op
+          ON op.id = ols.operator_id
+         AND op.is_canonical = true
        WHERE ols.content_type = %s
          AND (%s::int IS NULL OR op.id = %s)
          AND (%s

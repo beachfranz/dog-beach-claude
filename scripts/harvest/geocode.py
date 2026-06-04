@@ -236,9 +236,11 @@ def overpass_name_search(name: str, state: str | None):
 def fetch_pending(conn, content_type: str, operator_id: int | None, retry_failed: bool):
     sql = """
       SELECT oel.id, oel.name, oel.address, oel.address_city, oel.address_state,
-             op.name AS operator_name
+             op.canonical_name AS operator_name
         FROM public.operator_extracted_locations oel
-        JOIN public.operator op ON op.id = oel.operator_id
+        JOIN public.operators op
+          ON op.id = oel.operator_id
+         AND op.is_canonical = true
        WHERE oel.content_type = %s
          AND oel.extraction_status = 'success'
          AND (oel.lat IS NULL OR (%s AND oel.geocode_status = 'no_match'))

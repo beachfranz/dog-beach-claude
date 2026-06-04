@@ -62,9 +62,10 @@ def preflight_check(state: str) -> dict:
         cur.execute("""
             SELECT count(DISTINCT op.id)
               FROM public.dog_parks_gold dpg
-              JOIN public.operator op ON op.id = dpg.inferred_operator_id
+              JOIN public.operators op ON op.id = dpg.inferred_operator_id
              WHERE dpg.state = %s AND dpg.is_active
-               AND op.type IN ('city','county')
+               AND op.is_canonical = true
+               AND op.level IN ('city','county')
              GROUP BY op.id HAVING count(*) >= 3
         """, (state,))
         # Count operators with ≥3 attributed parks (the walker's min_parks default)
@@ -80,7 +81,8 @@ def preflight_check(state: str) -> dict:
                  WHERE state = %s AND is_active AND address_city IS NOT NULL
                    AND (inferred_operator_id IS NULL
                         OR inferred_operator_id NOT IN (
-                          SELECT id FROM public.operator WHERE type IN ('city','county')))
+                          SELECT id FROM public.operators
+                           WHERE is_canonical = true AND level IN ('city','county')))
                  GROUP BY address_city HAVING count(*) >= 3
                  ORDER BY n DESC LIMIT 15
             """, (state,))

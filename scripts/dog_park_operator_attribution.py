@@ -354,8 +354,14 @@ def _write_to_gold(classifications):
     conn = _connect_pg()
     try:
         with conn, conn.cursor() as cur:
-            # Build lowercase name → id lookup for public.operator (singular).
-            cur.execute("SELECT id, lower(name) FROM public.operator")
+            # Build lowercase name → id lookup for canonical operators.
+            # Post Phase 5a: public.operator (singular) was dropped; the unified
+            # table is public.operators with is_canonical=true marking the
+            # canonical subset. Column name → canonical_name.
+            cur.execute(
+                "SELECT id, lower(canonical_name) FROM public.operators "
+                "WHERE is_canonical = true"
+            )
             op_lookup = {name: oid for oid, name in cur.fetchall()}
 
             updates = 0

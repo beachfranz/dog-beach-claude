@@ -1,59 +1,65 @@
-"""Typed accessors for the operator vs operators table choice.
+"""DEPRECATED post Phase 5a (2026-06-04).
 
-The two tables look like duplicates because of their names, but they
-serve DIFFERENT roles:
+This module was the helper layer for the two-table operator model
+(`public.operator` singular + `public.operators` plural, bridged by
+`operators.canonical_operator_id`). Both the singular table AND the
+bridge column were dropped in Phase 5a (commit 89d11d8) when the model
+was unified into a single `public.operators` table with `is_canonical`
+boolean.
 
-  public.operator   (singular, ~159 rows) — hand-curated consumer-surface
-                                              registry. Cascade-wired via
-                                              entity_operator + policy_source
-                                              .issuing_operator_id.
-                                              "Who shows up on beach.html?"
+All functions in this module reference dropped objects and will fail
+on first DB call. Rather than silent breakage, they now raise
+NotImplementedError immediately with a migration-path message.
 
-  public.operators  (plural, ~9,275 rows)  — bulk-extracted from TIGER cities,
-                                              CPAD units, OSM. Most rows are
-                                              level=city. Used by the
-                                              operator_llm_extract pipeline.
-                                              "Where do extractions attach?"
+MIGRATION GUIDE
+===============
 
-Both are load-bearing. Don't merge. See:
-  - HARD memory pin: operate-two-table-finding
-  - Bridge FK migration: 20260522_operators_canonical_bridge.sql
-  - Table comments: 20260522_operator_table_comments.sql
+Old call                                          New pattern
+─────────────────────────────────────────────────────────────────────────
+get_canonical_operator(name='...')                SELECT * FROM public.operators
+                                                  WHERE LOWER(canonical_name) = LOWER(%s)
+                                                    AND is_canonical = true LIMIT 1
 
-These helpers exist so new code doesn't have to remember which table to
-query. Prefer them over raw SQL where possible. They're thin — they don't
-hide the underlying tables, just disambiguate the choice at the call site.
+get_canonical_operator(id=N)                      SELECT * FROM public.operators
+                                                  WHERE id = N AND is_canonical = true
 
-USAGE
-=====
+get_extraction_operator(canonical_name='...')     Same query as get_canonical_operator
+                                                  but WITHOUT the is_canonical filter
+                                                  (since 'extraction pool' = whole table now)
 
-    from scripts.common.operator import (
-        get_canonical_operator,
-        get_extraction_operator,
-        canonical_for_extraction,
-        extractions_for_canonical,
-    )
+canonical_for_extraction(extraction_id=N)         SELECT * FROM public.operators o
+                                                  WHERE o.id = COALESCE(
+                                                    (SELECT parent_operator_id FROM
+                                                     public.operators WHERE id = N), N
+                                                  ) AND o.is_canonical = true
 
-    # I want the consumer-surface operator row (operator singular):
-    op = get_canonical_operator(name='Crystal Cove Conservancy')
-    op = get_canonical_operator(id=8)
+extractions_for_canonical(canonical_id=N)         SELECT * FROM public.operators
+                                                  WHERE parent_operator_id = N
+                                                  OR (id = N AND is_canonical = true)
 
-    # I want the extraction-pool operator row (operators plural):
-    ext = get_extraction_operator(canonical_name='City of Half Moon Bay')
-    ext = get_extraction_operator(id=42)
+add_canonical_operator(name=..., op_type=...)     INSERT INTO public.operators
+                                                  (canonical_name, slug, state_code, level,
+                                                   is_canonical, is_active, origin_source,
+                                                   ...) VALUES (...);
+                                                  Single-table insert. No FK bridge.
+                                                  Set is_canonical=true.
 
-    # Cross-bridge: given an extraction row, find its consumer-surface
-    # counterpart (via the formal FK, NOT by name match):
-    op = canonical_for_extraction(extraction_id=42)
+The semantic shift: "canonical vs extraction" is no longer two tables;
+it's an `is_canonical` boolean on rows in one table. The cascade resolver
+(`_resolve_beach_operator`) and `policy_source_effective_tier_for_beach`
+all filter `op.is_canonical = true` to scope to the canonical subset.
 
-    # Reverse-bridge: given a consumer-surface operator, find all
-    # extraction-pool rows that point at it (may be 0, 1, or many):
-    exts = extractions_for_canonical(canonical_id=8)
+See:
+  - Phase 5a:  supabase/migrations/20260604_operator_unify_phase5a_drop_singular.sql
+  - Phase 14d: supabase/migrations/20260604_phase14d_resolver_rewrite.sql
+  - Phase 14h: supabase/migrations/20260604_phase14h_dog_park_rpcs_operator_repoint.sql
+
+If you need these helpers as live functions again, redesign them around
+the unified table. Do NOT silently re-introduce a two-table abstraction —
+the unification was deliberate. Per `[[never-solve-same-problem-twice]]`.
 """
 from __future__ import annotations
 from typing import Any
-
-from scripts.common.db import connect
 
 
 __all__ = [
@@ -65,217 +71,31 @@ __all__ = [
 ]
 
 
-# ─── Writers ─────────────────────────────────────────────────────────
+_DEPRECATION_MSG = (
+    "scripts.common.operator was deprecated 2026-06-04 (Phase 5a). "
+    "The public.operator (singular) table and operators.canonical_operator_id "
+    "FK bridge were dropped. See the module docstring for the migration "
+    "guide to direct SQL using public.operators + is_canonical filter."
+)
+
 
 def add_canonical_operator(
     *,
     name: str,
-    op_type: str,          # operator.type — 'nonprofit', 'city', 'county', 'state', 'federal_department', 'city_department', 'special_district'
-    state_code: str,       # operators.state_code — 'CA', 'NH', 'WA', etc.
+    op_type: str,
+    state_code: str,
     short_name: str | None = None,
     web_url: str | None = None,
     metadata: dict | None = None,
-    plural_level: str = "private",  # operators.level — 'private' is the right default for nonprofits
+    plural_level: str = "private",
     plural_subtype: str | None = "ngo",
-    plural_slug: str | None = None,  # auto-derived from name if None
+    plural_slug: str | None = None,
     notes: str | None = None,
     apply: bool = False,
 ) -> dict:
-    """Atomically add a new operator to BOTH public.operator (singular) AND
-    public.operators (plural), with the canonical_operator_id FK set.
+    """DEPRECATED — see module docstring."""
+    raise NotImplementedError(_DEPRECATION_MSG)
 
-    Per Franz 2026-05-22 LATE decision: new-state nonprofits + sub-agencies
-    MUST be in both tables so the bridge FK works consistently. Avoids the
-    4-orphan pattern that CA accidentally accumulated.
-
-    Idempotent: if an operator (singular) row with the same name already
-    exists, that one is reused (no duplicate insert).
-
-    Default: dry-run (returns what WOULD be inserted; no writes). Pass
-    apply=True to commit.
-
-    Args
-    ----
-    name           : Canonical name. Used for both operator.name and
-                     operators.canonical_name.
-    op_type        : operator.type enum (nonprofit, city, county, state, …).
-    state_code     : 2-letter state code for operators.state_code.
-    short_name     : Optional short name shared by both tables.
-    web_url        : Optional URL for operator.web_url.
-    metadata       : Optional jsonb for operator.metadata (e.g.,
-                     {'created_for': 'NH-launch', 'agent_verified': True}).
-    plural_level   : operators.level enum — default 'private' (right for
-                     nonprofits). Use 'city' for city sub-departments,
-                     'county' for county sub-agencies, etc.
-    plural_subtype : operators.subtype — default 'ngo' (right for
-                     nonprofits). Use 'special-district' for sub-agencies.
-    plural_slug    : Optional slug for operators.slug. If None, auto-derived
-                     from name.
-    notes          : Optional note carried on the operators (plural) row.
-
-    Returns
-    -------
-    dict with keys: 'singular_id', 'plural_id', 'applied' (bool),
-                    'singular_inserted' (bool — false when reused).
-    """
-    import re
-    if plural_slug is None:
-        # crude but consistent — lowercase, dashes, strip non-alnum
-        plural_slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-
-    with connect() as c, c.cursor() as cur:
-        # 1. Find or insert singular
-        cur.execute(
-            "SELECT id FROM public.operator WHERE LOWER(name) = LOWER(%s)",
-            (name,),
-        )
-        row = cur.fetchone()
-        if row:
-            singular_id = row[0]
-            singular_inserted = False
-        else:
-            if not apply:
-                # In dry-run, fabricate a placeholder; don't actually insert
-                singular_id = -1
-                singular_inserted = True
-            else:
-                import json
-                # FIX 2026-05-25 LATE — operator.chk_operator_gov_or_delegated
-                # constraint requires agency_id IS NOT NULL (for gov types)
-                # OR delegated_authority_via IS NOT NULL (for delegated/private).
-                # For gov op_types ('city','county','state','federal*'),
-                # find-or-create matching agency row and set agency_id.
-                # For 'nonprofit' / 'special_district' etc., caller should
-                # set delegated_authority_via via metadata['delegated_to'] or
-                # we leave them to fail (caller's responsibility for non-gov).
-                agency_id = None
-                gov_types = {"city", "county", "state",
-                             "federal_department", "federal_military",
-                             "state_department", "county_department",
-                             "city_department"}
-                if op_type in gov_types:
-                    # Agency name convention (from existing data): bare entity
-                    # name without "City of " / "County of " / "State of " prefix.
-                    agency_name = name
-                    for pfx in ("City of ", "County of ", "State of ",
-                                "Town of "):
-                        if agency_name.startswith(pfx):
-                            agency_name = agency_name[len(pfx):]
-                            break
-                    cur.execute(
-                        "SELECT id FROM public.agency WHERE name = %s AND type = %s LIMIT 1",
-                        (agency_name, op_type),
-                    )
-                    arow = cur.fetchone()
-                    if arow:
-                        agency_id = arow[0]
-                    else:
-                        cur.execute(
-                            "INSERT INTO public.agency "
-                            "  (name, type, metadata, created_at, updated_at) "
-                            "VALUES (%s, %s, %s::jsonb, now(), now()) "
-                            "RETURNING id",
-                            (agency_name, op_type,
-                             json.dumps({"state_code": state_code})),
-                        )
-                        agency_id = cur.fetchone()[0]
-                cur.execute(
-                    "INSERT INTO public.operator "
-                    "  (name, type, short_name, web_url, agency_id, metadata) "
-                    "VALUES (%s, %s, %s, %s, %s, %s::jsonb) RETURNING id",
-                    (name, op_type, short_name, web_url, agency_id,
-                     json.dumps(metadata or {})),
-                )
-                singular_id = cur.fetchone()[0]
-                singular_inserted = True
-
-        # 2. Check if plural row already exists for this singular
-        if singular_id > 0:
-            cur.execute(
-                "SELECT id FROM public.operators WHERE canonical_operator_id = %s",
-                (singular_id,),
-            )
-            existing = cur.fetchone()
-            if existing:
-                # Already paired — return existing
-                if apply:
-                    c.commit()
-                return {
-                    "singular_id": singular_id,
-                    "plural_id": existing[0],
-                    "applied": apply,
-                    "singular_inserted": singular_inserted,
-                    "plural_inserted": False,
-                }
-
-        # 3. Insert plural row with FK back to singular
-        if not apply:
-            return {
-                "singular_id": singular_id,
-                "plural_id": -1,
-                "applied": False,
-                "singular_inserted": singular_inserted,
-                "plural_inserted": True,
-                "would_insert_plural": {
-                    "slug": plural_slug, "canonical_name": name,
-                    "short_name": short_name, "level": plural_level,
-                    "subtype": plural_subtype, "state_code": state_code,
-                    "origin_source": "manual",
-                    "canonical_operator_id": singular_id,
-                    "notes": notes,
-                },
-            }
-
-        # FIX 2026-05-25 LATE — public.operators may already have a row
-        # with this slug (from TIGER bulk-load: 'city-of-baltimore' etc.)
-        # but with canonical_operator_id=NULL. Insert would UniqueViolation.
-        # Detect + UPDATE the existing row's canonical_operator_id bridge
-        # instead of inserting a duplicate.
-        cur.execute(
-            "SELECT id, canonical_operator_id FROM public.operators "
-            "WHERE slug = %s OR LOWER(canonical_name) = LOWER(%s) LIMIT 1",
-            (plural_slug, name),
-        )
-        existing_plural = cur.fetchone()
-        if existing_plural:
-            plural_id, existing_canonical = existing_plural
-            if existing_canonical is None:
-                cur.execute(
-                    "UPDATE public.operators "
-                    "SET canonical_operator_id = %s, updated_at = now() "
-                    "WHERE id = %s",
-                    (singular_id, plural_id),
-                )
-                plural_inserted = False  # bridged, not inserted
-            elif existing_canonical != singular_id:
-                # Already bridged to a DIFFERENT singular — unexpected; leave alone
-                plural_inserted = False
-            else:
-                plural_inserted = False
-        else:
-            cur.execute(
-                "INSERT INTO public.operators "
-                "  (slug, canonical_name, short_name, level, subtype, state_code, "
-                "   origin_source, is_active, canonical_operator_id, notes) "
-                "VALUES (%s, %s, %s, %s, %s, %s, 'manual', true, %s, %s) "
-                "RETURNING id",
-                (plural_slug, name, short_name, plural_level, plural_subtype,
-                 state_code, singular_id, notes),
-            )
-            plural_id = cur.fetchone()[0]
-            plural_inserted = True
-        c.commit()
-
-        return {
-            "singular_id": singular_id,
-            "plural_id": plural_id,
-            "applied": True,
-            "singular_inserted": singular_inserted,
-            "plural_inserted": plural_inserted,
-        }
-
-
-# ─── Direct accessors ────────────────────────────────────────────────
 
 def get_canonical_operator(
     *,
@@ -283,36 +103,8 @@ def get_canonical_operator(
     name: str | None = None,
     short_name: str | None = None,
 ) -> dict[str, Any] | None:
-    """Fetch ONE row from public.operator (singular, curated consumer
-    surface). Pass exactly one of `id`, `name`, `short_name`.
-
-    Returns dict (column → value) or None if no match.
-    """
-    n_args = sum(x is not None for x in (id, name, short_name))
-    if n_args != 1:
-        raise ValueError(
-            "get_canonical_operator: pass exactly one of id / name / short_name "
-            f"(got {n_args})"
-        )
-    with connect() as c, c.cursor() as cur:
-        if id is not None:
-            cur.execute("SELECT * FROM public.operator WHERE id = %s", (id,))
-        elif name is not None:
-            cur.execute(
-                "SELECT * FROM public.operator WHERE LOWER(name) = LOWER(%s) "
-                "LIMIT 1",
-                (name,),
-            )
-        else:  # short_name
-            cur.execute(
-                "SELECT * FROM public.operator WHERE LOWER(short_name) = LOWER(%s) "
-                "LIMIT 1",
-                (short_name,),
-            )
-        row = cur.fetchone()
-        if not row:
-            return None
-        return dict(zip([d[0] for d in cur.description], row))
+    """DEPRECATED — see module docstring."""
+    raise NotImplementedError(_DEPRECATION_MSG)
 
 
 def get_extraction_operator(
@@ -321,73 +113,15 @@ def get_extraction_operator(
     canonical_name: str | None = None,
     slug: str | None = None,
 ) -> dict[str, Any] | None:
-    """Fetch ONE row from public.operators (plural, bulk extraction pool).
-    Pass exactly one of `id`, `canonical_name`, `slug`.
+    """DEPRECATED — see module docstring."""
+    raise NotImplementedError(_DEPRECATION_MSG)
 
-    Returns dict (column → value) or None if no match.
-    """
-    n_args = sum(x is not None for x in (id, canonical_name, slug))
-    if n_args != 1:
-        raise ValueError(
-            "get_extraction_operator: pass exactly one of id / canonical_name / "
-            f"slug (got {n_args})"
-        )
-    with connect() as c, c.cursor() as cur:
-        if id is not None:
-            cur.execute("SELECT * FROM public.operators WHERE id = %s", (id,))
-        elif canonical_name is not None:
-            cur.execute(
-                "SELECT * FROM public.operators WHERE LOWER(canonical_name) = LOWER(%s) "
-                "LIMIT 1",
-                (canonical_name,),
-            )
-        else:  # slug
-            cur.execute(
-                "SELECT * FROM public.operators WHERE slug = %s LIMIT 1",
-                (slug,),
-            )
-        row = cur.fetchone()
-        if not row:
-            return None
-        return dict(zip([d[0] for d in cur.description], row))
-
-
-# ─── Bridge accessors (use the formal FK; never LOWER-name) ──────────
 
 def canonical_for_extraction(extraction_id: int) -> dict[str, Any] | None:
-    """Given an extraction-pool operators.id, return the canonical
-    operator row via the formal FK (operators.canonical_operator_id).
-
-    Returns dict or None if no canonical counterpart exists (most TIGER
-    cities — they have no consumer-surface presence).
-    """
-    with connect() as c, c.cursor() as cur:
-        cur.execute(
-            "SELECT op.* FROM public.operator op "
-            "JOIN public.operators o ON o.canonical_operator_id = op.id "
-            "WHERE o.id = %s",
-            (extraction_id,),
-        )
-        row = cur.fetchone()
-        if not row:
-            return None
-        return dict(zip([d[0] for d in cur.description], row))
+    """DEPRECATED — see module docstring."""
+    raise NotImplementedError(_DEPRECATION_MSG)
 
 
 def extractions_for_canonical(canonical_id: int) -> list[dict[str, Any]]:
-    """Given a canonical operator.id, return ALL extraction-pool rows
-    (operators.canonical_operator_id = canonical_id). Most singular
-    operators have 0 or 1 extraction-pool counterparts; a few have 2+
-    (variant names like "Long Beach" + "City of Long Beach").
-
-    Returns list of dicts (possibly empty).
-    """
-    with connect() as c, c.cursor() as cur:
-        cur.execute(
-            "SELECT * FROM public.operators WHERE canonical_operator_id = %s "
-            "ORDER BY id",
-            (canonical_id,),
-        )
-        rows = cur.fetchall()
-        cols = [d[0] for d in cur.description]
-        return [dict(zip(cols, r)) for r in rows]
+    """DEPRECATED — see module docstring."""
+    raise NotImplementedError(_DEPRECATION_MSG)

@@ -25,7 +25,7 @@ def triage_needs_review(state: str, apply: bool = True) -> dict:
         cur = conn.cursor()
         cur.execute("""
             SELECT count(*) FROM public.dog_park_discovery_queue dpdq
-              JOIN public.operator op ON op.id = dpdq.operator_id
+              JOIN public.operators op ON op.id = dpdq.operator_id AND op.is_canonical = true
               JOIN public.dog_parks_gold dpg ON dpg.fid = dpdq.best_match_fid
              WHERE dpdq.status = 'needs_review' AND dpg.state = %s
         """, (state,))
@@ -48,7 +48,7 @@ def triage_needs_review(state: str, apply: bool = True) -> dict:
         cur = conn.cursor()
         cur.execute("""
             SELECT count(*) FROM public.dog_park_discovery_queue dpdq
-              JOIN public.operator op ON op.id = dpdq.operator_id
+              JOIN public.operators op ON op.id = dpdq.operator_id AND op.is_canonical = true
               JOIN public.dog_parks_gold dpg ON dpg.fid = dpdq.best_match_fid
              WHERE dpdq.status = 'needs_review' AND dpg.state = %s
         """, (state,))

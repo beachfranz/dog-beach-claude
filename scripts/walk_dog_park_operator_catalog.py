@@ -78,9 +78,10 @@ def auto_operator_targets(state: str, min_parks: int = 3) -> list[int]:
         cur.execute("""
             SELECT op.id
               FROM public.dog_parks_gold dpg
-              JOIN public.operator op ON op.id = dpg.inferred_operator_id
+              JOIN public.operators op ON op.id = dpg.inferred_operator_id
              WHERE dpg.state = %s AND dpg.is_active
-               AND op.type IN ('city','county')
+               AND op.is_canonical = true
+               AND op.level IN ('city','county')
              GROUP BY op.id
              HAVING count(*) >= %s
              ORDER BY count(*) DESC
@@ -798,7 +799,11 @@ def main() -> int:
 
     conn = connect(); conn.set_client_encoding("UTF8")
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT id, name FROM public.operator WHERE id = ANY(%s)", (target_ops,))
+    cur.execute(
+        "SELECT id, canonical_name AS name FROM public.operators "
+        "WHERE id = ANY(%s) AND is_canonical = true",
+        (target_ops,),
+    )
     ops = {r['id']: r['name'] for r in cur.fetchall()}
     conn.close()
 

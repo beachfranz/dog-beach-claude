@@ -168,18 +168,25 @@ def audit(conf_threshold: float):
             cols = [c[0] for c in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
 
-            # Singular operators with ps rows but no matching plural-extraction by name
+            # Canonical operators with ps rows but no extraction-pool row by
+            # name match. Post Phase 5a: public.operator (singular) was dropped
+            # and the singular/plural distinction collapsed onto is_canonical.
+            # "canonical-with-PS" = is_canonical=true with a policy_source.
+            # "extraction-pool match" = a non-canonical row with same name AND
+            # an operator_dogs_policy extraction attached.
             cur.execute("""
-                SELECT o.id, o.name, o.type
-                FROM public.operator o
-                WHERE EXISTS (
+                SELECT o.id, o.canonical_name AS name, o.level AS type
+                FROM public.operators o
+                WHERE o.is_canonical = true
+                  AND EXISTS (
                     SELECT 1 FROM public.policy_source ps
                     WHERE ps.issuing_operator_id = o.id
                       AND ps.subtype = 'operator_posted_policy'
                 ) AND NOT EXISTS (
                     SELECT 1 FROM public.operators op2
                     JOIN public.operator_dogs_policy odp ON odp.operator_id = op2.id
-                    WHERE LOWER(op2.canonical_name) = LOWER(o.name)
+                    WHERE op2.is_canonical IS NOT TRUE
+                      AND LOWER(op2.canonical_name) = LOWER(o.canonical_name)
                 )
             """)
             no_extr_w_ps = [dict(zip([c[0] for c in cur.description], r)) for r in cur.fetchall()]

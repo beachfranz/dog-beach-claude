@@ -3886,15 +3886,19 @@ async function loadWaterConditionAdvisories(beachFid) {
     if (!r.ok) return;
     items = await r.json();
   } catch { return; }
-  // Today-only filter (user's local time). Drop advisories that don't
-  // start until after end-of-day today. Per Franz 2026-05-19 — "today
-  // only" trumps the RPC's 24h forward horizon.
+  // Next-24h filter (per Franz 2026-06-04, loosening the prior end-of-today
+  // local cutoff). The RPC already bounds candidates with p_horizon_hours=24;
+  // we re-apply that ceiling client-side to keep behavior explicit even if
+  // the RPC default changes. The prior end-of-today-local cutoff dropped
+  // tomorrow-morning advisories whenever the page was loaded in the evening,
+  // which gave the appearance of "missing" cautions on beaches with daytime-
+  // peaked hot-car / UV / asphalt windows.
   if (Array.isArray(items)) {
-    const eod = new Date(); eod.setHours(23, 59, 59, 999);
+    const horizon = new Date(Date.now() + 24 * 3600_000);
     items = items.filter(a => {
       if (!a.valid_from) return true;
       const from = new Date(a.valid_from);
-      return isNaN(from.getTime()) || from <= eod;
+      return isNaN(from.getTime()) || from <= horizon;
     });
   }
   if (!Array.isArray(items) || items.length === 0) {

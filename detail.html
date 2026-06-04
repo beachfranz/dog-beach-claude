@@ -969,6 +969,11 @@
 
     // Now that #scout-blurb is in the DOM, kick off the async loader.
     loadScoutBlurb(beach.location_id, date, day, hours, dog_policy);
+    // Additional cautions from beach_advisory (deterministic_weather, nws,
+    // marine_threshold, future). Inline narrative above renders bacteria
+    // from day.bacteria_risk, so we filter out source='deterministic_bacteria'
+    // here to avoid duplicating the Water Quality block.
+    loadBeachAdvisories(beach.arena_group_id);
   }
 
   function buildStatusBoard(hours) {
@@ -1524,6 +1529,69 @@
       }
     }
     return false;
+  }
+
+  // ── Additional cautions from beach_advisory ──────────────────────
+  // Fetches the unified beach_advisory feed (deterministic_weather,
+  // nws, marine_threshold, future) and appends narrative blocks to
+  // the existing .narrative section. Bacteria is filtered out because
+  // buildNarrative() already renders it from day.bacteria_risk.
+  async function loadBeachAdvisories(fid) {
+    if (!fid) return;
+    let items = [];
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_beach_advisories`, {
+        method: 'POST',
+        headers: {
+          apikey: ANON_KEY,
+          Authorization: `Bearer ${ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ p_fid: parseInt(fid, 10), p_horizon_hours: 24 }),
+      });
+      if (!r.ok) return;
+      items = await r.json();
+    } catch { return; }
+    if (!Array.isArray(items) || items.length === 0) return;
+
+    // Drop bacteria (rendered inline) + today-only window (matches beach.html behavior)
+    const eod = new Date(); eod.setHours(23, 59, 59, 999);
+    items = items.filter(a => {
+      if (a.source === 'deterministic_bacteria') return false;
+      if (!a.valid_from) return true;
+      const from = new Date(a.valid_from);
+      return isNaN(from.getTime()) || from <= eod;
+    });
+    if (items.length === 0) return;
+
+    // Severity → narrative color class (matches existing buildNarrative usage)
+    const sevColor = { extreme: 'red', severe: 'red', moderate: 'amber', minor: '' };
+
+    const blocksHtml = items.map(a => {
+      const color = sevColor[a.severity] || '';
+      const label = a.label || a.event_type || 'Advisory';
+      const value = a.value ? ` <span style="color:var(--text-muted); font-weight:500;">${escHtml(a.value)}</span>` : '';
+      const text  = a.dog_impact_text || a.label || '';
+      return `<div class="narrative-block">
+        <div class="narrative-label">${escHtml(label)}${value}</div>
+        <div class="narrative-text ${color}">${escHtml(text)}</div>
+      </div>`;
+    }).join('');
+
+    // Append to existing .narrative div; create one if absent (when the
+    // inline path produced no bacteria block + no no_go_text).
+    let narrative = document.querySelector('.narrative');
+    if (!narrative) {
+      narrative = document.createElement('div');
+      narrative.className = 'narrative';
+      const legend = document.querySelector('.legend');
+      if (legend && legend.parentNode) {
+        legend.parentNode.insertBefore(narrative, legend.nextSibling);
+      } else {
+        document.getElementById('main-content').appendChild(narrative);
+      }
+    }
+    narrative.insertAdjacentHTML('beforeend', blocksHtml);
   }
 
   // ── Scout header blurb ───────────────────────────────────────────

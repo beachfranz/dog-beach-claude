@@ -114,7 +114,22 @@ Notes on 'regions':
     physical area (e.g. 'North half', 'South of harbor pier') — NEVER a
     jurisdiction (e.g. NOT 'San Diego County (at home)')
   - Only populate sections that are explicitly addressed; omit unmentioned ones
-  - Per-section 'time_window' captures windowed rules (e.g. 'sand off-leash 6pm-9am')"""
+  - Per-section 'time_window' captures windowed rules (e.g. 'sand off-leash 6pm-9am')
+
+CRITICAL — REQUIRED structure for complex answers:
+  - If answer = 'varies_by_zone': you MUST populate regions[] with at least
+    ONE region having sections.sand.rule set. Do NOT use 'varies_by_zone' as
+    a way to avoid providing structure — if you cannot identify per-zone sand
+    rules, return 'on_leash' or 'not_allowed' as a whole-beach default with
+    the closest matching quote.
+  - If answer = 'seasonal': you MUST populate top-level time_window AND
+    populate regions[0].sections.sand.rule with the rule that applies during
+    the time window, plus regions[0].sections.sand.time_window mirroring the
+    top-level time_window. Same rule: do NOT use 'seasonal' as a way to avoid
+    structure.
+  - If you genuinely cannot determine a sand rule from the source, prefer
+    answer='on_leash' (the conservative US-default for public beaches) over
+    'varies_by_zone'/'seasonal' without structure."""
 
 
 VALID_RULE_ANSWERS = {
@@ -229,8 +244,16 @@ def find_or_insert_policy_source(cur, op_id: int | None, op_name: str,
 
 def _derive_dominant_sand_rule(answer: dict) -> str | None:
     """For complex answers (seasonal / varies_by_zone), derive the dominant
-    sand rule from regions[]. Returns one of the SIMPLE_RULE_ANSWERS or None
-    if no derivable sand rule is found."""
+    sand rule from regions[].
+
+    Returns:
+      - One of SIMPLE_RULE_ANSWERS if regions[] has a sand rule
+      - 'on_leash' as conservative fallback when the answer is
+        seasonal/varies_by_zone but regions[] is missing or empty
+        (the US public-beach default; better than no bps row at all)
+      - None for unknown / no_match (truly insufficient signal)
+    """
+    answer_type = (answer.get('answer') or '').strip()
     regions = answer.get('regions') or []
     sand_rules: list[str] = []
     for r in regions:
@@ -241,15 +264,24 @@ def _derive_dominant_sand_rule(answer: dict) -> str | None:
             rule = (sand.get('rule') or '').strip()
             if rule in SIMPLE_RULE_ANSWERS:
                 sand_rules.append(rule)
-    if not sand_rules:
-        return None
-    # Most permissive sand rule wins for the cascade quick-lookup. The full
-    # zone_rules JSONB (in BEP for now; later promoted) preserves nuance.
-    priority = ['off_leash', 'off_leash_voice_control', 'on_leash', 'not_allowed']
-    for p in priority:
-        if p in sand_rules:
-            return p
-    return sand_rules[0]
+    if sand_rules:
+        # Most permissive sand rule wins for the cascade quick-lookup. The full
+        # zone_rules JSONB (in BEP for now; later promoted) preserves nuance.
+        priority = ['off_leash', 'off_leash_voice_control', 'on_leash', 'not_allowed']
+        for p in priority:
+            if p in sand_rules:
+                return p
+        return sand_rules[0]
+
+    # No derivable sand rule from regions[]. If the answer was structurally
+    # complex (seasonal / varies_by_zone), fall back to 'on_leash' — the
+    # conservative US-default for public beaches. The BEP audit row still has
+    # the full LLM response with whatever context the model provided.
+    if answer_type in ('seasonal', 'varies_by_zone'):
+        return 'on_leash'
+
+    # For unknown / no_match / parse_error, truly no signal — skip bps
+    return None
 
 
 def insert_beach_policy_source(cur, fid: int, ps_id: int, answer: dict,

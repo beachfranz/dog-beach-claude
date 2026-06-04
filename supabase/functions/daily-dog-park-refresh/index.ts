@@ -285,26 +285,6 @@ async function processPark(
   // c. Build raw hours
   const rawHours = buildRawHours(park, weather, sunriseByDate, sunsetByDate, tz);
 
-  // c.5 Mud-caution check — dirt-surface parks get a caution flag when
-  // 72h precip ≥ 5mm. Per [[weather-grid-reference-layer]]. Uses the
-  // precipitation_history view (same source as bacteria-risk for beaches).
-  let mudCaution = false;
-  if (park.surface === "dirt" || park.surface === "decomposed_granite" || park.surface === "wood_chips") {
-    try {
-      const { data: precipData, error: precipErr } = await supabase.rpc("precip_72h_for_point", {
-        p_lat:         park.latitude,
-        p_lng:         park.longitude,
-        p_anchor_date: new Date().toISOString().slice(0, 10),
-      });
-      if (!precipErr && typeof precipData === "number" && precipData >= 5) {
-        mudCaution = true;
-        console.log(`[dog_park:${park.fid}] Mud caution: ${precipData}mm in 72h on ${park.surface}`);
-      }
-    } catch (_) {
-      // best-effort; mud caution isn't critical to scoring
-    }
-  }
-
   // d. Score
   let scored: ScoredHour[];
   try {
@@ -354,7 +334,7 @@ async function processPark(
     const dailyRows = dates.map((date) => {
       const dayHours = scored.filter((h) => h.localDate === date);
       const window = windows.get(date) ?? null;
-      return buildDailyRow(park, date, dayHours, window, config, runAt, tz, mudCaution);
+      return buildDailyRow(park, date, dayHours, window, config, runAt, tz);
     });
     if (dailyRows.length > 0) {
       const { error: delErr } = await supabase
@@ -564,7 +544,6 @@ function buildDailyRow(
   config: DogParkScoringConfig,
   runAt: Date,
   tz: string,
-  mudCaution: boolean = false,
 ) {
   const daylightHours = dayHours.filter((h) => h.isDaylight);
   const dayStatus = deriveDayStatus(daylightHours);
@@ -582,9 +561,6 @@ function buildDailyRow(
   for (const h of dayHours) {
     h.positiveReasonCodes.forEach((c) => positiveSet.add(c));
     h.riskReasonCodes.forEach((c) => riskSet.add(c));
-  }
-  if (mudCaution) {
-    riskSet.add("muddy_surface");
   }
 
   return {

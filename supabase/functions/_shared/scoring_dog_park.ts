@@ -528,7 +528,7 @@ function scoreOneHour(
   else if (ms.wind === "advisory") risk.push("breezy");
   if (rainAdj.status === "no_go") risk.push("heavy_rain");
   else if (rainAdj.status === "caution") {
-    risk.push(surface === "dirt" ? "muddy_surface" : surface === "concrete" || surface === "asphalt" ? "slick_surface" : "rain_risk");
+    risk.push(surface === "concrete" || surface === "asphalt" ? "slick_surface" : "rain_risk");
   } else if (rainAdj.status === "advisory") risk.push("some_rain_chance");
   if (ms.uv === "no_go") risk.push("extreme_uv");
   else if (ms.uv === "caution") risk.push("high_uv");

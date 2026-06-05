@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>2026-06-04 Verification Sweep — Dog Beach Scout</title>
+<style>
+  :root {
+    --bg: #f8fafc; --card: #fff; --text: #0f2742; --muted: #64748b;
+    --border: #e2e8f0; --link: #1d4ed8; --link-visited: #6366f1;
+    --green: #16a34a; --red: #dc2626; --amber: #f59e0b;
+  }
+  body { font-family: ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); max-width: 1100px; margin: 24px auto; padding: 0 16px; line-height: 1.5; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 28px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 14px; margin: 16px 0 6px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  .lead { color: var(--muted); font-size: 14px; margin: 0 0 24px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--card); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  th, td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; font-size: 12px; }
+  tr:last-child td { border-bottom: none; }
+  a { color: var(--link); text-decoration: none; }
+  a:visited { color: var(--link-visited); }
+  a:hover { text-decoration: underline; }
+  .pill { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .pill-ca { background: #fef3c7; color: #92400e; }
+  .pill-or { background: #d1fae5; color: #065f46; }
+  .pill-wa { background: #dbeafe; color: #1e40af; }
+  .pill-ma { background: #fce7f3; color: #9d174d; }
+  .pill-md { background: #ede9fe; color: #5b21b6; }
+  .pill-manual { background: #fee2e2; color: #991b1b; }
+  .pill-nps { background: #fef3c7; color: #78350f; }
+  .pill-state { background: #d1fae5; color: #064e3b; }
+  .pill-city { background: #e0e7ff; color: #3730a3; }
+  .note { font-size: 12px; color: var(--muted); margin: 4px 0 16px; }
+  .check { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; margin: 16px 0; }
+  code { font-family: ui-monospace, monospace; font-size: 12px; background: #f1f5f9; padding: 1px 4px; border-radius: 3px; }
+  .expected { font-size: 12px; color: var(--muted); font-style: italic; }
+</style>
+</head>
+<body>
+
+<h1>2026-06-04 Verification Sweep</h1>
+<p class="lead">
+  End-state click-through verification after tonight's operator unification +
+  resolver rewrite. Three rounds of "I missed it" already shipped + fixed
+  (Step 1 → 14h → 14i). This page exists so the next round gets found here,
+  not by you on the live site.
+  Click each link, scan the page, note anything that 404s, 500s, or renders
+  broken. Open links in new tabs so this index stays open.
+</p>
+
+<div class="check">
+  <strong>What to look for on each page:</strong>
+  <ul style="margin: 6px 0 0; padding-left: 20px; font-size: 13px;">
+    <li><strong>500 / blank page</strong> — likely another dangling <code>public.operator</code> ref or column-rename miss</li>
+    <li><strong>Missing operator name</strong> — line that should say "City of …" or "U.S. National Park Service" is empty</li>
+    <li><strong>Missing Scout blurb</strong> — narrative paragraph absent or just "…" placeholder</li>
+    <li><strong>Wrong leash rule</strong> — beach.html dog policy section disagrees with what you'd expect for that beach</li>
+    <li><strong>No best window</strong> — daily-beach-refresh staleness; less urgent (still draining backlog)</li>
+  </ul>
+</div>
+
+<h2>1. beach.html (consumer beach page)</h2>
+<p class="note">Reads <code>beach_dog_policy</code> + makes live <code>beach-chat</code> call for the Scout blurb. The page we've been spot-checking.</p>
+<table>
+  <thead><tr><th>fid</th><th>State</th><th>Name</th><th>Operator attribution path</th><th>Open</th></tr></thead>
+  <tbody>
+    <tr><td>6212</td><td><span class="pill pill-ca">CA</span></td><td>HB Dog Beach</td><td><span class="pill pill-manual">manual_curator</span> PSHDB</td><td><a href="../beach.html?fid=6212" target="_blank">beach.html?fid=6212</a></td></tr>
+    <tr><td>8347</td><td><span class="pill pill-ca">CA</span></td><td>La Jolla Shores</td><td><span class="pill pill-city">CPAD CA</span> City of San Diego</td><td><a href="../beach.html?fid=8347" target="_blank">beach.html?fid=8347</a></td></tr>
+    <tr><td>8330</td><td><span class="pill pill-ca">CA</span></td><td>Crystal Cove State Beach</td><td><span class="pill pill-manual">manual_curator</span> Crystal Cove Conservancy</td><td><a href="../beach.html?fid=8330" target="_blank">beach.html?fid=8330</a></td></tr>
+    <tr><td>684</td><td><span class="pill pill-ca">CA</span></td><td>Avalis Beach (Point Reyes)</td><td><span class="pill pill-nps">PAD-US NPS</span> United States National Park Service</td><td><a href="../beach.html?fid=684" target="_blank">beach.html?fid=684</a></td></tr>
+    <tr><td>4715</td><td><span class="pill pill-ca">CA</span></td><td>Sandy Beach (Lake Tahoe)</td><td><span class="pill pill-manual">manual_curator</span> North Tahoe PUD</td><td><a href="../beach.html?fid=4715" target="_blank">beach.html?fid=4715</a></td></tr>
+    <tr><td>8452</td><td><span class="pill pill-ca">CA</span></td><td>Robert W. Crown Memorial</td><td><span class="pill pill-manual">manual_curator</span> EBRPD</td><td><a href="../beach.html?fid=8452" target="_blank">beach.html?fid=8452</a></td></tr>
+    <tr><td>1355333</td><td><span class="pill pill-ma">MA</span></td><td>Carson Beach (Boston)</td><td><span class="pill pill-state">PAD-US state</span> MA DCR <em>(no PS — should still render)</em></td><td><a href="../beach.html?fid=1355333" target="_blank">beach.html?fid=1355333</a></td></tr>
+    <tr><td>6310347</td><td><span class="pill pill-md">MD</span></td><td>Sandy Point State Park</td><td><span class="pill pill-state">PAD-US state</span> MD DNR</td><td><a href="../beach.html?fid=6310347" target="_blank">beach.html?fid=6310347</a></td></tr>
+  </tbody>
+</table>
+
+<h2>2. dog-park.html</h2>
+<p class="note">The 500 Franz caught earlier (<code>operators_1.name</code> error). Three edge fns fixed in 14i — re-verify across states + operator types.</p>
+<table>
+  <thead><tr><th>fid</th><th>State</th><th>Name</th><th>Operator</th><th>Open</th></tr></thead>
+  <tbody>
+    <tr><td>562</td><td><span class="pill pill-ca">CA</span></td><td>Arbor Dog Park</td><td><em>(no inferred operator)</em></td><td><a href="../dog-park.html?fid=562" target="_blank">dog-park.html?fid=562</a></td></tr>
+    <tr><td>330</td><td><span class="pill pill-ca">CA</span></td><td>César Chávez Dog Park</td><td>City of Berkeley</td><td><a href="../dog-park.html?fid=330" target="_blank">dog-park.html?fid=330</a></td></tr>
+    <tr><td>331</td><td><span class="pill pill-ca">CA</span></td><td>Toad Hollow Dog Park</td><td>City of Davis</td><td><a href="../dog-park.html?fid=331" target="_blank">dog-park.html?fid=331</a></td></tr>
+    <tr><td>336</td><td><span class="pill pill-ca">CA</span></td><td>Corona Heights Dog Play Area</td><td>City of San Francisco</td><td><a href="../dog-park.html?fid=336" target="_blank">dog-park.html?fid=336</a></td></tr>
+    <tr><td>338</td><td><span class="pill pill-ca">CA</span></td><td>Raymond G. Gamma Reed St Dog Park</td><td><em>(no inferred operator)</em></td><td><a href="../dog-park.html?fid=338" target="_blank">dog-park.html?fid=338</a></td></tr>
+  </tbody>
+</table>
+
+<h2>3. find.html (discovery)</h2>
+<p class="note">
+  Reads <code>find_beaches</code> + <code>nearest_dog_parks</code> RPCs in parallel. Three want-chip modes select which to show.
+  The "no dog parks showing" bug from earlier was here — verify each toggle mode.
+</p>
+<table>
+  <thead><tr><th>Mode</th><th>URL params</th><th>Expected</th><th>Open</th></tr></thead>
+  <tbody>
+    <tr><td>Default (off-leash beaches + dog parks)</td><td><em>none</em></td><td>Mixed beach + dog park cards</td><td><a href="../find.html" target="_blank">find.html</a></td></tr>
+    <tr><td>Only off-leash beaches</td><td><code>?want=off_leash_beach</code></td><td>Only beach cards</td><td><a href="../find.html?want=off_leash_beach" target="_blank">find.html?want=off_leash_beach</a></td></tr>
+    <tr><td>Only on-leash beaches</td><td><code>?want=on_leash_beach</code></td><td>Only beach cards (on-leash)</td><td><a href="../find.html?want=on_leash_beach" target="_blank">find.html?want=on_leash_beach</a></td></tr>
+    <tr><td>Only dog parks</td><td><code>?want=dog_park</code></td><td>Only dog park cards</td><td><a href="../find.html?want=dog_park" target="_blank">find.html?want=dog_park</a></td></tr>
+    <tr><td>All three</td><td><code>?want=off_leash_beach,on_leash_beach,dog_park</code></td><td>Mixed all types</td><td><a href="../find.html?want=off_leash_beach,on_leash_beach,dog_park" target="_blank">find.html?want=all</a></td></tr>
+    <tr><td>Legacy dest=beach</td><td><code>?dest=beach</code></td><td>Back-compat: just beaches</td><td><a href="../find.html?dest=beach" target="_blank">find.html?dest=beach</a></td></tr>
+    <tr><td>Legacy dest=dog_park</td><td><code>?dest=dog_park</code></td><td>Back-compat: just dog parks</td><td><a href="../find.html?dest=dog_park" target="_blank">find.html?dest=dog_park</a></td></tr>
+  </tbody>
+</table>
+
+<h2>4. detail.html (hour-by-hour)</h2>
+<p class="note">Reads <code>get-beach-detail</code>. Same beaches as section 1; date set to today.</p>
+<table>
+  <thead><tr><th>fid</th><th>Name</th><th>Open</th></tr></thead>
+  <tbody>
+    <tr><td>8347</td><td>La Jolla Shores</td><td><a id="d-8347" href="#" target="_blank">detail.html?fid=8347&amp;date=today</a></td></tr>
+    <tr><td>6212</td><td>HB Dog Beach</td><td><a id="d-6212" href="#" target="_blank">detail.html?fid=6212&amp;date=today</a></td></tr>
+    <tr><td>684</td><td>Avalis Beach</td><td><a id="d-684" href="#" target="_blank">detail.html?fid=684&amp;date=today</a></td></tr>
+    <tr><td>4715</td><td>Sandy Beach (Tahoe)</td><td><a id="d-4715" href="#" target="_blank">detail.html?fid=4715&amp;date=today</a></td></tr>
+  </tbody>
+</table>
+
+<h2>5. index.html (7-day forecast)</h2>
+<p class="note">The home page. Reads <code>get-beach-summary</code>. Same beaches as detail.</p>
+<table>
+  <thead><tr><th>fid</th><th>Name</th><th>Open</th></tr></thead>
+  <tbody>
+    <tr><td>8347</td><td>La Jolla Shores</td><td><a href="../index.html?fid=8347" target="_blank">index.html?fid=8347</a></td></tr>
+    <tr><td>6212</td><td>HB Dog Beach</td><td><a href="../index.html?fid=6212" target="_blank">index.html?fid=6212</a></td></tr>
+    <tr><td>8330</td><td>Crystal Cove State Beach</td><td><a href="../index.html?fid=8330" target="_blank">index.html?fid=8330</a></td></tr>
+    <tr><td>684</td><td>Avalis Beach</td><td><a href="../index.html?fid=684" target="_blank">index.html?fid=684</a></td></tr>
+  </tbody>
+</table>
+
+<h2>6. Mobile + misc</h2>
+<table>
+  <thead><tr><th>Page</th><th>Notes</th><th>Open</th></tr></thead>
+  <tbody>
+    <tr><td>mobile-beach.html</td><td>Mobile variant — same data, narrower layout</td><td><a href="../mobile-beach.html?fid=8347" target="_blank">mobile-beach.html?fid=8347</a></td></tr>
+    <tr><td>compare.html</td><td>Legacy redirect → find.html</td><td><a href="../compare.html" target="_blank">compare.html</a></td></tr>
+    <tr><td>paywall.html</td><td>Admin gate (collects x-admin-secret)</td><td><a href="../paywall.html" target="_blank">paywall.html</a></td></tr>
+  </tbody>
+</table>
+
+<h2>7. Raw API endpoints (for JSON spot-checks)</h2>
+<p class="note">If a page renders weird, hit the underlying endpoint to see the raw response shape.</p>
+<table>
+  <thead><tr><th>Endpoint</th><th>Open</th></tr></thead>
+  <tbody>
+    <tr><td>get-beach-summary?fid=8347</td><td><a id="api-bs" href="#" target="_blank">JSON</a></td></tr>
+    <tr><td>get-beach-detail?fid=8347&amp;date=today</td><td><a id="api-bd" href="#" target="_blank">JSON</a></td></tr>
+    <tr><td>get-dog-park-summary?fid=562</td><td><a id="api-dps" href="#" target="_blank">JSON</a></td></tr>
+    <tr><td>nearest_dog_parks RPC (POST — use browser dev tools)</td><td><em>see find.html network tab</em></td></tr>
+  </tbody>
+</table>
+
+<h2>If you find something broken</h2>
+<div class="check">
+  <ol style="margin: 0 0 0 20px; font-size: 13px;">
+    <li>Open browser dev tools → Network tab → reload the broken page</li>
+    <li>Find the 4xx/5xx response (red row)</li>
+    <li>Copy the error body (usually <code>{"error": "..."}</code>) — paste it back to Claude</li>
+    <li>That error message usually names the missing column / table / RPC, which makes the fix shape obvious (same pattern as 14h / 14i)</li>
+  </ol>
+</div>
+
+<script>
+  // Build today's date for detail.html and JSON links
+  const today = new Date().toISOString().slice(0, 10);
+  const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
+  const ANON_KEY = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
+
+  ['8347','6212','684','4715'].forEach(fid => {
+    const a = document.getElementById('d-' + fid);
+    if (a) {
+      a.href = `../detail.html?fid=${fid}&date=${today}`;
+      a.textContent = `detail.html?fid=${fid}&date=${today}`;
+    }
+  });
+
+  document.getElementById('api-bs').href =
+    `${SUPABASE_URL}/functions/v1/get-beach-summary?fid=8347&apikey=${ANON_KEY}`;
+  document.getElementById('api-bd').href =
+    `${SUPABASE_URL}/functions/v1/get-beach-detail?fid=8347&date=${today}&apikey=${ANON_KEY}`;
+  document.getElementById('api-dps').href =
+    `${SUPABASE_URL}/functions/v1/get-dog-park-summary?fid=562&apikey=${ANON_KEY}`;
+</script>
+
+</body>
+</html>

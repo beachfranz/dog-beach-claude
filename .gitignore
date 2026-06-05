@@ -13,7 +13,8 @@ scripts/pipeline/*.csv
 /checkpoints/
 
 # Local-only tooling state
-.claude/
+.claude/*
+!.claude/skills/
 supabase/.temp/
 supabase.exe
 

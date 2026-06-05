@@ -118,6 +118,91 @@ def dp_photos_load_websearch(state: str, **kw) -> dict:
     return out
 
 
+def dp_photos_vision_tag(state: str, **kw) -> dict:
+    """Two-pass Haiku vision tagger over DP photos in the state, then
+    enforce the dog-relevance gate per [[dp-photos-are-dog-only]].
+
+    Steps:
+      1. Subprocess `load_photo_vision_tags.py --entity dog_park --state X`
+         to tag photos with structured visual signals (has_dog, scene,
+         is_dog_park_relevant) into source_meta.vision.
+      2. Hide photos where is_dog_park_relevant=false (sets hidden_at so
+         dp_photos_curate's existing hidden_at filter excludes them).
+      3. Un-curate already-curated photos that now fail the gate
+         (cleanup path for batches curated before vision tagging was
+         wired into the pipeline — 2026-06-05 backfill).
+
+    Cost: ~$0.005/photo Haiku 4.5 two-pass. State-scoped chunks of 200
+    photos × 4 workers; typical state ≈ $5-25.
+
+    Encoded after 2026-06-05 surfaced fid 2390 (Gardner Dog Park MA)
+    showing 6 Office-of-Governor-Healey photos curated with no dog
+    content — pipeline had loaded + curated but never vision-tagged.
+    """
+    started = datetime.now(timezone.utc)
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+    # Step 1: vision tagging via subprocess
+    args = [sys.executable, "scripts/load_photo_vision_tags.py",
+            "--entity", "dog_park", "--state", state,
+            "--chunk-size", "200", "--workers", "4"]
+    try:
+        result = subprocess.run(args, cwd=repo, capture_output=True,
+                                text=True, timeout=1800)
+    except subprocess.TimeoutExpired:
+        return {"op": "dp_photos_vision_tag", "state": state,
+                "error": "tagger timeout after 1800s",
+                "n_tagged": 0, "n_hidden_not_relevant": 0, "n_uncurated_bad_picks": 0}
+    if result.returncode != 0:
+        return {"op": "dp_photos_vision_tag", "state": state,
+                "error": f"tagger exit {result.returncode}: {(result.stderr or '')[-200:]}",
+                "n_tagged": 0, "n_hidden_not_relevant": 0, "n_uncurated_bad_picks": 0}
+
+    m = re.search(r"(?:photos_tagged|tagged)[=:\s]+(\d+)", result.stdout or "")
+    n_tagged = int(m.group(1)) if m else 0
+
+    # Step 2 + 3: hide non-relevant + un-curate bad existing picks
+    conn = connect()
+    n_hidden = 0
+    n_uncurated = 0
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE public.dog_park_photos p
+                   SET hidden_at = now(),
+                       hidden_by = 'vision-tag-not-relevant'
+                  FROM public.dog_parks_gold g
+                 WHERE g.fid = p.dog_park_fid
+                   AND g.state = %s AND g.is_active AND g.is_scoreable
+                   AND p.hidden_at IS NULL
+                   AND p.source_meta->'vision'->>'is_dog_park_relevant' = 'false'
+            """, (state,))
+            n_hidden = cur.rowcount
+
+            cur.execute("""
+                UPDATE public.dog_park_photos p
+                   SET curated_at = NULL,
+                       curated_by = NULL
+                  FROM public.dog_parks_gold g
+                 WHERE g.fid = p.dog_park_fid
+                   AND g.state = %s AND g.is_active AND g.is_scoreable
+                   AND p.curated_at IS NOT NULL
+                   AND p.source_meta->'vision'->>'is_dog_park_relevant' = 'false'
+            """, (state,))
+            n_uncurated = cur.rowcount
+            conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "op": "dp_photos_vision_tag",
+        "state": state,
+        "n_tagged": n_tagged,
+        "n_hidden_not_relevant": n_hidden,
+        "n_uncurated_bad_picks": n_uncurated,
+    }
+
+
 def dp_photos_curate(state: str, **kw) -> dict:
     """Cross-source additive top-6 curate per DP.
 

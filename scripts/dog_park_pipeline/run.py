@@ -33,6 +33,7 @@ from . import (
     dp_photos_load_flickr,
     dp_photos_load_wikimedia,
     dp_photos_load_websearch,
+    dp_photos_vision_tag,
     dp_photos_curate,
 )
 
@@ -54,6 +55,7 @@ OPS = [
     ("dp_photos_load_flickr",    lambda s: dp_photos_load_flickr(s)),
     ("dp_photos_load_wikimedia", lambda s: dp_photos_load_wikimedia(s)),
     ("dp_photos_load_websearch", lambda s: dp_photos_load_websearch(s)),
+    ("dp_photos_vision_tag",     lambda s: dp_photos_vision_tag(s)),
     ("dp_photos_curate",         lambda s: dp_photos_curate(s)),
 ]
 

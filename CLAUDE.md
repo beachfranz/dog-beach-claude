@@ -212,6 +212,39 @@ CRUD over beaches, dupes, geocoding, off-leash flags, source classification, pol
 
 Step-wise pipeline that classifies + enriches beaches in `beaches_staging_new`. Examples: `v2-county-classify`, `v2-private-land-filter`, `v2-state-classify`, `v2-noaa-station-match`, `v2-promote-to-beaches`. The orchestrator is `v2-run-pipeline`. Architecture documented at the bottom of this file under "Catalog Ingest Pipeline".
 
+### PostgREST 1000-row cap — silent truncation
+
+Supabase applies `db-max-rows=1000` to every PostgREST response (REST `.select()` AND RPC results). Queries matching more rows are silently capped at 1000. PostgREST signals this via HTTP **206 Partial Content** + a `Content-Range: 0-999/<total>` header, and supabase-js surfaces it as `{ count, status }` on the response — but the JSON body (`data`) looks fine. If the function only checks `data` and `error`, the truncation is invisible.
+
+This caused the 2026-06-05 14-day stuck-Luhr-Jensen blackout: `daily-beach-refresh` queried `beaches_gold` (2,889 scoreable beaches), got 1,000 back, and processed only those. The remaining 1,889 — all higher-fid states OR/WA/NH/MI/OH/RI/VA — were invisible to the function for days.
+
+**Two fixes, depending on shape**:
+
+1. **Selection-style queries** (pick N beaches to process): use an aggregating SQL function called via `supabase.rpc(...)` that does the entire selection DB-side and returns ≤ N rows. The result count never exceeds the cap. See `beaches_due_for_refresh(target_fids, target_location_ids, skip_recent_hours, limit)` + `dog_parks_due_for_refresh(...)` as the canonical pattern.
+
+2. **Detail-style queries** (load metadata for a known-bounded set of fids): use `.in("fid", fids)` where `fids.length ≤ 40` or similar, AND wrap with `ensureNotTruncated()` from `_shared/safeSelect.ts` to catch future scope drift.
+
+**`ensureNotTruncated()` usage**:
+
+```ts
+import { ensureNotTruncated } from "../_shared/safeSelect.ts";
+
+const result = await supabase
+  .from("beach_day_recommendations")
+  .select("arena_group_id, generated_at", { count: "exact" })
+  .in("arena_group_id", fids);
+ensureNotTruncated(result, "beach-recs by fid");
+const { data, error } = result;
+```
+
+`{ count: 'exact' }` makes PostgREST send back the full count even when truncating. The helper compares `data.length` to `count`; warns on mismatch (or throws with `{ hard: true }`). Skipping `{ count: 'exact' }` makes the helper warn that detection is disabled.
+
+**Audits**:
+- `_orch_w_chunked_refresh_freshness_audit` watches per-fid staleness (catches the downstream symptom: beaches stuck stale because the function never sees them).
+- `_orch_w_orch_deps_health_audit` watches orch_jobs.depends_on for dead refs (catches the upstream symptom: jobs silently skipped).
+
+Encoded HARD rule: [[paired-functions-port-fixes-both-sides]] — when fixing a query pattern on the beach side, sweep the dog-park sibling in the same change.
+
 ### Auth model
 
 Browser-facing reads use the publishable anon key:

@@ -182,17 +182,20 @@ Deno.serve(async (req: Request) => {
     });
 
     // Fetch all active beaches for the location switcher dropdown.
-    // All on the spine now — no JOIN needed.
-    const { data: goldList } = await supabase
-      .from("beaches_gold")
-      .select("fid, location_id, name, display_name_override")
-      .eq("is_active", true)
-      .order("name");
-    const allBeaches = (goldList ?? []).map(g => ({
-      location_id:    g.location_id ?? null,
-      arena_group_id: g.fid,
-      display_name:   g.display_name_override ?? g.name,
-    }));
+    //
+    // 2026-06-05 LATE: switched to all_active_beaches_for_dropdown RPC
+    // (returns a single jsonb-array row) to bypass PostgREST's
+    // db-max-rows=1000 cap. The prior `.from("beaches_gold").eq("is_active")`
+    // SELECT was truncating to ~27% of the 3,709 active beaches —
+    // ~2,709 silently invisible to the dropdown. See 20260605i.
+    const { data: dropdownData, error: dropdownErr } = await supabase
+      .rpc("all_active_beaches_for_dropdown");
+    if (dropdownErr) console.warn(`allBeaches RPC failed: ${dropdownErr.message}`);
+    const allBeaches = (dropdownData as Array<{
+      arena_group_id: number;
+      location_id: string | null;
+      display_name: string;
+    }>) ?? [];
 
     // Fire-and-forget page-view log. Feeds the long-tail tier in the
     // daily-refresh strategy: recently-viewed beaches get full nightly

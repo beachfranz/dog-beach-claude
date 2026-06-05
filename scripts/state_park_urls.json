@@ -59,6 +59,37 @@
     "notes": "Listing URL is virginia.org/things-to-do/outdoors/state-parks (tourism-maintained, photo-friendly). Agency site dcr.virginia.gov/state-parks is authoritative. State-park-specific photo loader deferred; Wikimedia + websearch handle photos state-agnostically. State dog policy deferred to localities per Va. Code § 3.2-6539 (no statewide leash law).",
     "added": "2026-05-26"
   },
+  "MA": {
+    "agency": "Massachusetts Department of Conservation and Recreation (DCR)",
+    "url": "https://www.mass.gov/guides/alphabetical-list-of-massachusetts-state-parks",
+    "state_dog_policy_url": "https://www.mass.gov/guides/dogs-in-dcr-parks",
+    "loader_deferred": true,
+    "notes": "Static alphabetical-list page on mass.gov (Drupal-style CMS). Each park likely links to a `/locations/<slug>-state-park` detail page. Loader-friendly pattern. Dogs-in-DCR-parks guide is the state-level dog policy authority for MA state parks — feed into codify-cascade as state_dogs_policy_v1 source. Wikimedia + websearch handle photos state-agnostically meanwhile. Franz-provided 2026-06-05. MA has 726 scoreable beaches (highest of new MVP+ states).",
+    "added": "2026-06-05"
+  },
+  "RI": {
+    "agency": "Rhode Island Division of Parks and Recreation (DEM)",
+    "url": "https://riparks.ri.gov/",
+    "parks_url": "https://riparks.ri.gov/parks",
+    "beaches_url": "https://riparks.ri.gov/beaches",
+    "loader_deferred": true,
+    "notes": "Two distinct inventory pages: /parks for state parks, /beaches for state beaches. Both likely have a clean listing → detail-page pattern (RI is small, ~30 properties total). Wikimedia + websearch handle photos state-agnostically meanwhile. Franz-provided 2026-06-05. RI has 42 scoreable beaches.",
+    "added": "2026-06-05"
+  },
+  "OH": {
+    "agency": "Ohio Department of Natural Resources (ODNR)",
+    "url": "https://ohiodnr.gov/go-and-do/plan-a-visit/find-a-property/find-a-property-search",
+    "loader_deferred": true,
+    "notes": "Server-side query-param filter: `?activity=<Type>` (e.g., `?activity=State%20Park`, `?activity=Dog%20Park`). Likely loader-friendly (URL-driven, not SPA hash). Wikimedia + websearch handle photos state-agnostically meanwhile. Franz-provided 2026-06-05. Filter pattern documented so future loader can iterate activity types.",
+    "added": "2026-06-05"
+  },
+  "MI": {
+    "agency": "Michigan Department of Natural Resources (DNR)",
+    "url": "https://www.michigan.gov/recsearch/locator#g=&location%20type=be7f73ee757c4a9093061d7badbb7d4e%20State%20park",
+    "loader_deferred": true,
+    "notes": "SPA-style recreation search with hash-based filter (location_type GUID for 'State park' = be7f73ee757c4a9093061d7badbb7d4e). Static scrape returns shell only; would need Playwright OR the SPA's underlying API endpoint to enumerate parks. Wikimedia + websearch handle photos state-agnostically. MI has 583 scoreable beaches via GNIS Great-Lakes shore entries.",
+    "added": "2026-06-05"
+  },
   "UT": {
     "agency": "Utah State Parks (Utah Division of State Parks, DNR)",
     "url": "https://stateparks.utah.gov/parks/",

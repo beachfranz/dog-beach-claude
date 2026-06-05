@@ -87,11 +87,15 @@ Deno.serve(async (req: Request) => {
   if (authFail) return authFail;
 
   let targetFids: number[] | null = null;
-  // MVP+ scope (Franz 2026-05-30): CA + OR + WA + MD + UT. Override via body.state:
-  //   "ALL" → all states ; "MD" / etc → that single state.
-  // The old default was "CA" which silently starved every other state's
-  // daily refresh after they launched.
-  let stateFilters: string[] = ["CA", "OR", "WA", "MD", "UT"];
+  // National scope (Franz 2026-06-05): default is NO state filter — process
+  // every is_active + is_scoreable dog park regardless of state. Replaces
+  // the prior MVP+ hardcode (CA+OR+WA+MD+UT) which was the third
+  // [[paired-functions-port-fixes-both-sides]] trap today. Weather grid
+  // falls back to direct Open-Meteo fetch for cells not yet loaded;
+  // tg_compute_weather_grid_cell auto-registers them on next entity touch.
+  // Body.state overrides: "ALL"/null → no filter (default) ; "MD"/etc →
+  // single state.
+  let stateFilters: string[] = [];
   let skipRecentHours: number | null = null;
   let limitParks: number | null = null;
   try {

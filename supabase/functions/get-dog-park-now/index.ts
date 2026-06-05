@@ -45,9 +45,10 @@ Deno.serve(async (req: Request) => {
   // limit=100, mirroring daily-dog-park-refresh's chunked pattern. Hard-
   // capped at 500 to keep one call safe.
   let limitParks: number | null = null;
-  // MVP+ scope (Franz 2026-05-30): CA + OR + WA + MD + UT. Body.state overrides:
-  //   "ALL" → every state ; "MD" / etc → just that state.
-  let stateFilters: string[] = ["CA", "OR", "WA", "MD", "UT"];
+  // National scope (Franz 2026-06-05): default is NO state filter — see
+  // daily-dog-park-refresh for full rationale. Body.state overrides:
+  //   "ALL"/null → no filter (default) ; "MD" / etc → just that state.
+  let stateFilters: string[] = [];
 
   if (req.method === "GET") {
     const fid = new URL(req.url).searchParams.get("fid");

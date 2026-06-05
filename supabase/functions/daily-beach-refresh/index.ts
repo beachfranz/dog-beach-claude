@@ -3,6 +3,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders }  from "../_shared/cors.ts";
+import { ensureNotTruncated } from "../_shared/safeSelect.ts";
 import { fetchWeather, wmoToSummaryWeather }   from "./openmeteo.ts";
 import { fetchTides }                           from "./noaa.ts";
 import { fetchCrowds, jsDayToBestTimeDay }      from "./besttime.ts";
@@ -230,15 +231,18 @@ Deno.serve(async (req: Request) => {
     }
 
     // 2. Load full detail for just those fids (≤ limit rows; well below
-    //    the PostgREST cap, no truncation risk).
-    const { data: goldRows, error: beachErr } = await supabase.from("beaches_gold")
+    //    the PostgREST cap, no truncation risk). ensureNotTruncated()
+    //    catches scope drift if limit ever grows past the cap.
+    const detailResult = await supabase.from("beaches_gold")
       .select(`
         fid, location_id, name, display_name_override, lat, lon,
         noaa_station_id, besttime_venue_id, timezone, open_time, close_time,
         scoring_tier, is_active, address, website, description, parking_text,
         beach_dog_policy(dogs_prohibited_start, dogs_prohibited_end)
-      `)
+      `, { count: "exact" })
       .in("fid", dueFids);
+    ensureNotTruncated(detailResult, "daily-beach-refresh: detail SELECT");
+    const { data: goldRows, error: beachErr } = detailResult;
     if (beachErr) throw new Error(`Failed to load beach detail: ${beachErr.message}`);
 
     type GoldRow = {

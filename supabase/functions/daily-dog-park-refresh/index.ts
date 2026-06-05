@@ -7,6 +7,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { ensureNotTruncated } from "../_shared/safeSelect.ts";
 import { fetchWeather, wmoToSummaryWeather } from "./openmeteo.ts";
 import {
   scoreDogParkHours,
@@ -171,15 +172,18 @@ Deno.serve(async (req: Request) => {
   }
 
   // 3. Load park detail for just those fids (≤ limit rows, well under
-  //    the PostgREST cap).
-  const { data: parksRaw, error: parksErr } = await supabase
+  //    the PostgREST cap). ensureNotTruncated catches scope drift if
+  //    limit ever grows past the cap.
+  const detailResult = await supabase
     .from("dog_parks_gold")
     .select(`
       fid, name, display_name_override, lat, lon, state, surface,
       has_fence, has_drinking_water,
       dog_park_dog_policy!inner(hours_open_time, hours_close_time, off_leash_flag)
-    `)
+    `, { count: "exact" })
     .in("fid", dueFids);
+  ensureNotTruncated(detailResult, "daily-dog-park-refresh: detail SELECT");
+  const { data: parksRaw, error: parksErr } = detailResult;
   if (parksErr) {
     return new Response(JSON.stringify({ error: `parks detail load: ${parksErr.message}` }),
       { status: 500, headers: cors });

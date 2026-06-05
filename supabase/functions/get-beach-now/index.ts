@@ -70,52 +70,61 @@ Deno.serve(async (req: Request) => {
   // ── Resolve all input keys to a single set of arena_group_ids ───────────────
   // Path 3b-3.x: beaches_gold is the spine; the legacy location_id slug
   // lives on it now too. Any location_id input maps to arena_group_id
-  // via beaches_gold.
-  const fidSet = new Set<number>(arenaGroupIds ?? []);
-  if (locationIds?.length) {
-    const { data: rows } = await supabase
-      .from("beaches_gold")
-      .select("fid")
-      .in("location_id", locationIds);
-    for (const r of rows ?? []) {
-      if (r.fid) fidSet.add(r.fid);
-    }
+  // 2026-06-05 LATE: switched to all-in-one RPC to bypass PostgREST
+  // db-max-rows=1000 cap. Today's pool is under cap (~702 hourly-tier
+  // beaches) but mirrors the dog-park-side fix per
+  // [[paired-functions-port-fixes-both-sides]] — will trip when hourly
+  // tier grows. RPC selects from beaches_gold with scoring_tier='hourly'
+  // + filters, applies skip_recent on hourly_scores.updated_at WHERE
+  // is_now=true, orders oldest-NOW-first, caps at p_limit DB-side.
+  // See 20260605h.
+  const targetFidsArr = arenaGroupIds ?? null;
+  const targetLocIds  = locationIds ?? null;
+
+  const { data: dueRows, error: dueErr } = await supabase.rpc(
+    "beaches_due_for_now_refresh",
+    {
+      p_target_fids:         targetFidsArr,
+      p_target_location_ids: targetLocIds,
+      p_skip_recent_hours:   skipRecentHours,
+      p_limit:               limitBeaches,
+    },
+  );
+  if (dueErr) return json({ error: `beaches_due_for_now_refresh: ${dueErr.message}` }, 500);
+  const dueFids = (dueRows ?? []).map((r: { fid: number }) => r.fid);
+  if (dueFids.length === 0) {
+    return json({
+      ok: true,
+      message: skipRecentHours !== null
+        ? `all beaches refreshed within ${skipRecentHours}h`
+        : "No beaches found",
+      results: [], skipped_recent: 0,
+    });
   }
 
-  let beachQuery = supabase.from("beaches_gold")
-    .select(`
-      fid,
-      location_id,
-      name,
-      display_name_override,
-      lat,
-      lon,
-      noaa_station_id,
-      besttime_venue_id,
-      timezone,
-      open_time,
-      close_time,
-      is_active,
-      address,
-      website,
-      description,
-      parking_text,
-      beach_dog_policy(dogs_prohibited_start, dogs_prohibited_end)
-    `)
-    .eq("is_active", true);
-  if (fidSet.size > 0) {
-    beachQuery = beachQuery.in("fid", [...fidSet]);
-  }
-  // If neither key was provided, fall through to "all active scoreable
-  // beaches" — same semantic as the hourly cron call (POST {} → batch).
-  // 2026-05-13: scoring_tier replaces is_scoreable. Hourly tier only
-  // — daily tier doesn't need NOW refreshes (rolled-up by daily-beach-refresh).
-  if (!locationIds?.length && !arenaGroupIds?.length) {
-    beachQuery = beachQuery.eq("scoring_tier", "hourly");
-  }
-
+  // Load detail for just those fids (≤ limit rows; well under cap).
   const [goldRes, configRes] = await Promise.all([
-    beachQuery,
+    supabase.from("beaches_gold")
+      .select(`
+        fid,
+        location_id,
+        name,
+        display_name_override,
+        lat,
+        lon,
+        noaa_station_id,
+        besttime_venue_id,
+        timezone,
+        open_time,
+        close_time,
+        is_active,
+        address,
+        website,
+        description,
+        parking_text,
+        beach_dog_policy(dogs_prohibited_start, dogs_prohibited_end)
+      `)
+      .in("fid", dueFids),
     supabase.from("scoring_config")
       .select("*")
       .eq("is_active", true)
@@ -124,7 +133,7 @@ Deno.serve(async (req: Request) => {
       .single(),
   ]);
 
-  if (goldRes.error || !goldRes.data?.length) return json({ error: "No beaches found" }, 404);
+  if (goldRes.error || !goldRes.data?.length) return json({ error: "No beaches found after detail load" }, 500);
   if (configRes.error || !configRes.data)     return json({ error: "Scoring config not found" }, 500);
 
   // Reshape gold rows into the existing beach shape so refreshNow doesn't change.
@@ -141,7 +150,7 @@ Deno.serve(async (req: Request) => {
                       | null
                       | { dogs_prohibited_start: string | null; dogs_prohibited_end: string | null }[];
   };
-  let beaches = (goldRes.data as GoldRow[]).map(g => {
+  const beaches = (goldRes.data as GoldRow[]).map(g => {
     const dp = Array.isArray(g.beach_dog_policy) ? g.beach_dog_policy[0] : g.beach_dog_policy;
     return {
       location_id:    g.location_id,
@@ -164,57 +173,8 @@ Deno.serve(async (req: Request) => {
     };
   });
 
-  // ── Optional skip_recent_hours filter ────────────────────────────────────
-  // Drop beaches whose is_now row was updated within the cutoff. Mirrors
-  // the same flag on daily-beach-refresh; idempotent for cron retries and
-  // ad-hoc fires. For hourly cron pass ~0.9 (= 54min, gives 6min slack
-  // before the next firing).
-  let skippedRecent = 0;
-  if (skipRecentHours !== null && beaches.length > 0) {
-    const cutoffMs = runAt.getTime() - skipRecentHours * 3600 * 1000;
-    const cutoffIso = new Date(cutoffMs).toISOString();
-    const beachFids = beaches.map(b => b.arena_group_id);
-    const { data: recentRows, error: recentErr } = await supabase
-      .from("beach_day_hourly_scores")
-      .select("arena_group_id, updated_at")
-      .eq("is_now", true)
-      .in("arena_group_id", beachFids)
-      .gte("updated_at", cutoffIso);
-    if (recentErr) {
-      console.warn(`skip_recent_hours query failed: ${recentErr.message} — proceeding without skip`);
-    } else {
-      const recentSet = new Set((recentRows ?? []).map((r: { arena_group_id: number }) => r.arena_group_id));
-      const before = beaches.length;
-      beaches = beaches.filter(b => !recentSet.has(b.arena_group_id));
-      skippedRecent = before - beaches.length;
-      console.log(`skip_recent_hours=${skipRecentHours} → skipped ${skippedRecent}/${before}; ${beaches.length} remaining`);
-    }
-  }
-
-  // Sort by oldest-NOW-first and cap to `limit`. Mirrors the chunked-drain
-  // pattern in daily-beach-refresh: each fire processes the stalest
-  // beaches first, so the chunked cron drains the pool fairly.
-  if (limitBeaches !== null && beaches.length > limitBeaches) {
-    const beachFids = beaches.map(b => b.arena_group_id);
-    const { data: ageRows, error: ageErr } = await supabase
-      .from("beach_day_hourly_scores")
-      .select("arena_group_id, updated_at")
-      .eq("is_now", true)
-      .in("arena_group_id", beachFids);
-    if (ageErr) {
-      console.warn(`limit-sort age query failed: ${ageErr.message} — applying naive slice`);
-      beaches = beaches.slice(0, limitBeaches);
-    } else {
-      const ageBy: Record<number, number> = {};
-      for (const r of (ageRows ?? []) as { arena_group_id: number; updated_at: string | null }[]) {
-        ageBy[r.arena_group_id] = r.updated_at ? new Date(r.updated_at).getTime() : 0;
-      }
-      beaches.sort((a, b) => (ageBy[a.arena_group_id] ?? 0) - (ageBy[b.arena_group_id] ?? 0));
-      const before = beaches.length;
-      beaches = beaches.slice(0, limitBeaches);
-      console.log(`limit=${limitBeaches} → processing ${beaches.length}/${before} oldest-NOW beaches`);
-    }
-  }
+  // skip_recent_hours + limit-sort are applied DB-side by beaches_due_for_now_refresh.
+  const skippedRecent = 0;
 
   const config = configRes.data;
 

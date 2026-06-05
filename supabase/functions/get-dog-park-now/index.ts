@@ -72,19 +72,43 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  let q = supabase
-    .from("dog_parks_gold")
-    .select(`
-      fid, name, display_name_override, lat, lon, state, surface,
-      dog_park_dog_policy(hours_open_time, hours_close_time)
-    `)
-    .eq("is_active", true)
-    .eq("is_scoreable", true);
-  if (targetFids?.length) q = q.in("fid", targetFids);
-  else if (stateFilters.length > 0) q = q.in("state", stateFilters);
+  // 2026-06-05 LATE: switched to all-in-one RPC to bypass PostgREST
+  // db-max-rows=1000 cap. With today's MVP+ scope lift (national
+  // pool ~2,589 parks), the prior `from("dog_parks_gold").eq(...)` was
+  // silently truncating, leaving ~1,589 parks invisible to NOW refresh.
+  // RPC selects, filters by skip_recent_hours (on hourly_scores.updated_at
+  // WHERE is_now=true), and orders oldest-NOW-first DB-side. Result is
+  // ≤ p_limit so the cap never engages. See 20260605h.
+  const { data: dueRows, error: dueErr } = await supabase.rpc(
+    "dog_parks_due_for_now_refresh",
+    {
+      p_target_fids:       targetFids?.length ? targetFids : null,
+      p_state_filter:      stateFilters.length > 0 ? stateFilters : null,
+      p_skip_recent_hours: skipRecentHours,
+      p_limit:             limitParks,
+    },
+  );
+  if (dueErr) return json({ error: `dog_parks_due_for_now_refresh: ${dueErr.message}` }, 500);
+  const dueFids = (dueRows ?? []).map((r: { fid: number }) => r.fid);
+  if (dueFids.length === 0) {
+    return json({
+      ok: true,
+      message: skipRecentHours !== null
+        ? `all parks refreshed within ${skipRecentHours}h`
+        : "no parks found",
+      count: 0,
+    });
+  }
 
+  // Load detail for just those fids (≤ limit rows; well under cap).
   const [parksRes, configRes] = await Promise.all([
-    q,
+    supabase
+      .from("dog_parks_gold")
+      .select(`
+        fid, name, display_name_override, lat, lon, state, surface,
+        dog_park_dog_policy(hours_open_time, hours_close_time)
+      `)
+      .in("fid", dueFids),
     supabase.from("dog_park_scoring_config")
       .select("*")
       .eq("is_active", true)
@@ -93,7 +117,7 @@ Deno.serve(async (req: Request) => {
   ]);
 
   if (parksRes.error) return json({ error: `parks load: ${parksRes.error.message}` }, 500);
-  if (!parksRes.data?.length) return json({ error: "no parks found" }, 404);
+  if (!parksRes.data?.length) return json({ error: "no parks found after detail load" }, 500);
   if (configRes.error || !configRes.data) return json({ error: "no active config" }, 500);
 
   type Row = {
@@ -102,7 +126,7 @@ Deno.serve(async (req: Request) => {
     dog_park_dog_policy: { hours_open_time: string | null; hours_close_time: string | null }
       | { hours_open_time: string | null; hours_close_time: string | null }[] | null;
   };
-  let parks = (parksRes.data as Row[]).map((g) => {
+  const parks = (parksRes.data as Row[]).map((g) => {
     const dp = Array.isArray(g.dog_park_dog_policy) ? g.dog_park_dog_policy[0] : g.dog_park_dog_policy;
     return {
       fid: g.fid,
@@ -115,45 +139,7 @@ Deno.serve(async (req: Request) => {
       hours_close_time: dp?.hours_close_time ?? null,
     };
   });
-
-  // skip_recent_hours filter (hourly cron passes ~0.9 = 54min)
-  let skippedRecent = 0;
-  if (skipRecentHours !== null && parks.length > 0) {
-    const cutoff = new Date(runAt.getTime() - skipRecentHours * 3_600_000).toISOString();
-    const { data: recent } = await supabase
-      .from("dog_park_day_hourly_scores")
-      .select("dog_park_fid")
-      .eq("is_now", true)
-      .in("dog_park_fid", parks.map((p) => p.fid))
-      .gte("updated_at", cutoff);
-    const recentSet = new Set((recent ?? []).map((r: any) => r.dog_park_fid));
-    const before = parks.length;
-    parks = parks.filter((p) => !recentSet.has(p.fid));
-    skippedRecent = before - parks.length;
-  }
-
-  // Sort oldest-NOW-first and cap to `limit`. Mirrors the chunked-drain
-  // pattern in daily-dog-park-refresh.
-  if (limitParks !== null && parks.length > limitParks) {
-    const { data: ageRows, error: ageErr } = await supabase
-      .from("dog_park_day_hourly_scores")
-      .select("dog_park_fid, updated_at")
-      .eq("is_now", true)
-      .in("dog_park_fid", parks.map((p) => p.fid));
-    if (ageErr) {
-      console.warn(`limit-sort age query failed: ${ageErr.message} — applying naive slice`);
-      parks = parks.slice(0, limitParks);
-    } else {
-      const ageBy: Record<number, number> = {};
-      for (const r of (ageRows ?? []) as { dog_park_fid: number; updated_at: string | null }[]) {
-        ageBy[r.dog_park_fid] = r.updated_at ? new Date(r.updated_at).getTime() : 0;
-      }
-      parks.sort((a, b) => (ageBy[a.fid] ?? 0) - (ageBy[b.fid] ?? 0));
-      const before = parks.length;
-      parks = parks.slice(0, limitParks);
-      console.log(`limit=${limitParks} → processing ${parks.length}/${before} oldest-NOW parks`);
-    }
-  }
+  const skippedRecent = 0;  // applied DB-side by the RPC
 
   const config = configRes.data as DogParkScoringConfig;
 

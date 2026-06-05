@@ -11,6 +11,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import Anthropic from "https://esm.sh/@anthropic-ai/sdk@0.39.0";
 import { corsHeaders } from "../_shared/cors.ts";
+import { ensureNotTruncated } from "../_shared/safeSelect.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -194,12 +195,14 @@ Deno.serve(async (req: Request) => {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-  const { data: govRows, error: govErr } = await supabase
+  const govRes = await supabase
     .from("beach_enrichment_provenance")
-    .select("fid")
+    .select("fid", { count: "exact" })
     .eq("field_group", "governance")
     .eq("is_canonical", true)
     .in("source", COUNTY_SOURCE_SET);
+  ensureNotTruncated(govRes, "v2-county-dog-policy: gov filter");
+  const { data: govRows, error: govErr } = govRes;
   if (govErr) return json({ error: `gov filter: ${govErr.message}` }, 500);
   const countyGovernedFids = (govRows ?? []).map(r => r.fid);
 

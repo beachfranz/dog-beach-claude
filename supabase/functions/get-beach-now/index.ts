@@ -8,6 +8,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { ensureNotTruncated } from "../_shared/safeSelect.ts";
 import {
   scoreHours,
   buildHourLabel,
@@ -103,6 +104,7 @@ Deno.serve(async (req: Request) => {
   }
 
   // Load detail for just those fids (≤ limit rows; well under cap).
+  // ensureNotTruncated guards against scope drift if limit ever exceeds cap.
   const [goldRes, configRes] = await Promise.all([
     supabase.from("beaches_gold")
       .select(`
@@ -123,7 +125,7 @@ Deno.serve(async (req: Request) => {
         description,
         parking_text,
         beach_dog_policy(dogs_prohibited_start, dogs_prohibited_end)
-      `)
+      `, { count: "exact" })
       .in("fid", dueFids),
     supabase.from("scoring_config")
       .select("*")
@@ -133,6 +135,7 @@ Deno.serve(async (req: Request) => {
       .single(),
   ]);
 
+  ensureNotTruncated(goldRes, "get-beach-now: detail SELECT");
   if (goldRes.error || !goldRes.data?.length) return json({ error: "No beaches found after detail load" }, 500);
   if (configRes.error || !configRes.data)     return json({ error: "Scoring config not found" }, 500);
 

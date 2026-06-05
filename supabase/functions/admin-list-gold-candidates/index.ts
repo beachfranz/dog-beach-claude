@@ -22,6 +22,7 @@
 import { createClient }   from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders }    from "../_shared/cors.ts";
 import { requireAdmin }   from "../_shared/admin-auth.ts";
+import { ensureNotTruncated } from "../_shared/safeSelect.ts";
 
 const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -374,10 +375,13 @@ Deno.serve(async (req) => {
   }
 
   // 2. beaches_gold identity
-  const { data: golds } = await supa
+  const goldsRes = await supa
     .from("beaches_gold")
-    .select("fid, name, display_name_override, county_name, state, location_id, lat, lon, park_name, cpad_unit_id")
+    .select("fid, name, display_name_override, county_name, state, location_id, lat, lon, park_name, cpad_unit_id",
+      { count: "exact" })
     .in("fid", fids);
+  ensureNotTruncated(goldsRes, "admin-list-gold-candidates: gold identity by fid");
+  const { data: golds } = goldsRes;
   const goldByFid: Record<number, any> = {};
   for (const g of (golds ?? [])) goldByFid[g.fid] = g;
 
@@ -402,11 +406,13 @@ Deno.serve(async (req) => {
   const distinctMngAgncy = Array.from(new Set(Object.values(mngAgncyByFid)));
   const operatorByMngAgncy: Record<string, any> = {};
   if (distinctMngAgncy.length) {
-    const { data: ops } = await supa
+    const opsRes = await supa
       .from("operators")
-      .select("id, canonical_name, cpad_agncy_name, level, slug")
+      .select("id, canonical_name, cpad_agncy_name, level, slug",
+        { count: "exact" })
       .in("cpad_agncy_name", distinctMngAgncy);
-    for (const o of (ops ?? [])) operatorByMngAgncy[o.cpad_agncy_name] = o;
+    ensureNotTruncated(opsRes, "admin-list-gold-candidates: operators by cpad_agncy_name");
+    for (const o of (opsRes.data ?? [])) operatorByMngAgncy[o.cpad_agncy_name] = o;
   }
   const operatorIdByFid: Record<number, number> = {};
   const operatorNameByFid: Record<number, string> = {};

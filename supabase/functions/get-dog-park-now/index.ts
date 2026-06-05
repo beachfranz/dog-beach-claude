@@ -8,6 +8,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { ensureNotTruncated } from "../_shared/safeSelect.ts";
 import {
   scoreDogParkHours,
   type RawHourData,
@@ -101,13 +102,14 @@ Deno.serve(async (req: Request) => {
   }
 
   // Load detail for just those fids (≤ limit rows; well under cap).
+  // ensureNotTruncated guards against scope drift if limit ever exceeds cap.
   const [parksRes, configRes] = await Promise.all([
     supabase
       .from("dog_parks_gold")
       .select(`
         fid, name, display_name_override, lat, lon, state, surface,
         dog_park_dog_policy(hours_open_time, hours_close_time)
-      `)
+      `, { count: "exact" })
       .in("fid", dueFids),
     supabase.from("dog_park_scoring_config")
       .select("*")
@@ -116,6 +118,7 @@ Deno.serve(async (req: Request) => {
       .single(),
   ]);
 
+  ensureNotTruncated(parksRes, "get-dog-park-now: detail SELECT");
   if (parksRes.error) return json({ error: `parks load: ${parksRes.error.message}` }, 500);
   if (!parksRes.data?.length) return json({ error: "no parks found after detail load" }, 500);
   if (configRes.error || !configRes.data) return json({ error: "no active config" }, 500);

@@ -171,14 +171,22 @@ Deno.serve(async (req: Request) => {
   });
   console.log(`Loaded ${parks.length} dog parks`);
 
-  // 3. Optional: skip parks refreshed recently
+  // 3. Optional: skip parks refreshed recently.
+  //
+  //    Filters on `dog_park_day_recommendations.generated_at`, NOT
+  //    `dog_park_day_hourly_scores.updated_at`. The NOW refresh
+  //    (get-dog-park-now) bumps hourly_scores.updated_at hourly on
+  //    existing rows; using updated_at here would silently hide any park
+  //    with hourly NOW traffic from daily-refresh forever — generated_at
+  //    on recommendations never advances, freshness audit fires at 4h
+  //    threshold every day. Mirrors beach-side fix 552d757 (2026-06-03).
   let toProcess = parks;
   if (skipRecentHours !== null) {
     const since = new Date(runAt.getTime() - skipRecentHours * 3_600_000).toISOString();
     const { data: recent } = await supabase
-      .from("dog_park_day_hourly_scores")
+      .from("dog_park_day_recommendations")
       .select("dog_park_fid")
-      .gte("updated_at", since);
+      .gte("generated_at", since);
     const recentFids = new Set((recent ?? []).map((r: any) => r.dog_park_fid));
     toProcess = parks.filter((p) => !recentFids.has(p.fid));
     console.log(`Skipping ${parks.length - toProcess.length} parks refreshed within ${skipRecentHours}h`);

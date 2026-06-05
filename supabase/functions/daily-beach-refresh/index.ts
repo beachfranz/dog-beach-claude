@@ -192,45 +192,55 @@ Deno.serve(async (req: Request) => {
   const results: RefreshResult[] = [];
 
   try {
-    // 1. Load scoreable beaches from the spine.
+    // 1. Select beaches due for refresh via the all-in-one RPC.
     //
-    // 2026-05-13 cutover: is_scoreable retired. The gate is now
-    // scoring_tier ∈ ('daily','hourly') as produced by Matrix C'
-    // (refresh_scoring_tier). 'none' excludes Tier 4 + low-traffic
-    // Tier 3 by construction.
-    console.log("Loading beaches from beaches_gold (scoring_tier in daily/hourly)...");
-    let beachQuery = supabase.from("beaches_gold")
+    // 2026-06-05 cutover (from PostgREST page-truncated SELECT): the prior
+    // approach hit PostgREST's db-max-rows=1000 cap on beaches_gold, so
+    // beaches with high fids (OR/WA/NH/MI/OH/RI/VA) were silently invisible
+    // to the function — fid 6947591 stuck 14 days stale. The RPC does
+    // the entire selection DB-side and returns just the ≤p_limit oldest
+    // fids to process. Result is always ≤ limit so the cap never engages.
+    //
+    // Filters applied DB-side: is_active + scoring_tier IN (daily, hourly)
+    // + optional target_location_ids + optional skip_recent_hours
+    // (against beach_day_recommendations.generated_at, NOT updated_at — see
+    // 552d757). Ordered by max(generated_at) ASC with NULLS FIRST so
+    // never-written beaches surface immediately.
+    console.log("Selecting due beaches via beaches_due_for_refresh RPC...");
+    const { data: dueRows, error: dueErr } = await supabase.rpc(
+      "beaches_due_for_refresh",
+      {
+        p_target_fids:         null,
+        p_target_location_ids: targetLocationIds ?? null,
+        p_skip_recent_hours:   skipRecentHours,
+        p_limit:               limitBeaches,
+      },
+    );
+    if (dueErr) throw new Error(`beaches_due_for_refresh failed: ${dueErr.message}`);
+    const dueFids = (dueRows ?? []).map((r: { fid: number }) => r.fid);
+    console.log(`RPC returned ${dueFids.length} beaches due for refresh`);
+    if (dueFids.length === 0) {
+      return json({
+        ok: true,
+        message: skipRecentHours !== null
+          ? `All beaches refreshed within skip_recent_hours=${skipRecentHours} — nothing to do`
+          : "No active beaches found",
+        results: [], skipped_recent: 0,
+      }, 200, cors);
+    }
+
+    // 2. Load full detail for just those fids (≤ limit rows; well below
+    //    the PostgREST cap, no truncation risk).
+    const { data: goldRows, error: beachErr } = await supabase.from("beaches_gold")
       .select(`
-        fid,
-        location_id,
-        name,
-        display_name_override,
-        lat,
-        lon,
-        noaa_station_id,
-        besttime_venue_id,
-        timezone,
-        open_time,
-        close_time,
-        scoring_tier,
-        is_active,
-        address,
-        website,
-        description,
-        parking_text,
+        fid, location_id, name, display_name_override, lat, lon,
+        noaa_station_id, besttime_venue_id, timezone, open_time, close_time,
+        scoring_tier, is_active, address, website, description, parking_text,
         beach_dog_policy(dogs_prohibited_start, dogs_prohibited_end)
       `)
-      .in("scoring_tier", ["daily", "hourly"])
-      .eq("is_active", true);
-    if (targetLocationIds && targetLocationIds.length > 0) {
-      beachQuery = beachQuery.in("location_id", targetLocationIds);
-    }
-    const { data: goldRows, error: beachErr } = await beachQuery;
+      .in("fid", dueFids);
+    if (beachErr) throw new Error(`Failed to load beach detail: ${beachErr.message}`);
 
-    // Reshape gold rows into the existing Beach interface so the rest of
-    // the function doesn't need touching. PostgREST returns the joined
-    // beaches row as either an object or array depending on cardinality;
-    // since we INNER JOIN there's exactly one.
     type GoldRow = {
       fid: number; location_id: string | null;
       name: string; display_name_override: string | null;
@@ -269,80 +279,10 @@ Deno.serve(async (req: Request) => {
         created_at:     "",
       };
     };
-    let beaches: Beach[] | null = goldRows ? (goldRows as GoldRow[]).map(flatten) : null;
-
-    console.log("Beach query result — data:", beaches?.length ?? "null", "error:", beachErr?.message ?? "none");
-
-    if (beachErr) throw new Error(`Failed to load beaches: ${beachErr.message}`);
-    if (!beaches || beaches.length === 0) {
-      return json({ ok: true, message: "No active beaches found", results: [] }, 200, cors);
-    }
-
-    // 1b. Optional skip_recent_hours filter — drop beaches whose today's
-    //     beach_day_recommendations row was GENERATED within the cutoff.
-    //     Lets pg_cron / failed-batch retries / ad-hoc fires be idempotent
-    //     without client-side dedup. Mirrors --skip-recent semantics from
-    //     the LLM extractors.
-    //
-    //     Filters on `generated_at`, NOT `updated_at`. The NOW refresh
-    //     (get-beach-now) calls apply_v2_best_window_to_beach_recommendations
-    //     hourly which bumps updated_at on existing rec rows; using
-    //     updated_at here would silently hide any beach with hourly NOW
-    //     traffic from daily-refresh forever (HB Dog Beach fid 6212 stuck
-    //     for 9 days; root-caused 2026-06-03).
-    let skippedRecent = 0;
-    if (skipRecentHours !== null) {
-      const cutoffIso = new Date(runAt.getTime() - skipRecentHours * 3600 * 1000).toISOString();
-      const beachFids = beaches.map(b => b.arena_group_id);
-      const { data: recentRows, error: recentErr } = await supabase
-        .from("beach_day_recommendations")
-        .select("arena_group_id")
-        .in("arena_group_id", beachFids)
-        .gte("generated_at", cutoffIso);
-      if (recentErr) {
-        console.warn(`skip_recent_hours query failed: ${recentErr.message} — proceeding without skip`);
-      } else {
-        const recentSet = new Set((recentRows ?? []).map((r: { arena_group_id: number }) => r.arena_group_id));
-        const before = beaches.length;
-        beaches = beaches.filter(b => !recentSet.has(b.arena_group_id));
-        skippedRecent = before - beaches.length;
-        console.log(`skip_recent_hours=${skipRecentHours} → skipped ${skippedRecent}/${before} beaches; ${beaches.length} remaining`);
-      }
-    }
-
-    if (beaches.length === 0) {
-      return json({
-        ok: true,
-        message: `All beaches refreshed within skip_recent_hours=${skipRecentHours} — nothing to do`,
-        results: [], skipped_recent: skippedRecent,
-      }, 200, cors);
-    }
-
-    // 1c. Sort by oldest-rec-first and cap to `limit` so each chunked invocation
-    //     drains the stale queue safely (one call's worth fits under the worker
-    //     resource cap). Per Franz 2026-05-30: previously a no-limit fire on
-    //     the full ~2,900-beach stale pool hit WORKER_RESOURCE_LIMIT every time,
-    //     so no beach ever got marked recent and the queue never drained.
-    if (limitBeaches !== null && beaches.length > limitBeaches) {
-      const beachFids = beaches.map(b => b.arena_group_id);
-      const { data: ageRows, error: ageErr } = await supabase
-        .from("beach_day_recommendations")
-        .select("arena_group_id, updated_at")
-        .in("arena_group_id", beachFids);
-      if (ageErr) {
-        console.warn(`limit-sort age query failed: ${ageErr.message} — applying naive slice`);
-        beaches = beaches.slice(0, limitBeaches);
-      } else {
-        const ageBy: Record<number, number> = {};
-        for (const r of (ageRows ?? []) as { arena_group_id: number; updated_at: string | null }[]) {
-          ageBy[r.arena_group_id] = r.updated_at ? new Date(r.updated_at).getTime() : 0;
-        }
-        beaches.sort((a, b) => (ageBy[a.arena_group_id] ?? 0) - (ageBy[b.arena_group_id] ?? 0));
-        const before = beaches.length;
-        beaches = beaches.slice(0, limitBeaches);
-        console.log(`limit=${limitBeaches} → processing ${beaches.length}/${before} oldest-stale beaches`);
-      }
-    }
+    let beaches: Beach[] = goldRows
+      ? (goldRows as GoldRow[]).map(flatten)
+      : [];
+    const skippedRecent = 0;  // RPC applies skip_recent_hours DB-side; not counted client-side
 
     // 2. Load scoring config
     console.log("Loading scoring config...");

@@ -129,30 +129,63 @@ Deno.serve(async (req: Request) => {
   const config = configRow as DogParkScoringConfig;
   console.log("Loaded config:", config.scoring_version);
 
-  // 2. Load scoreable dog parks
-  let q = supabase
+  // 2. Select parks due for refresh via the all-in-one RPC. Mirrors the
+  //    beach-side daily-beach-refresh 2026-06-05 cutover; same rationale.
+  //
+  //    History: prior PostgREST SELECT on dog_parks_gold + per-fid
+  //    freshness queries were silently capped at db-max-rows=1000.
+  //    For dog parks (~780 scoreable) the table SELECT happened to fit,
+  //    but the freshness join did NOT, so most parks defaulted to
+  //    age=0/epoch and tied for "oldest" → arbitrary 40 picked. Beach
+  //    side had the same shape worse (~2,889 beaches).
+  //
+  //    The RPC does the entire selection DB-side and returns ≤p_limit
+  //    fids ordered oldest-rec-first (NULLS FIRST for never-written).
+  //    Result is always ≤ limit so the cap never engages. skip_recent
+  //    is applied on dog_park_day_recommendations.generated_at, NOT
+  //    hourly_scores.updated_at — get-dog-park-now bumps the latter.
+  console.log("Selecting due parks via dog_parks_due_for_refresh RPC...");
+  const { data: dueRows, error: dueErr } = await supabase.rpc(
+    "dog_parks_due_for_refresh",
+    {
+      p_target_fids:       targetFids ?? null,
+      p_state_filter:      stateFilters.length > 0 ? stateFilters : null,
+      p_skip_recent_hours: skipRecentHours,
+      p_limit:             limitParks,
+    },
+  );
+  if (dueErr) {
+    return new Response(JSON.stringify({ error: `dog_parks_due_for_refresh: ${dueErr.message}` }),
+      { status: 500, headers: cors });
+  }
+  const dueFids = (dueRows ?? []).map((r: { fid: number }) => r.fid);
+  console.log(`RPC returned ${dueFids.length} parks due for refresh`);
+  if (dueFids.length === 0) {
+    return new Response(JSON.stringify({
+      ok: true,
+      message: skipRecentHours !== null
+        ? `all parks refreshed within ${skipRecentHours}h`
+        : "no parks to refresh",
+      count: 0,
+    }), { headers: cors });
+  }
+
+  // 3. Load park detail for just those fids (≤ limit rows, well under
+  //    the PostgREST cap).
+  const { data: parksRaw, error: parksErr } = await supabase
     .from("dog_parks_gold")
     .select(`
       fid, name, display_name_override, lat, lon, state, surface,
       has_fence, has_drinking_water,
       dog_park_dog_policy!inner(hours_open_time, hours_close_time, off_leash_flag)
     `)
-    .eq("is_active", true)
-    .eq("is_scoreable", true);
-  if (stateFilters.length > 0) q = q.in("state", stateFilters);
-  if (targetFids) q = q.in("fid", targetFids);
-
-  const { data: parksRaw, error: parksErr } = await q;
+    .in("fid", dueFids);
   if (parksErr) {
-    return new Response(JSON.stringify({ error: `parks load: ${parksErr.message}` }),
+    return new Response(JSON.stringify({ error: `parks detail load: ${parksErr.message}` }),
       { status: 500, headers: cors });
   }
-  if (!parksRaw || parksRaw.length === 0) {
-    return new Response(JSON.stringify({ ok: true, message: "no parks to refresh", count: 0 }),
-      { headers: cors });
-  }
 
-  const parks: DogPark[] = parksRaw.map((p: any) => {
+  const toProcess: DogPark[] = (parksRaw ?? []).map((p: any) => {
     const dp = Array.isArray(p.dog_park_dog_policy) ? p.dog_park_dog_policy[0] : p.dog_park_dog_policy;
     return {
       fid: p.fid,
@@ -169,54 +202,7 @@ Deno.serve(async (req: Request) => {
       off_leash_flag: dp?.off_leash_flag ?? null,
     };
   });
-  console.log(`Loaded ${parks.length} dog parks`);
-
-  // 3. Optional: skip parks refreshed recently.
-  //
-  //    Filters on `dog_park_day_recommendations.generated_at`, NOT
-  //    `dog_park_day_hourly_scores.updated_at`. The NOW refresh
-  //    (get-dog-park-now) bumps hourly_scores.updated_at hourly on
-  //    existing rows; using updated_at here would silently hide any park
-  //    with hourly NOW traffic from daily-refresh forever — generated_at
-  //    on recommendations never advances, freshness audit fires at 4h
-  //    threshold every day. Mirrors beach-side fix 552d757 (2026-06-03).
-  let toProcess = parks;
-  if (skipRecentHours !== null) {
-    const since = new Date(runAt.getTime() - skipRecentHours * 3_600_000).toISOString();
-    const { data: recent } = await supabase
-      .from("dog_park_day_recommendations")
-      .select("dog_park_fid")
-      .gte("generated_at", since);
-    const recentFids = new Set((recent ?? []).map((r: any) => r.dog_park_fid));
-    toProcess = parks.filter((p) => !recentFids.has(p.fid));
-    console.log(`Skipping ${parks.length - toProcess.length} parks refreshed within ${skipRecentHours}h`);
-  }
-
-  // 3b. Sort oldest-rec-first and cap to `limit` so each chunked invocation
-  //     drains under the worker resource cap. Mirrors beach-side fix
-  //     (Franz 2026-05-30). Without this, the full ~600-park pool hit
-  //     WORKER_RESOURCE_LIMIT every fire, no park got marked recent, the
-  //     skip-recent gate never engaged, queue never drained.
-  if (limitParks !== null && toProcess.length > limitParks) {
-    const fids = toProcess.map((p) => p.fid);
-    const { data: ageRows, error: ageErr } = await supabase
-      .from("dog_park_day_recommendations")
-      .select("dog_park_fid, updated_at")
-      .in("dog_park_fid", fids);
-    if (ageErr) {
-      console.warn(`limit-sort age query failed: ${ageErr.message} — applying naive slice`);
-      toProcess = toProcess.slice(0, limitParks);
-    } else {
-      const ageBy: Record<number, number> = {};
-      for (const r of (ageRows ?? []) as { dog_park_fid: number; updated_at: string | null }[]) {
-        ageBy[r.dog_park_fid] = r.updated_at ? new Date(r.updated_at).getTime() : 0;
-      }
-      toProcess.sort((a, b) => (ageBy[a.fid] ?? 0) - (ageBy[b.fid] ?? 0));
-      const before = toProcess.length;
-      toProcess = toProcess.slice(0, limitParks);
-      console.log(`limit=${limitParks} → processing ${toProcess.length}/${before} oldest-stale parks`);
-    }
-  }
+  console.log(`Loaded detail for ${toProcess.length}/${dueFids.length} due parks`);
 
   // 4. Process serially (351 parks × ~1s/park ≈ 6 min wall clock)
   const results: RefreshResult[] = [];

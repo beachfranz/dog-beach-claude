@@ -1867,7 +1867,18 @@ function buildHoursSection(beach, amenities, dogPolicy) {
   // (Franz 2026-05-20 — was rendering raw "10:00:00–17:00:00").
   const prohibStartFmt = prohibStart ? _hhmmToFmt(String(prohibStart).slice(0,5)) : null;
   const prohibEndFmt   = prohibEnd   ? _hhmmToFmt(String(prohibEnd  ).slice(0,5)) : null;
-  const prohibNote  = (prohibStartFmt && prohibEndFmt)
+  // Suppress the "Dogs not allowed X-Y" + "come back after Y" block when the
+  // window spans the entire day (00:00–23:59). Such a window is never useful
+  // to display: either it's a sentinel meaning "no time-of-day restriction"
+  // OR it's a regional plover-style closure that the promoter mis-collapsed
+  // to a whole-beach flat field. The dog-policy section conveys access state
+  // separately. Per Franz 2026-06-04 — Oceano Dunes case (the page was saying
+  // "come back after 11:59pm now").
+  const isFullDayProhib = (
+    String(prohibStart || '').slice(0,5) === '00:00' &&
+    String(prohibEnd   || '').slice(0,5) === '23:59'
+  );
+  const prohibNote  = (prohibStartFmt && prohibEndFmt && !isFullDayProhib)
     ? `<p class="hours-dogs-prohibited"><strong>Dogs not allowed ${escHtml(prohibStartFmt)}–${escHtml(prohibEndFmt)}</strong></p>`
       + _suggestPostProhibitionTime(prohibStart, prohibEnd, beach.timezone)
     : '';
@@ -4044,8 +4055,13 @@ function _detectDpTriggerTier(dogPolicy, hoursToday) {
       (dogPolicy.has_on_leash === false && dogPolicy.has_off_leash === false)) {
     return 'no_dogs';
   }
-  // Tier 3: dogs_prohibited window active NOW (local time)
-  if (dogPolicy.dogs_prohibited_start && dogPolicy.dogs_prohibited_end) {
+  // Tier 3: dogs_prohibited window active NOW (local time).
+  // Skip the full-day sentinel (00:00–23:59) — never useful; either
+  // redundant with dogs_allowed=no OR a regional-window mis-collapse to
+  // whole-beach. Per Franz 2026-06-04 Oceano Dunes case.
+  if (dogPolicy.dogs_prohibited_start && dogPolicy.dogs_prohibited_end
+      && !(String(dogPolicy.dogs_prohibited_start).slice(0,5) === '00:00'
+        && String(dogPolicy.dogs_prohibited_end).slice(0,5) === '23:59')) {
     const now = new Date();
     const hh = String(now.getHours()).padStart(2, '0');
     const mm = String(now.getMinutes()).padStart(2, '0');

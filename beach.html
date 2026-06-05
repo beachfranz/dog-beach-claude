@@ -217,7 +217,6 @@
     font-weight: 700; color: var(--text); line-height: 14px;
     font-variant-numeric: tabular-nums;
   }
-  .hourbar-score.score-cap { color: var(--red); }
   .hourbar-pos {
     flex: 1; display: flex; flex-direction: column-reverse;
     width: 100%; overflow: hidden; border-radius: 3px 3px 0 0;
@@ -242,12 +241,6 @@
   .hourbar-seg.neg-rank-2 { background: hsl(0, 36%, 51%); }
   .hourbar-seg.neg-rank-3 { background: hsl(0, 42%, 60%); }
   .hourbar-seg.neg-rank-4 { background: hsl(0, 45%, 71%); }
-  .hourbar-cap-marker {
-    background: repeating-linear-gradient(
-      45deg, var(--red), var(--red) 3px,
-      rgba(127,29,29,1) 3px, rgba(127,29,29,1) 6px);
-    height: 3px; width: 100%;
-  }
   .hourbar-axis {
     display: flex; justify-content: space-between; gap: 6px; padding: 4px 2px 0;
     font-family: 'DM Mono', monospace; font-size: 9px; color: var(--text-muted);
@@ -1137,26 +1130,24 @@ function renderHourlyBarsV2(p, nowH) {
       .map(d => `<div class="hourbar-seg neg-rank-${d.rank}" style="height:${(d.val / NEG_MAX * 100).toFixed(1)}%"></div>`)
       .join('');
 
-    const capMarker = h.gate_fired ? `<div class="hourbar-cap-marker"></div>` : '';
     const isNow = h.local_hour === nowH ? ' bar-now' : '';
     const isClosed = h.status === 'closed' || h.is_closed === true;
     const closedClass = isClosed ? ' bar-closed' : '';
-    const scoreClass = h.gate_fired ? 'hourbar-score score-cap' : 'hourbar-score';
     const scoreText = isClosed ? '' : (h.score != null ? h.score : '');
 
     const tipLines = [];
     if (isClosed) {
       tipLines.push(`${h.hour_label} · 🚧 closed`);
     } else {
-      tipLines.push(`${h.hour_label}${h.gate_fired ? ' ⚠️ cap' : ''} · ${h.score ?? 0}`);
+      tipLines.push(`${h.hour_label} · ${h.score ?? 0}`);
       for (const d of [...posSorted].reverse()) tipLines.push(`${d.icon} +${d.val}%`);
       for (const d of negSorted) tipLines.push(`${d.icon} −${d.val}%`);
     }
     const tip = tipLines.join('\n');
 
     return `<div class="hourbar-col${isNow}${closedClass}" data-tip="${escHtml(tip)}">
-      <div class="${scoreClass}">${scoreText}</div>
-      <div class="hourbar-pos">${isClosed ? '' : capMarker + posHtml}</div>
+      <div class="hourbar-score">${scoreText}</div>
+      <div class="hourbar-pos">${isClosed ? '' : posHtml}</div>
       <div class="hourbar-neg">${isClosed ? '' : negHtml}</div>
     </div>`;
   }).join('');
@@ -1168,8 +1159,6 @@ function renderHourlyBarsV2(p, nowH) {
   const driveBadge = p.drive_minutes != null
     ? `<span class="hourbars-drive">🚗 ${p.drive_minutes}min ${p.drive_factor >= 0 ? '+' : ''}${p.drive_factor}</span>`
     : '';
-  const anyGate = hours.some(h => h.gate_fired);
-  const gateBadge = anyGate ? `<span class="hourbars-gate" title="One or more hours hit a safety cap">cap ${30}</span>` : '';
 
   // Legend — only icons present in this chart
   const hasPos = (k) => hours.some(h => (h[k] || 0) > 0);
@@ -1225,7 +1214,7 @@ function renderHourlyBarsV2(p, nowH) {
   return `<div class="hourbars-wrap">
     <div class="hourbars-meta">
       <span>Hourly score · ${_v2FormatHour(p.open_hour)} – ${_v2FormatHour(p.close_hour)}</span>
-      <span>${driveBadge} ${gateBadge}</span>
+      <span>${driveBadge}</span>
     </div>
     <div class="hourbars-chart">
       <div class="hourbars-yaxis">

@@ -449,7 +449,6 @@
     line-height: 14px;
     font-variant-numeric: tabular-nums;
   }
-  .hourbar-score.score-cap { color: var(--red); }
   /* Top half: positives stack UP from axis (column-reverse fills bottom→top
    * inside, anchored to the axis line). */
   .hourbar-pos {
@@ -490,13 +489,6 @@
   .hourbar-seg.neg-rank-2 { background: hsl(0, 36%, 51%); }    /* ≈ red-600 desat */
   .hourbar-seg.neg-rank-3 { background: hsl(0, 42%, 60%); }    /* ≈ red-500 desat */
   .hourbar-seg.neg-rank-4 { background: hsl(0, 45%, 71%); }    /* ≈ red-400 desat — smallest */
-  /* Cap stripe at top of positive stack when safety gate fires */
-  .hourbar-cap-marker {
-    background: repeating-linear-gradient(
-      45deg, var(--red), var(--red) 3px,
-      rgba(127,29,29,1) 3px, rgba(127,29,29,1) 6px);
-    height: 3px; width: 100%;
-  }
   .hourbar-axis {
     display: flex; justify-content: space-between; gap: 6px; padding: 4px 2px 0;
     font-family: 'DM Mono', monospace;
@@ -555,14 +547,6 @@
     background: rgba(0,0,0,0.04);
     padding: 2px 8px; border-radius: 999px;
   }
-  .hourbars-gate {
-    display: inline-block;
-    background: #fee2e2; color: #991b1b;
-    font-size: 10px; font-weight: 700;
-    padding: 2px 6px; border-radius: 4px;
-    text-transform: uppercase; letter-spacing: 0.05em;
-  }
-
   /* Source-attribution footer (operator-verified / OSM-default) */
   .policy-source {
     margin-top: 10px;
@@ -833,7 +817,7 @@ function applyHourlyV2(payload) {
     badge.textContent = ''; // hide the number
     const cls = score >= 70 ? 'go' : score >= 40 ? 'caution' : 'no_go';
     badge.className = `fit-badge fit-badge-${cls}`;
-    badge.title = `${current?.hour_label || 'now'}: ${cls.replace('_',' ')}${current?.gate_fired ? ' (safety cap)' : ''}`;
+    badge.title = `${current?.hour_label || 'now'}: ${cls.replace('_',' ')}`;
   }
   // Render bar chart inside Best-time card
   const target = document.querySelector('.besttime-card');
@@ -978,16 +962,13 @@ function renderHourlyBars(p, nowH) {
       .map(d => `<div class="hourbar-seg neg-rank-${d.rank}" style="height:${(d.val / NEG_MAX * 100).toFixed(1)}%"></div>`)
       .join('');
 
-    const capMarker = h.gate_fired
-      ? `<div class="hourbar-cap-marker"></div>` : '';
     const isNow = h.local_hour === nowH ? ' bar-now' : '';
 
-    // Tooltip — header + icon-and-value lines. Mirrors the chart.
     const tipLines = [];
     if (h.status === 'closed' || h.is_closed === true) {
       tipLines.push(`${h.hour_label} · 🚧 closed`);
     } else {
-      tipLines.push(`${h.hour_label}${h.gate_fired ? ' ⚠️ cap' : ''} · ${h.score ?? 0}`);
+      tipLines.push(`${h.hour_label} · ${h.score ?? 0}`);
       for (const d of [...posSorted].reverse()) tipLines.push(`${d.icon} +${d.val}%`);
       for (const d of negSorted) tipLines.push(`${d.icon} −${d.val}%`);
     }
@@ -995,11 +976,10 @@ function renderHourlyBars(p, nowH) {
 
     const isClosed = h.status === 'closed' || h.is_closed === true;
     const closedClass = isClosed ? ' bar-closed' : '';
-    const scoreClass = h.gate_fired ? 'hourbar-score score-cap' : 'hourbar-score';
     const scoreText = isClosed ? '' : (h.score != null ? h.score : '');
     return `<div class="hourbar-col${isNow}${closedClass}" data-tip="${escHtml(tip)}">
-      <div class="${scoreClass}">${scoreText}</div>
-      <div class="hourbar-pos">${isClosed ? '' : capMarker + posHtml}</div>
+      <div class="hourbar-score">${scoreText}</div>
+      <div class="hourbar-pos">${isClosed ? '' : posHtml}</div>
       <div class="hourbar-neg">${isClosed ? '' : negHtml}</div>
     </div>`;
   }).join('');
@@ -1010,10 +990,6 @@ function renderHourlyBars(p, nowH) {
 
   const driveBadge = p.drive_minutes != null
     ? `<span class="hourbars-drive">🚗 ${p.drive_minutes}min ${p.drive_factor >= 0 ? '+' : ''}${p.drive_factor}</span>`
-    : '';
-  const anyGate = hours.some(h => h.gate_fired);
-  const gateBadge = anyGate
-    ? `<span class="hourbars-gate" title="One or more hours hit a safety cap">cap ${30}</span>`
     : '';
 
   // Legend — only show segments that appear at least once in the rendered chart.
@@ -1064,7 +1040,7 @@ function renderHourlyBars(p, nowH) {
   return `<div class="hourbars-wrap">
     <div class="hourbars-meta">
       <span>Hourly score · open ${formatHour(p.open_hour)} – ${formatHour(p.close_hour)}</span>
-      <span>${driveBadge} ${gateBadge}</span>
+      <span>${driveBadge}</span>
     </div>
     <div class="hourbars-chart">
       <div class="hourbars-yaxis">

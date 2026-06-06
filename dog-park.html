@@ -73,9 +73,8 @@
     vertical-align: 0.04em;
     margin-right: 4px;
   }
-  .fit-badge-go      { background: #16a34a; }
-  .fit-badge-caution { background: #f59e0b; }
-  .fit-badge-no_go   { background: #dc2626; }
+  .fit-badge-open   { background: #16a34a; }
+  .fit-badge-closed { background: #6b7280; }
   .park-region {
     color: var(--text-muted);
     margin-left: 0.4em;
@@ -805,7 +804,7 @@ function applyHourlyV2(payload) {
       }
     } else {
       // No qualifying best window today (e.g. fully-closed day)
-      const anyOpen = hours.some(h => h.status !== 'closed' && !h.is_closed);
+      const anyOpen = hours.some(h => !h.is_closed);
       headlineEl.textContent = anyOpen ? 'Open today (no clear best window)' : 'Closed today';
     }
   }
@@ -814,10 +813,10 @@ function applyHourlyV2(payload) {
   // No number; the color (+ tooltip) carries the meaning.
   const badge = document.querySelector('.fit-badge');
   if (badge) {
-    badge.textContent = ''; // hide the number
-    const cls = score >= 70 ? 'go' : score >= 40 ? 'caution' : 'no_go';
+    badge.textContent = '';
+    const cls = current?.is_closed ? 'closed' : 'open';
     badge.className = `fit-badge fit-badge-${cls}`;
-    badge.title = `${current?.hour_label || 'now'}: ${cls.replace('_',' ')}`;
+    badge.title = `${current?.hour_label || 'now'}: ${cls}`;
   }
   // Render bar chart inside Best-time card
   const target = document.querySelector('.besttime-card');
@@ -845,7 +844,6 @@ function _bestWindowFromNowV2DP(hours, fromHour) {
     .filter(h =>
       typeof h.local_hour === 'number'
       && h.local_hour >= fromHour
-      && h.status !== 'closed'
       && h.is_closed !== true
       && Number.isFinite(Number(h.score)))
     .sort((a, b) => a.local_hour - b.local_hour);
@@ -965,7 +963,7 @@ function renderHourlyBars(p, nowH) {
     const isNow = h.local_hour === nowH ? ' bar-now' : '';
 
     const tipLines = [];
-    if (h.status === 'closed' || h.is_closed === true) {
+    if (h.is_closed === true) {
       tipLines.push(`${h.hour_label} · 🚧 closed`);
     } else {
       tipLines.push(`${h.hour_label} · ${h.score ?? 0}`);
@@ -974,7 +972,7 @@ function renderHourlyBars(p, nowH) {
     }
     const tip = tipLines.join('\n');
 
-    const isClosed = h.status === 'closed' || h.is_closed === true;
+    const isClosed = h.is_closed === true;
     const closedClass = isClosed ? ' bar-closed' : '';
     const scoreText = isClosed ? '' : (h.score != null ? h.score : '');
     return `<div class="hourbar-col${isNow}${closedClass}" data-tip="${escHtml(tip)}">
@@ -1152,9 +1150,9 @@ function render(data) {
   const nameEl = document.getElementById('park-name');
   nameEl.textContent = '';
   const badge = document.createElement('span');
-  badge.className = 'fit-badge fit-badge-caution';
+  badge.className = 'fit-badge';
   badge.textContent = '··';
-  badge.title = 'Loading score...';
+  badge.title = 'Loading…';
   nameEl.appendChild(badge);
   nameEl.appendChild(document.createTextNode(' ' + park.display_name));
   const regionParts = [];
@@ -1500,11 +1498,7 @@ function buildOverviewBlurb(park) {
 }
 
 function buildScoutCard(park, now, today) {
-  // Headline derived from today's best_window_label OR live status.
-  // Prefer v2 hour status with v1 fallback. Per Franz 2026-05-30 v1-retirement.
-  const nowStatus = now?.hour_status_v2 ?? now?.hour_status;
-  const headline = today?.best_window_label
-    || (nowStatus === 'go' || nowStatus === 'clear' ? 'Great right now' : 'Open dawn–dusk');
+  const headline = today?.best_window_label || 'Open dawn–dusk';
   const verifiedHtml = (park.policy?.source === 'operator_posted'
     || park.policy?.source === 'operator_posted_v2')
     ? `<div><span class="verified-badge">✓ Operator-verified</span></div>` : '';
@@ -1529,15 +1523,9 @@ function buildScoutCard(park, now, today) {
 async function loadScoutBlurb(park, today, now, liveWindowOverride) {
   const el = document.getElementById('scout-blurb');
   if (!el) return;
-  // No v1-status short-circuit — the v1 hour_status frequently disagrees
-  // with v2 scoring (e.g. v1='no_go' on a 70-scoring hour). The chat LLM
-  // has the full current conditions + bands in its system prompt and can
-  // frame appropriately (cautious vs upbeat). Per Franz 2026-05-27 LATE.
-  const status = (now?.hour_status_v2 ?? now?.hour_status)
-              ?? (today?.day_status_v2 ?? today?.day_status);
   const window = liveWindowOverride
     || today?.best_window_label
-    || (status === 'go' ? 'right now' : 'during operating hours');
+    || 'during operating hours';
   const question = `Write the Scout intro paragraph for visiting this dog park today. The best time window is '${window}'. Use this EXACT window verbatim in your paragraph — do NOT generate or substitute a different time range. Weave '${window}' naturally into the prose (e.g. "${window} is your window", "hit it ${window}", "${window} is firing"). No need to bold it; the headline above already styles the window.`;
   try {
     const r = await fetch(`${SUPABASE_URL}/functions/v1/dog-park-chat`, {

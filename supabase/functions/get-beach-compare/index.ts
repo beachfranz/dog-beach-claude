@@ -54,7 +54,7 @@ Deno.serve(async (req: Request) => {
   // Day recommendations for these beaches on this date — keyed on arena_group_id
   const { data: days, error: daysErr } = await supabase
     .from("beach_day_recommendations")
-    .select("arena_group_id, day_status_v2, composite_score_v2, best_window_label, go_hours_count, avg_wind, avg_tide_height, busyness_category, summary_weather")
+    .select("arena_group_id, composite_score_v2, best_window_label, go_hours_count, avg_wind, avg_tide_height, busyness_category, summary_weather")
     .in("arena_group_id", fids)
     .eq("local_date", date);
 
@@ -118,8 +118,6 @@ Deno.serve(async (req: Request) => {
       display_name:      beach.display_name_override ?? beach.name,
       latitude:          beach.lat,
       longitude:         beach.lon,
-      // v2-only after Franz 2026-05-30 v1-retirement task #12.
-      day_status:        day?.day_status_v2 ?? "no_data",
       composite_score_v2: day?.composite_score_v2 ?? null,
       best_window_label: day?.best_window_label ?? null,
       go_hours_count:    day?.go_hours_count ?? 0,

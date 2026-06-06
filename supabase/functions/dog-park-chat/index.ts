@@ -177,10 +177,7 @@ function buildPrompt(
     if (today.summary_weather)  conditions.push(`weather: ${today.summary_weather}`);
   }
 
-  // v2-only after Franz 2026-05-30 task #12.
-  const window = today?.best_window_label
-    ?? (now?.hour_status_v2 === "clear" ? "right now" : "during operating hours");
-  const status = now?.hour_status_v2 ?? today?.day_status_v2 ?? "unknown";
+  const window = today?.best_window_label ?? "during operating hours";
 
   // Pack-list suggestions — concrete items the LLM can name.
   // Dog park staples + condition-triggered extras.
@@ -222,7 +219,6 @@ function buildPrompt(
     `PARK: ${name}${locationLine ? ` (${locationLine})` : ""}`,
     `FEATURES: ${features.join("; ")}`,
     `HOURS: ${hoursText}`,
-    `STATUS NOW: ${status.toUpperCase()}${today?.day_status_v2 ? ` (today: ${today.day_status_v2.toUpperCase()})` : ""}`,
     `BEST WINDOW: ${window}`,
     `CURRENT CONDITIONS: ${conditions.length ? conditions.join(", ") : "(no live data)"}`,
     `${description ? `OPERATOR DESCRIPTION (for context, don't quote): ${description}` : ""}`,

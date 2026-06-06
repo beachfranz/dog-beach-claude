@@ -254,9 +254,7 @@ async function refreshNow(
     );
     if (bwErr) console.warn(`[dog_park:${park.fid}] apply_v2 window soft-fail:`, bwErr.message);
 
-    // Read back v2 fields for response so dog-park.html NOW path has them
     let hourScoreV2: number | null = null;
-    let hourStatusV2: string | null = null;
     const { data: v2row } = await supabase
       .from("dog_park_day_hourly_scores")
       .select("hour_score_v2")
@@ -265,20 +263,10 @@ async function refreshNow(
       .maybeSingle();
     hourScoreV2 = (v2row?.hour_score_v2 as number | null) ?? null;
 
-    const { data: stRow } = await supabase.rpc("v2_compute_hour_status_dog_park", {
-      p_uv:         row.uv_index ?? null,
-      p_asphalt:    row.asphalt_temp ?? null,
-      p_wind:       row.wind_speed ?? null,
-      p_precip:     row.precip_chance ?? null,
-      p_feels_like: row.feels_like ?? null,
-      p_is_closed:  false,
-    });
-    hourStatusV2 = (stRow as unknown as string | null) ?? null;
-
     return {
       fid: park.fid,
       ok: true,
-      row: { ...row, hour_score_v2: hourScoreV2, hour_status_v2: hourStatusV2 },
+      row: { ...row, hour_score_v2: hourScoreV2 },
     };
   } catch (err) {
     console.error(`[dog_park:${park.fid}] NOW refresh error:`, String(err));

@@ -778,7 +778,7 @@
     // NOW cards can render the car icon without the client-side haversine.
     const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
     const beachList = (await loadBeachesForDate(todayISO))
-      .map(b => ({ location_id: b.location_id, arena_group_id: b.arena_group_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule, has_on_leash: b.has_on_leash, has_off_leash: b.has_off_leash, dogs_allowed: b.dogs_allowed, location_tier: b.location_tier, distance_m: b.distance_m, day_status: b.day_status_v2 ?? b.day_status, composite_score: b.composite_score_v2 ?? b.composite_score }));
+      .map(b => ({ location_id: b.location_id, arena_group_id: b.arena_group_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule, has_on_leash: b.has_on_leash, has_off_leash: b.has_off_leash, dogs_allowed: b.dogs_allowed, location_tier: b.location_tier, distance_m: b.distance_m, composite_score: b.composite_score_v2 ?? null }));
     if (myToken !== _renderToken) return;   // superseded
 
     // Sort by STATIC beach data first to pick the top-N candidates that
@@ -789,7 +789,7 @@
       .filter(b => matchesLeashFilter(b))
       .map(b => ({
         beach:    b,
-        day:      { composite_score: b.composite_score, day_status: b.day_status },
+        day:      { composite_score: b.composite_score },
         distance: resolveDistanceMiles(b),
       }))
       .filter(c => matchesDistanceFilter(c.distance));
@@ -797,7 +797,7 @@
 
     // Fetch live get-beach-now for top-N only (was: every filtered
     // beach — 30-100 concurrent Edge calls, the "glacial" bottleneck).
-    const hasScoring = b => b.day_status && b.day_status !== 'no_data';
+    const hasScoring = b => b.composite_score != null;
     const refined = await Promise.all(topN.map(c =>
       hasScoring(c.beach)
         ? fetch(`${SUPABASE_URL}/functions/v1/get-beach-now?${c.beach.arena_group_id ? 'arena_group_id=' + c.beach.arena_group_id : 'location_id=' + c.beach.location_id}`,
@@ -816,29 +816,16 @@
 
   function nowToDay(d) {
     if (!d || d.error) return null;
-    // Prefer v2 hour status + score; fall back to v1 during transition.
-    // Per Franz 2026-05-30 v1-retirement task #5.
-    const status = d.hour_status_v2 ?? d.hour_status;
     return {
       is_now:             true,
       location_id:        d.location_id,
       arena_group_id:     d.arena_group_id,
       local_date:         d.local_date,
-      day_status:         status,
       best_window_label:  'Right now',
-      best_window_status: status,
       bacteria_risk:      'none',
       summary_weather:    wmoToSummaryWeather(d.weather_code, d.wind_speed),
       weather_code:       d.weather_code,
-      composite_score:    d.hour_score_v2 ?? d.hour_score,
-      metric_statuses: {
-        tide:  d.tide_status,
-        wind:  d.wind_status,
-        rain:  d.rain_status,
-        crowd: d.crowd_status,
-        temp:  d.temp_status,
-        uv:    d.uv_status,
-      },
+      composite_score:    d.hour_score_v2 ?? null,
       lowest_tide_height: d.tide_height,
       tide_direction:     d.tide_direction,
       avg_temp:           d.temp_air,
@@ -918,9 +905,9 @@
       : '';
 
     const operatorLine = verified && dp.operator_short
-      ? `<div class="window-sub status-go">Verified: ${dp.operator_short}</div>`
+      ? `<div class="window-sub status-none">Verified: ${dp.operator_short}</div>`
       : verified
-      ? `<div class="window-sub status-go">Operator-verified</div>`
+      ? `<div class="window-sub status-none">Operator-verified</div>`
       : `<div class="window-sub status-none" style="opacity:0.6">Default — not operator-verified</div>`;
 
     const chips = [];
@@ -939,7 +926,6 @@
       ? `<div class="chips">${chips.join('<span class="chip-sep">·</span>')}</div>`
       : '';
 
-    const status = verified ? 'go' : 'advisory';
     const heroThumb = dp.hero_thumb_url || dp.hero_image_url;
     const leftVisual = heroThumb
       ? `<img class="dp-thumb" src="${heroThumb}" alt="" loading="lazy"
@@ -947,7 +933,7 @@
       : `<span class="day-score-value">🐾</span><span class="day-score-label">DP</span>`;
 
     return `
-      <div class="day-card status-${status}" onclick="window.location.href='dog-park.html?fid=${dp.fid}'">
+      <div class="day-card" onclick="window.location.href='dog-park.html?fid=${dp.fid}'">
         <div class="day-left">
           <div class="rank-label">#${rank}</div>
           <div class="day-score">${leftVisual}</div>
@@ -955,7 +941,7 @@
         <div class="day-content">
           <div class="beach-name">${dp.name || 'Unnamed dog park'}</div>
           <div class="window-row">
-            <div class="window-sub status-${verified ? 'go' : 'none'}">${leashLabel} · ${hours}</div>
+            <div class="window-sub status-none">${leashLabel} · ${hours}</div>
             ${distChip}
           </div>
           ${operatorLine}
@@ -1160,18 +1146,11 @@
     return data.beaches ?? [];
   }
 
-  // Convert flat get-beaches-find row into the day shape buildBeachCard expects.
-  // Prefer v2 day_status / composite_score with v1 fallback while the daily
-  // refresh backfills v2 fields across the catalog. Per Franz 2026-05-30
-  // v1-retirement task #5.
   function beachToDay(b) {
-    const status = b.day_status_v2 ?? b.day_status;
-    if (!status || status === 'no_data') return null;
+    if (b.composite_score_v2 == null) return null;
     return {
-      day_status:         status,
-      composite_score:    b.composite_score_v2 ?? b.composite_score,
+      composite_score:    b.composite_score_v2,
       best_window_label:  b.best_window_label,
-      best_window_status: b.best_window_status,
       bacteria_risk:      b.bacteria_risk,
       summary_weather:    b.summary_weather,
       weather_code:       b.weather_code,
@@ -1296,12 +1275,10 @@
     _scoutAbortCtrl = new AbortController();
     const myCtrl = _scoutAbortCtrl;
 
-    // Full context with scores + distances for all sort modes
     const contextLines = sorted.slice(0, 5).map((c, i) => {
       const score   = c.day?.composite_score ?? '—';
-      const status  = c.day?.day_status      ?? 'unknown';
       const distStr = c.distance != null ? `${c.distance.toFixed(1)} mi away` : 'distance unknown';
-      return `${i + 1}. ${c.beach.display_name} (score: ${score}, status: ${status}, ${distStr})`;
+      return `${i + 1}. ${c.beach.display_name} (score: ${score}, ${distStr})`;
     }).join('; ');
 
     const now       = new Date();
@@ -1353,21 +1330,16 @@
     el.classList.remove('loading');
   }
 
-  // ── Build a beach card ─────────────────────────────────────────────
   function buildBeachCard({ beach, day, distance }, rank) {
-    const status     = day?.day_status ?? 'no_go';
-    const score      = day?.composite_score ?? null;
-    const scoreClass = score !== null ? `score-${status}` : 'score-none';
-
+    const score = day?.composite_score ?? null;
     const scoreHtml = `
-      <div class="day-score ${scoreClass}">
+      <div class="day-score">
         <span class="day-score-value">${score !== null ? score : '—'}</span>
         <span class="day-score-label">SCORE</span>
       </div>`;
 
     const weatherIcon = getWeatherIcon(day?.summary_weather, day?.weather_code);
 
-    const windowStatus = day?.best_window_status ?? status;
     const safeName = beach.display_name.replace(/'/g, "\\'");
     const distLink = distance !== null
       ? `<div class="window-sub status-none dist-link" onclick="event.stopPropagation();openDirections(${beach.latitude},${beach.longitude},'${safeName}',${distance})">🚗 ${distance.toFixed(1)} mi</div>`
@@ -1375,14 +1347,12 @@
 
     let windowHtml;
     if (day?.is_now && distLink) {
-      // NOW card with known location: distance replaces the "Right now" label.
       windowHtml = distLink;
     } else if (day?.is_now) {
-      windowHtml = `<div class="window-sub status-${windowStatus}">Right now</div>`;
+      windowHtml = `<div class="window-sub status-none">Right now</div>`;
     } else {
-      // Non-NOW: window label on the left, distance on the right, same row.
       const labelHtml = day?.best_window_label
-        ? `<div class="window-sub status-${windowStatus}">${day.best_window_label}</div>`
+        ? `<div class="window-sub status-none">${day.best_window_label}</div>`
         : `<div class="window-sub status-none">No good window</div>`;
       windowHtml = distLink
         ? `<div class="window-row">${labelHtml}${distLink}</div>`
@@ -1405,7 +1375,7 @@
     const tierClass = `tier-${tier}`;
 
     return `
-      <div class="day-card status-${status} ${tierClass}" data-location-id="${beach.location_id}" onclick="window.location.href='beach.html?${beach.arena_group_id ? 'fid=' + beach.arena_group_id : 'location_id=' + beach.location_id}'">
+      <div class="day-card ${tierClass}" data-location-id="${beach.location_id}" onclick="window.location.href='beach.html?${beach.arena_group_id ? 'fid=' + beach.arena_group_id : 'location_id=' + beach.location_id}'">
         <div class="day-left">
           <div class="rank-label">#${rank}</div>
           ${scoreHtml}
@@ -1421,28 +1391,18 @@
       </div>`;
   }
 
-  // ── Chips ──────────────────────────────────────────────────────────
-  function chipClass(status) {
-    if (!status || status === 'go') return 'chip-go';
-    if (status === 'advisory')      return 'chip-advisory';
-    if (status === 'caution')       return 'chip-caution';
-    if (status === 'no_go')         return 'chip-no_go';
-    return '';
-  }
-
   function buildChips(day /* distance no longer a chip — rendered in window-row */) {
     const parts = [];
-    const ms    = day?.metric_statuses ?? {};
 
     if (day?.lowest_tide_height != null) {
       const arrow = day.tide_direction === 'rising' ? '↑' : day.tide_direction === 'falling' ? '↓' : '';
-      parts.push(`<span class="chip ${chipClass(ms.tide)}">🌊 ${parseFloat(day.lowest_tide_height).toFixed(1)}ft${arrow}</span>`);
+      parts.push(`<span class="chip">🌊 ${parseFloat(day.lowest_tide_height).toFixed(1)}ft${arrow}</span>`);
     }
     if (day?.avg_temp != null) {
-      parts.push(`<span class="chip ${chipClass(ms.temp)}">🌡 ${Math.round(day.avg_temp)}°</span>`);
+      parts.push(`<span class="chip">🌡 ${Math.round(day.avg_temp)}°</span>`);
     }
     if (day?.avg_wind != null) {
-      parts.push(`<span class="chip ${chipClass(ms.wind)}">💨 ${Math.round(day.avg_wind)}mph</span>`);
+      parts.push(`<span class="chip">💨 ${Math.round(day.avg_wind)}mph</span>`);
     }
     if (day?.busyness_category) {
       const crowdLabel = {
@@ -1451,7 +1411,7 @@
         dog_party:   '🎉 Party',
         too_crowded: '🚫 Crowded',
       }[day.busyness_category] ?? day.busyness_category;
-      parts.push(`<span class="chip ${chipClass(ms.crowd)}">${crowdLabel}</span>`);
+      parts.push(`<span class="chip">${crowdLabel}</span>`);
     }
 
     return parts.join(`<span class="chip-sep">·</span>`);

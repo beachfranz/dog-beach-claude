@@ -77,9 +77,8 @@
     vertical-align: 0.04em;
     margin-right: 4px;
   }
-  .fit-badge-go      { background: #16a34a; }
-  .fit-badge-caution { background: #f59e0b; }
-  .fit-badge-no_go   { background: #dc2626; }
+  .fit-badge-open   { background: #16a34a; }
+  .fit-badge-closed { background: #6b7280; }
   /* Mobile second-line: park hours + best time + car chip — center
    * justified beneath the h1. */
   .beach-secondline {
@@ -2116,10 +2115,7 @@ function buildBestTimeCard(today, dogPolicy, beachFid, hoursToday, beach, amenit
   // Card shows when there's a window OR an apology to convey.
   if (!hasWindow && !isNoDogs && !isSandWaterProhibited) return '';
 
-  // Clickable when hourly detail is available. Either day_status
-  // implies the hourly_scores row was computed and detail.html will
-  // render. Accept v2 OR v1 for the presence check during transition.
-  const clickable = !!(today && (today.day_status_v2 ?? today.day_status));
+  const clickable = !!today;
   const clickAttr = clickable ? ' data-open-detail="1"' : '';
 
   // Compact summary header: title left, time-range right. Hourly bars
@@ -2357,16 +2353,11 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
     (dogPolicy.has_on_leash === false && dogPolicy.has_off_leash === false)
   );
   const isSandWaterProhibited = _sandOrWaterProhibited(dogPolicy?.zone_rules);
-  // Prefer v2 day status; fall back to v1 during transition.
-  // Per Franz 2026-05-30 v1-retirement task #4.
-  const noGoodWindows = today && (today.day_status_v2 ?? today.day_status) === 'no_go';
 
-  // Hide the BEACH card during apology cases — single message in NOW.
   const hideBeach = () => {
     const card = document.querySelector('.scout-beach-card');
     if (card) card.style.display = 'none';
   };
-  // Helper — any short-circuit path also ends the loader.
   const finishLoader = () => { if (window.Loader) Loader.stop(); };
   if (isNoDogs) {
     if (el) el.textContent = "Sorry bud — dogs aren't allowed here. Check the alternatives below for a nearby spot that welcomes pups.";
@@ -2380,10 +2371,6 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
     if (el) el.textContent = '';
     hideBeach(); finishLoader(); return;
   }
-  if (noGoodWindows) {
-    if (el) el.textContent = "Today's looking rough at this beach — no go-quality hours. Check the alternatives below if you can travel.";
-    el?.classList.add('loaded'); hideBeach(); finishLoader(); return;
-  }
 
   // Time-aware window: only consider hours from the current local hour
   // forward, using the same per-hour Overall the bar chart uses. If the
@@ -2395,7 +2382,6 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
     el?.classList.add('loaded'); hideBeach(); finishLoader(); return;
   }
   const windowLabel  = _formatHourRange(nowWindow.start, nowWindow.end);
-  const windowStatus = today.best_window_status ?? 'go';
 
   // ── Deterministic cautions + descriptive metaphors ───────────────
   // Scout's prompt receives a STRICT list of what's actually flagged
@@ -2471,7 +2457,7 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
   // Pack-list intentionally NOT mentioned — the Pack List card below
   // handles that. Scout's prose stays about beach + window only.
   const question =
-    `Current local time: ${nowLabel || 'now'}. Best window remaining: ${windowLabel} (${windowStatus}).\n\n` +
+    `Current local time: ${nowLabel || 'now'}. Best window remaining: ${windowLabel}.\n\n` +
     `ACTIVE CAUTIONS TODAY (address these and ONLY these):\n${cautionFacts.length ? cautionFacts.map(c => '- ' + c).join('\n') : '- (none — conditions are clean)'}\n\n` +
     `NOT FLAGGED TODAY (you MUST NOT mention these as concerns; they are explicitly NOT issues):\n${nonIssues.length ? nonIssues.map(n => '- ' + n).join('\n') : '- (n/a)'}\n\n` +
     `DESCRIPTIVE METAPHORS — use these phrasings instead of raw numeric scores anywhere in your prose:\n` +

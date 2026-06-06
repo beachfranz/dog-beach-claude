@@ -81,9 +81,8 @@
     vertical-align: 0.04em;
     margin-right: 4px;
   }
-  .fit-badge-go      { background: #16a34a; }
-  .fit-badge-caution { background: #f59e0b; }
-  .fit-badge-no_go   { background: #dc2626; }
+  .fit-badge-open   { background: #16a34a; }
+  .fit-badge-closed { background: #6b7280; }
   /* City · state inlined into the h1 — same font/size/weight,
    * lighter color so it reads as supporting info to the name. */
   .beach-region {
@@ -1131,7 +1130,7 @@ function renderHourlyBarsV2(p, nowH) {
       .join('');
 
     const isNow = h.local_hour === nowH ? ' bar-now' : '';
-    const isClosed = h.status === 'closed' || h.is_closed === true;
+    const isClosed = h.is_closed === true;
     const closedClass = isClosed ? ' bar-closed' : '';
     const scoreText = isClosed ? '' : (h.score != null ? h.score : '');
 
@@ -1282,13 +1281,13 @@ function applyBeachHourlyV2(payload, todayRec) {
   // (they're time-sensitive and not pre-stored).
   const headlineEl = document.querySelector('.besttime-headline');
   if (headlineEl) {
-    const isNowClosed = current?.status === 'closed' || current?.is_closed === true;
+    const isNowClosed = current?.is_closed === true;
     const SECTION_NOUN = { sand: 'Sand', water: 'Water', water_play: 'Water play' };
     if (isNowClosed) {
       let reopenLabel = null;
       const idx = hours.findIndex(h => h.local_hour === nowH);
       for (let i = idx + 1; i < hours.length; i++) {
-        if (hours[i].status !== 'closed' && !hours[i].is_closed) {
+        if (!hours[i].is_closed) {
           reopenLabel = hours[i].hour_label; break;
         }
       }
@@ -1318,7 +1317,7 @@ function applyBeachHourlyV2(payload, todayRec) {
       }
     } else {
       // No v2 window picked. Distinguish "closed all day" from "open but mediocre".
-      const anyOpen = hours.some(h => h.status !== 'closed' && !h.is_closed);
+      const anyOpen = hours.some(h => !h.is_closed);
       if (!anyOpen) {
         // All hours closed — usually dogs_allowed='no' beach.
         const firstClosure = (payload.closures || [])[0];
@@ -1404,7 +1403,6 @@ function _bestWindowFromNowV2(hours, fromHour) {
     .filter(h =>
       typeof h.local_hour === 'number'
       && h.local_hour >= fromHour
-      && h.status !== 'closed'
       && h.is_closed !== true
       && Number.isFinite(Number(h.score)))
     .sort((a, b) => a.local_hour - b.local_hour);
@@ -1559,8 +1557,7 @@ function render(data, beachFid) {
   nameEl.textContent = '';
   const fitScores = _appealScores(beach, dog_policy, amenities, data.hours_today);
   const badge = document.createElement('span');
-  badge.className = `fit-badge fit-badge-${
-    fitScores.overall >= 70 ? 'go' : fitScores.overall >= 40 ? 'caution' : 'no_go'}`;
+  badge.className = 'fit-badge';
   badge.textContent = fitScores.overall;
   badge.title = `Your Fit · ${_PREF_LABEL[fitScores.userPref] || fitScores.userPref}: ${fitScores.overall}/100`;
   nameEl.appendChild(badge);
@@ -3110,7 +3107,7 @@ function buildBestTimeCard(today, dogPolicy, beachFid, hoursToday, beach, amenit
   // Headline starts as "…" and gets replaced by applyBeachHourlyV2 with
   // the v2 best window, "Closed right now — reopens at X", or similar.
   // Per Franz 2026-05-28: v2 is the working standard, no v1 fallback.
-  const clickable = !!(today && today.day_status);
+  const clickable = !!today;
   const clickAttr = clickable ? ' data-open-detail="1"' : '';
   return `<section class="card besttime-card${clickable ? ' clickable' : ''}" data-fid="${beachFid}">
     <div class="besttime-header">
@@ -3215,10 +3212,6 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
     (dogPolicy.has_on_leash === false && dogPolicy.has_off_leash === false)
   );
   const isSandWaterProhibited = _sandOrWaterProhibited(dogPolicy?.zone_rules);
-  // Prefer v2 day status; fall back to v1 during transition.
-  // Per Franz 2026-05-30 v1-retirement task #7.
-  const dayStatus = today && (today.day_status_v2 ?? today.day_status);
-  const noGoodWindows = dayStatus === 'no_go';
 
   if (isNoDogs) {
     el.textContent = "Sorry bud — dogs aren't allowed here. Check the alternatives below for a nearby spot that welcomes pups.";
@@ -3229,14 +3222,8 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
     el.classList.add('loaded'); return;
   }
   if (!today) {
-    // Non-scoreable / no recommendation today. The element lives
-    // inside the Best Time card; leave a soft note when present.
     el.textContent = '';
     return;
-  }
-  if (noGoodWindows) {
-    el.textContent = "Today's looking rough at this beach — no go-quality hours. Check the alternatives below if you can travel.";
-    el.classList.add('loaded'); return;
   }
 
   // Best window for the day. Stored today.best_window_label is the

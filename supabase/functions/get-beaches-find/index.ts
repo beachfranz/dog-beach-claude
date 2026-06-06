@@ -131,7 +131,7 @@ Deno.serve(async (req: Request) => {
     const scoresByFid: Record<number, {
       composite: number; tide: number; wind: number;
       crowd: number; rain: number; temp: number; count: number;
-      bestWindowLabel: string | null; bestWindowStatus: string | null;
+      bestWindowLabel: string | null;
     }> = {};
 
     for (const fid of arenaGroupIds) {
@@ -139,10 +139,8 @@ Deno.serve(async (req: Request) => {
 
       let windowHours: HourRow[];
       let bestWindowLabel:  string | null = null;
-      let bestWindowStatus: string | null = null;
 
       if (isToday) {
-        // Recompute best remaining window
         const remaining = locHours.filter(
           h => h.is_candidate_window && Number(h.local_hour) >= currentHour
         );
@@ -150,14 +148,13 @@ Deno.serve(async (req: Request) => {
         const bestSet = new Set(win ? win.hours.map(h => h.local_hour) : []);
         windowHours      = locHours.filter(h => bestSet.has(Number(h.local_hour)));
         bestWindowLabel  = win ? buildWindowLabel(win.startHour, win.endHour) : "No good window remaining";
-        bestWindowStatus = win ? win.status : "no_go";
       } else {
         windowHours = locHours.filter(h => h.is_in_best_window);
       }
 
       const count = windowHours.length;
       if (count === 0) {
-        scoresByFid[fid] = { composite: 0, tide: 0, wind: 0, crowd: 0, rain: 0, temp: 0, count: 0, bestWindowLabel, bestWindowStatus };
+        scoresByFid[fid] = { composite: 0, tide: 0, wind: 0, crowd: 0, rain: 0, temp: 0, count: 0, bestWindowLabel };
         continue;
       }
 
@@ -184,15 +181,13 @@ Deno.serve(async (req: Request) => {
         temp:      temp      / count,
         count,
         bestWindowLabel,
-        bestWindowStatus,
       };
     }
 
     // ── 4. Assemble and rank ──────────────────────────────────────────────────
     const ranked = (beaches as BeachRow[]).map(b => {
       const s = scoresByFid[b.arena_group_id];
-      const bestWindowLabel  = isToday ? (s?.bestWindowLabel  ?? b.best_window_label)  : b.best_window_label;
-      const bestWindowStatus = isToday ? (s?.bestWindowStatus ?? b.best_window_status) : b.best_window_status;
+      const bestWindowLabel  = isToday ? (s?.bestWindowLabel ?? b.best_window_label) : b.best_window_label;
       return {
         arena_group_id:     b.arena_group_id,
         location_id:        b.location_id,
@@ -206,12 +201,8 @@ Deno.serve(async (req: Request) => {
         dogs_prohibited_start: b.dogs_prohibited_start ?? null,
         location_tier:      b.location_tier ?? null,
         distance_m:         b.distance_m ?? null,
-        // v2-only after Franz 2026-05-30 task #12.
-        day_status:         (b as Record<string, unknown>).day_status_v2 ?? "no_data",
-        day_status_v2:      (b as Record<string, unknown>).day_status_v2 ?? null,
         composite_score_v2: (b as Record<string, unknown>).composite_score_v2 ?? null,
         best_window_label:  bestWindowLabel  ?? null,
-        best_window_status: bestWindowStatus ?? null,
         bacteria_risk:      b.bacteria_risk  ?? null,
         summary_weather:    b.summary_weather ?? null,
         weather_code:       b.weather_code    ?? null,
@@ -256,9 +247,7 @@ interface BeachRow {
   dogs_prohibited_start: string | null;
   location_tier:      string | null;
   distance_m:         number | null;
-  day_status:         string | null;
   best_window_label:  string | null;
-  best_window_status: string | null;
   bacteria_risk:      string | null;
   summary_weather:    string | null;
   weather_code:       number | null;
@@ -293,7 +282,7 @@ type CandidateHour = {
 
 function findBestRemainingWindow(hours: CandidateHour[]): {
   startHour: number; endHour: number; avgScore: number;
-  status: string; hours: CandidateHour[];
+  hours: CandidateHour[];
 } | null {
   if (!hours.length) return null;
 
@@ -333,59 +322,10 @@ function findBestRemainingWindow(hours: CandidateHour[]): {
 
   if (window.length < 2) return null;
 
-  // Window status = worst per-hour v2 status across the window hours.
-  // Computed inline from raw values via v2StatusFor — v1 *_status columns
-  // dropped from the schema per Franz 2026-05-30 task #12.
-  const statusRank: Record<string, number> = { clear: 0, advisory: 1, caution: 2, no_go: 3 };
-  const overallStatus = window.reduce<string | null>((worst, h) => {
-    const hStatus = v2HourStatus(h);
-    if (worst === null) return hStatus;
-    return (statusRank[hStatus] ?? 0) >= (statusRank[worst] ?? 0) ? hStatus : worst;
-  }, null) ?? "clear";
-
   return {
     startHour: window[0].local_hour,
     endHour:   window[window.length - 1].local_hour,
     avgScore:  window.reduce((s, h) => s + score(h), 0) / window.length,
-    status:    overallStatus,
     hours:     window,
   };
-}
-
-// ─── v2 status helpers (inline port of public.v2_signal_status) ──────────
-// SQL truth-source: scoring_config_v2 + v2_signal_status. Pin
-// [[v2-signal-status-mapping]]. Keep in sync when bands change.
-type V2Status = "clear" | "advisory" | "caution" | "no_go";
-function v2StatusFor(signal: string, v: number | null | undefined): V2Status | null {
-  if (v == null) return null;
-  switch (signal) {
-    case "uv":         return v >= 11 ? "no_go" : v >= 9 ? "caution" : v >= 6 ? "advisory" : "clear";
-    case "asphalt":    return v >= 125 ? "no_go" : v >= 115 ? "advisory" : "clear";
-    case "sand":       return v >= 145 ? "no_go" : v >= 125 ? "caution" : v >= 115 ? "advisory" : "clear";
-    case "tide":       return v >= 7 ? "no_go" : v >= 5 ? "caution" : v >= 3 ? "advisory" : "clear";
-    case "wind":       return v >= 35 ? "no_go" : v >= 19 ? "caution" : v >= 13 ? "advisory" : "clear";
-    case "crowd":      return v >= 85 ? "no_go" : v >= 60 ? "caution" : v >= 30 ? "advisory" : "clear";
-    case "precip":     return v >= 80 ? "no_go" : v >= 50 ? "caution" : v >= 30 ? "advisory" : "clear";
-    case "feels_hot":  return v >= 125 ? "no_go" : v >= 95 ? "caution" : v >= 85 ? "advisory" : "clear";
-    case "feels_cold": return v <= 20 ? "no_go" : v <= 32 ? "caution" : v <= 50 ? "advisory" : "clear";
-    default:           return null;
-  }
-}
-function v2HourStatus(h: { tide_height: number | null; wind_speed: number | null;
-                          precip_chance: number | null; busyness_score: number | null;
-                          feels_like: number | null; uv_index: number | null;
-                          sand_temp: number | null; asphalt_temp: number | null }): V2Status {
-  const rank: Record<V2Status, number> = { clear: 0, advisory: 1, caution: 2, no_go: 3 };
-  let worst: V2Status = "clear";
-  const consider = (s: V2Status | null) => { if (s && rank[s] > rank[worst]) worst = s; };
-  consider(v2StatusFor("tide",       h.tide_height));
-  consider(v2StatusFor("wind",       h.wind_speed));
-  consider(v2StatusFor("precip",     h.precip_chance));
-  consider(v2StatusFor("crowd",      h.busyness_score));
-  consider(v2StatusFor("uv",         h.uv_index));
-  consider(v2StatusFor("sand",       h.sand_temp));
-  consider(v2StatusFor("asphalt",    h.asphalt_temp));
-  consider(v2StatusFor("feels_hot",  h.feels_like));
-  consider(v2StatusFor("feels_cold", h.feels_like));
-  return worst;
 }

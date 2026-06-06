@@ -102,7 +102,7 @@ Deno.serve(async (req: Request) => {
           .eq("is_active", true),
         supabase
           .from("beach_day_recommendations")
-          .select("location_id, local_date, day_status_v2, composite_score_v2, best_window_label, best_window_text, avg_temp, avg_wind, avg_uv, avg_tide_height, lowest_tide_height, busyness_category, go_hours_count, caution_hours_count, no_go_hours_count, caution_text, risk_reason_codes, positive_reason_codes, summary_weather, bacteria_risk, precip_72h_mm")
+          .select("location_id, local_date, composite_score_v2, best_window_label, best_window_text, avg_temp, avg_wind, avg_uv, avg_tide_height, lowest_tide_height, busyness_category, go_hours_count, caution_hours_count, no_go_hours_count, caution_text, risk_reason_codes, positive_reason_codes, summary_weather, bacteria_risk, precip_72h_mm")
           .gte("local_date", todayPacific)
           .order("local_date", { ascending: true })
           .order("location_id", { ascending: true })
@@ -495,10 +495,8 @@ function buildSystemPrompt(
                        : bacteriaRisk === "low"      ? `  Note: ${d.precip_72h_mm ?? 0}mm rain in past 72h (below advisory threshold)`
                        : "";
 
-    // Prefer v2 day status; fall back to v1 during transition.
-    const dayStatus = (d.day_status_v2 as string | null)?.toString().toUpperCase();
     return `
-  ${date} ${dayOfWeek.toUpperCase()} (${dayStatus}) ${isWeekend ? "[WEEKEND]" : "[WEEKDAY]"}
+  ${date} ${dayOfWeek.toUpperCase()} ${isWeekend ? "[WEEKEND]" : "[WEEKDAY]"}
   Hours: ${d.go_hours_count ?? 0} go / ${d.caution_hours_count ?? 0} caution / ${d.no_go_hours_count ?? 0} no-go
   Best window: ${d.best_window_label ?? "none"} | Weather: ${d.summary_weather ?? "unknown"} | Tide: ${fmtNum(d.avg_tide_height, "ft")} avg, ${fmtNum(lowestTide, "ft")} low, ${tideDirection} | Wind: ${fmtNum(d.avg_wind, "mph")} | Temp: ${fmtNum(d.avg_temp, "°F")}${feelsLike !== null ? ` (feels ${feelsLike}°F)` : ""} | UV: ${fmtNum(d.avg_uv, "")} | Crowds: ${d.busyness_category ?? "unknown"}
   ${positives ? `Positives: ${positives}` : ""}
@@ -736,7 +734,7 @@ function buildCrossBeachPrompt(
     const days = daysByBeach.get(b.location_id as string) ?? [];
     const dayLines = days.map((d) => {
       const risks = Array.isArray(d.risk_reason_codes) ? (d.risk_reason_codes as string[]).join(", ") : "";
-      return `    ${d.local_date} (${(d.day_status_v2 as string | null)?.toString().toUpperCase() ?? "?"}): window=${d.best_window_label ?? "none"} weather=${d.summary_weather ?? "?"} wind=${fmtNum(d.avg_wind, "mph")} temp=${fmtNum(d.avg_temp, "°F")} crowds=${d.busyness_category ?? "?"} go=${d.go_hours_count ?? 0}h${risks ? ` risks=${risks}` : ""}${d.caution_text ? ` caution="${d.caution_text}"` : ""}`;
+      return `    ${d.local_date}: window=${d.best_window_label ?? "none"} weather=${d.summary_weather ?? "?"} wind=${fmtNum(d.avg_wind, "mph")} temp=${fmtNum(d.avg_temp, "°F")} crowds=${d.busyness_category ?? "?"} go=${d.go_hours_count ?? 0}h${risks ? ` risks=${risks}` : ""}${d.caution_text ? ` caution="${d.caution_text}"` : ""}`;
     }).join("\n");
     return `\n${b.display_name} (${b.location_id}):\n${dayLines || "    (no data)"}`;
   }).join("\n");

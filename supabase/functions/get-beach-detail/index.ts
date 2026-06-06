@@ -209,11 +209,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (photosErr) console.warn("photos fetch failed:", photosErr.message);
-    // Decorate hours with v2 status fields. Inline TS so we don't need
-    // an RPC per hour; mirrors get_beach_info RPC behavior. Per Franz
-    // 2026-05-30 v1-retirement detail.html migration.
-    const decoratedHours = (finalHours as Record<string, unknown>[]).map(decorateV2);
-    return json({ beach, day: finalDay, hours: decoratedHours, metadata,
+    return json({ beach, day: finalDay, hours: finalHours, metadata,
                   zone_rules: zoneRules, dog_policy: dogPolicy, alternatives,
                   photos: photos ?? [] });
 
@@ -226,97 +222,6 @@ function formatHour(hour: number): string {
   if (hour === 0 || hour === 24) return "12am";
   if (hour === 12) return "12pm";
   return hour < 12 ? `${hour}am` : `${hour - 12}pm`;
-}
-
-// ─── v2 status mapping ─────────────────────────────────────────────────────
-// Inline copy of public.v2_signal_status thresholds. SQL truth-source is
-// scoring_config_v2 / v2_signal_status. Pin: [[v2-signal-status-mapping]].
-// Keep in sync when bands change. Mirrors the TS port in beach-chat/index.ts.
-type V2Status = "clear" | "advisory" | "caution" | "no_go";
-function v2StatusFor(signal: string, v: number | null | undefined): V2Status | null {
-  if (v == null) return null;
-  switch (signal) {
-    case "uv":
-      if (v >= 11) return "no_go";
-      if (v >= 9)  return "caution";
-      if (v >= 6)  return "advisory";
-      return "clear";
-    case "asphalt":
-      if (v >= 125) return "no_go";
-      if (v >= 115) return "advisory";
-      return "clear";
-    case "sand":
-      if (v >= 145) return "no_go";
-      if (v >= 125) return "caution";
-      if (v >= 115) return "advisory";
-      return "clear";
-    case "tide":
-      if (v >= 7) return "no_go";
-      if (v >= 5) return "caution";
-      if (v >= 3) return "advisory";
-      return "clear";
-    case "wind":
-      if (v >= 35) return "no_go";
-      if (v >= 19) return "caution";
-      if (v >= 13) return "advisory";
-      return "clear";
-    case "crowd":
-      if (v >= 85) return "no_go";
-      if (v >= 60) return "caution";
-      if (v >= 30) return "advisory";
-      return "clear";
-    case "precip":
-      if (v >= 80) return "no_go";
-      if (v >= 50) return "caution";
-      if (v >= 30) return "advisory";
-      return "clear";
-    case "feels_hot":
-      if (v >= 125) return "no_go";
-      if (v >= 95)  return "caution";
-      if (v >= 85)  return "advisory";
-      return "clear";
-    case "feels_cold":
-      if (v <= 20) return "no_go";
-      if (v <= 32) return "caution";
-      if (v <= 50) return "advisory";
-      return "clear";
-    default:
-      return null;
-  }
-}
-function v2Worst(a: V2Status | null, b: V2Status | null): V2Status | null {
-  const rank = (s: V2Status | null) =>
-    s === "no_go" ? 3 : s === "caution" ? 2 : s === "advisory" ? 1 : s === "clear" ? 0 : -1;
-  return rank(a) >= rank(b) ? a : b;
-}
-function decorateV2(h: Record<string, unknown>): Record<string, unknown> {
-  const num = (k: string) => h[k] as number | null;
-  const sTide    = v2StatusFor("tide",       num("tide_height"));
-  const sWind    = v2StatusFor("wind",       num("wind_speed"));
-  const sRain    = v2StatusFor("precip",     num("precip_chance"));
-  const sCrowd   = v2StatusFor("crowd",      num("busyness_score"));
-  const sUv      = v2StatusFor("uv",         num("uv_index"));
-  const sSand    = v2StatusFor("sand",       num("sand_temp"));
-  const sAsphalt = v2StatusFor("asphalt",    num("asphalt_temp"));
-  const sFeelsH  = v2StatusFor("feels_hot",  num("feels_like"));
-  const sFeelsC  = v2StatusFor("feels_cold", num("feels_like"));
-  const sTemp    = v2Worst(sFeelsH, sFeelsC);
-  const worst    = [sTide, sWind, sRain, sCrowd, sUv, sSand, sAsphalt, sTemp]
-                    .reduce<V2Status | null>((w, s) => v2Worst(w, s), null) ?? "clear";
-  return {
-    ...h,
-    tide_status_v2:       sTide,
-    wind_status_v2:       sWind,
-    rain_status_v2:       sRain,
-    crowd_status_v2:      sCrowd,
-    uv_status_v2:         sUv,
-    sand_status_v2:       sSand,
-    asphalt_status_v2:    sAsphalt,
-    temp_hot_status_v2:   sFeelsH,
-    temp_cold_status_v2:  sFeelsC,
-    temp_status_v2:       sTemp,
-    hour_status_v2:       worst,
-  };
 }
 
 function buildWindowLabel(startHour: number, endHour: number): string {

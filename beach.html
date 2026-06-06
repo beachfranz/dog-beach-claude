@@ -1566,6 +1566,16 @@ async function load() {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     if (!data?.beach) return showError('Beach not found.');
+    // V2 → V1 alias so existing reads of h.hour_score / day.composite_score
+    // transparently get v2 values when present. Mirrors detail.html:644.
+    // Lets bulk SQL refresh (which writes v2-only) cut over without touching
+    // 10+ downstream render sites.
+    for (const h of (data.hours_today || [])) {
+      if (h.hour_score_v2 != null) h.hour_score = h.hour_score_v2;
+    }
+    if (data.today?.composite_score_v2 != null) {
+      data.today.composite_score = data.today.composite_score_v2;
+    }
     render(data, resolvedFid);
   } catch (err) {
     console.error(err);

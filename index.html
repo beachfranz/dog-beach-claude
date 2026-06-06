@@ -747,7 +747,7 @@
       bacteria_risk:       'none',
       summary_weather:     wmoToSummaryWeather(d.weather_code, d.wind_speed),
       weather_code:        d.weather_code,
-      composite_score:     d.hour_score,
+      composite_score:     d.hour_score_v2 ?? d.hour_score,
       metric_statuses: {
         tide:  d.tide_status,
         wind:  d.wind_status,

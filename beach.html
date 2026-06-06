@@ -225,8 +225,12 @@
   }
   .hourbar-col:hover .hourbar-pos,
   .hourbar-col:hover .hourbar-neg { filter: brightness(1.08); }
-  .hourbar-col.bar-now .hourbar-pos,
-  .hourbar-col.bar-now .hourbar-neg { outline: 2px solid #0f172a; outline-offset: 1px; }
+  .hourbar-now {
+    height: 12px; flex: none; text-align: center;
+    font-family: 'DM Mono', monospace; font-size: 9px;
+    font-weight: 700; color: var(--text);
+    letter-spacing: 0.04em; line-height: 12px;
+  }
   .hourbar-seg { width: 100%; }
   .hourbar-seg.pos-rank-1 { background: hsl(224, 32%, 33%); }
   .hourbar-seg.pos-rank-2 { background: hsl(226, 35%, 40%); }
@@ -1128,7 +1132,8 @@ function renderHourlyBarsV2(p, nowH) {
       .map(d => `<div class="hourbar-seg neg-rank-${d.rank}" style="height:${(d.val / NEG_MAX * 100).toFixed(1)}%"></div>`)
       .join('');
 
-    const isNow = h.local_hour === nowH ? ' bar-now' : '';
+    const isNow = h.local_hour === nowH;
+    const nowLabel = `<div class="hourbar-now">${isNow ? 'Now' : ''}</div>`;
     const isClosed = h.is_closed === true;
     const closedClass = isClosed ? ' bar-closed' : '';
     const scoreText = isClosed ? '' : (h.score != null ? h.score : '');
@@ -1143,8 +1148,9 @@ function renderHourlyBarsV2(p, nowH) {
     }
     const tip = tipLines.join('\n');
 
-    return `<div class="hourbar-col${isNow}${closedClass}" data-tip="${escHtml(tip)}">
+    return `<div class="hourbar-col${closedClass}" data-tip="${escHtml(tip)}">
       <div class="hourbar-score">${scoreText}</div>
+      ${nowLabel}
       <div class="hourbar-pos">${isClosed ? '' : posHtml}</div>
       <div class="hourbar-neg">${isClosed ? '' : negHtml}</div>
     </div>`;

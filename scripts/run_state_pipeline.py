@@ -255,6 +255,22 @@ PHASES = [
             "                 where source='osm_landing' and state=$STATE), false)",
         'criterion_text': "external_source_status['osm_landing', state] in (ok, skipped)",
     },
+    # ensure_osm_beach_polys — 2026-06-06: pulls OSM natural=beach polygons
+    # for the state into public.osm_beach_polys. Used by
+    # refresh_beach_polygon_membership's osm_features block to compute
+    # area_m2 for beaches_gold (parity with dog_parks_gold.area_m2). Same
+    # Overpass-API substrate as ensure_overpass; co-located here so both
+    # OSM pulls happen together.
+    {
+        'key': 'ensure_osm_beach_polys',
+        'kind': 'python',
+        'action': 'ensure_osm_beach_polys',
+        'criterion':
+            "select coalesce((select status in ('ok','skipped') "
+            "                 from public.external_source_status "
+            "                 where source='osm_beach_polys' and state=$STATE), false)",
+        'criterion_text': "external_source_status['osm_beach_polys', state] in (ok, skipped)",
+    },
     # ensure_poi_landing — 2026-05-22 LATE: closes the gap surfaced by DE
     # virgin-state test. POI data (US_beaches.csv) is load-bearing for most
     # coastal states — without it, beaches_gold count drops dramatically
@@ -1923,6 +1939,46 @@ def action_ensure_pad_us(state: str) -> int:
 def action_ensure_overpass(state: str) -> int:
     return _ensure_loader(state, 'osm_landing', 'bulk_load_overpass.py', timeout=1200)
 
+
+def action_ensure_osm_beach_polys(state: str) -> int:
+    """ensure_osm_beach_polys phase: load OSM natural=beach polygons for
+    the state into public.osm_beach_polys via Overpass.
+
+    The loader writes external_source_status('osm_beach_polys', state) on
+    success; we honor that here for skip behavior, same as _ensure_loader.
+    Lives in scripts/ (not scripts/loaders/) because it predates the
+    loaders/ subfolder convention; mirror the _ensure_loader contract
+    inline rather than restructure.
+    """
+    from datetime import datetime, timezone, timedelta
+    max_age_days = 30
+    with open_conn() as c, c.cursor() as cur:
+        cur.execute(
+            "select status, last_loaded_at from public.external_source_status "
+            " where source='osm_beach_polys' and state=%s",
+            (state,),
+        )
+        r = cur.fetchone()
+    if r:
+        status, last = r
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+        if status in ('ok', 'skipped') and last and last > cutoff:
+            log(f'    osm_beach_polys already loaded for {state} ({status}, '
+                f'age <{max_age_days}d); skip')
+            return 0
+    cmd = [sys.executable, 'scripts/load_osm_beach_polys.py', '--states', state]
+    log(f'    invoking {" ".join(cmd[1:])}')
+    rc, out, err = _run_subprocess(cmd, timeout=1200)
+    if rc != 0:
+        raise RuntimeError(f'load_osm_beach_polys.py exit {rc}: {err[-500:]}')
+    silent = _scan_subprocess_output_for_silent_failure(out, name='load_osm_beach_polys.py')
+    if silent:
+        raise RuntimeError(
+            f'load_osm_beach_polys.py exited rc=0 but stdout revealed silent failures:\n  - '
+            + '\n  - '.join(silent)
+        )
+    return 1
+
 def action_ensure_poi_landing(state: str) -> int:
     # CSV is local — fast. ~30s max even for biggest states (FL/CA).
     return _ensure_loader(state, 'poi_landing', 'load_poi_landing_state.py', timeout=120)
@@ -3156,6 +3212,7 @@ PYTHON_ACTIONS = {
     'ensure_county_subdivisions': action_ensure_county_subdivisions,
     'pad_us_manager_class_preflight': action_pad_us_manager_class_preflight,
     'ensure_overpass':         action_ensure_overpass,
+    'ensure_osm_beach_polys':  action_ensure_osm_beach_polys,
     'ensure_poi_landing':      action_ensure_poi_landing,
     'ensure_amenities':        action_ensure_amenities,
     'ensure_dog_features':     action_ensure_dog_features,

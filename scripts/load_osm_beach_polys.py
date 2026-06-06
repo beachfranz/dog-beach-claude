@@ -261,6 +261,23 @@ def upsert_features(features: list[dict], dry_run: bool = False):
             print(f"  table total: {n} rows ({n_named} named) avg area {avg_area:,} m2")
 
 
+def _write_status(state: str, row_count: int, status: str = 'ok', notes: str = ''):
+    """Record per-state load in external_source_status so the launch
+    pipeline's `ensure_osm_beach_polys` phase can skip a freshly-loaded state."""
+    with psycopg2.connect(**PG) as conn, conn.cursor() as cur:
+        cur.execute("""
+            insert into public.external_source_status
+              (source, state, last_loaded_at, row_count, status, notes)
+            values ('osm_beach_polys', %s, now(), %s, %s, %s)
+            on conflict (source, state) do update
+              set last_loaded_at = excluded.last_loaded_at,
+                  row_count      = excluded.row_count,
+                  status         = excluded.status,
+                  notes          = excluded.notes
+        """, (state, row_count, status, notes))
+        conn.commit()
+
+
 def fetch_and_upsert_state(state: str, dry_run: bool = False, mirror: bool = False):
     """Fetch + upsert OSM beach polygons for one state."""
     bbox = BBOXES.get(state)
@@ -280,9 +297,14 @@ def fetch_and_upsert_state(state: str, dry_run: bool = False, mirror: bool = Fal
 
     if not features:
         print(f"[{state}]   nothing to load")
+        if not dry_run:
+            _write_status(state, 0, status='skipped',
+                          notes='Overpass returned no polygons in this bbox')
         return
 
     upsert_features(features, dry_run=dry_run)
+    if not dry_run:
+        _write_status(state, len(features), status='ok')
 
 
 def main():

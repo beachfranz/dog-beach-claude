@@ -53,6 +53,7 @@ OVERPASS_MIRROR = "https://overpass.kumi.systems/api/interpreter"
 # Per-state bboxes: south,west,north,east (rough envelopes that include
 # coast + inland lakes). Overpass natural=beach picks up both.
 BBOXES = {
+    # MVP+ states
     "AL":     "30.2,-88.5,35.0,-84.9",
     "CA":     "32.5,-124.5,42.0,-114.1",
     "DE":     "38.4,-75.8,39.8,-75.0",
@@ -67,6 +68,24 @@ BBOXES = {
     "UT":     "36.9,-114.1,42.0,-109.0",
     "VA":     "36.5,-83.7,39.5,-75.2",
     "WA":     "45.5,-124.8,49.1,-116.9",
+    # Other coastal (Atlantic / Pacific / Gulf / Great Lakes)
+    "ME":     "43.0,-71.1,47.5,-66.9",
+    "CT":     "40.9,-73.7,42.1,-71.7",
+    "NY":     "40.4,-79.8,45.0,-71.8",
+    "NJ":     "38.8,-75.6,41.4,-73.8",
+    "NC":     "33.7,-84.4,36.6,-75.4",
+    "SC":     "32.0,-83.4,35.2,-78.5",
+    "GA":     "30.3,-85.6,35.0,-80.7",
+    "MS":     "30.1,-91.7,35.0,-88.0",
+    "LA":     "28.9,-94.1,33.0,-88.8",
+    "TX":     "25.8,-106.7,36.5,-93.5",
+    "AK":     "51.0,-180.0,71.5,-130.0",
+    "HI":     "18.9,-160.3,22.2,-154.8",
+    "MN":     "43.5,-97.3,49.4,-89.5",
+    "WI":     "42.4,-92.9,47.1,-86.2",
+    "IL":     "36.9,-91.5,42.5,-87.0",
+    "IN":     "37.7,-88.1,41.8,-84.8",
+    "PA":     "39.7,-80.5,42.3,-74.7",
     # Test slices
     "SoCal":  "32.5,-121.5,35.0,-117.0",
     "Marin":  "37.8,-123.0,38.3,-122.4",
@@ -75,6 +94,16 @@ BBOXES = {
 # MVP+ states (catalog has active beaches) — used by --states ALL_MVP.
 ALL_MVP_STATES = ["AL", "CA", "DE", "FL", "MA", "MD", "MI", "NH",
                   "OH", "OR", "RI", "UT", "VA", "WA"]
+
+# All US coastal states (Atlantic, Pacific, Gulf, Great Lakes) —
+# --states ALL_COASTAL convenience.
+ALL_COASTAL_STATES = [
+    "AL", "AK", "CA", "CT", "DE", "FL", "GA", "HI", "IL", "IN",
+    "LA", "MA", "MD", "ME", "MI", "MN", "MS", "NC", "NH", "NJ",
+    "NY", "OH", "OR", "PA", "RI", "SC", "TX", "VA", "WA", "WI",
+]
+# Non-MVP+ subset — the "remaining coastal" you'd run after MVP+ load.
+REMAINING_COASTAL_STATES = [s for s in ALL_COASTAL_STATES if s not in ALL_MVP_STATES]
 
 
 def overpass_query(bbox: str) -> str:
@@ -324,6 +353,10 @@ def main():
         states = [args.bbox]
     elif args.states == "ALL_MVP":
         states = ALL_MVP_STATES
+    elif args.states == "ALL_COASTAL":
+        states = ALL_COASTAL_STATES
+    elif args.states == "REMAINING_COASTAL":
+        states = REMAINING_COASTAL_STATES
     else:
         states = [s.strip() for s in args.states.split(",") if s.strip()]
 

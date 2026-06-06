@@ -985,7 +985,7 @@ function renderHourlyBars(p, nowH) {
                       + (h.pos_window || 0) + _drivePosThis;
     const barTopPct = POS_MAX > 0 ? (posTotalThis / POS_MAX * 100) : 0;
     const dogIcon = isInBest
-      ? `<span class="hourbar-dog" style="bottom: calc(${barTopPct.toFixed(1)}% + 10px);">🐶</span>`
+      ? `<span class="hourbar-dog" style="bottom: calc(${barTopPct.toFixed(1)}% + 6px);">🐶</span>`
       : '';
     const markerHtml = `<div class="hourbar-marker">${isNow ? 'Now' : ''}</div>`;
 

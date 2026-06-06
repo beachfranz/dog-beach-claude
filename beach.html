@@ -1157,7 +1157,7 @@ function renderHourlyBarsV2(p, nowH) {
       + (h.pos_drinking || 0) + (h.pos_disabled || 0) + (h.pos_dog_access || 0);
     const barTopPct = POS_MAX > 0 ? (posTotalThis / POS_MAX * 100) : 0;
     const dogIcon = isInBest
-      ? `<span class="hourbar-dog" style="bottom: calc(${barTopPct.toFixed(1)}% + 10px);">🐶</span>`
+      ? `<span class="hourbar-dog" style="bottom: calc(${barTopPct.toFixed(1)}% + 6px);">🐶</span>`
       : '';
     const markerHtml = `<div class="hourbar-marker">${isNow ? 'Now' : ''}</div>`;
     const isClosed = h.is_closed === true;

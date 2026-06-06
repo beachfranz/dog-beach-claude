@@ -70,53 +70,58 @@ def fetch_one(lat: float, lng: float, hours: int = 48) -> dict | None:
 
 
 def upsert_marine(conn, beach_fid: int, data: dict, max_hours: int) -> int:
+    """Batch-upsert one beach's marine forecast via execute_values. One
+    pooler round-trip instead of 48 (one INSERT per hour)."""
     hourly = (data or {}).get("hourly") or {}
     times = hourly.get("time") or []
     if not times:
         return 0
     cols = {v: hourly.get(v) or [] for v in MARINE_VARIABLES}
-    upd = conn.cursor()
-    n = 0
+    rows = []
     for i, t in enumerate(times[:max_hours]):
         ts = t + "Z" if "T" in t and not t.endswith("Z") else t
-        row = {
-            "ts": ts,
-            "wave_height_m":           cols["wave_height"][i]              if i < len(cols["wave_height"]) else None,
-            "wave_period_s":           cols["wave_period"][i]              if i < len(cols["wave_period"]) else None,
-            "wave_direction_deg":      cols["wave_direction"][i]           if i < len(cols["wave_direction"]) else None,
-            "swell_wave_height_m":     cols["swell_wave_height"][i]        if i < len(cols["swell_wave_height"]) else None,
-            "swell_wave_period_s":     cols["swell_wave_period"][i]        if i < len(cols["swell_wave_period"]) else None,
-            "wind_wave_height_m":      cols["wind_wave_height"][i]         if i < len(cols["wind_wave_height"]) else None,
-            "wind_wave_period_s":      cols["wind_wave_period"][i]         if i < len(cols["wind_wave_period"]) else None,
-            "sst_c":                   cols["sea_surface_temperature"][i]  if i < len(cols["sea_surface_temperature"]) else None,
-            "ocean_current_velocity_ms": cols["ocean_current_velocity"][i] if i < len(cols["ocean_current_velocity"]) else None,
-        }
-        upd.execute("""
-            INSERT INTO public.beach_marine_forecast (
-              beach_fid, ts, wave_height_m, wave_period_s, wave_direction_deg,
-              swell_wave_height_m, swell_wave_period_s,
-              wind_wave_height_m, wind_wave_period_s,
-              sst_c, ocean_current_velocity_ms,
-              source, fetched_at
-            ) VALUES (%(fid)s, %(ts)s, %(wave_height_m)s, %(wave_period_s)s, %(wave_direction_deg)s,
-                      %(swell_wave_height_m)s, %(swell_wave_period_s)s,
-                      %(wind_wave_height_m)s, %(wind_wave_period_s)s,
-                      %(sst_c)s, %(ocean_current_velocity_ms)s,
-                      'open_meteo', now())
-            ON CONFLICT (beach_fid, ts) DO UPDATE SET
-              wave_height_m            = EXCLUDED.wave_height_m,
-              wave_period_s            = EXCLUDED.wave_period_s,
-              wave_direction_deg       = EXCLUDED.wave_direction_deg,
-              swell_wave_height_m      = EXCLUDED.swell_wave_height_m,
-              swell_wave_period_s      = EXCLUDED.swell_wave_period_s,
-              wind_wave_height_m       = EXCLUDED.wind_wave_height_m,
-              wind_wave_period_s       = EXCLUDED.wind_wave_period_s,
-              sst_c                    = EXCLUDED.sst_c,
-              ocean_current_velocity_ms = EXCLUDED.ocean_current_velocity_ms,
-              fetched_at               = now()
-        """, {**row, "fid": beach_fid})
-        n += 1
-    return n
+        rows.append((
+            beach_fid, ts,
+            cols["wave_height"][i]              if i < len(cols["wave_height"]) else None,
+            cols["wave_period"][i]              if i < len(cols["wave_period"]) else None,
+            cols["wave_direction"][i]           if i < len(cols["wave_direction"]) else None,
+            cols["swell_wave_height"][i]        if i < len(cols["swell_wave_height"]) else None,
+            cols["swell_wave_period"][i]        if i < len(cols["swell_wave_period"]) else None,
+            cols["wind_wave_height"][i]         if i < len(cols["wind_wave_height"]) else None,
+            cols["wind_wave_period"][i]         if i < len(cols["wind_wave_period"]) else None,
+            cols["sea_surface_temperature"][i]  if i < len(cols["sea_surface_temperature"]) else None,
+            cols["ocean_current_velocity"][i]   if i < len(cols["ocean_current_velocity"]) else None,
+        ))
+    if not rows:
+        return 0
+    upd = conn.cursor()
+    psycopg2.extras.execute_values(
+        upd,
+        """
+        INSERT INTO public.beach_marine_forecast (
+          beach_fid, ts, wave_height_m, wave_period_s, wave_direction_deg,
+          swell_wave_height_m, swell_wave_period_s,
+          wind_wave_height_m, wind_wave_period_s,
+          sst_c, ocean_current_velocity_ms,
+          source, fetched_at
+        ) VALUES %s
+        ON CONFLICT (beach_fid, ts) DO UPDATE SET
+          wave_height_m            = EXCLUDED.wave_height_m,
+          wave_period_s            = EXCLUDED.wave_period_s,
+          wave_direction_deg       = EXCLUDED.wave_direction_deg,
+          swell_wave_height_m      = EXCLUDED.swell_wave_height_m,
+          swell_wave_period_s      = EXCLUDED.swell_wave_period_s,
+          wind_wave_height_m       = EXCLUDED.wind_wave_height_m,
+          wind_wave_period_s       = EXCLUDED.wind_wave_period_s,
+          sst_c                    = EXCLUDED.sst_c,
+          ocean_current_velocity_ms = EXCLUDED.ocean_current_velocity_ms,
+          fetched_at               = now()
+        """,
+        rows,
+        template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'open_meteo', now())",
+        page_size=100,
+    )
+    return len(rows)
 
 
 def main() -> int:
@@ -142,9 +147,14 @@ def main() -> int:
                        AND lat IS NOT NULL AND lon IS NOT NULL
                 """, (args.state.upper(),))
             elif args.all_mvp:
+                # Ocean-coastal MVP+ states. Open-Meteo Marine API is
+                # ocean-only — Great Lakes states (MI, OH) get 400 and
+                # land states would too. Updated from CA/OR/WA hardcode
+                # (when MVP+ was 3) to current 10-state coastal scope.
                 cur.execute("""
                     SELECT fid, name, lat, lon FROM public.beaches_gold
-                     WHERE state IN ('CA','OR','WA') AND is_active = true
+                     WHERE state IN ('CA','OR','WA','MA','RI','NH','MD','VA','DE','AL')
+                       AND is_active = true
                        AND scoring_tier IN ('daily','hourly')
                        AND lat IS NOT NULL AND lon IS NOT NULL
                 """)

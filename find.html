@@ -1859,7 +1859,7 @@
 
     const el = document.getElementById('product-chips');
     el.innerHTML = chips.map(c =>
-      `<a class="product-chip" href="${c.href}" target="_blank" rel="noopener noreferrer">[ ${c.icon} ${c.label} ]</a>`
+      `<a class="product-chip" href="${c.def.href}" target="_blank" rel="noopener noreferrer">[ ${c.def.icon} ${c.def.label} ]</a>`
     ).join('');
     el.style.display = '';
   }

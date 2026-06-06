@@ -777,8 +777,11 @@
     // nearest-N path is used consistently. distance_m is preserved so
     // NOW cards can render the car icon without the client-side haversine.
     const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    // Preserve full RPC fields on each beach so beachToDay() below can
+    // build a complete day object (with best_window_label, chips, etc.)
+    // for the static-day fallback when get-beach-now has no live data.
     const beachList = (await loadBeachesForDate(todayISO))
-      .map(b => ({ location_id: b.location_id, arena_group_id: b.arena_group_id, display_name: b.display_name, latitude: b.latitude, longitude: b.longitude, access_rule: b.access_rule, has_on_leash: b.has_on_leash, has_off_leash: b.has_off_leash, dogs_allowed: b.dogs_allowed, location_tier: b.location_tier, distance_m: b.distance_m, composite_score: b.composite_score_v2 ?? null }));
+      .map(b => ({ ...b, composite_score: b.composite_score_v2 ?? null }));
     if (myToken !== _renderToken) return;   // superseded
 
     // Sort by STATIC beach data first to pick the top-N candidates that
@@ -789,7 +792,12 @@
       .filter(b => matchesLeashFilter(b))
       .map(b => ({
         beach:    b,
-        day:      { composite_score: b.composite_score },
+        // Build the static day from the RPC payload (composite_score_v2,
+        // best_window_label, chips). When get-beach-now lands with live
+        // data, this gets replaced with a NOW day; when it doesn't (no
+        // is_now row), the static day stays so the card still renders
+        // today's score + window label instead of a "—" placeholder.
+        day:      beachToDay(b),
         distance: resolveDistanceMiles(b),
       }))
       .filter(c => matchesDistanceFilter(c.distance));
@@ -816,6 +824,14 @@
 
   function nowToDay(d) {
     if (!d || d.error) return null;
+    // get-beach-now returns a wrapper shape `{ok:true, message:'No beaches
+    // found', results:[]}` when the requested beach has no is_now row.
+    // Treat that as "no NOW data" so the caller falls back to the static
+    // day composite — otherwise this returns a truthy day object with
+    // composite_score=null and the card renders "—" even when the day rec
+    // has a real score. Discriminator: a real NOW row has location_id +
+    // hour_score_v2.
+    if (d.location_id == null || d.hour_score_v2 == null) return null;
     return {
       is_now:             true,
       location_id:        d.location_id,
@@ -825,7 +841,7 @@
       bacteria_risk:      'none',
       summary_weather:    wmoToSummaryWeather(d.weather_code, d.wind_speed),
       weather_code:       d.weather_code,
-      composite_score:    d.hour_score_v2 ?? null,
+      composite_score:    d.hour_score_v2,
       lowest_tide_height: d.tide_height,
       tide_direction:     d.tide_direction,
       avg_temp:           d.temp_air,

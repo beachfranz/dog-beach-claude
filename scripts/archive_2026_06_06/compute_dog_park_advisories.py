@@ -92,22 +92,22 @@ def main() -> int:
             elif args.state:
                 cur.execute("""
                     SELECT fid FROM public.dog_parks_gold
-                     WHERE state=%s AND is_active AND scoring_tier IN ('daily','hourly')
+                     WHERE state=%s AND is_active AND is_scoreable = true
                 """, (args.state.upper(),))
             elif args.all_mvp:
                 cur.execute("""
                     SELECT fid FROM public.dog_parks_gold
-                     WHERE state IN ('CA','OR','WA') AND is_active AND scoring_tier IN ('daily','hourly')
+                     WHERE state IN ('CA','OR','WA') AND is_active AND is_scoreable = true
                 """)
             elif args.all_scored:
                 cur.execute("""
                     SELECT fid FROM public.dog_parks_gold
-                     WHERE is_active AND scoring_tier IN ('daily','hourly')
+                     WHERE is_active AND is_scoreable = true
                 """)
             else:
                 cur.execute("""
                     SELECT fid FROM public.dog_parks_gold
-                     WHERE state='CA' AND is_active AND scoring_tier IN ('daily','hourly')
+                     WHERE state='CA' AND is_active AND is_scoreable = true
                      ORDER BY fid LIMIT 30
                 """)
             scope = [r[0] for r in cur.fetchall()]

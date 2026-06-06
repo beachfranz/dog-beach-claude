@@ -72,11 +72,34 @@ HEARTBEAT_INTERVAL_S = 15
 
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / 'scripts' / 'pipeline' / '.env')
-POOLER = (ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip()
-_p = urllib.parse.urlparse(POOLER)
-PG = dict(host=_p.hostname, port=_p.port or 5432, user=_p.username,
-          password=os.environ['SUPABASE_DB_PASSWORD'],
-          dbname=(_p.path or '/postgres').lstrip('/'), sslmode='require')
+
+# Use the SESSION-mode pooler (port 5432 on the Supavisor host) instead
+# of the default TRANSACTION-mode pooler (port 6543). Same hostname,
+# same auth, but session mode hands the script ONE backend slot for the
+# whole session — no per-transaction timeout. Transaction mode cuts the
+# connection after ~10 min mid-transaction, which killed HI run #46 on
+# the `promote` phase (11m50s in, entire transaction rolled back,
+# beaches_gold empty).
+#
+# Direct (db.<ref>.supabase.co) would also work but is IPv6-only on the
+# free tier; most home/office networks are IPv4 → DNS lookup fails.
+# Session-mode pooler uses the same IPv4-native host as transaction mode.
+#
+# Trade-off: one pooler slot held for ~hours of launch. The session
+# pooler is sized to handle many such sessions; one admin script is
+# negligible. Subprocesses (state-pipeline-spawned loaders) still use
+# the transaction pooler via their own pooler-url read — they're fast
+# and pool-friendly.
+_POOLER_URL = (ROOT / 'supabase' / '.temp' / 'pooler-url').read_text().strip()
+_p = urllib.parse.urlparse(_POOLER_URL)
+PG = dict(
+    host=_p.hostname,
+    port=5432,                                  # session mode (not 6543 / transaction)
+    user=_p.username,
+    password=os.environ['SUPABASE_DB_PASSWORD'],
+    dbname=(_p.path or '/postgres').lstrip('/'),
+    sslmode='require',
+)
 
 
 # Phase definitions. Each has:

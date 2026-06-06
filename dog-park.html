@@ -467,12 +467,15 @@
   }
   .hourbar-col:hover .hourbar-pos,
   .hourbar-col:hover .hourbar-neg { filter: brightness(1.08); }
-  .hourbar-now {
-    height: 12px; flex: none; text-align: center;
+  .hourbar-marker {
+    height: 16px; flex: none;
+    display: flex; justify-content: center; align-items: center;
+    gap: 3px;
     font-family: 'DM Mono', monospace; font-size: 9px;
     font-weight: 700; color: var(--text);
-    letter-spacing: 0.04em; line-height: 12px;
+    letter-spacing: 0.04em; line-height: 16px;
   }
+  .hourbar-dog { width: 14px; height: 14px; display: block; }
   .hourbar-seg { width: 100%; }
   /* Rank-based shading at HALF saturation (Franz 2026-05-27 LATE).
    * Tailwind blue / red HSL values with saturation × 0.5. Lightness
@@ -897,6 +900,8 @@ function renderHourlyBars(p, nowH) {
   // nice-ceiled to the day's actual max so a mild-day chart zooms in
   // instead of looking tiny vs the 50-pt absolute cap.
   const hours = p.hours || [];
+  const bestStart = p.best_window_v2_start;
+  const bestEnd   = p.best_window_v2_end;
   let maxPos = 0, maxNeg = 0;
   for (const h of hours) {
     const drivePos = Math.max(0, h.drive || 0);
@@ -965,7 +970,11 @@ function renderHourlyBars(p, nowH) {
       .join('');
 
     const isNow = h.local_hour === nowH;
-    const nowLabel = `<div class="hourbar-now">${isNow ? 'Now' : ''}</div>`;
+    const isInBest = bestStart != null && bestEnd != null
+                  && h.local_hour >= bestStart && h.local_hour <= bestEnd;
+    const dogPart = isInBest ? '<img src="src/avatar.png" class="hourbar-dog" alt="best window">' : '';
+    const nowPart = isNow ? '<span>Now</span>' : '';
+    const markerHtml = `<div class="hourbar-marker">${dogPart}${nowPart}</div>`;
 
     const tipLines = [];
     if (h.is_closed === true) {
@@ -982,7 +991,7 @@ function renderHourlyBars(p, nowH) {
     const scoreText = isClosed ? '' : (h.score != null ? h.score : '');
     return `<div class="hourbar-col${closedClass}" data-tip="${escHtml(tip)}">
       <div class="hourbar-score">${scoreText}</div>
-      ${nowLabel}
+      ${markerHtml}
       <div class="hourbar-pos">${isClosed ? '' : posHtml}</div>
       <div class="hourbar-neg">${isClosed ? '' : negHtml}</div>
     </div>`;

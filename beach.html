@@ -217,7 +217,8 @@
   }
   .hourbar-pos {
     flex: 1; display: flex; flex-direction: column-reverse;
-    width: 100%; overflow: hidden; border-radius: 3px 3px 0 0;
+    width: 100%; overflow: visible; border-radius: 3px 3px 0 0;
+    position: relative;
   }
   .hourbar-neg {
     flex: 1; display: flex; flex-direction: column;
@@ -226,14 +227,17 @@
   .hourbar-col:hover .hourbar-pos,
   .hourbar-col:hover .hourbar-neg { filter: brightness(1.08); }
   .hourbar-marker {
-    height: 16px; flex: none;
-    display: flex; justify-content: center; align-items: center;
-    gap: 3px;
+    height: 12px; flex: none; text-align: center;
     font-family: 'DM Mono', monospace; font-size: 9px;
     font-weight: 700; color: var(--text);
-    letter-spacing: 0.04em; line-height: 16px;
+    letter-spacing: 0.04em; line-height: 12px;
   }
-  .hourbar-dog { width: 14px; height: 14px; display: block; }
+  .hourbar-dog {
+    position: absolute;
+    left: 50%; transform: translateX(-50%);
+    font-size: 14px; line-height: 1;
+    pointer-events: none;
+  }
   .hourbar-seg { width: 100%; }
   .hourbar-seg.pos-rank-1 { background: hsl(224, 32%, 33%); }
   .hourbar-seg.pos-rank-2 { background: hsl(226, 35%, 40%); }
@@ -1140,9 +1144,22 @@ function renderHourlyBarsV2(p, nowH) {
     const isNow = h.local_hour === nowH;
     const isInBest = bestStart != null && bestEnd != null
                   && h.local_hour >= bestStart && h.local_hour <= bestEnd;
-    const dogPart = isInBest ? '<img src="src/avatar.png" class="hourbar-dog" alt="best window">' : '';
-    const nowPart = isNow ? '<span>Now</span>' : '';
-    const markerHtml = `<div class="hourbar-marker">${dogPart}${nowPart}</div>`;
+    // Per-hour positive total drives the dog's float position (10px above
+    // the top of this hour's positive bar). Mirrors the maxPos loop above.
+    const _drivePosThis = Math.max(0, h.drive || 0);
+    const posTotalThis =
+      (h.pos_fence || 0) + (h.pos_water || 0) + (h.pos_shade || 0)
+      + (h.pos_comfort || 0) + (h.pos_agility || 0) + (h.pos_water_play || 0)
+      + (h.pos_temp || 0) + (h.pos_wind || 0) + (h.pos_sky || 0)
+      + (h.pos_window || 0) + _drivePosThis
+      + (h.pos_restroom || 0) + (h.pos_lifeguard || 0) + (h.pos_parking || 0)
+      + (h.pos_shower || 0) + (h.pos_picnic || 0) + (h.pos_food || 0)
+      + (h.pos_drinking || 0) + (h.pos_disabled || 0) + (h.pos_dog_access || 0);
+    const barTopPct = POS_MAX > 0 ? (posTotalThis / POS_MAX * 100) : 0;
+    const dogIcon = isInBest
+      ? `<span class="hourbar-dog" style="bottom: calc(${barTopPct.toFixed(1)}% + 10px);">🐶</span>`
+      : '';
+    const markerHtml = `<div class="hourbar-marker">${isNow ? 'Now' : ''}</div>`;
     const isClosed = h.is_closed === true;
     const closedClass = isClosed ? ' bar-closed' : '';
     const scoreText = isClosed ? '' : (h.score != null ? h.score : '');
@@ -1160,7 +1177,7 @@ function renderHourlyBarsV2(p, nowH) {
     return `<div class="hourbar-col${closedClass}" data-tip="${escHtml(tip)}">
       <div class="hourbar-score">${scoreText}</div>
       ${markerHtml}
-      <div class="hourbar-pos">${isClosed ? '' : posHtml}</div>
+      <div class="hourbar-pos">${isClosed ? '' : posHtml}${isClosed ? '' : dogIcon}</div>
       <div class="hourbar-neg">${isClosed ? '' : negHtml}</div>
     </div>`;
   }).join('');

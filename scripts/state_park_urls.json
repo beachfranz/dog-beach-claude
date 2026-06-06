@@ -97,5 +97,12 @@
     "loader_deferred": true,
     "notes": "Listing URL is stateparks.utah.gov/parks (Franz-provided 2026-05-27). State law PDF at utah.gov/pmn/files/698971.pdf documents delegation to localities — no statewide leash mandate. State-park-specific photo loader deferred; Wikimedia + websearch handle photos state-agnostically. UT is inland (no coast) — beaches sourced from GNIS lake/reservoir entries (Bear Lake, Utah Lake, Great Salt Lake, Lake Powell shore).",
     "added": "2026-05-27"
+  },
+  "HI": {
+    "agency": "Hawaii Division of State Parks (DLNR)",
+    "url": "https://www.hawaiistateparks.org/parks",
+    "loader_deferred": true,
+    "notes": "Franz-provided 2026-06-06. State parks site is hawaiistateparks.org/parks (canonical listing). State-park-specific photo loader deferred; Wikimedia + websearch handle photos state-agnostically. HI is beach-heavy / dog-park-light catalog (~7 active scoreable dog parks per 2026-06-06 audit — likely reflects HI's rabies-free quarantine history suppressing dog-park infrastructure).",
+    "added": "2026-06-06"
   }
 }

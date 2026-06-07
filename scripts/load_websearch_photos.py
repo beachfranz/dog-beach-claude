@@ -69,6 +69,8 @@ HOST_BLOCKLIST = (
     "tiktok.com",                # TikTok blocks hot-linked image rendering — broken thumbnails. Franz 2026-06-07
     "alamy.com",                 # Stock photo agency — every image has a giant watermark. Franz 2026-06-07
     "vecteezy.com",              # Stock site dominated by low-quality AI-generated imagery. Franz 2026-06-07
+    "metroparkstacoma.org",      # Hot-link rendering blocked. Franz 2026-06-07
+    "parkstacoma.gov",           # Hot-link rendering blocked. Franz 2026-06-07
 )
 
 

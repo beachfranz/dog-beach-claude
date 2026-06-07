@@ -27,35 +27,70 @@ DEFAULT_STATES = ['HI', 'MA', 'WA', 'MI', 'OH', 'NH', 'RI', 'AL', 'DE']
 DEFAULT_LOAD_AFTER = '2026-06-06 18:00'
 DEFAULT_OUT = 'admin/preview_websearch_20260607.html'
 
-SQL = """
-WITH bp_per_beach AS (
-  SELECT b.fid, b.name, b.state, COUNT(*) AS n
-  FROM public.beaches_gold b
-  JOIN public.beach_photos bp ON bp.arena_group_id = b.fid
-  WHERE bp.source = 'websearch'
-    AND bp.loaded_at > %(load_after)s
-    AND b.state = ANY(%(states)s)
-  GROUP BY 1, 2, 3
-),
-strat AS (
-  SELECT *, NTILE(5) OVER (PARTITION BY state ORDER BY n DESC, fid) AS stratum
-  FROM bp_per_beach
-),
-picked AS (
-  SELECT DISTINCT ON (state, stratum) state, stratum, fid, name
-  FROM strat
-  ORDER BY state, stratum, md5(fid::text)
-)
-SELECT p.state, p.stratum, p.fid, p.name,
-       bp.image_url, bp.page_url, bp.source_meta->>'host' AS host,
-       bp.source_meta->>'description' AS descr,
-       (bp.source_meta->>'rank')::int AS rk
-FROM picked p
-JOIN public.beach_photos bp
-  ON bp.arena_group_id = p.fid AND bp.source = 'websearch'
-WHERE bp.loaded_at > %(load_after)s
-ORDER BY p.state, p.stratum, p.fid, rk;
-"""
+# Entity-specific table + FK shapes. dog_park doesn't have a load_after
+# filter applied — most dog park websearch data is older; we sample from
+# the whole catalog instead.
+ENTITY_META = {
+    'beach': {
+        'gold_table': 'public.beaches_gold',
+        'photo_table': 'public.beach_photos',
+        'fk_col': 'arena_group_id',
+    },
+    'dog_park': {
+        'gold_table': 'public.dog_parks_gold',
+        'photo_table': 'public.dog_park_photos',
+        'fk_col': 'dog_park_fid',
+    },
+}
+
+
+def _build_sql(entity: str, strata_mode: str, strata: int, use_load_after: bool) -> str:
+    """Compose the stratified-sample SQL for the chosen entity + strata mode."""
+    meta = ENTITY_META[entity]
+    if strata_mode == 'state':
+        partition = 'PARTITION BY state '
+        order_outer = 'state, stratum, md5(fid::text)'
+        distinct_on = '(state, stratum)'
+        select_strata_cols = 'state, stratum, fid, name'
+    else:  # global
+        partition = ''
+        order_outer = 'stratum, md5(fid::text)'
+        distinct_on = '(stratum)'
+        select_strata_cols = "''::text AS state, stratum, fid, name"
+
+    state_filter = 'AND e.state = ANY(%(states)s)' if strata_mode == 'state' else ''
+    load_filter = "AND bp.loaded_at > %(load_after)s" if use_load_after else ''
+
+    return f"""
+    WITH per_entity AS (
+      SELECT e.fid, e.name, e.state, COUNT(*) AS n
+      FROM {meta['gold_table']} e
+      JOIN {meta['photo_table']} bp ON bp.{meta['fk_col']} = e.fid
+      WHERE bp.source = 'websearch'
+        AND e.is_active
+        {load_filter}
+        {state_filter}
+      GROUP BY 1, 2, 3
+    ),
+    strat AS (
+      SELECT *, NTILE({strata}) OVER ({partition}ORDER BY n DESC, fid) AS stratum
+      FROM per_entity
+    ),
+    picked AS (
+      SELECT DISTINCT ON {distinct_on} {select_strata_cols}
+      FROM strat
+      ORDER BY {order_outer}
+    )
+    SELECT p.state, p.stratum, p.fid, p.name,
+           bp.image_url, bp.page_url, bp.source_meta->>'host' AS host,
+           bp.source_meta->>'description' AS descr,
+           (bp.source_meta->>'rank')::int AS rk
+    FROM picked p
+    JOIN {meta['photo_table']} bp
+      ON bp.{meta['fk_col']} = p.fid AND bp.source = 'websearch'
+    {('WHERE bp.loaded_at > %(load_after)s' if use_load_after else '')}
+    ORDER BY p.state NULLS FIRST, p.stratum, p.fid, rk;
+    """
 
 STYLE = """body{font-family:system-ui;max-width:1400px;margin:24px auto;padding:0 16px;background:#f5f5f5;color:#222}
 h1{margin:0 0 8px 0}h2{margin-top:32px;border-bottom:2px solid #ccc;padding-bottom:6px}
@@ -86,22 +121,29 @@ def _pooler_url() -> str:
     return base.replace('@aws', f':{pw}@aws').replace('6543', '5432')
 
 
-def _fetch_rows(states: list[str], load_after: str) -> list[tuple]:
+def _fetch_rows(entity: str, strata_mode: str, strata: int,
+                states: list[str], load_after: str | None) -> list[tuple]:
+    use_load_after = bool(load_after)
+    sql = _build_sql(entity, strata_mode, strata, use_load_after)
+    params: dict = {'states': states}
+    if use_load_after:
+        params['load_after'] = load_after
     with psycopg2.connect(_pooler_url()) as conn:
         with conn.cursor() as cur:
-            cur.execute(SQL, {'states': states, 'load_after': load_after})
+            cur.execute(sql, params)
             return cur.fetchall()
 
 
-def _build_html(rows: list[tuple], states: list[str], notes: str) -> str:
+def _build_html(rows: list[tuple], states: list[str], notes: str,
+                strata_mode: str = 'state') -> str:
     by_state = defaultdict(lambda: defaultdict(list))
-    fid_meta: dict[int, tuple[str, int]] = {}
+    fid_meta: dict[int, tuple[str, int, str]] = {}
     for state, stratum, fid, name, image_url, page_url, host, descr, rk in rows:
         by_state[state][fid].append({
             'image_url': image_url, 'page_url': page_url,
             'host': host, 'descr': descr, 'rk': rk,
         })
-        fid_meta[fid] = (name, stratum)
+        fid_meta[fid] = (name, stratum, state)
 
     parts: list[str] = []
     parts.append('<!doctype html><html><head><meta charset="utf-8">')
@@ -111,20 +153,14 @@ def _build_html(rows: list[tuple], states: list[str], notes: str) -> str:
     if notes:
         parts.append(f'<p>{html_lib.escape(notes)}</p>')
 
-    parts.append('<div class="toc">')
-    for st in states:
-        n_b = len(by_state[st])
-        n_p = sum(len(v) for v in by_state[st].values())
-        parts.append(f'<a href="#{st}">{st} ({n_b} beaches, {n_p} photos)</a>')
-    parts.append('</div>')
-
-    for st in states:
-        if not by_state[st]:
-            continue
-        parts.append(f'<h2 id="{st}">{st}</h2>')
-        for fid in sorted(by_state[st].keys(), key=lambda f: fid_meta[f][1]):
-            name, stratum = fid_meta[fid]
-            photos = by_state[st][fid]
+    if strata_mode == 'global':
+        # Flat layout: just stratum-ordered list, no per-state grouping
+        all_fids = sorted(fid_meta.keys(), key=lambda f: fid_meta[f][1])
+        parts.append(f'<p><b>{len(all_fids)} entities, '
+                     f'{sum(len(v) for v in by_state[""].values())} photos</b></p>')
+        for fid in all_fids:
+            name, stratum, st = fid_meta[fid]
+            photos = by_state[''][fid] if '' in by_state else by_state[st][fid]
             parts.append('<div class="beach">')
             parts.append(
                 f'<h3>{html_lib.escape(name)} '
@@ -145,25 +181,70 @@ def _build_html(rows: list[tuple], states: list[str], notes: str) -> str:
                     f'<div class="descr">{descr}</div></div></div>'
                 )
             parts.append('</div></div>')
+    else:
+        parts.append('<div class="toc">')
+        for st in states:
+            n_b = len(by_state[st])
+            n_p = sum(len(v) for v in by_state[st].values())
+            parts.append(f'<a href="#{st}">{st} ({n_b} beaches, {n_p} photos)</a>')
+        parts.append('</div>')
+
+        for st in states:
+            if not by_state[st]:
+                continue
+            parts.append(f'<h2 id="{st}">{st}</h2>')
+            for fid in sorted(by_state[st].keys(), key=lambda f: fid_meta[f][1]):
+                name, stratum, _ = fid_meta[fid]
+                photos = by_state[st][fid]
+                parts.append('<div class="beach">')
+                parts.append(
+                    f'<h3>{html_lib.escape(name)} '
+                    f'<span class="stratum">— fid {fid} · stratum {stratum} · '
+                    f'{len(photos)} photos</span></h3>'
+                )
+                parts.append('<div class="photos">')
+                for p in photos:
+                    img = html_lib.escape(p['image_url'] or '')
+                    page = html_lib.escape(p['page_url'] or '#')
+                    host = html_lib.escape(p['host'] or '')
+                    descr = html_lib.escape((p['descr'] or '')[:200])
+                    parts.append(
+                        f'<div class="photo">'
+                        f'<a href="{page}" target="_blank">'
+                        f'<img src="{img}" loading="lazy" alt=""></a>'
+                        f'<div class="meta"><div class="host">{host}</div>'
+                        f'<div class="descr">{descr}</div></div></div>'
+                    )
+                parts.append('</div></div>')
     parts.append('</body></html>')
     return '\n'.join(parts)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--entity', choices=['beach', 'dog_park'], default='beach')
+    ap.add_argument('--strata-mode', choices=['state', 'global'], default='state',
+                    help='state: NTILE per state (default, 5 strata per state). '
+                         'global: NTILE across the whole catalog (e.g. 50 total).')
+    ap.add_argument('--strata', type=int, default=5,
+                    help='Strata count. For state mode this is per-state (default 5); '
+                         'for global it is the total sample size.')
     ap.add_argument('--states', default=','.join(DEFAULT_STATES))
-    ap.add_argument('--load-after', default=DEFAULT_LOAD_AFTER)
+    ap.add_argument('--load-after', default=DEFAULT_LOAD_AFTER,
+                    help='Only photos loaded after this timestamp. Pass empty string '
+                         'to disable (sample the whole catalog).')
     ap.add_argument('--out', default=DEFAULT_OUT)
     ap.add_argument('--notes', default='')
     args = ap.parse_args()
 
     _load_env()
     states = [s.strip().upper() for s in args.states.split(',') if s.strip()]
-    rows = _fetch_rows(states, args.load_after)
-    html_doc = _build_html(rows, states, args.notes)
+    load_after = args.load_after.strip() or None
+    rows = _fetch_rows(args.entity, args.strata_mode, args.strata, states, load_after)
+    html_doc = _build_html(rows, states, args.notes, strata_mode=args.strata_mode)
     Path(args.out).write_text(html_doc, encoding='utf-8')
-    total_beaches = len({(s, f) for s, _, f, *_ in rows})
-    print(f'Wrote {args.out}  beaches={total_beaches} photos={len(rows)}')
+    total = len({f for _, _, f, *_ in rows})
+    print(f'Wrote {args.out}  {args.entity}s={total} photos={len(rows)}')
 
 
 if __name__ == '__main__':

@@ -1624,6 +1624,22 @@
     return true;
   }
 
+  // Hide beaches the user can't actually use at the moment they're
+  // looking at. NOW pill → drop beaches currently inside their dog
+  // prohibition window (Newport Municipal etc. between 10am–4:30pm).
+  // 'always_no' beaches (Surfside) drop on every view — they're not
+  // an option any time.
+  // Dog parks always pass (never have prohibition windows).
+  // Per Franz 2026-06-07: "when now is selected, beaches that exclude
+  // dogs during the current hour should be hidden."
+  function matchesDogHoursForView(card) {
+    if (card.kind !== 'beach') return true;
+    const state = card.dogHours?.state;
+    if (state === 'always_no') return false;
+    if (selectedDay === 'now' && state === 'now_prohibited') return false;
+    return true;
+  }
+
   function buildRanked() {
     const all = [
       ...beachResults.map(normalizeBeach),
@@ -1633,6 +1649,7 @@
       .filter(matchesWant)
       .filter(matchesAmenities)
       .filter(matchesDistance)
+      .filter(matchesDogHoursForView)
       .filter(matchesSearch);
     if (!filtered.length) return [];
     // Sort by rankScore (current_hour_score if available, else today's

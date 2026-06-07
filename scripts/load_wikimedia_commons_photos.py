@@ -70,6 +70,13 @@ def select_targets(args) -> list[dict]:
     table = ent["table"]
     sel = ent["select_fields"]
     base = {"is_active": "eq.true"}
+    # Scoreable filter: dog_parks_gold has is_scoreable boolean; beaches_gold
+    # uses scoring_tier IN ('daily','hourly'). Entity-aware refactor 2026-05-26
+    # left is_scoreable hardcoded which fails for beach (column doesn't exist).
+    scoreable_filter = (
+        {"scoring_tier": "in.(daily,hourly)"} if args.entity == "beach"
+        else {"is_scoreable": "eq.true"}
+    )
     if args.fids:
         ids = [int(s) for s in args.fids.split(",")]
         rows = supa(f"/rest/v1/{table}",
@@ -80,13 +87,13 @@ def select_targets(args) -> list[dict]:
         states = [s.strip().upper() for s in args.states.split(",")]
         rows = supa(f"/rest/v1/{table}",
                     params={"select": sel,
-                            **base, "is_scoreable": "eq.true",
+                            **base, **scoreable_filter,
                             "state": f"in.({','.join(states)})",
                             "order": "fid.asc"})
     elif args.pilot or args.full:
         rows = supa(f"/rest/v1/{table}",
                     params={"select": sel,
-                            **base, "is_scoreable": "eq.true",
+                            **base, **scoreable_filter,
                             "order": "fid.asc",
                             **({"limit": str(int(args.pilot))} if args.pilot else {})})
     else:

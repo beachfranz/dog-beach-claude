@@ -1720,12 +1720,21 @@ def _state_tier12_fids_ranked_by_photos(state: str) -> list[int]:
     # base_join binds `state` once (the photo-count subquery scope).
     # Outer where binds it a second time. Order: subquery first, then outer.
     if has_dog_policy:
+        # Mirror _state_tier12_fids: include tier-3 beaches with no
+        # operative beach_policy_source evidence (bootstrap-tier-3).
         sql = ("select g.fid from public.beaches_gold g "
                "join public.beach_dog_policy bdp on bdp.arena_group_id = g.fid "
                + base_join +
                "where g.is_active and g.state = %s "
-               "  and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
-               "      in ('1_off-leash','2_on-leash') ")
+               "  and ( "
+               "    public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+               "        in ('1_off-leash','2_on-leash') "
+               "    OR NOT EXISTS ( "
+               "      SELECT 1 FROM public.beach_policy_source bps "
+               "       WHERE bps.beach_fid = g.fid "
+               "         AND bps.operative_status = 'operative' "
+               "    ) "
+               "  ) ")
         args = (state, state)
     else:
         sql = ("select g.fid from public.beaches_gold g "
@@ -1780,11 +1789,30 @@ def _state_tier12_fids(state: str) -> list[int]:
 
     args: tuple
     if has_dog_policy:
-        sql = ("select g.fid from public.beaches_gold g "
-               "join public.beach_dog_policy bdp on bdp.arena_group_id = g.fid "
-               "where g.is_active and g.state = %s "
-               "  and public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
-               "      in ('1_off-leash','2_on-leash') ")
+        # Tier-1+2 (off-leash / on-leash) by default. ALSO include tier-3
+        # beaches that have NO operative beach_policy_source evidence yet —
+        # those are bootstrap-classified by state baseline alone, not
+        # genuinely tier-3, and will be re-evaluated as codify or per-beach
+        # extraction lands real evidence. Without this, photo loaders
+        # systematically skip famous beaches that fall into tier-3 only
+        # because the state baseline is restrictive (ME, HI, AL).
+        # Catalog audit 2026-06-07 ME launch: 191/269 ME beaches were
+        # tier-3 from state baseline alone — incl. Old Orchard, Popham,
+        # Ogunquit. ~622 such beaches catalog-wide across all states.
+        sql = (
+            "select g.fid from public.beaches_gold g "
+            "join public.beach_dog_policy bdp on bdp.arena_group_id = g.fid "
+            "where g.is_active and g.state = %s "
+            "  and ( "
+            "    public.beach_location_tier(bdp.dogs_allowed, bdp.has_off_leash, bdp.has_on_leash, bdp.dogs_prohibited_start::text) "
+            "        in ('1_off-leash','2_on-leash') "
+            "    OR NOT EXISTS ( "
+            "      SELECT 1 FROM public.beach_policy_source bps "
+            "       WHERE bps.beach_fid = g.fid "
+            "         AND bps.operative_status = 'operative' "
+            "    ) "
+            "  ) "
+        )
         args = (state,)
     else:
         # Bootstrap: refire on all active+scoreable beaches to populate beach_dog_policy.

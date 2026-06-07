@@ -166,23 +166,139 @@ def commons_geosearch(lat: float, lng: float, radius_m: int = RADIUS_M, limit: i
     return _commons_call(params).get("query", {}).get("geosearch", []) or []
 
 
-def commons_imageinfo(pageids: list[int]) -> dict[int, dict]:
-    """Batch fetch imageinfo for pageids. Returns {pageid: imageinfo dict}."""
-    if not pageids: return {}
+# ─── Category-based lookup (yields where geosearch misses) ───────────────────
+#
+# Geosearch only sees Commons files with explicit geo-tags within ~500m of the
+# beach pin. Famous beaches like Old Orchard Beach ME or Hanauma Bay HI have
+# rich Category pages on Commons (Category:Old_Orchard_Beach, Category:Hanauma_Bay)
+# with dozens of photos — most NOT geo-tagged. Category lookup pulls those.
+#
+# 2026-06-07: shipped to address the catalog-wide tier-3 Wikimedia gap (1 photo
+# per state on geosearch alone). For Maine: Category:State_parks_of_Maine has
+# 20 sub-categories totaling 350+ photos invisible to geosearch.
+
+def derive_candidate_categories(beach_name: str, state: str | None) -> list[str]:
+    """Generate likely Commons Category page names for a beach.
+
+    Returns up to ~5 candidates in priority order. Caller tries each via
+    commons_category_exists() and uses the first that exists. Empty list
+    if name is too generic to be worth trying.
+    """
+    if not beach_name or len(beach_name) < 4:
+        return []
+    # Skip generic single-word names that would collide with non-beach categories
+    GENERIC = {"sand beach", "long beach", "main beach", "north beach",
+               "south beach", "east beach", "west beach", "lake beach",
+               "town beach", "city beach", "public beach", "ocean beach"}
+    if beach_name.lower().strip() in GENERIC:
+        return []
+
+    # Title-case + underscore — Commons convention
+    base = beach_name.strip().replace(" ", "_")
+    # Strip parenthetical disambiguators that we'll re-add as state suffix
+    base = _re_global.sub(r"_\([^)]+\)$", "", base)
+
+    candidates: list[str] = []
+    candidates.append(f"Category:{base}")
+    if state:
+        # US state Categories on Commons follow several conventions
+        full_name = US_STATE_FULL_NAMES.get(state.upper(), state)
+        candidates.append(f"Category:{base}_({full_name})")
+        candidates.append(f"Category:{base},_{full_name}")
+        # State Park variant — common for named parks that include the suffix
+        if not _re_global.search(r"state[_ ]park|sp$", base, _re_global.I):
+            candidates.append(f"Category:{base}_State_Park")
+    return candidates
+
+
+# Lazy-loaded; populated once and reused.
+US_STATE_FULL_NAMES = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+    "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+    "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho",
+    "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas",
+    "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+    "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi",
+    "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+    "NH": "New_Hampshire", "NJ": "New_Jersey", "NM": "New_Mexico", "NY": "New_York",
+    "NC": "North_Carolina", "ND": "North_Dakota", "OH": "Ohio", "OK": "Oklahoma",
+    "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode_Island", "SC": "South_Carolina",
+    "SD": "South_Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah",
+    "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West_Virginia",
+    "WI": "Wisconsin", "WY": "Wyoming",
+}
+
+
+def commons_category_exists(category_title: str) -> bool:
+    """Cheap check: does this Commons Category page exist?"""
     params = {
-        "action": "query", "prop": "imageinfo",
-        "pageids": "|".join(str(p) for p in pageids),
-        "iiprop": "url|size|mime|extmetadata",
-        "iiextmetadatafilter": "License|LicenseShortName|Artist|ImageDescription|Credit|UsageTerms",
+        "action": "query",
+        "titles": category_title,
         "format": "json",
     }
-    out = {}
     pages = _commons_call(params).get("query", {}).get("pages", {}) or {}
+    # Missing pages are returned with pageid=-1 / missing="" key
+    for pid, page in pages.items():
+        if int(pid) > 0 and "missing" not in page:
+            return True
+    return False
+
+
+def commons_category_members(category_title: str, limit: int = 50) -> list[dict]:
+    """Fetch File: members of a Commons Category. Returns geosearch-shaped
+    dicts so the caller can pass them through the same imageinfo + rank path:
+    [{pageid, title, lat=None, lon=None, dist=None}]
+    """
+    params = {
+        "action": "query",
+        "generator": "categorymembers",
+        "gcmtitle": category_title,
+        "gcmnamespace": "6",          # File: namespace
+        "gcmlimit": str(min(limit, 500)),
+        "prop": "info",
+        "format": "json",
+    }
+    pages = _commons_call(params).get("query", {}).get("pages", {}) or {}
+    out: list[dict] = []
     for pid_str, page in pages.items():
         pid = int(pid_str)
-        info_list = page.get("imageinfo") or []
-        if info_list:
-            out[pid] = info_list[0] | {"_title": page.get("title")}
+        if pid <= 0:
+            continue
+        out.append({
+            "pageid": pid,
+            "title":  page.get("title"),
+            "lat":    None,             # category members aren't geo-anchored;
+            "lon":    None,             # rank_and_pick handles the None case
+        })
+    return out
+
+
+def commons_imageinfo(pageids: list[int]) -> dict[int, dict]:
+    """Batch fetch imageinfo for pageids. Returns {pageid: imageinfo dict}.
+
+    Commons API rejects unauthenticated requests with > 50 pageids per call,
+    returning an empty pages dict silently. Category-page members can push
+    a single beach over 50 (Old Orchard Beach has 54 + 3 geo hits = 57),
+    so we chunk transparently.
+    """
+    if not pageids: return {}
+    CHUNK = 50
+    out: dict[int, dict] = {}
+    for i in range(0, len(pageids), CHUNK):
+        batch = pageids[i:i + CHUNK]
+        params = {
+            "action": "query", "prop": "imageinfo",
+            "pageids": "|".join(str(p) for p in batch),
+            "iiprop": "url|size|mime|extmetadata",
+            "iiextmetadatafilter": "License|LicenseShortName|Artist|ImageDescription|Credit|UsageTerms",
+            "format": "json",
+        }
+        pages = _commons_call(params).get("query", {}).get("pages", {}) or {}
+        for pid_str, page in pages.items():
+            pid = int(pid_str)
+            info_list = page.get("imageinfo") or []
+            if info_list:
+                out[pid] = info_list[0] | {"_title": page.get("title")}
     return out
 
 
@@ -396,7 +512,13 @@ def rank_and_pick(geo_results: list[dict], info_map: dict[int, dict],
         if PHOTO_EXTS and ext and ext not in PHOTO_EXTS: continue
         mime = info.get("mime") or ""
         if mime and not mime.startswith("image/"): continue
-        d = int(haversine_m(beach_lat, beach_lng, g.get("lat") or 0, g.get("lon") or 0))
+        # Distance: geosearch hits have lat/lon; category-page members don't
+        # (and didn't need to — Category membership implies the photo IS of
+        # the beach). Treat category-members as distance=0 from beach centroid.
+        if g.get("lat") is None or g.get("lon") is None:
+            d = 0
+        else:
+            d = int(haversine_m(beach_lat, beach_lng, g.get("lat"), g.get("lon")))
 
         extmd = info.get("extmetadata") or {}
         desc = (extmd.get("ImageDescription", {}) or {}).get("value") or ""
@@ -405,9 +527,17 @@ def rank_and_pick(geo_results: list[dict], info_map: dict[int, dict],
         # Dog-word filter (require_dog=True by default per [[this-is-a-dog-app]]).
         # Skips files whose title+description don't mention a dog token.
         # Drops ~98% of geosearch hits (boats, tents, panoramas) and lifts
-        # the surviving has_dog rate substantially. Override with
-        # --no-dog-filter for backfills (e.g., scenic placeholders).
-        if require_dog and not _has_dog_text(title, desc):
+        # the surviving has_dog rate substantially.
+        #
+        # Applied to GEOSEARCH hits only. Category-page members (lat=None)
+        # are skipped because Category membership is a stronger relevance
+        # signal — a Commons curator already vetted "this photo is OF this
+        # beach". Without this carve-out, Category lookup nets nearly zero
+        # photos for famous beaches whose Categories are scenic (Popham
+        # has 32 Category members, 0 mention dogs in title/description).
+        # Override with --no-dog-filter for backfills.
+        is_from_category = (g.get("lat") is None)
+        if require_dog and not is_from_category and not _has_dog_text(title, desc):
             continue
 
         # Skip blocklisted photographers
@@ -537,6 +667,13 @@ def main():
                          "Default is to require dogs|puppy|retriever|... in title or "
                          "description (per [[this-is-a-dog-app]]). Use this flag only "
                          "for scenic-placeholder backfills.")
+    ap.add_argument("--no-category-lookup", action="store_true",
+                    help="Disable Commons Category page lookup. Default is ON: "
+                         "for each beach, also try Category:<Beach_Name>, "
+                         "Category:<Beach_Name>_(State), Category:<Beach_Name>_State_Park "
+                         "etc. and pull members. Major lever for famous beaches whose "
+                         "Commons content isn't all geo-tagged (Old Orchard, Hanauma, "
+                         "Camden Hills SP, etc.).")
     args = ap.parse_args()
 
     ent = ENTITIES[args.entity]
@@ -564,26 +701,54 @@ def main():
         time.sleep(THROTTLE_S)
         try:
             geo = commons_geosearch(b["lat"], b["lng"], args.radius, limit=30)
-            if not geo:
+
+            # Category lookup: pulls Commons Category page members that
+            # aren't geo-tagged. Default ON; --no-category-lookup to skip.
+            cat_hits: list[dict] = []
+            cat_used: str | None = None
+            if not args.no_category_lookup:
+                for cand in derive_candidate_categories(b.get("name", ""), b.get("state")):
+                    if commons_category_exists(cand):
+                        cat_hits = commons_category_members(cand, limit=80)
+                        cat_used = cand
+                        break
+
+            # Merge geo + category hits, dedupe on pageid (geo wins for distance)
+            merged_by_pid: dict[int, dict] = {}
+            for g in geo:
+                merged_by_pid[g["pageid"]] = g
+            for c in cat_hits:
+                merged_by_pid.setdefault(c["pageid"], c)
+
+            if not merged_by_pid:
                 no_photos += 1
                 replace_commons(b["fid"], [], entity=args.entity)
                 continue
+
             # Filter curator-rejected external_ids — don't surface trashed photos
             rej = rejected_by_fid.get(b["fid"]) or set()
             if rej:
-                geo = [g for g in geo if str(g.get("pageid")) not in rej]
-                if not geo:
+                merged_by_pid = {pid: g for pid, g in merged_by_pid.items()
+                                 if str(pid) not in rej}
+                if not merged_by_pid:
                     no_photos += 1
                     replace_commons(b["fid"], [], entity=args.entity)
                     continue
+
+            merged = list(merged_by_pid.values())
             time.sleep(THROTTLE_S)
-            info_map = commons_imageinfo([g["pageid"] for g in geo])
-            picked = rank_and_pick(geo, info_map, b["lat"], b["lng"],
+            info_map = commons_imageinfo([g["pageid"] for g in merged])
+            picked = rank_and_pick(merged, info_map, b["lat"], b["lng"],
                                    args.radius, args.per_beach, blocked,
                                    beach_name=b.get("name", ""),
                                    beach_meta={"scoring_tier": b.get("scoring_tier"),
                                                "dogs_allowed": b.get("dogs_allowed")},
                                    require_dog=not args.no_dog_filter)
+            if cat_used and picked:
+                # Light traceability — first chunk's stdout shows which
+                # category landed photos. Useful for spot-checking matches.
+                print(f"    fid={b['fid']} '{b.get('name','')}' "
+                      f"→ {cat_used} ({len(cat_hits)} members)", flush=True)
             if not picked:
                 no_photos += 1
                 replace_commons(b["fid"], [], entity=args.entity)

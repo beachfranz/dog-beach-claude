@@ -66,6 +66,7 @@ HOST_BLOCKLIST = (
     # Session-bound CDNs that never render hot-linked (no referrer/cookies):
     "lookaside.fbsbx.com",       # Facebook static
     "lookaside.instagram.com",   # Instagram static
+    "tiktok.com",                # TikTok blocks hot-linked image rendering — broken thumbnails. Franz 2026-06-07
 )
 
 

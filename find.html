@@ -445,13 +445,24 @@
     gap: 14px;
     align-items: center;
   }
+  /* Walkability score disc inside the now-strip — smaller than result-card
+   * discs (48px vs 56px) so it reads as a peer signal not a competitor. */
+  #now-score-disc.score-disc {
+    width: 48px; height: 48px;
+    box-shadow: 0 2px 6px rgba(15,39,66,0.15);
+  }
+  #now-score-disc .score-val { font-size: 17px; font-weight: 700; }
+  #now-score-disc .score-lbl { font-size: 8px; }
+  .now-headline {
+    display: flex; align-items: baseline; gap: 8px;
+    line-height: 1;
+  }
   .now-icon {
-    font-size: 42px; line-height: 1;
-    width: 56px; height: 56px;
-    display: flex; align-items: center; justify-content: center;
-    background: white;
-    border-radius: 50%;
-    box-shadow: var(--shadow-sm);
+    font-size: 26px; line-height: 1;
+    width: auto; height: auto;
+    background: none;
+    border-radius: 0;
+    box-shadow: none;
     flex-shrink: 0;
   }
   .now-figures {
@@ -460,12 +471,29 @@
   }
   .now-temp {
     font-family: 'Outfit', sans-serif;
-    font-size: 32px; font-weight: 700;
+    font-size: 28px; font-weight: 700;
     letter-spacing: -0.02em; line-height: 1;
     color: var(--text);
     font-variant-numeric: tabular-nums;
   }
-  .now-temp-deg { color: var(--text-muted); font-weight: 500; }
+  .now-temp-deg { color: var(--text-muted); font-weight: 500; font-size: 0.7em; }
+  /* Best-walk-window line — paws icon + label, sits under the headline
+   * but above the blurb. Hidden when no good window is found. */
+  .now-window {
+    font-size: 13px; color: var(--text);
+    padding-top: 10px;
+    margin-top: 4px;
+    border-top: 1px dashed rgba(3,105,161,0.20);
+  }
+  .now-window-icon { margin-right: 4px; }
+  .now-window strong { font-weight: 700; color: var(--advisory); }
+  /* Walkability blurb — deterministic 1-2 sentence prose. */
+  .now-blurb {
+    font-size: 13px; line-height: 1.5;
+    color: var(--text); opacity: 0.92;
+    margin-top: 2px;
+  }
+  .now-blurb:empty, .now-window:empty { display: none; }
   .now-summary {
     font-size: 13px; color: var(--text);
     font-weight: 500;
@@ -923,17 +951,25 @@
 
   <section class="now-strip now-loading" id="now-strip" aria-live="polite">
     <div class="now-head">
-      <span class="now-eyebrow">Now at you</span>
+      <span class="now-eyebrow">Walk from here</span>
       <span class="now-time" id="now-time">—</span>
     </div>
     <div class="now-body">
-      <div class="now-icon" id="now-icon">🌤️</div>
+      <div class="score-disc" id="now-score-disc" aria-hidden="true">
+        <span class="score-val" id="now-score-val">—</span>
+        <span class="score-lbl">Now</span>
+      </div>
       <div class="now-figures">
-        <div class="now-temp"><span id="now-temp-val">—</span><span class="now-temp-deg">°F</span></div>
+        <div class="now-headline">
+          <span class="now-icon" id="now-icon">🌤️</span>
+          <span class="now-temp"><span id="now-temp-val">—</span><span class="now-temp-deg">°F</span></span>
+        </div>
         <div class="now-summary" id="now-summary">Reading your sky…</div>
         <div class="now-meta" id="now-meta"></div>
       </div>
     </div>
+    <div class="now-window" id="now-window"></div>
+    <div class="now-blurb" id="now-blurb"></div>
     <div class="now-cautions" id="now-cautions"></div>
   </section>
 
@@ -1222,35 +1258,86 @@
   }
 
   // ─── One-off "Now at you" weather ───────────────────────────────────
+  // Read user-location weather via the W2 reference layer:
+  //   1. ensure-user-weather-cell registers the bin-floored cell and
+  //      does a one-shot Open-Meteo fetch when cold ([[weather-grid-
+  //      reference-layer]] / [[grid-consumers-require-cell-warmth-gate]]).
+  //   2. weather_for_point reads the resulting hourly rows.
+  //   3. Compute walkability score per hour, pick best window, render.
+  // NO direct Open-Meteo fallback per the HARD rule — a cold cell that
+  // can't warm shows the loading state until the fn succeeds.
+  let nowHourlyRows = [];   // raw rows from weather_for_point
   async function loadNowAtUser() {
     if (userLat == null || userLng == null) return;
     const strip = document.getElementById('now-strip');
     strip.classList.add('now-loading');
-    const url = `https://api.open-meteo.com/v1/forecast`
-      + `?latitude=${userLat}&longitude=${userLng}`
-      + `&current=temperature_2m,wind_speed_10m,wind_gusts_10m,weather_code,uv_index,relative_humidity_2m,precipitation,apparent_temperature`
-      + `&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto`;
     try {
-      const res = await fetch(url);
-      const data = await res.json();
-      const c = data.current ?? {};
+      const ensureRes = await fetch(
+        `${SUPABASE_URL}/functions/v1/ensure-user-weather-cell`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lat: userLat, lng: userLng }),
+        });
+      const ensure = await ensureRes.json();
+      if (!ensure?.is_warm) {
+        document.getElementById('now-summary').textContent = 'Warming up your neighborhood forecast…';
+        return;
+      }
+      const startISO = new Date().toISOString();
+      const endISO   = new Date(Date.now() + 24 * 3600_000).toISOString();
+      const wfpRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/rpc/weather_for_point`,
+        {
+          method: 'POST',
+          headers: {
+            'apikey':        ANON_KEY,
+            'Authorization': `Bearer ${ANON_KEY}`,
+            'Content-Type':  'application/json',
+          },
+          body: JSON.stringify({
+            p_lat: userLat, p_lng: userLng,
+            p_start_ts: startISO, p_end_ts: endISO,
+          }),
+        });
+      if (!wfpRes.ok) throw new Error(`weather_for_point HTTP ${wfpRes.status}`);
+      nowHourlyRows = (await wfpRes.json()) || [];
+      if (!Array.isArray(nowHourlyRows) || nowHourlyRows.length === 0) {
+        document.getElementById('now-summary').textContent = 'Forecast not ready yet.';
+        return;
+      }
+      // Pick the current/nearest-future hour as "now" for the headline.
+      const nowMs = Date.now();
+      const sorted = [...nowHourlyRows].sort((a, b) =>
+        Math.abs(new Date(a.forecast_ts) - nowMs) - Math.abs(new Date(b.forecast_ts) - nowMs));
+      const nh = sorted[0];
       nowAtUser = {
-        tempF:    c.temperature_2m,
-        feelsF:   c.apparent_temperature,
-        windMph:  c.wind_speed_10m,
-        gustMph:  c.wind_gusts_10m,
-        wmoCode:  c.weather_code,
-        uv:       c.uv_index,
-        rhPct:    c.relative_humidity_2m,
-        precip:   c.precipitation,
-        timeISO:  c.time,
-        tz:       data.timezone,
+        tempF:    num(nh.temp_air),
+        feelsF:   num(nh.feels_like),
+        windMph:  num(nh.wind_speed),
+        wmoCode:  intOrNull(nh.weather_code),
+        uv:       num(nh.uv_index),
+        precip:   num(nh.precip_mm),
+        timeISO:  nh.forecast_ts,
+        tz:       null,  // not returned by weather_for_point; use beach-local for display
       };
       renderNowAtUser();
-    } catch {
-      document.getElementById('now-summary').textContent = 'Sky reading unavailable.';
+    } catch (e) {
+      document.getElementById('now-summary').textContent = 'Forecast unavailable.';
+    } finally {
       strip.classList.remove('now-loading');
     }
+  }
+
+  function num(v) {
+    if (v == null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  function intOrNull(v) {
+    if (v == null) return null;
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : null;
   }
 
   function renderNowAtUser() {
@@ -1264,16 +1351,167 @@
     if (n.feelsF != null && Math.abs(n.feelsF - n.tempF) >= 3) meta.push(`Feels ${Math.round(n.feelsF)}°`);
     if (n.windMph != null) meta.push(`Wind ${Math.round(n.windMph)} mph`);
     if (n.uv != null) meta.push(`UV ${n.uv.toFixed(1)}`);
-    if (n.rhPct != null) meta.push(`RH ${Math.round(n.rhPct)}%`);
     document.getElementById('now-meta').innerHTML = meta
       .map(t => `<span>${t}</span>`).join(`<span class="meta-dot">·</span>`);
-    // Local time
     if (n.timeISO) {
       const dt = new Date(n.timeISO);
       const fmt = new Intl.DateTimeFormat('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
       document.getElementById('now-time').textContent = fmt.format(dt);
     }
     document.getElementById('now-cautions').innerHTML = buildCautionBadges(n);
+
+    // ── Walkability score, best window, blurb ──
+    // Compute over the hourly rows fetched from weather_for_point.
+    const hourly = nowHourlyRows.map(walkabilityForRow).sort((a, b) => a.tsMs - b.tsMs);
+    const nowMs = Date.now();
+    const nowHour = hourly.find(h => h.tsMs >= nowMs - 30 * 60_000) ?? hourly[0];
+    const nowScore = nowHour?.score ?? null;
+    // Disc
+    const disc  = document.getElementById('now-score-disc');
+    const dval  = document.getElementById('now-score-val');
+    if (nowScore != null) {
+      dval.textContent = nowScore;
+      const tone = nowScore >= 70 ? 'tone-go' : nowScore >= 45 ? 'tone-mid' : 'tone-low';
+      disc.className = `score-disc ${tone}`;
+    } else {
+      dval.textContent = '—';
+      disc.className = 'score-disc tone-unk';
+    }
+    // Best window from now → end of day at user's local tz (best-effort:
+    // use browser local). Same algorithm as beach.html _bestWindowFromNowV2.
+    const win = pickBestWalkWindow(hourly, nowMs);
+    const winEl = document.getElementById('now-window');
+    if (win) {
+      winEl.innerHTML = `<span class="now-window-icon">🐾</span> Best walk: <strong>${escapeHtml(win.label)}</strong>`;
+      winEl.style.display = '';
+    } else {
+      winEl.style.display = 'none';
+    }
+    // Blurb — deterministic rule-based copy keyed on dominant condition.
+    const blurbEl = document.getElementById('now-blurb');
+    const blurb = walkabilityBlurb(n, hourly, win);
+    if (blurb) {
+      blurbEl.textContent = blurb;
+      blurbEl.style.display = '';
+    } else {
+      blurbEl.style.display = 'none';
+    }
+  }
+
+  // Per-row walkability: simplified weather-only v2 mirror. Same band
+  // shapes as scoring_config_v2 (temp bell, wind, sky WMO, heat/UV neg,
+  // harsh neg) minus amenities/dog-access/tide/crowd which don't apply
+  // to a generic neighborhood walk.
+  function walkabilityForRow(r) {
+    const tempF  = num(r.temp_air);
+    const feelsF = num(r.feels_like) ?? tempF;
+    const wind   = num(r.wind_speed);
+    const uv     = num(r.uv_index);
+    const wmo    = intOrNull(r.weather_code);
+    const precip = num(r.precip_mm);
+    const tsMs   = new Date(r.forecast_ts).getTime();
+
+    // temp_pos: bell around 72°F, ±20° range, max 10
+    const tempPos = tempF == null ? 4
+      : Math.max(0, Math.round(10 * (1 - Math.min(Math.abs(feelsF - 72), 20) / 20)));
+    // wind_pos: 6 at calm, drops 1 per 2 mph, floor 0
+    const windPos = wind == null ? 4 : Math.max(0, 6 - Math.round(wind / 2));
+    // sky_pos: from WMO (mirrors the SQL switch in apply_v2_best_window_bulk)
+    const skyPos = wmoSkyPos(wmo);
+    // heat_uv_neg
+    const uvNeg = uv == null ? 0 : uv >= 11 ? 8 : uv >= 8 ? 5 : uv >= 6 ? 2 : 0;
+    const hotNeg = feelsF == null || feelsF < 90 ? 0
+      : Math.min(4, Math.round((feelsF - 90) * 0.4));
+    // harsh_neg: strong wind, rain, cold
+    const windHarsh = wind == null ? 0 : wind >= 25 ? 8 : wind >= 15 ? 4 : 0;
+    const precipNeg = precip == null ? 0 : precip > 1.5 ? 6 : precip > 0.5 ? 3 : 0;
+    const coldNeg = feelsF == null || feelsF > 50 ? 0
+      : Math.min(6, Math.round((50 - feelsF) * 0.25));
+
+    const positives = Math.min(22, tempPos + windPos + skyPos);
+    const negatives = Math.min(20, uvNeg + hotNeg + windHarsh + precipNeg + coldNeg);
+    const score = Math.max(0, Math.min(100, 50 + positives - negatives));
+    return { tsMs, score, tempF, feelsF, wind, uv, wmo, precip, isDay: r.is_day === true };
+  }
+
+  function wmoSkyPos(code) {
+    if (code == null) return 2;
+    const map = { 0:6, 1:5, 2:4, 3:2, 45:1, 48:0, 51:2, 53:1, 55:0,
+                  56:0, 57:0, 61:1, 63:0, 65:0, 66:0, 67:0, 71:0, 73:0, 75:0, 77:0,
+                  80:1, 81:0, 82:0, 85:0, 86:0, 95:0, 96:0, 99:0 };
+    return map[code] ?? 2;
+  }
+
+  // Longest contiguous run of "good" hours (score ≥ 65) from now forward,
+  // capped at 5h. Mirrors the picker shape in beach.html's _bestWindowFromNowV2.
+  function pickBestWalkWindow(hourly, nowMs) {
+    const eligible = hourly.filter(h => h.tsMs >= nowMs - 30 * 60_000 && h.score >= 65);
+    if (eligible.length < 2) return null;
+    const runs = [];
+    let cur = [eligible[0]];
+    for (let i = 1; i < eligible.length; i++) {
+      const dt = eligible[i].tsMs - cur[cur.length - 1].tsMs;
+      if (Math.abs(dt - 3600_000) < 60_000) {
+        cur.push(eligible[i]);
+      } else {
+        if (cur.length >= 2) runs.push(cur);
+        cur = [eligible[i]];
+      }
+    }
+    if (cur.length >= 2) runs.push(cur);
+    if (!runs.length) return null;
+    // Best by avg score, cap at 5h
+    const MAX_LEN = 5;
+    let best = null;
+    for (const run of runs) {
+      const slice = run.length <= MAX_LEN ? run : (() => {
+        let bestSlice = null, bestSum = -Infinity;
+        for (let i = 0; i + MAX_LEN <= run.length; i++) {
+          const s = run.slice(i, i + MAX_LEN);
+          const sum = s.reduce((acc, h) => acc + h.score, 0);
+          if (sum > bestSum) { bestSum = sum; bestSlice = s; }
+        }
+        return bestSlice;
+      })();
+      const avg = slice.reduce((s, h) => s + h.score, 0) / slice.length;
+      if (!best || avg > best.avg) best = { slice, avg };
+    }
+    if (!best) return null;
+    const startMs = best.slice[0].tsMs;
+    const endMs   = best.slice[best.slice.length - 1].tsMs + 3600_000;
+    return {
+      label: `${fmtClockHour(startMs)}–${fmtClockHour(endMs)}`,
+      startMs, endMs, avg: Math.round(best.avg),
+    };
+  }
+
+  function fmtClockHour(ms) {
+    const d = new Date(ms);
+    return new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: true })
+      .format(d).toLowerCase().replace(/\s/g, '');
+  }
+
+  // Deterministic blurb. Leads with the dominant condition; trailing
+  // sentence is upbeat-but-honest (per [[honest-brand-prefers-candor]]).
+  function walkabilityBlurb(now, hourly, win) {
+    if (!now) return '';
+    const t = now.tempF, f = now.feelsF ?? t, w = now.windMph, uv = now.uv, p = now.precip, wmo = now.wmoCode;
+    const heads = [];
+    if (SEVERE_WMO.has(wmo)) heads.push("Storm's overhead — wait it out.");
+    else if (p != null && p > 1) heads.push("Rain's falling — slip out between bands.");
+    else if (uv != null && uv >= 8) heads.push("Sun's intense — early or late is kinder on paws.");
+    else if (f >= 88) heads.push("Hot one — keep it short, hit the shade.");
+    else if (f <= 38) heads.push("Cold one — bundle up if your dog runs cool.");
+    else if (w != null && w >= 22) heads.push("Wind's up — head out anyway, just hold the leash tight.");
+    else if (wmo === 0) heads.push("Clear and easy — neighborhood walk's a solid pick.");
+    else if (wmo === 1 || wmo === 2) heads.push("Mild sky — comfortable walking weather.");
+    else if (wmo === 3) heads.push("Overcast and calm — good walking light.");
+    else if (wmo === 45 || wmo === 48) heads.push("Fog's in — keep the leash close.");
+    else heads.push("Walkable now — neighborhood is in play.");
+    if (win) {
+      heads.push(`Best stretch looks like ${win.label}.`);
+    }
+    return heads.join(' ');
   }
 
   function nowSummary(n) {

@@ -35,6 +35,13 @@
     "pattern": "wordpress_slug",
     "added": "2026-05-23"
   },
+  "ME": {
+    "agency": "Maine Bureau of Parks and Lands (DACF / BPL)",
+    "url": "https://apps.web.maine.gov/cgi-bin/online/doc/parksearch/index.pl",
+    "loader_deferred": true,
+    "notes": "Franz-provided 2026-06-07. Official BPL portal exposes a parksearch CGI with 40 parks (dropdown), but per-park detail URL pattern is JS-driven (form GET to index.pl with state_park=<id> returns identical 84,298-byte index page; ?searchSubmit / ?submit / results.pl / detail.pl all ignored or 404). Cracking it = Playwright + DevTools, ~1hr. Wikimedia Category:State_parks_of_Maine has 20 sub-categories + ~350 photos (Camden Hills 55, Fort McClary 86, Reid 33, Popham 32) — currently unreachable until Wikimedia loader gains category-based lookup (parked Wikimedia improvement #2 from 2026-06-06). Park IDs harvested from BPL dropdown for future use: Popham=22, Reid=13, Crescent=4, Two Lights=28, Ferry=8, Scarborough=87, Roque Bluffs=23, Lamoine=16, Sebago Lake=26, Mt Blue=18, Wolfe's Neck Woods=31, Camden Hills=14, etc.",
+    "added": "2026-06-07"
+  },
   "NH": {
     "agency": "New Hampshire Division of Parks and Recreation (NH State Parks)",
     "url": "https://www.nhstateparks.org/find-parks-trails",

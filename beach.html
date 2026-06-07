@@ -69,9 +69,10 @@
     font-size: 24px; font-weight: 700; color: var(--text);
     margin: 0 0 6px;
   }
-  /* Your-Fit overall as a colored badge to the left of the name.
-   * 20% smaller than the h1 (24px → 19px) per Franz; colored by
-   * the same go/caution/no_go threshold the bar chart uses. */
+  /* Today's score badge — composite_score_v2 from the find_beaches /
+   * get-beach-summary surface. Same number find.html shows. Colored by
+   * score tone matching find.html's pin + disc palette. Neutral grey
+   * when no score for today (out-of-season, no scoring tier, etc.). */
   .fit-badge {
     display: inline-block;
     font-size: 19px; font-weight: 700; line-height: 1.1;
@@ -82,6 +83,10 @@
     vertical-align: 0.04em;
     margin-right: 4px;
   }
+  .fit-badge.tone-go  { background: #16a34a; }
+  .fit-badge.tone-mid { background: #f59e0b; }
+  .fit-badge.tone-low { background: #dc2626; }
+  .fit-badge.tone-unk { background: #6b7280; }
   /* City · state inlined into the h1 — same font/size/weight,
    * lighter color so it reads as supporting info to the name. */
   .beach-region {
@@ -1069,8 +1074,16 @@ function formatClosureLine(c) {
 
 function renderHourlyBarsV2(p, nowH) {
   const hours = p.hours || [];
-  const bestStart = p.best_window_v2_start;
-  const bestEnd   = p.best_window_v2_end;
+  // Mark the 🐶 on the REMAINING best window — same _bestWindowFromNowV2
+  // call the headline uses (line 1348). Previously read full-day
+  // p.best_window_v2_start/end from the payload, which marked the
+  // global-best block (often the morning window for HI/SD). Bars then
+  // contradicted the headline — chart said "morning was best" while the
+  // text said "5pm–10pm is your window." Per Franz 2026-06-07: the
+  // headline is correct; the chart was looking at the wrong window.
+  const remaining = _bestWindowFromNowV2(hours, nowH);
+  const bestStart = remaining?.startHour ?? null;
+  const bestEnd   = remaining?.endHour ?? null;
   let maxPos = 0, maxNeg = 0;
   for (const h of hours) {
     const drivePos = Math.max(0, h.drive || 0);
@@ -1593,14 +1606,25 @@ function render(data, beachFid) {
   const { beach, dog_policy, amenities } = data;
   document.title = `${beach.display_name} — Dog Beach Scout`;
   // Beach name + inline region (city · state) — same h1, lighter color.
-  // Your-Fit overall renders as a colored badge to the left of the name.
+  // Score badge renders to the left of the name. Source = today's
+  // composite_score_v2 (max of best-window hour scores; bakes amenities,
+  // dog access, weather, tide, wind, crowd, heat via scoring_config_v2
+  // band weights). Same number find.html shows — single source of truth
+  // per Franz 2026-06-07. Previously this rendered a client-side 60/20/20
+  // _appealScores() mix that diverged from find's number; deleted.
   const nameEl = document.getElementById('beach-name');
   nameEl.textContent = '';
-  const fitScores = _appealScores(beach, dog_policy, amenities, data.hours_today);
+  const todayScore = data.today?.composite_score_v2 ?? data.today?.composite_score ?? null;
   const badge = document.createElement('span');
-  badge.className = 'fit-badge';
-  badge.textContent = fitScores.overall;
-  badge.title = `Your Fit · ${_PREF_LABEL[fitScores.userPref] || fitScores.userPref}: ${fitScores.overall}/100`;
+  const tone = todayScore == null ? 'tone-unk'
+             : todayScore >= 70   ? 'tone-go'
+             : todayScore >= 45   ? 'tone-mid'
+             :                       'tone-low';
+  badge.className = `fit-badge ${tone}`;
+  badge.textContent = todayScore != null ? todayScore : '—';
+  badge.title = todayScore != null
+    ? `Today's score · ${todayScore}/100`
+    : 'No score available for today';
   nameEl.appendChild(badge);
   nameEl.appendChild(document.createTextNode(' ' + beach.display_name));
   const regionParts = [];
@@ -3600,18 +3624,15 @@ function _appealScores(beach, dogPolicy, amenities, hoursToday) {
   return { availability, amenitiesScore, weatherScore, overall, userPref: pref };
 }
 
-function buildAppealCard(beach, dogPolicy, amenities, hoursToday) {
-  const s = _appealScores(beach, dogPolicy, amenities, hoursToday);
-  const prefLabel = _PREF_LABEL[s.userPref] || s.userPref;
-  return `<section class="card appeal-card">
-    <div class="appeal-header">
-      <h2>Your Fit <span class="appeal-pref">· ${escHtml(prefLabel)}</span></h2>
-      <div class="appeal-overall">
-        <span class="appeal-overall-num">${s.overall}</span><span class="appeal-overall-max">/100</span>
-      </div>
-    </div>
-  </section>`;
-}
+// buildAppealCard removed 2026-06-07 — the 60/20/20 _appealScores mix
+// diverged from composite_score_v2 (the number find.html shows). Per
+// Franz, the score badge in the h1 + the find.html disc both read
+// composite_score_v2 now; the "Your Fit" appeal card was never mounted
+// in render() anyway, but the helpers (_appealScores, USER_PREF,
+// _hourlyAvailability, _amenitiesScore, _availabilityFromFlags,
+// _PREF_LABEL) and the retired _renderScoreBars chart that consumes
+// them are preserved as dead code alongside the chart Franz kept
+// "in case they come back" (see comment near line 3162).
 
 // ─── Pack list (rule-based, no LLM) ──────────────────────────────
 // Replaces the 2026-05-07 pack-list-via-Scout sentence that was

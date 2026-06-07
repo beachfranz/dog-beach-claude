@@ -417,12 +417,12 @@ The loader fans out per-cell fetches across batches over minutes-to-hours (per-t
 
 **Two gate shapes:**
 
-1. **Picker SQL fn** (`beaches_due_for_refresh`, `dog_parks_due_for_refresh`): CTE filters entities whose cell has < 45 forecast rows in `[now, now+48h]`. Pattern in `20260606ze_picker_weather_grid_warm_gate.sql`.
+1. **Picker SQL fn** (`beaches_due_for_refresh`, `dog_parks_due_for_refresh`): CTE filters entities whose cell has < 22 forecast rows in `[now, now+24h]`. Pattern in `20260606ze_picker_weather_grid_warm_gate.sql`; threshold tuned in `20260607c_grid_warm_threshold_realism.sql`.
 2. **Direct SQL fn** (`refresh_beach_day_hourly_scores_bulk`, `refresh_marine_advisories`): same filter embedded in the `_scope` CTE so cold-cell entities never reach the JOIN. Don't add a fallback — let the entity drop out; next loader-tier tick + next consumer-tick auto-recovers.
 
 **Orchestrator gate** (state-launch): `weather_grid_warm` phase in `run_state_pipeline.py` polls cell coverage, fires `refresh-weather-grid {tier:'t1', state_filter}` if cold, criterion ≥95% of state cells warm. Belt-and-suspenders so a fresh-state launch completes without operator intervention.
 
-**Threshold = ≥45 of next-48h** because t1 owns the next-48h window and fires every hour with retries. A wider 7-day threshold was tried first and false-negative'd cells where t3 (12h schedule) hadn't yet caught up — CA/MA cells dropped to 39–55% pass rate. The near-48h window is what daily refresh actually depends on (today + tomorrow bars).
+**Threshold = ≥22 of next-24h** because t1 fetches Open-Meteo with `forecast_days=2` → hours from `today 00:00` to `tomorrow 23:00` UTC. As the day progresses, the forward-looking subset (rows > now()) erodes from 48 → ~24 by end-of-day. The original ≥45/48h threshold was satisfiable only in a narrow window around UTC midnight — surfaced as the ME launch (16:30 UTC) gate-pass of 1/201 cells. ≥22/24 anchors to the window t1 reliably populates at any UTC hour while preserving the gate's intent (cell has contiguous near-term forecast — prevents partial-with-gaps writes like HI fid 13882's 1PM cutoff).
 
 ### Direct-fetch fallback — when it's OK
 
@@ -433,7 +433,7 @@ ONE remaining surface still uses direct-fetch fallback: `get-beach-now` / `get-d
 - **Dagster schedules default STOPPED** per project convention. Toggle ON via Dagster UI (`hourly_weather_grid_schedule` + `daily_weather_grid_inventory_schedule`) or grid goes stale within 1-3 days as forecasts age out. Picker gate then keeps consumers from racing the cold grid.
 - **WORKER_RESOURCE_LIMIT still possible** on `daily-beach-refresh` at >50 beaches/call. Mitigated via 2-min chunked cron (`beach_refresh_chunked`) + 22h stale filter. Real fix is Phase W4 (Dagster port of daily refreshes).
 
-Migrations: `20260525_weather_grid_schema.sql` + `_helpers.sql` + `_materialization.sql` + `20260606ze_picker_weather_grid_warm_gate.sql`. Pins: `[[weather-grid-reference-layer]]`, `[[grid-consumers-require-cell-warmth-gate]]`.
+Migrations: `20260525_weather_grid_schema.sql` + `_helpers.sql` + `_materialization.sql` + `20260606ze_picker_weather_grid_warm_gate.sql` + `20260607c_grid_warm_threshold_realism.sql`. Pins: `[[weather-grid-reference-layer]]`, `[[grid-consumers-require-cell-warmth-gate]]`.
 
 ---
 

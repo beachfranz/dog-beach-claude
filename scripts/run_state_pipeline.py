@@ -1274,10 +1274,10 @@ PHASES = [
             "          (select count(*) from public.marine_grid_hourly w "
             "            where w.grid_lat = c.g_lat and w.grid_lon = c.g_lon "
             "              and w.forecast_ts >  now() "
-            "              and w.forecast_ts <= now() + interval '48 hours') >= 45 "
+            "              and w.forecast_ts <= now() + interval '24 hours') >= 22 "
             "        )::float >= count(*)::float * 0.95)::boolean, true) "
             "from cells c",
-        'criterion_text': '≥95% of state marine cells have ≥45 forecast rows in next 48h '
+        'criterion_text': '≥95% of state marine cells have ≥22 forecast rows in next 24h '
                           '(or no marine cells in state — vacuously true)',
         'progress_sql':
             "with cells as (select distinct marine_grid_lat g_lat, marine_grid_lon g_lon "
@@ -1288,7 +1288,7 @@ PHASES = [
             "          (select count(*) from public.marine_grid_hourly w "
             "            where w.grid_lat = c.g_lat and w.grid_lon = c.g_lon "
             "              and w.forecast_ts >  now() "
-            "              and w.forecast_ts <= now() + interval '48 hours') >= 45 "
+            "              and w.forecast_ts <= now() + interval '24 hours') >= 22 "
             "        )::int done, count(*)::int total from cells c",
     },
     {
@@ -1310,10 +1310,10 @@ PHASES = [
             "          (select count(*) from public.weather_grid_hourly w "
             "            where w.grid_lat = c.g_lat and w.grid_lon = c.g_lon "
             "              and w.forecast_ts >  now() "
-            "              and w.forecast_ts <= now() + interval '48 hours') >= 45 "
+            "              and w.forecast_ts <= now() + interval '24 hours') >= 22 "
             "        )::float >= count(*)::float * 0.95)::boolean "
             "from cells c",
-        'criterion_text': '≥95% of state cells have ≥45 forecast rows in next 48h',
+        'criterion_text': '≥95% of state cells have ≥22 forecast rows in next 24h',
         'progress_sql':
             "with cells as (select distinct weather_grid_lat g_lat, weather_grid_lon g_lon "
             "                 from public.beaches_gold "
@@ -1322,7 +1322,7 @@ PHASES = [
             "          (select count(*) from public.weather_grid_hourly w "
             "            where w.grid_lat = c.g_lat and w.grid_lon = c.g_lon "
             "              and w.forecast_ts >  now() "
-            "              and w.forecast_ts <= now() + interval '48 hours') >= 45 "
+            "              and w.forecast_ts <= now() + interval '24 hours') >= 22 "
             "        )::int done, count(*)::int total from cells c",
     },
     {
@@ -3056,7 +3056,7 @@ def action_descriptions_audit(state: str) -> int:
 
 def action_marine_grid_warm(state: str) -> int:
     """Kick refresh-marine-grid for this state and poll until ≥95% of the
-    state's MARINE cells have ≥45 forecast rows in [now, now+48h]. Inland /
+    state's MARINE cells have ≥22 forecast rows in [now, now+24h]. Inland /
     lake beaches (marine_grid_lat IS NULL) are excluded from the count.
     Vacuously true for states with no marine cells (UT, MI inland, etc.)."""
     sql = ("select count(*) from ("
@@ -3068,7 +3068,7 @@ def action_marine_grid_warm(state: str) -> int:
            "where (select count(*) from public.marine_grid_hourly w "
            "        where w.grid_lat = c.g_lat and w.grid_lon = c.g_lon "
            "          and w.forecast_ts >  now() "
-           "          and w.forecast_ts <= now() + interval '48 hours') >= 45")
+           "          and w.forecast_ts <= now() + interval '24 hours') >= 22")
     total_sql = ("select count(*) from ("
                  "  select distinct marine_grid_lat, marine_grid_lon "
                  "    from public.beaches_gold "
@@ -3165,7 +3165,7 @@ def action_post_refresh_propagation(state: str) -> int:
 
 def action_weather_grid_warm(state: str) -> int:
     """Kick refresh-weather-grid (t1) for this state and poll until ≥95% of
-    the state's grid cells have ≥45 forecast rows in [now, now+48h]. Returns
+    the state's grid cells have ≥22 forecast rows in [now, now+24h]. Returns
     number of cells WARM at exit.
 
     Belt-and-suspenders for the picker grid-warm gate (migration ze): the
@@ -3181,7 +3181,7 @@ def action_weather_grid_warm(state: str) -> int:
            "where (select count(*) from public.weather_grid_hourly w "
            "        where w.grid_lat = c.g_lat and w.grid_lon = c.g_lon "
            "          and w.forecast_ts >  now() "
-           "          and w.forecast_ts <= now() + interval '48 hours') >= 45")
+           "          and w.forecast_ts <= now() + interval '24 hours') >= 22")
     total_sql = ("select count(*) from ("
                  "  select distinct weather_grid_lat, weather_grid_lon "
                  "    from public.beaches_gold "

@@ -1606,15 +1606,21 @@ function render(data, beachFid) {
   const { beach, dog_policy, amenities } = data;
   document.title = `${beach.display_name} — Dog Beach Scout`;
   // Beach name + inline region (city · state) — same h1, lighter color.
-  // Score badge renders to the left of the name. Source = today's
-  // composite_score_v2 (max of best-window hour scores; bakes amenities,
-  // dog access, weather, tide, wind, crowd, heat via scoring_config_v2
-  // band weights). Same number find.html shows — single source of truth
-  // per Franz 2026-06-07. Previously this rendered a client-side 60/20/20
-  // _appealScores() mix that diverged from find's number; deleted.
+  // Score badge renders the CURRENT-HOUR hour_score_v2 (not today's
+  // composite_score_v2 peak). Per Franz 2026-06-07: composite_score_v2
+  // is the peak hour score within today's best window — it diverged
+  // from the chart's "Now" bar (current hour). Badge now tracks Now
+  // directly, so the number you see at the top of the page is the same
+  // number under the "Now" bar marker. find.html badge follows the
+  // same rule once find_beaches is extended to return current_hour_score.
+  // Null when current hour is closed / pre-dawn / post-sunset — show
+  // "—" with neutral tone rather than falling back to peak (that would
+  // re-introduce the inconsistency we just removed).
   const nameEl = document.getElementById('beach-name');
   nameEl.textContent = '';
-  const todayScore = data.today?.composite_score_v2 ?? data.today?.composite_score ?? null;
+  const _nowH = _currentLocalHour(beach?.timezone);
+  const _nowRow = (data.hours_today || []).find(h => h.local_hour === _nowH);
+  const todayScore = _nowRow?.hour_score_v2 ?? _nowRow?.hour_score ?? null;
   const badge = document.createElement('span');
   const tone = todayScore == null ? 'tone-unk'
              : todayScore >= 70   ? 'tone-go'
@@ -1623,8 +1629,8 @@ function render(data, beachFid) {
   badge.className = `fit-badge ${tone}`;
   badge.textContent = todayScore != null ? todayScore : '—';
   badge.title = todayScore != null
-    ? `Today's score · ${todayScore}/100`
-    : 'No score available for today';
+    ? `Score now · ${todayScore}/100`
+    : 'Closed or no score for this hour';
   nameEl.appendChild(badge);
   nameEl.appendChild(document.createTextNode(' ' + beach.display_name));
   const regionParts = [];

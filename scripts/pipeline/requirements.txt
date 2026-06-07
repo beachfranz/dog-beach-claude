@@ -5,3 +5,7 @@ rapidfuzz
 tenacity
 tqdm
 python-dotenv
+# Geospatial — TIGER COUSUB shapefile loader needs both. First town-strong
+# state launch (NH/MA/RI/ME) bites here if the venv is fresh. Franz 2026-06-07.
+pyshp
+pyproj

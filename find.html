@@ -1285,14 +1285,19 @@
   //           score, bestWindow, tone, bacteriaRisk, leashTag, amenities:{has_parking,has_restrooms,has_water,has_shade},
   //           tier, raw }
   function normalizeBeach(b) {
-    // Disc shows current_hour_score (matches beach.html's badge + the
-    // detail.html chart's "Now" bar). composite_score_v2 (today's peak)
-    // is kept as a rank fallback when current hour has no score
-    // (pre-dawn / post-sunset / closed) — keeps the order useful at
-    // night when most beaches' current_hour_score is null.
-    // Per Franz 2026-06-07.
-    const score = b.current_hour_score ?? null;
-    const rankScore = b.current_hour_score ?? b.composite_score_v2 ?? null;
+    // Disc semantics:
+    //  - current_hour_score present → show it, colored tone (live signal)
+    //  - current null, composite_score_v2 present → fall back to peak,
+    //    rendered with tone-unk (grey) so users can tell it's a
+    //    "best today, not right now" number. Tier-3 limited-access
+    //    beaches (off-leash 6am-10am only) have null at noon — without
+    //    the fallback they look unscored even though they're rated 92
+    //    for their good hours. Per Franz 2026-06-07.
+    //  - both null → truly unscored, show "—" with tone-unk.
+    // Rank uses the same value so order matches displayed number.
+    const score = b.current_hour_score ?? b.composite_score_v2 ?? null;
+    const scoreIsCurrent = b.current_hour_score != null;
+    const rankScore = score;
     const dMi = b.distance_m != null ? b.distance_m / 1609.34
               : (userLat != null && b.latitude != null
                   ? haversine(userLat, userLng, parseFloat(b.latitude), parseFloat(b.longitude))
@@ -1309,8 +1314,9 @@
       distanceMi: dMi,
       score,
       rankScore,
+      scoreIsCurrent,
       bestWindow: b.best_window_label || null,
-      tone: scoreTone(score),
+      tone: scoreIsCurrent ? scoreTone(score) : 'unk',
       bacteriaRisk: b.bacteria_risk ?? 'none',
       hasOffLeash: b.has_off_leash === true,
       hasOnLeash:  b.has_on_leash === true,
@@ -1516,9 +1522,20 @@
     const toneClass = `tone-${tone}`;
     const tierClass = c.kind === 'beach' && c.tier ? `tier-${c.tier}` : '';
 
+    // Disc label communicates which signal we're showing:
+    //  - Park (dog parks, no daily composite)
+    //  - Now (current_hour_score live signal, colored tone)
+    //  - Best (composite_score_v2 fallback when current is null but
+    //    today's peak is known — grey tone-unk; user sees a number
+    //    but the label tells them it's not current)
+    //  - No data (both null)
+    const discLabel = c.kind === 'dog_park' ? 'Park'
+                    : c.score == null       ? 'No data'
+                    : c.scoreIsCurrent      ? 'Now'
+                    :                          'Best';
     const scoreDiscInner = c.kind === 'dog_park'
-      ? `<span class="score-val">★</span><span class="score-lbl">Park</span>`
-      : `<span class="score-val">${c.score != null ? c.score : '—'}</span><span class="score-lbl">${c.score != null ? 'Score' : 'No data'}</span>`;
+      ? `<span class="score-val">★</span><span class="score-lbl">${discLabel}</span>`
+      : `<span class="score-val">${c.score != null ? c.score : '—'}</span><span class="score-lbl">${discLabel}</span>`;
 
     const metaParts = [];
     if (c.distanceMi != null) {

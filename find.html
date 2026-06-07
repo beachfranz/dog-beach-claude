@@ -587,6 +587,16 @@
   .result-meta .meta-warn {
     color: var(--red); font-weight: 500;
   }
+  /* Dog-hours chip — currently-prohibited = red, currently-allowed
+   * (but with a daily window) = neutral. Pairs with the grey "Best"
+   * disc on tier-3 limited-access beaches so the user sees both
+   * "92 Best" + "🚫 Dogs out 10am–4:30pm" and understands the gap. */
+  .result-meta .meta-doghours-out {
+    color: var(--red); font-weight: 500;
+  }
+  .result-meta .meta-doghours-ok {
+    color: var(--text); font-weight: 500;
+  }
 
   .amenity-strip {
     display: flex; flex-wrap: wrap; gap: 4px;
@@ -1331,8 +1341,96 @@
         shade:     undefined,
       },
       tier,
+      // Dog hour exclusion — when the beach has a prohibited window,
+      // surface a chip so users know WHY current_hour_score is null
+      // (or why the disc shows "Best" grey at this hour). Computed
+      // client-side using the beach's own timezone.
+      dogHours: buildDogHoursChip(b),
       raw: b,
     };
+  }
+
+  // Returns { state, label, icon } or null. state ∈
+  // 'always_no' | 'now_prohibited' | 'now_ok_window' | null.
+  //   - always_no       → dogs_allowed='no' (Surfside Beach)
+  //   - now_prohibited  → in the daily prohibition window right now
+  //   - now_ok_window   → outside the prohibition window, but the beach
+  //                       has one (worth telling users the cutoff)
+  //   - null            → no prohibition / not enough data → no chip
+  function buildDogHoursChip(b) {
+    if (b?.dogs_allowed === 'no') {
+      return { state: 'always_no', label: 'Dogs not allowed', icon: '🚫' };
+    }
+    const start = parseHHMM(b?.dogs_prohibited_start);
+    const end   = parseHHMM(b?.dogs_prohibited_end);
+    if (start == null && end == null) return null;
+    const tz = b?.timezone || 'America/Los_Angeles';
+    const nowH = currentLocalHour(tz);
+    const startLbl = start != null ? fmtHourMin(start) : '?';
+    const endLbl   = end   != null ? fmtHourMin(end)   : '?';
+    // In-prohibition test: if both bounds known, normal range check.
+    // If only start known (dogs prohibited from X onward — e.g. after-X)
+    // treat now as prohibited when nowH >= start.
+    let inProhib;
+    if (start != null && end != null) {
+      // Range may wrap midnight (unlikely but possible)
+      if (start <= end) inProhib = nowH >= start && nowH < end;
+      else              inProhib = nowH >= start || nowH < end;
+    } else if (start != null) {
+      inProhib = nowH >= start;
+    } else {
+      inProhib = nowH < end;
+    }
+    if (inProhib) {
+      return {
+        state: 'now_prohibited',
+        label: start != null && end != null
+          ? `Dogs out ${startLbl}–${endLbl}`
+          : (start != null ? `Dogs out after ${startLbl}` : `Dogs out before ${endLbl}`),
+        icon: '🚫',
+      };
+    }
+    return {
+      state: 'now_ok_window',
+      label: start != null && end != null
+        ? `Dogs out ${startLbl}–${endLbl}`
+        : (start != null ? `Dogs out after ${startLbl}` : `Dogs out before ${endLbl}`),
+      icon: '🐾',
+    };
+  }
+
+  // Parse "HH:MM:SS" → minutes since midnight. Returns null when input
+  // is null / malformed.
+  function parseHHMM(s) {
+    if (!s) return null;
+    const m = String(s).match(/^(\d{1,2}):(\d{2})/);
+    if (!m) return null;
+    const h = parseInt(m[1], 10);
+    const mi = parseInt(m[2], 10);
+    if (!Number.isFinite(h) || !Number.isFinite(mi)) return null;
+    return h * 60 + mi;
+  }
+
+  // Format minutes-since-midnight → "10am" or "4:30pm".
+  function fmtHourMin(mins) {
+    const h24 = Math.floor(mins / 60);
+    const m   = mins % 60;
+    const ap  = h24 >= 12 ? 'pm' : 'am';
+    const h12 = h24 === 0 ? 12 : h24 > 12 ? h24 - 12 : h24;
+    return m === 0 ? `${h12}${ap}` : `${h12}:${String(m).padStart(2,'0')}${ap}`;
+  }
+
+  // Compare current local time at a TZ to a minutes-since-midnight value.
+  // Returns minutes-since-midnight at that TZ.
+  function currentLocalHour(tz) {
+    // Reuse minutes-since-midnight for the in-prohibition test so we
+    // don't get rounding artifacts at half-hour cutoffs like 16:30.
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(new Date());
+    const h = parseInt(parts.find(p => p.type === 'hour')?.value ?? '0', 10) % 24;
+    const m = parseInt(parts.find(p => p.type === 'minute')?.value ?? '0', 10);
+    return h * 60 + m;
   }
 
   function normalizeDogPark(dp) {
@@ -1548,6 +1646,13 @@
     }
     if (c.bacteriaRisk === 'high' || c.bacteriaRisk === 'moderate') {
       metaParts.push(`<span class="meta-warn">⚠ 72h rain advisory</span>`);
+    }
+    // Dog-hours chip — explains the grey "Best" disc on tier-3
+    // limited-access beaches at noon. now_prohibited = red, currently
+    // OK (but with a cutoff coming) = neutral, always-no = red.
+    if (c?.dogHours) {
+      const cls = c.dogHours.state === 'now_ok_window' ? 'meta-doghours-ok' : 'meta-doghours-out';
+      metaParts.push(`<span class="${cls}">${c.dogHours.icon} ${escapeHtml(c.dogHours.label)}</span>`);
     }
     const metaHtml = metaParts.join(`<span class="meta-dot">·</span>`);
 

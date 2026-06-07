@@ -68,6 +68,7 @@ HOST_BLOCKLIST = (
     "lookaside.instagram.com",   # Instagram static
     "tiktok.com",                # TikTok blocks hot-linked image rendering — broken thumbnails. Franz 2026-06-07
     "alamy.com",                 # Stock photo agency — every image has a giant watermark. Franz 2026-06-07
+    "vecteezy.com",              # Stock site dominated by low-quality AI-generated imagery. Franz 2026-06-07
 )
 
 

@@ -1,619 +1,886 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Find Your Beach — Dog Beach Scout</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Outfit:wght@500;600&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="src/chat.css" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Find a Beach — Dog Beach Scout</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="src/chat.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+  crossorigin="">
+<style>
+  /* ── Tokens — matched to beach.html ─────────────────────────────── */
+  :root {
+    --bg:           #f8fafc;
+    --card:         #ffffff;
+    --card-sunk:    #f1f5f9;
+    --text:         #0f2742;
+    --text-muted:   #64748b;
+    --text-dim:     #94a3b8;
+    --border:       #e2e8f0;
+    --border-soft:  #eef2f7;
+    --accent:       #1d4ed8;
+    --accent-soft:  rgba(29,78,216,0.10);
+    --green:        #16a34a;
+    --green-soft:   rgba(22,163,74,0.13);
+    --amber:        #f59e0b;
+    --amber-soft:   rgba(245,158,11,0.18);
+    --red:          #dc2626;
+    --red-soft:     rgba(220,38,38,0.13);
+    --advisory:     #0369a1;
+    --advisory-soft:rgba(3,105,161,0.10);
+    --radius:       14px;
+    --radius-sm:    10px;
+    --radius-xs:    6px;
+    --shadow-sm:    0 1px 2px rgba(15,39,66,0.04);
+    --shadow-md:    0 6px 18px rgba(15,39,66,0.08);
+    --shadow-lg:    0 18px 40px rgba(15,39,66,0.14);
+  }
 
-    :root {
-      --bg:           #eef4f8;  /* sea fog */
-      --surface:      #ffffff;
-      --surface-hover:#f5f9fc;
-      --border:       #d1dde8;  /* cool gray-blue */
-      --text:         #0f2742;  /* marine navy */
-      --text-muted:   #5b6b7d;
-      --text-dim:     #94a3b8;
-      --green:        #15803d;  /* hunter */
-      --green-dim:    #d1fae5;
-      --advisory:     #0369a1;  /* deep sea blue */
-      --advisory-dim: #e0f2fe;
-      --amber:        #b45309;  /* burnt orange */
-      --amber-dim:    #fed7aa;
-      --red:          #9f1239;  /* rose burgundy */
-      --red-dim:      #ffe4e6;
-      --radius:       14px;
-      --radius-sm:    8px;
-    }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { overflow-x: hidden; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
 
-    html, body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'DM Sans', sans-serif;
-      font-size: 15px;
-      -webkit-font-smoothing: antialiased;
-      min-height: 100vh;
-    }
+  .app {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 0 0 80px;
+    min-height: 100vh;
+  }
 
-    .app { max-width: 480px; margin: 0 auto; padding: 0 0 40px; }
+  /* ── Hero ───────────────────────────────────────────────────────── */
+  header.hero {
+    padding: 20px 18px 14px;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 30;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .wordmark {
+    display: flex; align-items: center; gap: 10px;
+    text-decoration: none; color: var(--text);
+    flex: 1; min-width: 0;
+  }
+  .wordmark-avatar {
+    width: 36px; height: 36px; border-radius: 50%;
+    cursor: pointer; flex-shrink: 0;
+    box-shadow: 0 0 0 2px var(--card), 0 0 0 3px var(--accent-soft);
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .wordmark-avatar:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 0 2px var(--card), 0 0 0 4px rgba(29,78,216,0.30);
+  }
+  .wordmark-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 10.5px; font-weight: 500;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--text-muted);
+    line-height: 1.2;
+  }
+  .wordmark-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 17px; font-weight: 700; color: var(--text);
+    line-height: 1.1;
+  }
+  .close-btn {
+    color: var(--text-muted); text-decoration: none;
+    font-size: 20px; line-height: 1;
+    padding: 6px 8px; border-radius: 6px;
+    flex-shrink: 0;
+  }
+  .close-btn:hover { background: var(--bg); color: var(--text); }
 
-    /* ── Header ───────────────────────────────────────────────────── */
-    .header {
-      padding: 16px 16px 0;
-      position: sticky;
-      top: 0;
-      background: var(--bg);
-      z-index: 10;
-      border-bottom: 1px solid var(--border);
-    }
+  /* ── Page heading band ──────────────────────────────────────────── */
+  .page-band {
+    padding: 18px 18px 6px;
+  }
+  .page-eyebrow {
+    font-family: 'DM Mono', monospace;
+    font-size: 10.5px; font-weight: 500;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+  .page-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 30px; font-weight: 700;
+    letter-spacing: -0.02em; line-height: 1.05;
+    color: var(--text);
+    margin: 0;
+  }
+  .page-title em {
+    font-style: normal;
+    color: var(--accent);
+  }
 
-    .header-top {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 10px;
-    }
+  /* ── Search + filters strip ─────────────────────────────────────── */
+  .search-strip {
+    margin: 12px 14px 8px;
+    padding: 12px 14px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+  }
 
-    .wordmark {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-family: 'Outfit', sans-serif;
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--text-muted);
-      text-decoration: none;
-    }
+  .search-bar {
+    position: relative;
+    display: flex; align-items: center;
+  }
+  .search-bar svg.search-icon {
+    position: absolute;
+    left: 11px;
+    width: 16px; height: 16px;
+    color: var(--text-muted);
+    pointer-events: none;
+  }
+  .search-input {
+    flex: 1;
+    padding: 11px 14px 11px 36px;
+    background: var(--card-sunk);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    font: 500 14px/1.2 'DM Sans', sans-serif;
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  }
+  .search-input::placeholder { color: var(--text-dim); font-weight: 400; }
+  .search-input:focus {
+    background: var(--card);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .search-clear {
+    position: absolute; right: 4px;
+    background: transparent; border: 0;
+    width: 28px; height: 28px;
+    border-radius: 50%; cursor: pointer;
+    color: var(--text-muted); font-size: 16px;
+    display: none;
+  }
+  .search-clear:hover { background: var(--bg); color: var(--text); }
+  .search-clear.visible { display: inline-flex; align-items: center; justify-content: center; }
 
-    .back-link {
-      font-family: 'DM Sans', sans-serif;
-      font-size: 13px;
-      color: var(--text-muted);
-      text-decoration: none;
-    }
-    .back-link:hover { color: var(--text); }
+  .filter-row {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin-top: 10px;
+  }
+  .filter-row-section {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    align-items: center;
+  }
+  .filter-divider {
+    width: 1px; height: 22px;
+    background: var(--border);
+    margin: 0 4px;
+    flex-shrink: 0;
+  }
 
-    .page-title {
-      font-family: 'Outfit', sans-serif;
-      font-size: 20px;
-      font-weight: 600;
-      color: var(--text);
-      margin-bottom: 10px;
-    }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 6px 11px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--card);
+    font: 600 12.5px/1 'DM Sans', sans-serif;
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.12s;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .chip:hover { background: var(--bg); border-color: var(--text-dim); }
+  .chip.active {
+    background: var(--text);
+    color: white;
+    border-color: var(--text);
+  }
+  .chip.active:hover { background: #1e3a5f; }
+  .chip .chip-icon { font-size: 13px; line-height: 1; }
 
-    /* ── Day pills ────────────────────────────────────────────────── */
-    .day-pills {
-      display: flex;
-      gap: 6px;
-      overflow-x: auto;
-      scrollbar-width: none;
-      padding-bottom: 12px;
-    }
-    .day-pills::-webkit-scrollbar { display: none; }
+  /* Amenity chip variant — softer when active so they don't compete
+   * with want-chips visually. Want-chips dominate; amenity-chips refine. */
+  .chip.chip-amenity.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .chip.chip-amenity.active:hover { background: rgba(29,78,216,0.16); }
 
-    .day-pill {
-      flex-shrink: 0;
-      font-family: 'DM Mono', monospace;
-      font-size: 11px;
-      font-weight: 500;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      padding: 5px 12px;
-      border-radius: 20px;
-      border: 1px solid var(--border);
-      background: var(--surface);
-      color: var(--text-muted);
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-    .day-pill:hover { border-color: #303650; color: var(--text); }
-    .day-pill.active { background: var(--surface-hover); border-color: #3b5bdb; color: var(--text); }
+  .meta-row {
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: 10px; margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border-soft);
+    font-size: 12.5px; color: var(--text-muted);
+  }
+  .meta-row .meta-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 10.5px; font-weight: 500;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .meta-select {
+    padding: 5px 8px; border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    background: var(--card);
+    font: 500 12.5px/1 'DM Sans', sans-serif;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .meta-select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
 
-    /* ── Want chips (multi-select intent) ─────────────────────────── */
-    .want-chips {
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-      padding: 8px 0 4px;
-    }
-    .want-chip {
-      flex: 0 1 auto;
-      font-family: 'DM Sans', sans-serif;
-      font-size: 12px;
-      font-weight: 500;
-      padding: 6px 12px;
-      border-radius: 20px;
-      border: 1px solid var(--border);
-      background: var(--surface);
-      color: var(--text-muted);
-      cursor: pointer;
-      transition: all 0.15s;
-      white-space: nowrap;
-    }
-    .want-chip:hover { border-color: #3b5bdb; color: var(--text); }
-    .want-chip.active {
-      background: #3b5bdb;
-      border-color: #3b5bdb;
-      color: #fff;
-    }
-    .want-label {
-      font-family: 'DM Mono', monospace;
-      font-size: 10px;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: var(--text-dim);
-      padding: 4px 0 0;
-    }
+  .loc-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin-left: auto;
+    padding: 4px 10px 4px 8px;
+    background: var(--card-sunk);
+    border-radius: 999px;
+    font-size: 12.5px; color: var(--text);
+    font-weight: 500;
+    max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .loc-pill-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--green);
+    flex-shrink: 0;
+    animation: locPulse 2.6s ease-in-out infinite;
+  }
+  @keyframes locPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(22,163,74,0.55); }
+    60%      { box-shadow: 0 0 0 6px rgba(22,163,74,0);   }
+  }
+  .loc-pill-text {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .loc-link {
+    color: var(--accent); font-size: 12px; font-weight: 600;
+    background: transparent; border: 0; cursor: pointer;
+    padding: 4px 6px; border-radius: 4px;
+    font-family: inherit;
+  }
+  .loc-link:hover { background: var(--accent-soft); }
 
-    /* ── Search controls ──────────────────────────────────────────── */
-    .search-controls {
-      padding: 12px 16px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
+  .zip-input {
+    width: 110px;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    background: var(--card);
+    font: 500 13px/1.2 'DM Mono', monospace;
+    color: var(--text);
+    outline: none;
+  }
+  .zip-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
-    .sort-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
+  /* ── Map block ──────────────────────────────────────────────────── */
+  .map-wrap {
+    margin: 6px 14px 0;
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--card);
+    box-shadow: var(--shadow-sm);
+  }
+  #map {
+    height: 38vh; min-height: 240px; max-height: 360px;
+    width: 100%;
+    background: #d9e7f0;
+  }
+  /* Custom Leaflet pin — score disc */
+  .pin {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: 700;
+    font-family: 'DM Mono', monospace;
+    font-size: 12.5px; line-height: 1;
+    box-shadow: 0 2px 4px rgba(15,39,66,0.25), 0 0 0 3px rgba(255,255,255,0.95);
+    transform: translateY(-2px);
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+    font-variant-numeric: tabular-nums;
+  }
+  .pin:hover {
+    transform: translateY(-4px) scale(1.08);
+    box-shadow: 0 6px 12px rgba(15,39,66,0.32), 0 0 0 3px rgba(255,255,255,1);
+  }
+  .pin.pin-active {
+    transform: translateY(-4px) scale(1.16);
+    box-shadow: 0 8px 16px rgba(15,39,66,0.34), 0 0 0 4px white, 0 0 0 6px var(--accent);
+    z-index: 800 !important;
+  }
+  .pin-go     { background: var(--green); }
+  .pin-mid    { background: var(--amber); }
+  .pin-low    { background: var(--red); }
+  .pin-unk    { background: var(--text-dim); }
+  .pin-park   { background: var(--accent); }
+  .pin-park::after {
+    content: '★';
+    font-size: 11px;
+    margin-left: 1px;
+  }
+  .pin-park .pin-park-score { display: none; }
+  .pin-user {
+    width: 22px; height: 22px;
+    background: var(--advisory);
+    border-radius: 50%;
+    box-shadow: 0 0 0 4px white, 0 0 0 6px rgba(3,105,161,0.45);
+    animation: userPulse 2.4s ease-out infinite;
+  }
+  @keyframes userPulse {
+    0%, 100% { box-shadow: 0 0 0 4px white, 0 0 0 6px rgba(3,105,161,0.45); }
+    50%      { box-shadow: 0 0 0 4px white, 0 0 0 12px rgba(3,105,161,0); }
+  }
 
-    .sort-label {
-      font-size: 13px;
-      color: var(--text-muted);
-      white-space: nowrap;
-    }
+  /* ── "Now at you" weather strip ─────────────────────────────────── */
+  .now-strip {
+    margin: 14px 14px 4px;
+    padding: 14px 16px;
+    border-radius: var(--radius);
+    background: linear-gradient(135deg, rgba(3,105,161,0.06) 0%, rgba(29,78,216,0.05) 100%);
+    border: 1px solid rgba(3,105,161,0.18);
+    box-shadow: var(--shadow-sm);
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .now-strip.now-loading {
+    opacity: 0.6;
+  }
+  .now-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px;
+  }
+  .now-eyebrow {
+    font-family: 'DM Mono', monospace;
+    font-size: 10.5px; font-weight: 500;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--advisory);
+  }
+  .now-time {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px; color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .now-body {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: center;
+  }
+  .now-icon {
+    font-size: 42px; line-height: 1;
+    width: 56px; height: 56px;
+    display: flex; align-items: center; justify-content: center;
+    background: white;
+    border-radius: 50%;
+    box-shadow: var(--shadow-sm);
+    flex-shrink: 0;
+  }
+  .now-figures {
+    display: flex; flex-direction: column; gap: 2px;
+    min-width: 0;
+  }
+  .now-temp {
+    font-family: 'Outfit', sans-serif;
+    font-size: 32px; font-weight: 700;
+    letter-spacing: -0.02em; line-height: 1;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .now-temp-deg { color: var(--text-muted); font-weight: 500; }
+  .now-summary {
+    font-size: 13px; color: var(--text);
+    font-weight: 500;
+  }
+  .now-meta {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px; color: var(--text-muted);
+    display: flex; flex-wrap: wrap; gap: 4px 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .now-cautions {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    padding-top: 8px;
+    border-top: 1px dashed rgba(3,105,161,0.20);
+  }
+  .now-cautions:empty { display: none; }
+  .caution-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11.5px; font-weight: 600;
+    line-height: 1;
+  }
+  .caution-badge.sev-advisory { background: var(--advisory-soft); color: var(--advisory); }
+  .caution-badge.sev-caution  { background: var(--amber-soft);    color: #92400e; }
+  .caution-badge.sev-no_go    { background: var(--red-soft);      color: var(--red); }
+  .caution-badge .caution-icon { font-size: 13px; line-height: 1; }
 
-    .sort-select {
-      flex: 1;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      color: var(--text);
-      font-family: 'DM Sans', sans-serif;
-      font-size: 13px;
-      padding: 7px 10px;
-      cursor: pointer;
-      outline: none;
-    }
-    .sort-select:focus { border-color: #3b5bdb; }
-    .sort-select option:disabled { color: var(--text-dim); }
-    .sort-select.compact { flex: 0 0 auto; }
+  /* ── Scout blurb ────────────────────────────────────────────────── */
+  .scout-blurb {
+    margin: 10px 14px 4px;
+    padding: 12px 16px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    border-left: 3px solid var(--accent);
+    font-size: 14px; line-height: 1.55;
+    color: var(--text);
+    box-shadow: var(--shadow-sm);
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+    opacity: 1;
+    min-height: 44px;
+    display: flex; align-items: center;
+  }
+  .scout-blurb:hover { background: #fbfcfe; }
+  .scout-blurb:active { transform: translateY(1px); }
+  .scout-blurb.loading {
+    color: var(--text-muted);
+    font-style: italic;
+  }
+  .scout-blurb.empty { display: none; }
 
-    .loc-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
+  /* ── Result list ────────────────────────────────────────────────── */
+  .results-head {
+    margin: 18px 18px 8px;
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 10px;
+  }
+  .results-head h2 {
+    font-family: 'Outfit', sans-serif;
+    font-size: 17px; font-weight: 700;
+    color: var(--text);
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  .results-count {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px; color: var(--text-muted);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    font-variant-numeric: tabular-nums;
+  }
 
-    .location-label {
-      flex: 1;
-      font-size: 13px;
-      color: var(--text-muted);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
+  .result-list {
+    display: flex; flex-direction: column; gap: 8px;
+    margin: 0 14px;
+  }
 
-    .loc-input {
-      flex: 1;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      color: var(--text);
-      font-family: 'DM Mono', monospace;
-      font-size: 13px;
-      padding: 7px 10px;
-      outline: none;
-      letter-spacing: 0.06em;
-    }
-    .loc-input:focus { border-color: #3b5bdb; }
-    .loc-input::placeholder { color: var(--text-dim); font-family: 'DM Sans', sans-serif; letter-spacing: 0; }
+  .result-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    display: grid;
+    grid-template-columns: 56px 1fr auto;
+    gap: 12px;
+    align-items: center;
+    cursor: pointer;
+    text-decoration: none; color: inherit;
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.12s, box-shadow 0.15s, border-color 0.15s, background 0.15s;
+    position: relative;
+    overflow: hidden;
+  }
+  .result-card::before {
+    /* Status-tinted left edge accent */
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--border);
+    transition: background 0.15s;
+  }
+  .result-card.tone-go::before     { background: var(--green); }
+  .result-card.tone-mid::before    { background: var(--amber); }
+  .result-card.tone-low::before    { background: var(--red); }
+  .result-card.tone-park::before   { background: var(--accent); }
+  .result-card:hover {
+    transform: translateY(-1px);
+    border-color: var(--text-dim);
+    box-shadow: var(--shadow-md);
+  }
+  .result-card.highlight {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-md);
+    animation: highlightPulse 1.6s ease-out;
+  }
+  @keyframes highlightPulse {
+    0%   { box-shadow: 0 0 0 0   var(--accent-soft), var(--shadow-md); }
+    40%  { box-shadow: 0 0 0 14px rgba(29,78,216,0); var(--shadow-md); }
+    100% { box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-md); }
+  }
 
-    .update-btn {
-      background: none;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      color: var(--text-muted);
-      font-family: 'DM Sans', sans-serif;
-      font-size: 12px;
-      padding: 7px 12px;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: all 0.15s;
-    }
-    .update-btn:hover { border-color: #3b5bdb; color: var(--text); }
-    .update-btn.highlighted {
-      background: #3b5bdb;
-      border-color: #3b5bdb;
-      color: #fff;
-      font-weight: 600;
-    }
-    .update-btn.highlighted:hover { background: #4c6ef5; border-color: #4c6ef5; }
+  /* Tier-4 (no dogs) — render muted so famous-but-prohibited beaches
+   * stay discoverable without being mistaken for a recommendation. */
+  .result-card.tier-4_no_dogs {
+    background: var(--card-sunk);
+    filter: grayscale(0.6);
+    opacity: 0.78;
+  }
+  .result-card.tier-4_no_dogs:hover { opacity: 1; filter: grayscale(0.25); }
 
-    /* ── Scout blurb ─────────────────────────────────────────────── */
-    .top-card { padding: 12px 16px 0; }
+  .score-disc {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-family: 'DM Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    color: white;
+    box-shadow: 0 2px 6px rgba(15,39,66,0.15);
+    flex-shrink: 0;
+  }
+  .score-disc.tone-go     { background: var(--green); }
+  .score-disc.tone-mid    { background: var(--amber); }
+  .score-disc.tone-low    { background: var(--red); }
+  .score-disc.tone-unk    { background: var(--text-dim); }
+  .score-disc.tone-park   { background: var(--accent); }
+  .score-disc .score-val  { font-size: 19px; font-weight: 700; line-height: 1; }
+  .score-disc .score-lbl  {
+    font-size: 8.5px; font-weight: 500;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    opacity: 0.85;
+    margin-top: 1px;
+  }
+  .score-disc.tone-unk .score-val { font-size: 22px; }
 
-    .scout-blurb {
-      margin: 10px 16px 0;
-      padding: 10px 12px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      font-family: 'DM Sans', sans-serif;
-      font-size: 13px;
-      line-height: 1.55;
-      color: var(--text-muted);
-      cursor: pointer;
-    }
-    .scout-blurb.loading { animation: pulse 1.4s ease-in-out infinite; }
+  .result-body {
+    display: flex; flex-direction: column; gap: 4px;
+    min-width: 0;
+  }
+  .result-name {
+    font-family: 'Outfit', sans-serif;
+    font-size: 16px; font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.005em;
+    line-height: 1.2;
+    overflow: hidden; text-overflow: ellipsis;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  }
+  .result-meta {
+    display: flex; flex-wrap: wrap; gap: 4px 10px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px; color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .result-meta .meta-dot { opacity: 0.5; }
+  .result-meta .meta-dist {
+    color: var(--text);
+    font-weight: 500;
+  }
+  .result-meta .meta-window { color: var(--text); }
+  .result-meta .meta-warn {
+    color: var(--red); font-weight: 500;
+  }
 
-    /* Aggregated product chip strip — sits beneath the Scout blurb,
-       chips reflect ANY condition firing across the visible beaches'
-       next 7 days. */
-    .product-chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px 12px;
-      margin: 8px 16px 0;
-    }
-    .product-chip {
-      font-family: 'DM Sans', sans-serif;
-      font-size: 13px;
-      color: var(--advisory);
-      text-decoration: none;
-      white-space: nowrap;
-    }
-    .product-chip:hover { color: var(--blue); text-decoration: underline; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .amenity-strip {
+    display: flex; flex-wrap: wrap; gap: 4px;
+    margin-top: 2px;
+  }
+  .amenity-strip:empty { display: none; }
+  .amenity-dot {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 2px 7px 2px 5px;
+    border-radius: 999px;
+    background: var(--card-sunk);
+    font-size: 10.5px; font-weight: 600;
+    color: var(--text-muted);
+    line-height: 1.2;
+  }
+  .amenity-dot.match {
+    background: var(--green-soft);
+    color: #14532d;
+  }
+  .amenity-dot.match .dot-mark { color: var(--green); font-weight: 700; }
+  .amenity-dot.miss {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px dashed var(--border);
+  }
+  .amenity-dot .dot-mark { font-size: 11px; line-height: 1; }
 
-    /* ── Beach cards (index.html style) ───────────────────────────── */
-    .beach-list {
-      padding: 12px 16px 0;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
+  .result-end {
+    display: flex; flex-direction: column; align-items: flex-end;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .rank-badge {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px; font-weight: 500;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .chev {
+    color: var(--text-dim);
+    font-size: 22px; line-height: 1;
+    transition: color 0.15s, transform 0.15s;
+  }
+  .result-card:hover .chev {
+    color: var(--accent);
+    transform: translateX(2px);
+  }
 
-    .day-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 14px 16px;
-      cursor: pointer;
-      transition: background 0.15s, border-color 0.15s, transform 0.1s;
-      display: grid;
-      grid-template-columns: auto 1fr 20px;
-      align-items: center;
-      gap: 12px;
-      text-decoration: none;
-      color: inherit;
-      -webkit-tap-highlight-color: transparent;
-    }
-    .day-card:hover  { background: var(--surface-hover); border-color: #303650; }
-    .day-card:active { transform: scale(0.99); }
+  /* Empty / loading state */
+  .skeleton {
+    height: 86px;
+    border-radius: var(--radius);
+    background: linear-gradient(90deg, var(--card-sunk) 0%, #e8eef5 50%, var(--card-sunk) 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s infinite;
+  }
+  @keyframes shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  .empty-state {
+    padding: 40px 24px;
+    text-align: center;
+    color: var(--text-muted);
+    background: var(--card);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+  }
+  .empty-state .empty-icon {
+    font-size: 32px;
+    margin-bottom: 8px;
+    opacity: 0.6;
+  }
+  .empty-state .empty-text {
+    font-size: 14px;
+  }
 
-    .day-card.status-go       { border-left: 3px solid var(--green); }
-    .day-card.status-advisory { border-left: 3px solid var(--advisory); }
-    .day-card.status-caution  { border-left: 3px solid var(--amber); }
-    .day-card.status-no_go    { border-left: 3px solid var(--red); opacity: 0.7; }
+  /* Footer */
+  .footer-note {
+    margin: 24px 18px 0;
+    font-family: 'DM Mono', monospace;
+    font-size: 10.5px; color: var(--text-dim);
+    text-align: center;
+    letter-spacing: 0.08em;
+  }
 
-    /* Tier-based display gates: 1+2 normal, 3 muted, 4 grey-no-dog.
-       scoring_tier is the cost gate (daily/hourly/none); this is the
-       display gate. */
-    .day-card.tier-3_limited_access {
-      opacity: 0.62;
-      filter: grayscale(0.45);
-    }
-    .day-card.tier-4_no_dogs {
-      opacity: 0.50;
-      filter: grayscale(0.75);
-      border-left-color: var(--text-dim) !important;
-    }
-    .day-card.tier-4_no_dogs .day-score-value::before { content: '🚫 '; }
-    .day-card.tier-unknown {
-      opacity: 0.55;
-      filter: grayscale(0.55);
-    }
+  /* ── Directions overlay (reused pattern from prior find.html) ───── */
+  .dir-overlay {
+    position: fixed; inset: 0;
+    background: rgba(15,39,66,0.55);
+    backdrop-filter: blur(2px);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.2s;
+    z-index: 1500;
+  }
+  .dir-overlay.open { opacity: 1; pointer-events: auto; }
+  .dir-sheet {
+    position: fixed;
+    left: 50%; bottom: 0;
+    transform: translate(-50%, 100%);
+    width: 100%; max-width: 720px;
+    background: var(--card);
+    border-radius: 18px 18px 0 0;
+    box-shadow: var(--shadow-lg);
+    padding: 10px 14px 18px;
+    z-index: 1600;
+    transition: transform 0.28s cubic-bezier(0.22, 0.61, 0.36, 1);
+  }
+  .dir-sheet.open { transform: translate(-50%, 0); }
+  .dir-handle {
+    width: 44px; height: 4px; border-radius: 2px;
+    background: var(--border); margin: 4px auto 12px;
+  }
+  .dir-beach {
+    font-family: 'Outfit', sans-serif;
+    font-size: 17px; font-weight: 700;
+    color: var(--text);
+  }
+  .dir-meta {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px; color: var(--text-muted);
+    margin: 2px 0 10px;
+    font-variant-numeric: tabular-nums;
+  }
+  #dir-map {
+    width: 100%; height: 50vh; min-height: 280px;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: #d9e7f0;
+  }
+  .dir-cancel {
+    margin-top: 12px;
+    width: 100%;
+    padding: 11px 14px;
+    background: var(--text);
+    color: white;
+    border: 0; border-radius: var(--radius-sm);
+    font: 600 14px/1 'DM Sans', sans-serif;
+    cursor: pointer;
+  }
+  .dir-cancel:hover { background: #1e3a5f; }
 
-    .day-left {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-    }
+  /* ── Phone (≤ 600px) ────────────────────────────────────────────── */
+  @media (max-width: 600px) {
+    .page-band     { padding: 14px 16px 4px; }
+    .page-title    { font-size: 26px; }
+    .search-strip  { margin: 10px 12px 6px; padding: 11px 12px; }
+    .map-wrap      { margin: 6px 12px 0; }
+    #map           { height: 36vh; min-height: 220px; }
+    .now-strip     { margin: 12px 12px 4px; padding: 12px 14px; }
+    .now-temp      { font-size: 28px; }
+    .now-icon      { width: 48px; height: 48px; font-size: 36px; }
+    .scout-blurb   { margin: 8px 12px 4px; padding: 10px 14px; font-size: 13.5px; }
+    .results-head  { margin: 16px 16px 6px; }
+    .result-list   { margin: 0 12px; }
+    .result-card   { padding: 11px 12px; gap: 10px; grid-template-columns: 50px 1fr auto; }
+    .score-disc    { width: 50px; height: 50px; }
+    .score-disc .score-val { font-size: 17px; }
+    .result-name   { font-size: 15px; }
+  }
 
-    .rank-label {
-      font-family: 'DM Mono', monospace;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      width: 20px;
-      text-align: center;
-    }
+  /* ── Tablet+ (≥ 760px) ─────────────────────────────────────────── */
+  @media (min-width: 760px) {
+    #map { height: 44vh; max-height: 480px; }
+    .page-title { font-size: 34px; }
+  }
 
-    .day-score {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 1px;
-    }
-    .dp-thumb {
-      width: 48px;
-      height: 48px;
-      border-radius: 6px;
-      object-fit: cover;
-      display: block;
-    }
-    .day-score-value {
-      font-family: 'DM Mono', monospace;
-      font-size: 15px;
-      font-weight: 500;
-      line-height: 1;
-    }
-    .day-score-label {
-      font-family: 'DM Mono', monospace;
-      font-size: 8px;
-      font-weight: 500;
-      letter-spacing: 0.06em;
-      color: var(--text-dim);
-      line-height: 1;
-    }
-    .day-score.score-go       .day-score-value { color: var(--green); }
-    .day-score.score-advisory .day-score-value { color: var(--advisory); }
-    .day-score.score-caution  .day-score-value { color: var(--amber); }
-    .day-score.score-no_go    .day-score-value { color: var(--red); opacity: 0.6; }
-    .day-score.score-none     .day-score-value { color: var(--text-dim); }
-
-    .weather-icon { font-size: 22px; line-height: 1; text-align: center; }
-
-    .day-content { min-width: 0; }
-
-    .beach-name {
-      font-family: 'Outfit', sans-serif;
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--text);
-      line-height: 1.2;
-      margin-bottom: 2px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .window-sub {
-      font-family: 'DM Sans', sans-serif;
-      font-size: 12px;
-      margin-bottom: 3px;
-    }
-    .window-sub.status-go       { color: var(--green); }
-    .window-sub.status-advisory { color: var(--advisory); }
-    .window-sub.status-caution  { color: var(--amber); }
-    .window-sub.status-no_go    { color: var(--red); }
-    .window-sub.status-none     { color: var(--text-dim); }
-    .dist-link { cursor: pointer; color: var(--text) !important; font-weight: 600; }
-    .dist-link:hover { opacity: 0.8; }
-    /* Row wrapping the window label + distance link for non-NOW cards.
-       Window label and 🚗 X.X mi sit next to each other with a small gap,
-       matching the visual density of the chip row below. */
-    .window-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 3px;
-    }
-    .window-row .window-sub { margin-bottom: 0; }
-
-    /* ── Directions modal ─────────────────────────────────────────── */
-    .dir-overlay {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.55);
-      z-index: 299;
-    }
-    .dir-overlay.open { display: block; }
-
-    .dir-sheet {
-      position: fixed;
-      bottom: 0;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 100%;
-      max-width: 480px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-bottom: none;
-      border-radius: 20px 20px 0 0;
-      padding: 16px 16px 36px;
-      z-index: 300;
-      display: none;
-      flex-direction: column;
-      gap: 12px;
-    }
-    .dir-sheet.open { display: flex; }
-
-    #dir-map {
-      width: 100%;
-      height: 260px;
-      border-radius: var(--radius-sm);
-      overflow: hidden;
-      background: var(--bg);
-    }
-
-    .dir-handle {
-      width: 36px;
-      height: 4px;
-      background: var(--border);
-      border-radius: 2px;
-      margin: 0 auto -4px;
-    }
-
-    .dir-beach {
-      font-family: 'Outfit', sans-serif;
-      font-size: 17px;
-      font-weight: 600;
-      color: var(--text);
-      text-align: center;
-    }
-
-    .dir-meta {
-      font-family: 'DM Mono', monospace;
-      font-size: 13px;
-      color: var(--text-muted);
-      text-align: center;
-    }
-
-    .dir-cancel {
-      background: none;
-      border: none;
-      color: var(--text-muted);
-      font-family: 'DM Sans', sans-serif;
-      font-size: 14px;
-      cursor: pointer;
-      text-align: center;
-      padding: 4px;
-    }
-    .dir-cancel:hover { color: var(--text); }
-
-    .bacteria-warning {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      font-family: 'DM Sans', sans-serif;
-      font-size: 11px;
-      font-weight: 600;
-      padding: 2px 6px;
-      border-radius: 4px;
-      margin-bottom: 3px;
-    }
-    .bacteria-warning.risk-moderate { background: rgba(251,191,36,0.15); color: var(--amber); }
-    .bacteria-warning.risk-high     { background: rgba(239,68,68,0.15);  color: var(--red);   }
-
-    .chips {
-      display: flex;
-      flex-wrap: nowrap;
-      gap: 2px;
-      align-items: center;
-      overflow: hidden;
-    }
-
-    .chip {
-      font-family: 'DM Mono', monospace;
-      font-size: 11px;
-      color: var(--text-muted);
-      display: flex;
-      align-items: center;
-      gap: 2px;
-      white-space: nowrap;
-      flex-shrink: 0;
-    }
-    .chip-sep { color: var(--text-dim); }
-    .chip.chip-go       { color: var(--green); }
-    .chip.chip-advisory { color: var(--advisory); }
-    .chip.chip-caution  { color: var(--amber); }
-    .chip.chip-no_go    { color: var(--red); }
-
-    .chevron {
-      color: var(--text-dim);
-      font-size: 16px;
-      line-height: 1;
-      flex-shrink: 0;
-    }
-
-    /* ── States ───────────────────────────────────────────────────── */
-    .no-data { padding: 40px 20px; text-align: center; font-size: 13px; color: var(--text-dim); }
-
-    .skeleton {
-      height: 88px;
-      background: linear-gradient(90deg, var(--surface) 25%, var(--surface-hover) 50%, var(--surface) 75%);
-      background-size: 200% 100%;
-      animation: shimmer 1.4s infinite;
-      border-radius: var(--radius);
-    }
-    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-  </style>
+  /* Reduced motion — drop animations users didn't ask for */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    .pin, .result-card:hover, .chev { transition: none; }
+  }
+</style>
 </head>
 <body>
+
 <div class="app">
 
-  <header class="header">
-    <div class="header-top">
-      <a href="index.html" class="wordmark">
-        <img src="src/avatar.png" class="scout-trigger" alt="Scout" onclick="event.preventDefault();toggleChat()" title="Ask Scout">
-        Dog Beach Scout
-      </a>
-      <a href="index.html" class="back-link">← Back</a>
-    </div>
-    <div class="page-title">Find Your Beach</div>
-    <div class="day-pills" id="day-pills"></div>
+  <header class="hero">
+    <a href="index.html" class="wordmark">
+      <img src="src/avatar.png" class="wordmark-avatar" onclick="event.preventDefault();toggleChat()" alt="Scout" title="Ask Scout">
+      <span>
+        <div class="wordmark-label">Dog Beach</div>
+        <div class="wordmark-title">Scout</div>
+      </span>
+    </a>
+    <a href="index.html" class="close-btn" title="Close">✕</a>
   </header>
 
-  <div class="search-controls">
-    <div class="want-label">Show me</div>
-    <div class="want-chips" id="want-chips">
-      <button type="button" class="want-chip active" data-want="off_leash_beach">Off-leash beaches</button>
-      <button type="button" class="want-chip" data-want="on_leash_beach">On-leash beaches</button>
-      <button type="button" class="want-chip active" data-want="dog_park">Dog parks</button>
+  <div class="page-band">
+    <div class="page-eyebrow">Discover</div>
+    <h1 class="page-title">Find your <em>beach.</em></h1>
+  </div>
+
+  <section class="search-strip" id="search-strip">
+    <div class="search-bar">
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="m21 21-4.3-4.3"></path>
+      </svg>
+      <input type="text" class="search-input" id="search-input"
+             placeholder="Beach, park, or city" autocomplete="off">
+      <button class="search-clear" id="search-clear" onclick="clearSearch()" title="Clear">×</button>
     </div>
-    <div class="sort-row">
-      <!-- Leash filter merged into want-chips (Off-leash beaches / On-leash beaches / Dog parks).
-           Per [[dog-park-subpipeline-scope]] consumer-UI decision 2026-05-25. -->
-      <select class="sort-select compact" id="leash-select" onchange="onLeashFilterChange(this.value)" style="display:none">
-        <option value="any" selected>Any</option>
-        <option value="off_leash">Off-leash</option>
-        <option value="on_leash">Required</option>
-      </select>
-      <span class="sort-label">Within</span>
-      <select class="sort-select compact" id="dist-select" onchange="onDistanceFilterChange(this.value)">
+
+    <div class="filter-row" role="group" aria-label="What kind of place">
+      <div class="filter-row-section" id="want-chips">
+        <button type="button" class="chip active" data-want="off_leash_beach">
+          <span class="chip-icon">🐾</span> Off-leash beaches
+        </button>
+        <button type="button" class="chip" data-want="on_leash_beach">
+          <span class="chip-icon">🐕</span> On-leash beaches
+        </button>
+        <button type="button" class="chip active" data-want="dog_park">
+          <span class="chip-icon">★</span> Dog parks
+        </button>
+      </div>
+    </div>
+
+    <div class="filter-row" role="group" aria-label="Amenities">
+      <div class="filter-row-section" id="amenity-chips">
+        <button type="button" class="chip chip-amenity" data-amenity="parking">
+          <span class="chip-icon">🅿️</span> Parking
+        </button>
+        <button type="button" class="chip chip-amenity" data-amenity="restrooms">
+          <span class="chip-icon">🚻</span> Restrooms
+        </button>
+        <button type="button" class="chip chip-amenity" data-amenity="water">
+          <span class="chip-icon">💧</span> Water
+        </button>
+        <button type="button" class="chip chip-amenity" data-amenity="shade">
+          <span class="chip-icon">🌳</span> Shade
+        </button>
+      </div>
+    </div>
+
+    <div class="meta-row">
+      <span class="meta-label">Within</span>
+      <select class="meta-select" id="dist-select" onchange="onDistanceChange(this.value)">
         <option value="5">5 mi</option>
         <option value="10" selected>10 mi</option>
         <option value="25">25 mi</option>
         <option value="50">50 mi</option>
         <option value="any">Any</option>
       </select>
-      <span class="sort-label">Sort by</span>
-      <select class="sort-select" id="sort-select" onchange="onSortChange(this.value)">
-        <option value="blend"    id="opt-blend"    selected>Best Nearby</option>
-        <option value="conditions">Best Conditions</option>
-        <option value="distance" id="opt-distance" disabled>Closest First</option>
-      </select>
+      <span class="loc-pill" id="loc-pill" title="Your search anchor">
+        <span class="loc-pill-dot"></span>
+        <span class="loc-pill-text" id="loc-pill-text">Detecting…</span>
+      </span>
+      <button class="loc-link" id="loc-link" onclick="onUpdateLocation()">Update</button>
     </div>
-    <div class="loc-row" id="loc-row">
-      <span class="location-label" id="location-label">📍 Detecting location…</span>
-      <button class="update-btn" id="update-btn" onclick="onUpdateLocation()">Update</button>
-    </div>
+  </section>
+
+  <div class="map-wrap">
+    <div id="map" role="application" aria-label="Map of nearby beaches and dog parks"></div>
   </div>
 
-  <div class="top-card" id="top-card"></div>
-  <div class="scout-blurb loading" id="scout-blurb" onclick="toggleChat()">...</div>
+  <section class="now-strip now-loading" id="now-strip" aria-live="polite">
+    <div class="now-head">
+      <span class="now-eyebrow">Now at you</span>
+      <span class="now-time" id="now-time">—</span>
+    </div>
+    <div class="now-body">
+      <div class="now-icon" id="now-icon">🌤️</div>
+      <div class="now-figures">
+        <div class="now-temp"><span id="now-temp-val">—</span><span class="now-temp-deg">°F</span></div>
+        <div class="now-summary" id="now-summary">Reading your sky…</div>
+        <div class="now-meta" id="now-meta"></div>
+      </div>
+    </div>
+    <div class="now-cautions" id="now-cautions"></div>
+  </section>
 
-  <!-- Aggregated product chip strip — populated by loadAggregatedChips()
-       across all beaches × next 7 days. Hidden until at least one chip
-       is rendered. -->
-  <div class="product-chips" id="product-chips" style="display:none;"></div>
+  <div class="scout-blurb loading" id="scout-blurb" onclick="toggleChat()" title="Ask Scout">Scout is sniffing the wind…</div>
 
-  <div class="beach-list" id="beach-list">
-    <div class="skeleton"></div>
-    <div class="skeleton"></div>
-    <div class="skeleton"></div>
-    <div class="skeleton"></div>
-    <div class="skeleton"></div>
+  <div class="results-head">
+    <h2 id="results-title">Better picks nearby</h2>
+    <span class="results-count" id="results-count"></span>
   </div>
+
+  <main class="result-list" id="result-list">
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+  </main>
+
+  <div class="footer-note">Powered by NOAA, Open-Meteo, and a wet nose.</div>
 
 </div>
 
 <div class="dir-overlay" id="dir-overlay" onclick="closeDirections()"></div>
-<div class="dir-sheet" id="dir-sheet">
+<div class="dir-sheet" id="dir-sheet" role="dialog" aria-modal="true">
   <div class="dir-handle"></div>
   <div class="dir-beach" id="dir-beach"></div>
   <div class="dir-meta" id="dir-meta"></div>
@@ -621,259 +888,377 @@
   <button class="dir-cancel" onclick="closeDirections()">Close</button>
 </div>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+  crossorigin=""></script>
 <script>
+  // ─── Config ─────────────────────────────────────────────────────────
   const SUPABASE_URL = 'https://ehlzbwtrsxaaukurekau.supabase.co';
   const ANON_KEY     = 'sb_publishable_lAg7YdZ3w7S5fN8jgiExKQ_3-KtW3xk';
 
-  // ── State ──────────────────────────────────────────────────────────
-  let beachCache  = {};   // { [date]: BeachFindRow[] } — one entry per date pill
-  let nowBeaches  = null; // [{ beach, day }] — cached after first NOW fetch
-  let userLat     = null;
-  let userLng     = null;
-  // 'blend' (Best Nearby) is the default sort. Falls back gracefully
-  // when location isn't known (blendScore treats distance=null as 0.5
-  // → monotonic in score, so it ranks like 'conditions' pre-location).
-  let currentSort = 'blend';
-  let leashFilter = 'any';
+  const DEFAULT_LAT  = 33.665;   // Huntington Dog Beach fallback
+  const DEFAULT_LNG  = -118.015;
+  const NEAREST_LIMIT = 14;
+  const DISPLAY_LIMIT = 12;
 
-  // Wants: multi-select intent chips. Per [[dog-park-subpipeline-scope]]
-  // 2026-05-25, the consumer UI is "Show me: [chips]" — Off-leash beaches,
-  // On-leash beaches, Dog parks. URL ?want=a,b,c takes precedence; falls
-  // back to localStorage; else default = off_leash_beach + dog_park
-  // ("the off-leash dog experience").
-  //
-  // Back-compat: still honors legacy ?dest=beach|dog_park for shared links.
-  const WANTS_KEY = 'find.wants';
-  const ALL_WANTS = ['off_leash_beach', 'on_leash_beach', 'dog_park'];
-  let wants = (() => {
+  const LOC_CACHE_KEY = 'dogbeach.user_loc';
+  const LOC_TTL_MS    = 24 * 60 * 60 * 1000;
+  const WANTS_KEY     = 'find.wants';
+  const AMENS_KEY     = 'find.amenities';
+  const DIST_KEY      = 'find.distanceFilterMi';
+
+  // ─── State ──────────────────────────────────────────────────────────
+  let userLat = null;
+  let userLng = null;
+  let locationLabel = '';
+
+  let wants = restoreWantsFromUrlOrStorage();
+  let amenityFilters = restoreAmenitiesFromStorage();
+  let distanceFilterMi = restoreDistanceFromStorage();
+  let searchQuery = '';
+
+  let beachResults = [];      // raw rows from get-beaches-find
+  let dogParkResults = [];    // raw rows from nearest_dog_parks
+  let lastRenderedCards = []; // mixed, ranked, filtered
+
+  let nowAtUser = null;       // result of one-off Open-Meteo on user lat/lng
+  let _scoutAbortCtrl = null;
+  const scoutCache = {};
+
+  let map = null;
+  let pinsLayer = null;
+  let userMarker = null;
+  let activePinId = null;
+
+  // ─── Restore helpers ────────────────────────────────────────────────
+  function restoreWantsFromUrlOrStorage() {
+    const ALL = ['off_leash_beach', 'on_leash_beach', 'dog_park'];
     try {
       const params = new URLSearchParams(window.location.search);
       const urlWant = params.get('want');
       if (urlWant) {
-        const set = new Set(urlWant.split(',').filter(w => ALL_WANTS.includes(w)));
-        if (set.size > 0) return set;
+        const set = new Set(urlWant.split(',').filter(w => ALL.includes(w)));
+        if (set.size) return set;
       }
-      // Legacy ?dest= → wants
-      const urlDest = params.get('dest');
-      if (urlDest === 'dog_park') return new Set(['dog_park']);
-      if (urlDest === 'beach') return new Set(['off_leash_beach']);
-      // localStorage
       const stored = localStorage.getItem(WANTS_KEY);
       if (stored) {
-        const set = new Set(stored.split(',').filter(w => ALL_WANTS.includes(w)));
-        if (set.size > 0) return set;
+        const set = new Set(stored.split(',').filter(w => ALL.includes(w)));
+        if (set.size) return set;
       }
-      // Default: off-leash dog experience
-      return new Set(['off_leash_beach', 'dog_park']);
-    } catch { return new Set(['off_leash_beach', 'dog_park']); }
-  })();
-  let dogParkCache = {}; // { 'YYYY-MM-DD': [...DP rows] } — per-date forecast
-
-  // Derived: what's the effective leash filter for beach queries?
-  // - Both chips → 'any'
-  // - Only off → 'off_leash'
-  // - Only on → 'on_leash'
-  // - Neither → 'any' (we won't fetch beaches at all)
-  function effectiveBeachLeash() {
-    const off = wants.has('off_leash_beach');
-    const on = wants.has('on_leash_beach');
-    if (off && on) return 'any';
-    if (off) return 'off_leash';
-    if (on) return 'on_leash';
-    return 'any';
+    } catch {}
+    return new Set(['off_leash_beach', 'dog_park']);
   }
-  function wantsBeaches() { return wants.has('off_leash_beach') || wants.has('on_leash_beach'); }
-  function wantsDogParks() { return wants.has('dog_park'); }
-
-  // Distance filter (miles). 'any' = no cap. Default 10mi. URL ?max_mi=
-  // takes precedence; falls back to localStorage; else 10. Numeric string
-  // in URL = mi cap; 'any' = uncapped.
-  const DIST_KEY = 'find.distanceFilterMi';
-  let distanceFilterMi = (() => {
+  function restoreAmenitiesFromStorage() {
+    const ALL = ['parking', 'restrooms', 'water', 'shade'];
+    try {
+      const stored = localStorage.getItem(AMENS_KEY);
+      if (stored) {
+        const set = new Set(stored.split(',').filter(a => ALL.includes(a)));
+        return set;
+      }
+    } catch {}
+    return new Set();
+  }
+  function restoreDistanceFromStorage() {
     try {
       const urlMi = new URLSearchParams(window.location.search).get('max_mi');
       if (urlMi === 'any') return 'any';
       const n = parseFloat(urlMi);
-      if (!isNaN(n) && n > 0) return n;
+      if (!Number.isNaN(n) && n > 0) return n;
       const stored = localStorage.getItem(DIST_KEY);
       if (stored === 'any') return 'any';
       const s = parseFloat(stored);
-      return !isNaN(s) && s > 0 ? s : 10;
+      return !Number.isNaN(s) && s > 0 ? s : 10;
     } catch { return 10; }
-  })();
-
-  // Server-bounded nearest-N set. Client filters/sorts within this set.
-  // GIST index on beaches.location makes the server query O(log N) at
-  // any catalog size. 10 is enough to show top 5–7 after any sort mode.
-  const NEAREST_LIMIT   = 10;
-  const DISPLAY_LIMIT   = 10;
-
-  // ── Day pills ──────────────────────────────────────────────────────
-  const days = [];
-  for (let i = 0; i < 7; i++) {
-    const d     = new Date(Date.now() + i * 86_400_000);
-    const iso   = d.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-    const label = i === 0 ? 'TDY' : i === 1 ? 'TMW'
-                : d.toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short' }).toUpperCase();
-    days.push({ iso, label });
   }
 
-  let selectedDate = days[0].iso;
+  function persistWants() {
+    try { localStorage.setItem(WANTS_KEY, [...wants].join(',')); } catch {}
+    try {
+      const url = new URL(window.location.href);
+      if (wants.size) url.searchParams.set('want', [...wants].join(','));
+      else url.searchParams.delete('want');
+      window.history.replaceState({}, '', url);
+    } catch {}
+  }
+  function persistAmenities() {
+    try { localStorage.setItem(AMENS_KEY, [...amenityFilters].join(',')); } catch {}
+  }
+  function persistDistance() {
+    try { localStorage.setItem(DIST_KEY, String(distanceFilterMi)); } catch {}
+  }
 
-  const pillsEl = document.getElementById('day-pills');
+  // ─── Location cache ─────────────────────────────────────────────────
+  function _readCachedLocation() {
+    try {
+      const raw = localStorage.getItem(LOC_CACHE_KEY);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!Number.isFinite(obj?.lat) || !Number.isFinite(obj?.lng)) return null;
+      if (typeof obj.ts !== 'number') return null;
+      if (Date.now() - obj.ts > LOC_TTL_MS) return null;
+      return obj;
+    } catch { return null; }
+  }
+  function _saveCachedLocation(lat, lng, label) {
+    try {
+      localStorage.setItem(LOC_CACHE_KEY,
+        JSON.stringify({ lat, lng, label, ts: Date.now() }));
+    } catch {}
+  }
 
-  // NOW pill first
-  const nowBtn = document.createElement('button');
-  nowBtn.className = 'day-pill';
-  nowBtn.textContent = 'NOW';
-  nowBtn.onclick = () => {
-    document.querySelectorAll('.day-pill').forEach(p => p.classList.remove('active'));
-    nowBtn.classList.add('active');
-    selectedDate = 'now';
-    sortAndRender();
+  function setUserLocation(lat, lng, label) {
+    userLat = lat;
+    userLng = lng;
+    if (label) locationLabel = label;
+    document.getElementById('loc-pill-text').textContent =
+      locationLabel || 'Saved location';
+  }
+
+  function setLocationLabelText(text) {
+    document.getElementById('loc-pill-text').textContent = text;
+  }
+
+  // ─── Geolocation flow ───────────────────────────────────────────────
+  function hydrateLocationFromCache() {
+    const cached = _readCachedLocation();
+    if (!cached) return false;
+    setUserLocation(cached.lat, cached.lng, cached.label || 'Saved location');
+    return true;
+  }
+
+  function requestGeolocation() {
+    setLocationLabelText('Detecting…');
+    if (!('geolocation' in navigator)) {
+      _fallbackToDefault();
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      async pos => {
+        const { latitude, longitude } = pos.coords;
+        const name = await reverseGeocode(latitude, longitude).catch(() => 'Your location');
+        setUserLocation(latitude, longitude, name);
+        _saveCachedLocation(latitude, longitude, name);
+        await loadEverything();
+      },
+      () => { showZipInput(); _fallbackToDefault(); },
+      { timeout: 8000, maximumAge: 5 * 60 * 1000 }
+    );
+  }
+
+  function _fallbackToDefault() {
+    setUserLocation(DEFAULT_LAT, DEFAULT_LNG, 'Huntington (default)');
+    loadEverything();
+  }
+
+  function showZipInput() {
+    const link = document.getElementById('loc-link');
+    link.outerHTML = `
+      <input class="zip-input" id="zip-input" type="text" inputmode="numeric"
+             maxlength="5" placeholder="ZIP"
+             oninput="this.value=this.value.replace(/\\D/g,'').slice(0,5)"
+             onkeydown="if(event.key==='Enter')submitZip()">
+      <button class="loc-link" id="zip-go" onclick="submitZip()">Go</button>`;
+  }
+
+  async function submitZip() {
+    const inp = document.getElementById('zip-input');
+    if (!inp || !/^\d{5}$/.test(inp.value)) {
+      if (inp) { inp.placeholder = '5 digits'; inp.style.borderColor = 'var(--red)'; }
+      return;
+    }
+    const zip = inp.value;
+    setLocationLabelText('Looking up ZIP…');
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?postalcode=${zip}&countrycodes=us&format=json&limit=1`,
+        { headers: { 'User-Agent': 'DogBeachScout/1.0' } });
+      const data = await res.json();
+      if (!data[0]) { inp.style.borderColor = 'var(--red)'; return; }
+      const lat = parseFloat(data[0].lat);
+      const lng = parseFloat(data[0].lon);
+      const label = `ZIP ${zip}`;
+      setUserLocation(lat, lng, label);
+      _saveCachedLocation(lat, lng, label);
+      // Restore button shape after success
+      document.getElementById('zip-input').remove();
+      const go = document.getElementById('zip-go');
+      go.outerHTML = `<button class="loc-link" id="loc-link" onclick="onUpdateLocation()">Update</button>`;
+      await loadEverything();
+    } catch {
+      setLocationLabelText('Lookup failed');
+    }
+  }
+
+  async function reverseGeocode(lat, lng) {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=10`,
+        { headers: { 'User-Agent': 'DogBeachScout/1.0' } });
+      const data = await res.json();
+      const addr = data?.address ?? {};
+      const city = addr.city || addr.town || addr.village || addr.hamlet || addr.suburb;
+      const state = addr.state ? abbrevState(addr.state) : null;
+      if (city && state) return `${city}, ${state}`;
+      if (city) return city;
+      if (state) return state;
+      return 'Your location';
+    } catch { return 'Your location'; }
+  }
+
+  function abbrevState(name) {
+    const map = {
+      'Alabama':'AL','Alaska':'AK','Arizona':'AZ','Arkansas':'AR','California':'CA',
+      'Colorado':'CO','Connecticut':'CT','Delaware':'DE','Florida':'FL','Georgia':'GA',
+      'Hawaii':'HI','Idaho':'ID','Illinois':'IL','Indiana':'IN','Iowa':'IA','Kansas':'KS',
+      'Kentucky':'KY','Louisiana':'LA','Maine':'ME','Maryland':'MD','Massachusetts':'MA',
+      'Michigan':'MI','Minnesota':'MN','Mississippi':'MS','Missouri':'MO','Montana':'MT',
+      'Nebraska':'NE','Nevada':'NV','New Hampshire':'NH','New Jersey':'NJ','New Mexico':'NM',
+      'New York':'NY','North Carolina':'NC','North Dakota':'ND','Ohio':'OH','Oklahoma':'OK',
+      'Oregon':'OR','Pennsylvania':'PA','Rhode Island':'RI','South Carolina':'SC',
+      'South Dakota':'SD','Tennessee':'TN','Texas':'TX','Utah':'UT','Vermont':'VT',
+      'Virginia':'VA','Washington':'WA','West Virginia':'WV','Wisconsin':'WI','Wyoming':'WY'
+    };
+    return map[name] || name;
+  }
+
+  function onUpdateLocation() {
+    // Replace the pill with a small picker: either re-request browser geo or
+    // open the ZIP entry directly. We just show the ZIP input — cleaner.
+    showZipInput();
+  }
+
+  // ─── One-off "Now at you" weather ───────────────────────────────────
+  async function loadNowAtUser() {
+    if (userLat == null || userLng == null) return;
+    const strip = document.getElementById('now-strip');
+    strip.classList.add('now-loading');
+    const url = `https://api.open-meteo.com/v1/forecast`
+      + `?latitude=${userLat}&longitude=${userLng}`
+      + `&current=temperature_2m,wind_speed_10m,wind_gusts_10m,weather_code,uv_index,relative_humidity_2m,precipitation,apparent_temperature`
+      + `&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto`;
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      const c = data.current ?? {};
+      nowAtUser = {
+        tempF:    c.temperature_2m,
+        feelsF:   c.apparent_temperature,
+        windMph:  c.wind_speed_10m,
+        gustMph:  c.wind_gusts_10m,
+        wmoCode:  c.weather_code,
+        uv:       c.uv_index,
+        rhPct:    c.relative_humidity_2m,
+        precip:   c.precipitation,
+        timeISO:  c.time,
+        tz:       data.timezone,
+      };
+      renderNowAtUser();
+    } catch {
+      document.getElementById('now-summary').textContent = 'Sky reading unavailable.';
+      strip.classList.remove('now-loading');
+    }
+  }
+
+  function renderNowAtUser() {
+    const strip = document.getElementById('now-strip');
+    strip.classList.remove('now-loading');
+    const n = nowAtUser; if (!n) return;
+    document.getElementById('now-icon').textContent = wmoIcon(n.wmoCode);
+    document.getElementById('now-temp-val').textContent = Math.round(n.tempF);
+    document.getElementById('now-summary').textContent = nowSummary(n);
+    const meta = [];
+    if (n.feelsF != null && Math.abs(n.feelsF - n.tempF) >= 3) meta.push(`Feels ${Math.round(n.feelsF)}°`);
+    if (n.windMph != null) meta.push(`Wind ${Math.round(n.windMph)} mph`);
+    if (n.uv != null) meta.push(`UV ${n.uv.toFixed(1)}`);
+    if (n.rhPct != null) meta.push(`RH ${Math.round(n.rhPct)}%`);
+    document.getElementById('now-meta').innerHTML = meta
+      .map(t => `<span>${t}</span>`).join(`<span class="meta-dot">·</span>`);
+    // Local time
+    if (n.timeISO) {
+      const dt = new Date(n.timeISO);
+      const fmt = new Intl.DateTimeFormat('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
+      document.getElementById('now-time').textContent = fmt.format(dt);
+    }
+    document.getElementById('now-cautions').innerHTML = buildCautionBadges(n);
+  }
+
+  function nowSummary(n) {
+    const wmoLabel = WMO_LABELS[n.wmoCode] || 'Mild';
+    if (n.windMph != null && n.windMph >= 20) return `${wmoLabel}, breezy.`;
+    if (n.tempF != null && n.tempF >= 88) return `${wmoLabel}, hot for paws.`;
+    if (n.tempF != null && n.tempF <= 40) return `${wmoLabel}, chilly.`;
+    return `${wmoLabel}.`;
+  }
+
+  function buildCautionBadges(n) {
+    const out = [];
+    if (n.uv != null && n.uv >= 8) out.push({ sev:'caution', icon:'☀️', text:`High UV (${n.uv.toFixed(1)})` });
+    else if (n.uv != null && n.uv >= 6) out.push({ sev:'advisory', icon:'☀️', text:`UV ${n.uv.toFixed(1)}` });
+    if (n.windMph != null && n.windMph >= 22) out.push({ sev:'caution', icon:'💨', text:`Windy (${Math.round(n.windMph)} mph)` });
+    else if (n.windMph != null && n.windMph >= 15) out.push({ sev:'advisory', icon:'💨', text:`Breezy (${Math.round(n.windMph)} mph)` });
+    if (n.tempF != null && n.tempF >= 90) out.push({ sev:'caution', icon:'🌡️', text:`Hot sand (${Math.round(n.tempF)}°)` });
+    if (n.tempF != null && n.tempF <= 38) out.push({ sev:'advisory', icon:'🥶', text:`Cold (${Math.round(n.tempF)}°)` });
+    if (n.precip != null && n.precip > 0.05) out.push({ sev:'caution', icon:'🌧️', text:'Rain falling' });
+    if (SEVERE_WMO.has(n.wmoCode)) out.push({ sev:'no_go', icon:'⛈️', text:'Severe weather' });
+    return out.map(b =>
+      `<span class="caution-badge sev-${b.sev}"><span class="caution-icon">${b.icon}</span>${b.text}</span>`
+    ).join('');
+  }
+
+  // ─── WMO maps ────────────────────────────────────────────────────────
+  const SEVERE_WMO  = new Set([63,64,65,66,67,71,72,73,74,75,76,77,82,95,96,97,98,99]);
+  const CAUTION_WMO = new Set([45,48,51,53,55,56,57,61,80,81]);
+  const WMO_LABELS = {
+    0:'Clear', 1:'Mostly clear', 2:'Partly cloudy', 3:'Overcast',
+    45:'Fog', 48:'Fog',
+    51:'Light drizzle', 53:'Drizzle', 55:'Heavy drizzle',
+    56:'Freezing drizzle', 57:'Freezing drizzle',
+    61:'Light rain', 63:'Rain', 65:'Heavy rain',
+    66:'Freezing rain', 67:'Freezing rain',
+    71:'Light snow', 73:'Snow', 75:'Heavy snow', 77:'Snow grains',
+    80:'Light showers', 81:'Showers', 82:'Violent showers',
+    95:'Thunderstorm', 96:'Thunderstorm', 99:'Thunderstorm',
   };
-  pillsEl.appendChild(nowBtn);
+  function wmoIcon(code) {
+    if (code == null) return '⛅';
+    if (code === 0)              return '☀️';
+    if (code <= 2)               return '⛅';
+    if (code === 3)              return '☁️';
+    if (code <= 48)              return '🌫️';
+    if (code <= 67)              return '🌧️';
+    if (code <= 77)              return '❄️';
+    if (code <= 82)              return '🌧️';
+    return '⛈️';
+  }
 
-  days.forEach(({ iso, label }) => {
-    const btn = document.createElement('button');
-    btn.className = 'day-pill' + (iso === selectedDate ? ' active' : '');
-    btn.textContent = label;
-    btn.onclick = () => {
-      document.querySelectorAll('.day-pill').forEach(p => p.classList.remove('active'));
-      btn.classList.add('active');
-      selectedDate = iso;
-      sortAndRender();
-    };
-
-    pillsEl.appendChild(btn);
-  });
-
-  // ── NOW mode ───────────────────────────────────────────────────────
-  // Request-ID guard: each sortAndRender* invocation increments the
-  // token. Stale async resumptions check the token before touching DOM
-  // and bail silently — kills the "renders twice with different beaches"
-  // flicker when geolocation lands mid-render. Per Franz 2026-05-19.
-  let _renderToken = 0;
-
-  function _sortCards(cards, mode) {
-    if (mode === 'distance') {
-      return [...cards].sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999));
+  // ─── Fetch beaches + dog parks ──────────────────────────────────────
+  async function loadBeaches() {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const params = new URLSearchParams({ date: today, scored: 'false' });
+    if (userLat != null && userLng != null) {
+      params.set('lat',   String(userLat));
+      params.set('lng',   String(userLng));
+      params.set('limit', String(NEAREST_LIMIT));
     }
-    if (mode === 'blend') {
-      const maxDist = Math.max(...cards.map(c => c.distance ?? 0), 1);
-      return [...cards].sort((a, b) => blendScore(b, maxDist) - blendScore(a, maxDist));
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/functions/v1/get-beaches-find?${params}`,
+        { headers: { 'Authorization': `Bearer ${ANON_KEY}` } });
+      const data = await res.json();
+      beachResults = Array.isArray(data.beaches) ? data.beaches : [];
+    } catch {
+      beachResults = [];
     }
-    return [...cards].sort((a, b) =>
-      (b.day?.composite_score ?? 0) - (a.day?.composite_score ?? 0));
   }
 
-  async function sortAndRenderNow() {
-    const myToken = ++_renderToken;
-    document.getElementById('top-card').innerHTML   = '<div class="skeleton"></div>';
-    document.getElementById('beach-list').innerHTML =
-      Array(4).fill('<div class="skeleton"></div>').join('');
-
-    // Pull beach list via loadBeachesForDate so the spatial-bounded
-    // nearest-N path is used consistently. distance_m is preserved so
-    // NOW cards can render the car icon without the client-side haversine.
-    const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-    // Preserve full RPC fields on each beach so beachToDay() below can
-    // build a complete day object (with best_window_label, chips, etc.)
-    // for the static-day fallback when get-beach-now has no live data.
-    const beachList = (await loadBeachesForDate(todayISO))
-      .map(b => ({ ...b, composite_score: b.composite_score_v2 ?? null }));
-    if (myToken !== _renderToken) return;   // superseded
-
-    // Sort by STATIC beach data first to pick the top-N candidates that
-    // need live get-beach-now refinement. Skeleton stays up during the
-    // fetch — no card render in this pass (would flicker when live
-    // data re-sorts the top card). Per Franz 2026-05-19.
-    const staticCards = beachList
-      .filter(b => matchesLeashFilter(b))
-      .map(b => ({
-        beach:    b,
-        // Build the static day from the RPC payload (composite_score_v2,
-        // best_window_label, chips). When get-beach-now lands with live
-        // data, this gets replaced with a NOW day; when it doesn't (no
-        // is_now row), the static day stays so the card still renders
-        // today's score + window label instead of a "—" placeholder.
-        day:      beachToDay(b),
-        distance: resolveDistanceMiles(b),
-      }))
-      .filter(c => matchesDistanceFilter(c.distance));
-    const topN = _sortCards(staticCards, currentSort).slice(0, DISPLAY_LIMIT);
-
-    // Fetch live get-beach-now for top-N only (was: every filtered
-    // beach — 30-100 concurrent Edge calls, the "glacial" bottleneck).
-    const hasScoring = b => b.composite_score != null;
-    const refined = await Promise.all(topN.map(c =>
-      hasScoring(c.beach)
-        ? fetch(`${SUPABASE_URL}/functions/v1/get-beach-now?${c.beach.arena_group_id ? 'arena_group_id=' + c.beach.arena_group_id : 'location_id=' + c.beach.location_id}`,
-            { headers: { 'Authorization': `Bearer ${ANON_KEY}` } })
-            .then(r => r.json())
-            .then(d => ({ ...c, day: nowToDay(d) || c.day }))
-            .catch(() => c)
-        : Promise.resolve(c)
-    ));
-    if (myToken !== _renderToken) return;   // superseded mid-fetch
-
-    // Single render with live day data — no intermediate flicker.
-    nowBeaches = refined;
-    renderSorted(_sortCards(refined, currentSort));
-  }
-
-  function nowToDay(d) {
-    if (!d || d.error) return null;
-    // get-beach-now returns a wrapper shape `{ok:true, message:'No beaches
-    // found', results:[]}` when the requested beach has no is_now row.
-    // Treat that as "no NOW data" so the caller falls back to the static
-    // day composite — otherwise this returns a truthy day object with
-    // composite_score=null and the card renders "—" even when the day rec
-    // has a real score. Discriminator: a real NOW row has location_id +
-    // hour_score_v2.
-    if (d.location_id == null || d.hour_score_v2 == null) return null;
-    return {
-      is_now:             true,
-      location_id:        d.location_id,
-      arena_group_id:     d.arena_group_id,
-      local_date:         d.local_date,
-      best_window_label:  'Right now',
-      bacteria_risk:      'none',
-      summary_weather:    wmoToSummaryWeather(d.weather_code, d.wind_speed),
-      weather_code:       d.weather_code,
-      composite_score:    d.hour_score_v2,
-      lowest_tide_height: d.tide_height,
-      tide_direction:     d.tide_direction,
-      avg_temp:           d.temp_air,
-      avg_wind:           d.wind_speed,
-      busyness_category:  d.busyness_category,
-    };
-  }
-
-  function wmoToSummaryWeather(code, windSpeed) {
-    if (windSpeed >= 20)           return 'windy';
-    if (code === 0)                return 'sunny';
-    if (code <= 2)                 return 'partly_cloudy';
-    if (code === 3)                return 'cloudy';
-    if (code >= 45 && code <= 48) return 'foggy';
-    if (code >= 51)                return 'rainy';
-    return 'partly_cloudy';
-  }
-
-  // ── Fetch beaches for a specific date (cached) ────────────────────
-  // Passes lat/lng+limit when the user has a resolved location, so the
-  // server returns only the nearest NEAREST_LIMIT beaches (GIST-indexed
-  // KNN). Without coords, returns the full active set for score sorting.
-  // ── Dog parks (Phase c — 2026-05-19) ──────────────────────────────
-  async function loadDogParks(date) {
-    // date: 'YYYY-MM-DD' (preferred) or null/'now' → server uses CURRENT_DATE
-    const cacheKey = date || 'today';
-    if (dogParkCache[cacheKey]) return dogParkCache[cacheKey];
+  async function loadDogParks() {
+    if (userLat == null || userLng == null) { dogParkResults = []; return; }
     try {
       const res = await fetch(
         `${SUPABASE_URL}/rest/v1/rpc/nearest_dog_parks`,
         {
-          method:  'POST',
+          method: 'POST',
           headers: {
             'apikey':        ANON_KEY,
             'Authorization': `Bearer ${ANON_KEY}`,
@@ -884,1049 +1269,632 @@
             p_lng:   userLng,
             p_limit: NEAREST_LIMIT,
             p_state: null,
-            p_date:  date && date !== 'now' ? date : null,
+            p_date:  null,
           }),
-        }
-      );
-      if (!res.ok) {
-        const txt = await res.text();
-        console.warn('nearest_dog_parks HTTP', res.status, txt);
-        return [];
-      }
+        });
+      if (!res.ok) { dogParkResults = []; return; }
       const rows = await res.json();
-      // Only cache when call was anchored to a real location — null-coord
-      // results have distance_miles=null and break the distance filter for
-      // every subsequent location-anchored render.
-      if (Array.isArray(rows) && userLat != null && userLng != null) dogParkCache[cacheKey] = rows;
-      return rows ?? [];
-    } catch (err) {
-      console.warn('nearest_dog_parks fetch failed:', err);
-      return [];
+      dogParkResults = Array.isArray(rows) ? rows : [];
+    } catch {
+      dogParkResults = [];
     }
   }
 
-  function buildDogParkCard(dp, rank) {
-    const safeName = (dp.name || 'Unnamed dog park').replace(/'/g, "\\'");
-    const verified = dp.source === 'operator_posted' || dp.source === 'operator_posted_v2';
-    // Leash is definitional for dog parks — hard-coded "Off-leash" label
-    const leashLabel = '🐕 Off-leash';
+  // ─── Normalize into common card shape ───────────────────────────────
+  // Returns: { kind, id, fid?, location_id?, name, lat, lng, distanceMi,
+  //           score, bestWindow, tone, bacteriaRisk, leashTag, amenities:{has_parking,has_restrooms,has_water,has_shade},
+  //           tier, raw }
+  function normalizeBeach(b) {
+    const score = b.composite_score_v2 ?? null;
+    const dMi = b.distance_m != null ? b.distance_m / 1609.34
+              : (userLat != null && b.latitude != null
+                  ? haversine(userLat, userLng, parseFloat(b.latitude), parseFloat(b.longitude))
+                  : null);
+    const tier = b.location_tier ?? 'unknown';
+    return {
+      kind: 'beach',
+      id: `b:${b.arena_group_id ?? b.location_id}`,
+      fid: b.arena_group_id ?? null,
+      location_id: b.location_id ?? null,
+      name: b.display_name || 'Beach',
+      lat: parseFloat(b.latitude),
+      lng: parseFloat(b.longitude),
+      distanceMi: dMi,
+      score,
+      bestWindow: b.best_window_label || null,
+      tone: scoreTone(score),
+      bacteriaRisk: b.bacteria_risk ?? 'none',
+      hasOffLeash: b.has_off_leash === true,
+      hasOnLeash:  b.has_on_leash === true,
+      // Amenity presence flags — from find_beaches RPC (extended
+      // 2026-06-07 to LEFT JOIN beach_amenities). NULL when the beach
+      // has no amenity row yet; consumer treats NULL as unknown.
+      // has_shade not tracked for beaches — stays undefined.
+      amenities: {
+        parking:   b.has_parking,
+        restrooms: b.has_restrooms,
+        water:     b.has_drinking_water,
+        shade:     undefined,
+      },
+      tier,
+      raw: b,
+    };
+  }
 
-    const hours = dp.hours_text
-                || (dp.hours_open_time && dp.hours_close_time
-                    ? `${dp.hours_open_time}–${dp.hours_close_time}`
-                    : 'hours unknown');
+  function normalizeDogPark(dp) {
+    // Dog parks don't carry a daily composite; score the disc as the
+    // accent-park tone. distance_miles comes from the RPC.
+    return {
+      kind: 'dog_park',
+      id: `p:${dp.fid}`,
+      fid: dp.fid,
+      location_id: null,
+      name: dp.name || 'Unnamed dog park',
+      lat: parseFloat(dp.lat),
+      lng: parseFloat(dp.lon),
+      distanceMi: dp.distance_miles ?? null,
+      score: null,
+      bestWindow: dp.hours_text
+                  || (dp.hours_open_time && dp.hours_close_time
+                      ? `${dp.hours_open_time}–${dp.hours_close_time}`
+                      : null),
+      tone: 'park',
+      bacteriaRisk: 'none',
+      hasOffLeash: true,
+      hasOnLeash:  false,
+      // Dog-park amenities — from nearest_dog_parks RPC (extended
+      // 2026-06-07 to surface has_shade + picnic_tables + water_play +
+      // agility from dog_park_dog_policy). Parking + restrooms aren't
+      // tracked at the policy layer → undefined → chip filter passes through.
+      amenities: {
+        parking:   undefined,
+        restrooms: undefined,
+        water:     dp.has_drinking_water,
+        shade:     dp.has_shade,
+      },
+      verified: dp.source === 'operator_posted' || dp.source === 'operator_posted_v2',
+      raw: dp,
+    };
+  }
 
-    const distChip = dp.distance_miles != null
-      ? `<div class="window-sub status-none dist-link" onclick="event.stopPropagation();openDirections(${dp.lat},${dp.lon},'${safeName}',${dp.distance_miles})">🚗 ${dp.distance_miles.toFixed(1)} mi</div>`
-      : '';
+  function scoreTone(s) {
+    if (s == null) return 'unk';
+    if (s >= 70)   return 'go';
+    if (s >= 45)   return 'mid';
+    return 'low';
+  }
 
-    const operatorLine = verified && dp.operator_short
-      ? `<div class="window-sub status-none">Verified: ${dp.operator_short}</div>`
-      : verified
-      ? `<div class="window-sub status-none">Operator-verified</div>`
-      : `<div class="window-sub status-none" style="opacity:0.6">Default — not operator-verified</div>`;
+  // ─── Filter + rank ──────────────────────────────────────────────────
+  function matchesSearch(card) {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    const name = (card.name || '').toLowerCase();
+    if (name.includes(q)) return true;
+    // Cheap city/region soft-match via raw fields if available
+    const raw = card.raw || {};
+    const blob = [raw.city, raw.county, raw.state, raw.region, raw.address_city]
+      .filter(Boolean).join(' ').toLowerCase();
+    return blob.includes(q);
+  }
 
-    const chips = [];
-    // Overlay wins over raw OSM
-    const fence = dp.has_fence_overlay ?? dp.has_fence;
-    const water = dp.has_drinking_water_overlay ?? dp.has_drinking_water;
-    const surface = dp.surface_overlay ?? dp.surface;
-    if (fence)              chips.push('<span class="chip chip-go">🚧 Fenced</span>');
-    if (water)              chips.push('<span class="chip chip-go">💧 Water</span>');
-    if (dp.double_gate)     chips.push('<span class="chip chip-go">🚪 Double-gate</span>');
-    if (dp.small_dog_area)  chips.push('<span class="chip chip-go">🐶 Sm-dog</span>');
-    if (dp.large_dog_area)  chips.push('<span class="chip chip-go">🐕‍🦺 Lg-dog</span>');
-    if (dp.lighting)        chips.push('<span class="chip">💡 Lit</span>');
-    if (surface)            chips.push(`<span class="chip">${surface}</span>`);
-    const chipsHtml = chips.length
-      ? `<div class="chips">${chips.join('<span class="chip-sep">·</span>')}</div>`
-      : '';
+  function matchesDistance(card) {
+    if (distanceFilterMi === 'any') return true;
+    if (card.distanceMi == null) return true;
+    return card.distanceMi <= distanceFilterMi;
+  }
 
-    const heroThumb = dp.hero_thumb_url || dp.hero_image_url;
-    const leftVisual = heroThumb
-      ? `<img class="dp-thumb" src="${heroThumb}" alt="" loading="lazy"
-              onerror="this.style.display='none'" />`
-      : `<span class="day-score-value">🐾</span><span class="day-score-label">DP</span>`;
+  function matchesWant(card) {
+    if (card.kind === 'dog_park') return wants.has('dog_park');
+    // Beach: depends on chips. Both off + on → either. Only off → has_off_leash.
+    // Only on → has_on_leash && !has_off_leash. Neither → exclude beaches.
+    const wantOff = wants.has('off_leash_beach');
+    const wantOn  = wants.has('on_leash_beach');
+    if (!wantOff && !wantOn) return false;
+    if (wantOff && wantOn) return true;
+    if (wantOff) return card.hasOffLeash;
+    if (wantOn)  return card.hasOnLeash && !card.hasOffLeash;
+    return true;
+  }
+
+  // Amenity hard-filter. Selected chip requires amenities[a] === true.
+  // Unknown (undefined/null) passes through — beaches/parks not yet enriched
+  // for this signal aren't punished, they just don't get the green ✓ dot.
+  // Explicit false filters the entity out.
+  //
+  // Why hard not soft: composite_score_v2 ALREADY rewards amenities (the
+  // bulk SQL apply adds +3 for parking, +4 for restrooms, +1 for drinking
+  // water, etc., per 20260606f_apply_v2_best_window_bulk.sql). Soft-blending
+  // here would double-count what the score already says. The chip's job is
+  // "show me only ones with X" — a filter, not a rerank.
+  function matchesAmenities(card) {
+    if (amenityFilters.size === 0) return true;
+    for (const a of amenityFilters) {
+      const v = card.amenities?.[a];
+      if (v === false) return false;
+      // undefined / null → unknown, pass through
+    }
+    return true;
+  }
+
+  function buildRanked() {
+    const all = [
+      ...beachResults.map(normalizeBeach),
+      ...dogParkResults.map(normalizeDogPark),
+    ];
+    const filtered = all
+      .filter(matchesWant)
+      .filter(matchesAmenities)
+      .filter(matchesDistance)
+      .filter(matchesSearch);
+    if (!filtered.length) return [];
+    // Sort by composite_score_v2 (already amenity/feature-baked), with
+    // distance as tiebreaker so an equal-scored closer pick wins. Dog parks
+    // have no composite — anchor them at 60 (slightly above neutral) so
+    // verified nearby parks can interleave alongside scored beaches.
+    const sortKey = c => c.score != null ? c.score : (c.kind === 'dog_park' ? 60 : 0);
+    return [...filtered]
+      .sort((a, b) => {
+        const sa = sortKey(a), sb = sortKey(b);
+        if (sb !== sa) return sb - sa;
+        const da = a.distanceMi ?? Infinity;
+        const db = b.distanceMi ?? Infinity;
+        return da - db;
+      })
+      .slice(0, DISPLAY_LIMIT);
+  }
+
+  // ─── Distance helper ────────────────────────────────────────────────
+  function haversine(lat1, lon1, lat2, lon2) {
+    const R = 3958.8;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.asin(Math.sqrt(a));
+  }
+
+  // ─── Render: result cards ───────────────────────────────────────────
+  function renderCards() {
+    const cards = buildRanked();
+    lastRenderedCards = cards;
+
+    const list = document.getElementById('result-list');
+    const head = document.getElementById('results-count');
+
+    if (!cards.length) {
+      list.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">🐾</div>
+          <div class="empty-text">No places match — try widening the radius or unpicking an amenity.</div>
+        </div>`;
+      head.textContent = '0 PLACES';
+      renderPins([]);
+      renderScoutBlurb(cards);
+      return;
+    }
+
+    head.textContent = `${cards.length} PLACE${cards.length === 1 ? '' : 'S'}`;
+    list.innerHTML = cards.map((c, i) => renderCardHTML(c, i + 1)).join('');
+    list.querySelectorAll('[data-card-id]').forEach(el => {
+      el.addEventListener('click', e => {
+        // Don't navigate when the click was on the dist-link (directions trigger)
+        if (e.target.closest('[data-dir]')) return;
+        const id = el.getAttribute('data-card-id');
+        const card = lastRenderedCards.find(c => c.id === id);
+        if (card) navigateToCard(card);
+      });
+    });
+    list.querySelectorAll('[data-dir]').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const id = btn.getAttribute('data-dir');
+        const card = lastRenderedCards.find(c => c.id === id);
+        if (card) openDirections(card);
+      });
+    });
+
+    renderPins(cards);
+    renderScoutBlurb(cards);
+  }
+
+  function renderCardHTML(c, rank) {
+    const tone = c.tone || 'unk';
+    const toneClass = `tone-${tone}`;
+    const tierClass = c.kind === 'beach' && c.tier ? `tier-${c.tier}` : '';
+
+    const scoreDiscInner = c.kind === 'dog_park'
+      ? `<span class="score-val">★</span><span class="score-lbl">Park</span>`
+      : `<span class="score-val">${c.score != null ? c.score : '—'}</span><span class="score-lbl">${c.score != null ? 'Score' : 'No data'}</span>`;
+
+    const metaParts = [];
+    if (c.distanceMi != null) {
+      metaParts.push(`<span class="meta-dist" data-dir="${c.id}" style="cursor:pointer">🚗 ${c.distanceMi.toFixed(1)} mi</span>`);
+    }
+    if (c.bestWindow) {
+      metaParts.push(`<span class="meta-window">${escapeHtml(c.bestWindow)}</span>`);
+    } else if (c.kind === 'beach' && c.score != null) {
+      metaParts.push(`<span class="meta-window" style="color:var(--text-dim)">No good window today</span>`);
+    }
+    if (c.bacteriaRisk === 'high' || c.bacteriaRisk === 'moderate') {
+      metaParts.push(`<span class="meta-warn">⚠ 72h rain advisory</span>`);
+    }
+    const metaHtml = metaParts.join(`<span class="meta-dot">·</span>`);
+
+    const amenityHtml = renderAmenityStrip(c);
 
     return `
-      <div class="day-card" onclick="window.location.href='dog-park.html?fid=${dp.fid}'">
-        <div class="day-left">
-          <div class="rank-label">#${rank}</div>
-          <div class="day-score">${leftVisual}</div>
+      <a class="result-card ${toneClass} ${tierClass}"
+         data-card-id="${c.id}"
+         href="${navUrl(c)}"
+         aria-label="${escapeAttr(c.name)} — rank ${rank}">
+        <div class="score-disc ${toneClass}" aria-hidden="true">
+          ${scoreDiscInner}
         </div>
-        <div class="day-content">
-          <div class="beach-name">${dp.name || 'Unnamed dog park'}</div>
-          <div class="window-row">
-            <div class="window-sub status-none">${leashLabel} · ${hours}</div>
-            ${distChip}
-          </div>
-          ${operatorLine}
-          ${chipsHtml}
+        <div class="result-body">
+          <div class="result-name">${escapeHtml(c.name)}</div>
+          <div class="result-meta">${metaHtml}</div>
+          ${amenityHtml}
         </div>
-        <div class="chevron">›</div>
-      </div>`;
+        <div class="result-end">
+          <div class="rank-badge">#${rank}</div>
+          <div class="chev">›</div>
+        </div>
+      </a>`;
   }
 
-  async function sortAndRenderDogParks() {
-    document.getElementById('top-card').innerHTML   = '<div class="skeleton"></div>';
-    document.getElementById('beach-list').innerHTML =
-      Array(4).fill('<div class="skeleton"></div>').join('');
-    document.getElementById('product-chips').style.display = 'none';
-    document.getElementById('day-pills').style.display     = 'none';
-
-    let dps;
-    try { dps = await loadDogParks(selectedDate); }
-    catch {
-      document.getElementById('beach-list').innerHTML =
-        '<div class="no-data">Failed to load dog parks.</div>';
-      return;
-    }
-
-    if (!dps.length) {
-      document.getElementById('top-card').innerHTML   = '';
-      document.getElementById('beach-list').innerHTML = '<div class="no-data">No dog parks nearby.</div>';
-      return;
-    }
-
-    // Leash filter applies (off_leash/mixed/on_leash)
-    let filtered = dps;
-    if (leashFilter === 'off_leash')  filtered = dps.filter(d => d.leash_policy === 'off_leash' || d.leash_policy === 'off_leash_voice_control');
-    else if (leashFilter === 'on_leash') filtered = dps.filter(d => d.leash_policy === 'on_leash');
-    else if (leashFilter === 'mixed')    filtered = dps.filter(d => d.leash_policy === 'mixed');
-
-    // Distance filter applies in DP mode too
-    filtered = filtered.filter(d => matchesDistanceFilter(d.distance_miles));
-
-    if (!filtered.length) {
-      document.getElementById('top-card').innerHTML   = '';
-      document.getElementById('beach-list').innerHTML = '<div class="no-data">No dog parks match those filters.</div>';
-      return;
-    }
-
-    // Sort: distance if known; else verified-first then name
-    const sorted = [...filtered].sort((a, b) => {
-      if (a.distance_miles != null && b.distance_miles != null) return a.distance_miles - b.distance_miles;
-      const av = a.source === 'operator_posted' ? 0 : 1;
-      const bv = b.source === 'operator_posted' ? 0 : 1;
-      if (av !== bv) return av - bv;
-      return (a.name || '').localeCompare(b.name || '');
-    }).slice(0, DISPLAY_LIMIT);
-
-    const [first, ...rest] = sorted;
-    document.getElementById('top-card').innerHTML   = buildDogParkCard(first, 1);
-    document.getElementById('beach-list').innerHTML = rest.map((d, i) => buildDogParkCard(d, i + 2)).join('');
-
-    // Replace scout blurb with static DP-mode caption (no LLM call)
-    const blurb = document.getElementById('scout-blurb');
-    blurb.classList.remove('loading');
-    const verifiedCount = filtered.filter(d => d.source === 'operator_posted').length;
-    blurb.textContent = verifiedCount
-      ? `${filtered.length} dog parks nearby — ${verifiedCount} with operator-verified rules.`
-      : `${filtered.length} dog parks nearby. Defaults assume off-leash inside fence (most US dog parks).`;
+  function navUrl(c) {
+    if (c.kind === 'dog_park') return `dog-park.html?fid=${c.fid}`;
+    return c.fid
+      ? `beach.html?fid=${c.fid}`
+      : `beach.html?location_id=${c.location_id}`;
   }
 
-  // ── Blended render (multi-chip selection includes both types) ────────
-  // Fetches beaches + dog parks in parallel, normalizes both to a common
-  // {kind, displayName, distance, score, status, ...renderData} shape,
-  // ranks by composite_score (with the cross-type wobble noted in
-  // [[dog-park-subpipeline-scope]] R5), interleaves heterogeneous cards.
-  async function sortAndRenderBlended() {
-    const myToken = ++_renderToken;
-    document.getElementById('top-card').innerHTML   = '<div class="skeleton"></div>';
-    document.getElementById('beach-list').innerHTML =
-      Array(4).fill('<div class="skeleton"></div>').join('');
-    document.getElementById('product-chips').style.display = 'none';
+  function navigateToCard(c) {
+    window.location.href = navUrl(c);
+  }
 
-    const dateForBeach = selectedDate === 'now'
-      ? new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
-      : selectedDate;
-
-    const [beaches, dps] = await Promise.all([
-      loadBeachesForDate(dateForBeach).catch(() => []),
-      loadDogParks(dateForBeach).catch(() => []),
-    ]);
-    if (myToken !== _renderToken) return;
-
-    // Beach cards
-    const beachCards = (beaches || [])
-      .filter(b => matchesLeashFilter(b))
-      .map(b => ({
-        kind: 'beach',
-        beach: b,
-        day: beachToDay(b),
-        distance: resolveDistanceMiles(b),
-        // Prefer v2 score for cross-type sort. Per Franz 2026-05-30 task #9.
-        score: b.composite_score_v2 ?? b.composite_score ?? 0,
-      }))
-      .filter(c => matchesDistanceFilter(c.distance));
-
-    // Dog park cards — no leash chip filter. The off-/on-leash beach chips
-    // express a preference about BEACHES; they don't translate to dog parks,
-    // which are definitionally off-leash. Selecting "on-leash beaches +
-    // dog parks" means "leashed beaches AND any dog park", not "leashed
-    // beaches AND leashed dog parks" (the latter is not a meaningful
-    // category). Previously this filter rejected every park when the user
-    // dropped off_leash_beach but kept on_leash_beach + dog_park.
-    const dpCards = (dps || [])
-      .filter(d => matchesDistanceFilter(d.distance_miles))
-      .map(d => ({
-        kind: 'dog_park',
-        dp: d,
-        distance: d.distance_miles,
-        // Prefer score_v2 (server-side spec — baseline 50 + positives -
-        // negatives + drive + status gate). Falls back to legacy
-        // composite_score when v2 is absent (no policy / no scoring), and
-        // verified-bias 75/60 when neither exists. Per
-        // [[dog-park-scoring-v2-spec]] 2026-05-27.
-        score: d.score_v2 != null ? d.score_v2
-             : d.composite_score != null ? d.composite_score
-             : (d.source === 'operator_posted' || d.source === 'operator_posted_v2') ? 75 : 60,
-        score_v2_components: d.score_v2_components ?? null,
-      }));
-
-    // Merge + sort. Build a single comparator so both type-streams + the
-    // final pass agree on ordering.
-    const all = [...beachCards, ...dpCards];
-    const maxDist = Math.max(...all.map(c => c.distance ?? 0), 1);
-    const cmp = (a, b) => {
-      if (currentSort === 'distance') return (a.distance ?? 9999) - (b.distance ?? 9999);
-      if (currentSort === 'blend') {
-        // Same blend formula for both types now that DP scores are real
-        // composite_score values comparable to beach composite_score.
-        const aS = blendScore({ day: { composite_score: a.score }, distance: a.distance }, maxDist);
-        const bS = blendScore({ day: { composite_score: b.score }, distance: b.distance }, maxDist);
-        return bS - aS;
-      }
-      return (b.score ?? 0) - (a.score ?? 0);
+  function renderAmenityStrip(c) {
+    if (amenityFilters.size === 0) return '';
+    const lookup = {
+      parking:   { icon:'🅿️', label:'Parking' },
+      restrooms: { icon:'🚻', label:'Restrooms' },
+      water:     { icon:'💧', label:'Water' },
+      shade:     { icon:'🌳', label:'Shade' },
     };
-
-    // Pre-sort each stream, then reserve min-N quota per type as a safety net.
-    // With real composite scores both types are comparable, but a 10 vs 5 ratio
-    // of beach:DP candidates can still wipe out the smaller stream on tied
-    // scores. Quota guarantees mixed results.
-    const sortedBeaches = [...beachCards].sort(cmp);
-    const sortedDps     = [...dpCards].sort(cmp);
-    const MIN_DP    = 2;
-    const MIN_BEACH = 2;
-    const reservedDps     = sortedDps.slice(0, Math.min(MIN_DP, sortedDps.length));
-    const reservedBeaches = sortedBeaches.slice(0, Math.min(MIN_BEACH, sortedBeaches.length));
-    const reserved = new Set([...reservedDps, ...reservedBeaches]);
-    const remaining = [...sortedBeaches, ...sortedDps].filter(c => !reserved.has(c)).sort(cmp);
-    const fillSlots = Math.max(0, DISPLAY_LIMIT - reserved.size);
-    let sorted = [...reserved, ...remaining.slice(0, fillSlots)];
-    sorted.sort(cmp);
-
-    if (!sorted.length) {
-      document.getElementById('top-card').innerHTML = '';
-      document.getElementById('beach-list').innerHTML = '<div class="no-data">No matches in selected scope.</div>';
-      return;
-    }
-
-    const renderCard = (c, i) => c.kind === 'beach'
-      ? buildBeachCard(c, i + 1)
-      : buildDogParkCard(c.dp, i + 1);
-
-    document.getElementById('top-card').innerHTML = renderCard(sorted[0], 0);
-    document.getElementById('beach-list').innerHTML = sorted.slice(1).map((c, i) => renderCard(c, i + 1)).join('');
-
-    // Update scout blurb with mixed-type summary
-    const blurb = document.getElementById('scout-blurb');
-    blurb.classList.remove('loading');
-    const nBeach = sorted.filter(c => c.kind === 'beach').length;
-    const nDp = sorted.filter(c => c.kind === 'dog_park').length;
-    blurb.textContent = `${nBeach} beach${nBeach !== 1 ? 'es' : ''} and ${nDp} dog park${nDp !== 1 ? 's' : ''} nearby.`;
-  }
-
-  async function loadBeachesForDate(date) {
-    const cacheKey = date;
-    if (beachCache[cacheKey]) return beachCache[cacheKey];
-    const params = new URLSearchParams({ date });
-    if (userLat !== null && userLng !== null) {
-      params.set('lat',   String(userLat));
-      params.set('lng',   String(userLng));
-      params.set('limit', String(NEAREST_LIMIT));
-    }
-    // Edge Function default is scored=false (full catalog); opt in here.
-    // scored=false (full catalog) so tier-4 no-dog beaches appear with the
-    // 🚫 indicator + greyscale styling. Was scored=true which excluded all
-    // beaches without scoring rows (i.e., tier 4). Per Franz 2026-05-25 —
-    // famous beaches like Venice/Zuma should be discoverable even when dogs
-    // aren't allowed. CSS .tier-4_no_dogs already styles the card.
-    params.set('scored', 'false');
-    const res  = await fetch(
-      `${SUPABASE_URL}/functions/v1/get-beaches-find?${params}`,
-      { headers: { 'Authorization': `Bearer ${ANON_KEY}` } }
-    );
-    const data = await res.json();
-    if (Array.isArray(data.beaches)) beachCache[cacheKey] = data.beaches;
-    return data.beaches ?? [];
-  }
-
-  function beachToDay(b) {
-    if (b.composite_score_v2 == null) return null;
-    return {
-      composite_score:    b.composite_score_v2,
-      best_window_label:  b.best_window_label,
-      bacteria_risk:      b.bacteria_risk,
-      summary_weather:    b.summary_weather,
-      weather_code:       b.weather_code,
-      lowest_tide_height: b.lowest_tide_height,
-      avg_temp:           b.avg_temp,
-      avg_wind:           b.avg_wind,
-      busyness_category:  b.busyness_category,
-      go_hours_count:     b.go_hours_count,
-    };
-  }
-
-  // ── Sort and render ────────────────────────────────────────────────
-  // Dispatches based on wants Set membership:
-  //   - dog_park only       → existing sortAndRenderDogParks (DP-only render)
-  //   - beach chip(s) only  → existing beach render with leashFilter from chips
-  //   - dog_park + beach    → blended render (parallel fetch, merge by score)
-  async function sortAndRender() {
-    // Re-derive leashFilter from current chips BEFORE any branch reads it.
-    // Was set after the DP-only return below, which left it stale when the
-    // user dropped from on-leash-beach + dog-park → dog-park-only — the
-    // DP filter then rejected every park (definitionally off-leash) because
-    // leashFilter was still 'on_leash' from the previous chip state.
-    leashFilter = effectiveBeachLeash();
-    if (wantsDogParks() && !wantsBeaches()) {
-      await sortAndRenderDogParks();
-      return;
-    }
-    // Beach (or blended) flow — restore day pills + chips that DP mode hides
-    document.getElementById('day-pills').style.display = '';
-    if (wantsDogParks() && wantsBeaches()) {
-      await sortAndRenderBlended();
-      return;
-    }
-    if (selectedDate === 'now') {
-      await sortAndRenderNow();
-      return;
-    }
-
-    // Fetch if not yet cached
-    let beaches = beachCache[selectedDate];
-    if (!beaches) {
-      document.getElementById('top-card').innerHTML   = '<div class="skeleton"></div>';
-      document.getElementById('beach-list').innerHTML =
-        Array(4).fill('<div class="skeleton"></div>').join('');
-      try {
-        beaches = await loadBeachesForDate(selectedDate);
-      } catch {
-        document.getElementById('beach-list').innerHTML =
-          '<div class="no-data">Failed to load beaches.</div>';
-        return;
+    const dots = [];
+    for (const a of amenityFilters) {
+      const def = lookup[a]; if (!def) continue;
+      const v = c.amenities?.[a];
+      if (v === true) {
+        dots.push(`<span class="amenity-dot match" title="${def.label}: yes"><span class="dot-mark">✓</span>${def.icon}</span>`);
+      } else if (v === false) {
+        dots.push(`<span class="amenity-dot miss" title="${def.label}: no"><span class="dot-mark">×</span>${def.icon}</span>`);
+      } else {
+        dots.push(`<span class="amenity-dot" title="${def.label}: unknown"><span class="dot-mark">?</span>${def.icon}</span>`);
       }
     }
+    return `<div class="amenity-strip">${dots.join('')}</div>`;
+  }
 
-    // Build cards with server-or-client distance and leash filter
-    const cards = beaches
-      .filter(b => matchesLeashFilter(b))
-      .map(b => ({
-        beach:    b,
-        day:      beachToDay(b),
-        distance: resolveDistanceMiles(b),
-      }))
-      .filter(c => matchesDistanceFilter(c.distance));
+  function escapeHtml(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function escapeAttr(s) {
+    return escapeHtml(s).replace(/"/g, '&quot;');
+  }
 
-    // Sort
-    let sorted;
-    if (currentSort === 'distance') {
-      sorted = [...cards].sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999));
-    } else if (currentSort === 'blend') {
-      const maxDist = Math.max(...cards.map(c => c.distance ?? 0), 1);
-      sorted = [...cards].sort((a, b) => blendScore(b, maxDist) - blendScore(a, maxDist));
-    } else {
-      sorted = [...cards].sort((a, b) =>
-        (b.day?.composite_score ?? 0) - (a.day?.composite_score ?? 0)
-      );
+  // ─── Map ────────────────────────────────────────────────────────────
+  function initMap() {
+    if (map) return;
+    map = L.map('map', {
+      zoomControl: true,
+      attributionControl: false,
+      scrollWheelZoom: false,  // less aggressive on a scroll-heavy page
+    });
+    map.on('click', () => { /* tapping the map background clears highlight */
+      activePinId = null;
+      Array.from(document.querySelectorAll('.pin.pin-active'))
+        .forEach(el => el.classList.remove('pin-active'));
+    });
+    L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      // Attribution control disabled above; required attribution still rendered
+      // by the included <a> below the map if/when we add a credit row.
+    }).addTo(map);
+    map.setView([userLat ?? DEFAULT_LAT, userLng ?? DEFAULT_LNG], 11);
+
+    if (userLat != null && userLng != null) {
+      const ui = L.divIcon({ html: `<div class="pin-user"></div>`, className: '', iconSize: [22, 22], iconAnchor: [11, 11] });
+      userMarker = L.marker([userLat, userLng], { icon: ui, zIndexOffset: 600 }).addTo(map);
     }
-
-    renderSorted(sorted.slice(0, DISPLAY_LIMIT));
   }
 
-  // ── Render sorted list: #1 above blurb, rest in list ──────────────
-  function renderSorted(sorted) {
-    renderSortedNoScout(sorted);
-    if (sorted.length) loadScoutBlurb(sorted);
-  }
-
-  // Render without firing the Scout LLM — used by sortAndRenderNow's
-  // Pass 1 (static-data render) so the LLM only fires after Pass 2's
-  // live data is in. Otherwise we'd burn an LLM call per render token.
-  function renderSortedNoScout(sorted) {
-    if (!sorted.length) {
-      document.getElementById('top-card').innerHTML   = '';
-      document.getElementById('beach-list').innerHTML = '<div class="no-data">No data available.</div>';
+  function renderPins(cards) {
+    if (!map) return;
+    if (pinsLayer) { map.removeLayer(pinsLayer); pinsLayer = null; }
+    if (!cards.length) {
+      if (userLat != null) map.setView([userLat, userLng], 11);
       return;
     }
-    const [first, ...rest] = sorted;
-    document.getElementById('top-card').innerHTML   = buildBeachCard(first, 1);
-    document.getElementById('beach-list').innerHTML = rest.map((c, i) => buildBeachCard(c, i + 2)).join('');
+    pinsLayer = L.layerGroup().addTo(map);
+    const pts = [];
+    cards.forEach((c, i) => {
+      if (Number.isNaN(c.lat) || Number.isNaN(c.lng)) return;
+      pts.push([c.lat, c.lng]);
+      const isPark = c.kind === 'dog_park';
+      const cls = isPark ? 'pin-park' : `pin-${c.tone}`;
+      const inner = isPark
+        ? `<span class="pin-park-score">${i + 1}</span>`
+        : (c.score != null ? c.score : i + 1);
+      const html = `<div class="pin ${cls}" data-pin-id="${c.id}">${inner}</div>`;
+      const icon = L.divIcon({ html, className: '', iconSize: [34, 34], iconAnchor: [17, 17] });
+      const marker = L.marker([c.lat, c.lng], { icon, riseOnHover: true });
+      marker.on('click', () => onPinClick(c.id));
+      marker.addTo(pinsLayer);
+    });
+    if (userLat != null) pts.push([userLat, userLng]);
+    if (pts.length === 1) {
+      map.setView(pts[0], 12);
+    } else if (pts.length > 1) {
+      const bounds = L.latLngBounds(pts);
+      map.fitBounds(bounds, { padding: [36, 36], maxZoom: 13 });
+    }
   }
 
-  // ── Scout blurb ────────────────────────────────────────────────────
-  const scoutCache = {};
-  // Abort the prior in-flight LLM call when a new render fires. Prevents
-  // stale chat responses from clobbering fresh-render text + saves the
-  // wasted Anthropic call. Per Franz 2026-05-19.
-  let _scoutAbortCtrl = null;
+  function onPinClick(cardId) {
+    activePinId = cardId;
+    Array.from(document.querySelectorAll('.pin'))
+      .forEach(el => el.classList.toggle('pin-active', el.getAttribute('data-pin-id') === cardId));
+    const card = document.querySelector(`.result-card[data-card-id="${cardId}"]`);
+    if (card) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.classList.add('highlight');
+      setTimeout(() => card.classList.remove('highlight'), 1600);
+    }
+  }
 
-  async function loadScoutBlurb(sorted) {
-    const first    = sorted[0];
-    const cacheKey = `${first.beach.location_id}_${selectedDate}_${currentSort}`;
-    const el       = document.getElementById('scout-blurb');
-    el.classList.add('loading');
-    el.textContent = '...';
+  // ─── Scout blurb ────────────────────────────────────────────────────
+  async function renderScoutBlurb(cards) {
+    const el = document.getElementById('scout-blurb');
+    if (!cards.length) {
+      el.classList.add('empty');
+      el.textContent = '';
+      return;
+    }
+    el.classList.remove('empty');
 
+    const first = cards[0];
+    const contextLines = cards.slice(0, 5).map((c, i) => {
+      const score = c.score != null ? c.score : 'park';
+      const distStr = c.distanceMi != null ? `${c.distanceMi.toFixed(1)} mi` : 'distance n/a';
+      return `${i + 1}. ${c.name} (${score}, ${distStr})`;
+    }).join('; ');
+
+    const cacheKey = JSON.stringify({
+      first: first.id,
+      wants: [...wants].sort(),
+      amen: [...amenityFilters].sort(),
+      dist: distanceFilterMi,
+    });
     if (scoutCache[cacheKey]) {
-      el.textContent = scoutCache[cacheKey];
       el.classList.remove('loading');
+      el.textContent = scoutCache[cacheKey];
       return;
     }
 
-    // Cancel any prior in-flight chat fetch
+    el.classList.add('loading');
+    el.textContent = 'Scout is sniffing the wind…';
+
     if (_scoutAbortCtrl) _scoutAbortCtrl.abort();
     _scoutAbortCtrl = new AbortController();
     const myCtrl = _scoutAbortCtrl;
 
-    const contextLines = sorted.slice(0, 5).map((c, i) => {
-      const score   = c.day?.composite_score ?? '—';
-      const distStr = c.distance != null ? `${c.distance.toFixed(1)} mi away` : 'distance unknown';
-      return `${i + 1}. ${c.beach.display_name} (score: ${score}, ${distStr})`;
-    }).join('; ');
+    const nowSummary = nowAtUser
+      ? `It's ${Math.round(nowAtUser.tempF)}°F with ${WMO_LABELS[nowAtUser.wmoCode] || 'mixed sky'} where the user is.`
+      : '';
+    const amenitySummary = amenityFilters.size
+      ? ` The user is filtering for ${[...amenityFilters].join(', ')}.`
+      : '';
 
-    const now       = new Date();
-    const pacific   = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit', hour12: true });
-    const timeStr   = pacific.format(now);
-    const isToday   = selectedDate === 'now' || selectedDate === new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-    const dateLabel = isToday ? `right now (it is currently ${timeStr} Pacific — only consider remaining hours of today)` : `on ${selectedDate}`;
-    let question;
+    const question = `${nowSummary}${amenitySummary} Ranked options: ${contextLines}. In two sentences, recommend ${first.name} (or — if its conditions are weak — call out a better trade-off from this list) and tell the owner what to expect there right now.`;
 
-    if (currentSort === 'conditions') {
-      question = `Beach rankings by best conditions ${dateLabel}: ${contextLines}. In two sentences, explain why ${first.beach.display_name} is ranked #1 — what specific conditions (tide, temperature, wind, crowd, weather) make it the standout choice compared to the others?`;
-
-    } else if (currentSort === 'distance') {
-      // Check if a nearby beach has materially better conditions (15+ points higher score)
-      const topScore   = first.day?.composite_score ?? 0;
-      const betterNear = sorted.slice(1, 4).find(c =>
-        c.day?.composite_score != null && (c.day.composite_score - topScore) >= 15
-      );
-
-      if (betterNear) {
-        question = `Beaches sorted by distance from the user ${dateLabel}: ${contextLines}. The closest is ${first.beach.display_name} (${first.distance?.toFixed(1)} mi, score: ${topScore}). Note that ${betterNear.beach.display_name} is only ${betterNear.distance?.toFixed(1)} mi away but has a score of ${betterNear.day.composite_score}. In two sentences, acknowledge the closest beach but point out whether the short extra drive to ${betterNear.beach.display_name} is worth it given the conditions difference.`;
-      } else {
-        question = `Beaches sorted by distance from the user ${dateLabel}: ${contextLines}. The closest beach is ${first.beach.display_name} at ${first.distance?.toFixed(1)} mi with a score of ${topScore}. In two sentences, explain why ${first.beach.display_name} is a solid nearby choice — focus on its current conditions, not its ranking vs others.`;
-      }
-
-    } else {
-      // Blend sort (50/50 conditions + proximity)
-      question = `Beaches ranked by the best combination of conditions and proximity ${dateLabel}: ${contextLines}. In two sentences, explain why ${first.beach.display_name} hits the sweet spot — it's the best balance of being close and having good conditions compared to the other options.`;
+    // For dog-park first picks, we don't have a location_id to anchor
+    // beach-chat to; fall back to the highest-ranked beach if one exists.
+    const beachAnchor = cards.find(c => c.kind === 'beach');
+    if (!beachAnchor) {
+      el.classList.remove('loading');
+      el.textContent = `Dog parks lead today — ${first.name} is your nearest verified park.`;
+      scoutCache[cacheKey] = el.textContent;
+      return;
     }
 
     try {
       const res  = await fetch(`${SUPABASE_URL}/functions/v1/beach-chat`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON_KEY}` },
-        body:    JSON.stringify({ location_id: first.beach.location_id, question }),
-        signal:  myCtrl.signal,
+        body:    JSON.stringify({
+          location_id: beachAnchor.location_id,
+          arena_group_id: beachAnchor.fid,
+          question,
+        }),
+        signal: myCtrl.signal,
       });
-      // If another loadScoutBlurb ran while we were waiting, bail
       if (myCtrl !== _scoutAbortCtrl) return;
-      const data  = await res.json();
+      const data = await res.json();
       if (myCtrl !== _scoutAbortCtrl) return;
-      const text  = data.answer ?? '';
+      const text = data.answer || '';
       scoutCache[cacheKey] = text;
-      el.textContent = text;
+      el.classList.remove('loading');
+      el.textContent = text || `${first.name} is the standout right now.`;
     } catch (e) {
-      if (e.name === 'AbortError') return;   // expected on supersede
+      if (e.name === 'AbortError') return;
+      el.classList.remove('loading');
       el.textContent = '';
-    }
-    el.classList.remove('loading');
-  }
-
-  function buildBeachCard({ beach, day, distance }, rank) {
-    const score = day?.composite_score ?? null;
-    const scoreHtml = `
-      <div class="day-score">
-        <span class="day-score-value">${score !== null ? score : '—'}</span>
-        <span class="day-score-label">SCORE</span>
-      </div>`;
-
-    const weatherIcon = getWeatherIcon(day?.summary_weather, day?.weather_code);
-
-    const safeName = beach.display_name.replace(/'/g, "\\'");
-    const distLink = distance !== null
-      ? `<div class="window-sub status-none dist-link" onclick="event.stopPropagation();openDirections(${beach.latitude},${beach.longitude},'${safeName}',${distance})">🚗 ${distance.toFixed(1)} mi</div>`
-      : '';
-
-    let windowHtml;
-    if (day?.is_now && distLink) {
-      windowHtml = distLink;
-    } else if (day?.is_now) {
-      windowHtml = `<div class="window-sub status-none">Right now</div>`;
-    } else {
-      const labelHtml = day?.best_window_label
-        ? `<div class="window-sub status-none">${day.best_window_label}</div>`
-        : `<div class="window-sub status-none">No good window</div>`;
-      windowHtml = distLink
-        ? `<div class="window-row">${labelHtml}${distLink}</div>`
-        : labelHtml;
-    }
-
-    const bacteriaRisk = day?.bacteria_risk ?? 'none';
-    const bacteriaHtml = bacteriaRisk === 'high'
-      ? `<div class="bacteria-warning risk-high">⚠ 72h rain advisory</div>`
-      : bacteriaRisk === 'moderate'
-      ? `<div class="bacteria-warning risk-moderate">⚠ 72h rain advisory</div>`
-      : '';
-
-    const chips = buildChips(day, distance);
-
-    // Tier class: display gate. T1+T2 render normally, T3 muted, T4
-    // grey-no-dog. Falls back to 'tier-unknown' if the field isn't
-    // populated (older client, edge cache, etc.).
-    const tier = beach.location_tier ?? 'unknown';
-    const tierClass = `tier-${tier}`;
-
-    return `
-      <div class="day-card ${tierClass}" data-location-id="${beach.location_id}" onclick="window.location.href='beach.html?${beach.arena_group_id ? 'fid=' + beach.arena_group_id : 'location_id=' + beach.location_id}'">
-        <div class="day-left">
-          <div class="rank-label">#${rank}</div>
-          ${scoreHtml}
-          <div class="weather-icon">${weatherIcon}</div>
-        </div>
-        <div class="day-content">
-          <div class="beach-name">${beach.display_name}</div>
-          ${windowHtml}
-          ${bacteriaHtml}
-          <div class="chips">${chips}</div>
-        </div>
-        <div class="chevron">›</div>
-      </div>`;
-  }
-
-  function buildChips(day /* distance no longer a chip — rendered in window-row */) {
-    const parts = [];
-
-    if (day?.lowest_tide_height != null) {
-      const arrow = day.tide_direction === 'rising' ? '↑' : day.tide_direction === 'falling' ? '↓' : '';
-      parts.push(`<span class="chip">🌊 ${parseFloat(day.lowest_tide_height).toFixed(1)}ft${arrow}</span>`);
-    }
-    if (day?.avg_temp != null) {
-      parts.push(`<span class="chip">🌡 ${Math.round(day.avg_temp)}°</span>`);
-    }
-    if (day?.avg_wind != null) {
-      parts.push(`<span class="chip">💨 ${Math.round(day.avg_wind)}mph</span>`);
-    }
-    if (day?.busyness_category) {
-      const crowdLabel = {
-        quiet:       '✌️ Quiet',
-        moderate:    '⚖️ Mod',
-        dog_party:   '🎉 Party',
-        too_crowded: '🚫 Crowded',
-      }[day.busyness_category] ?? day.busyness_category;
-      parts.push(`<span class="chip">${crowdLabel}</span>`);
-    }
-
-    return parts.join(`<span class="chip-sep">·</span>`);
-  }
-
-  // ── Weather icon ───────────────────────────────────────────────────
-  function getWeatherIcon(summaryWeather, wmoCode) {
-    const map = {
-      sunny:         '☀️',
-      partly_cloudy: '⛅',
-      cloudy:        '☁️',
-      foggy:         '🌫️',
-      rainy:         '🌧️',
-      windy:         '💨',
-    };
-    if (summaryWeather && map[summaryWeather]) return map[summaryWeather];
-    if (wmoCode === 0)              return '☀️';
-    if (wmoCode <= 2)               return '⛅';
-    if (wmoCode === 3)              return '☁️';
-    if (wmoCode <= 48)              return '🌫️';
-    if (wmoCode <= 67)              return '🌧️';
-    if (wmoCode <= 77)              return '🌨️';
-    if (wmoCode <= 82)              return '🌧️';
-    return '⛈️';
-  }
-
-  // ── Haversine distance (miles) ─────────────────────────────────────
-  function haversine(lat1, lon1, lat2, lon2) {
-    const R    = 3958.8;
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a    = Math.sin(dLat / 2) ** 2 +
-                 Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-                 Math.sin(dLon / 2) ** 2;
-    return R * 2 * Math.asin(Math.sqrt(a));
-  }
-
-  // Prefer the server-provided distance_m (set by the find_beaches RPC
-  // when lat/lng were passed). Falls back to client haversine using
-  // userLat/userLng if the server didn't compute it. Returns miles or
-  // null when neither source can produce a value.
-  function resolveDistanceMiles(beach) {
-    if (beach?.distance_m != null) return beach.distance_m / 1609.34;
-    if (userLat !== null && userLng !== null && beach?.latitude != null && beach?.longitude != null) {
-      return haversine(userLat, userLng, parseFloat(beach.latitude), parseFloat(beach.longitude));
-    }
-    return null;
-  }
-
-  // ── Blend score (higher = better) ─────────────────────────────────
-  function blendScore({ day, distance }, maxDist) {
-    const normScore = (day?.composite_score ?? 0) / 100;
-    const normDist  = distance !== null ? 1 - (distance / maxDist) : 0.5;
-    return (normScore + normDist) / 2;
-  }
-
-  // ── Location UI state ─────────────────────────────────────────────
-  function showZipInput() {
-    const row = document.getElementById('loc-row');
-    row.innerHTML = `
-      <input class="loc-input" id="loc-input" type="text" inputmode="numeric"
-             maxlength="5" placeholder="Enter ZIP code"
-             oninput="validateZipInput(this)" onkeydown="if(event.key==='Enter')onUpdateLocation()" />
-      <button class="update-btn highlighted" id="update-btn" onclick="onUpdateLocation()">Update</button>`;
-  }
-
-  function showLocationLabel(text) {
-    const row = document.getElementById('loc-row');
-    row.innerHTML = `
-      <span class="location-label" id="location-label">${text}</span>
-      <button class="update-btn" id="update-btn" onclick="onUpdateLocation()">Update</button>`;
-  }
-
-  function validateZipInput(el) {
-    el.value = el.value.replace(/\D/g, '').slice(0, 5);
-  }
-
-  // ── Update button handler ──────────────────────────────────────────
-  function onUpdateLocation() {
-    const input = document.getElementById('loc-input');
-    if (input) {
-      // ZIP mode — validate and geocode
-      const zip = input.value.trim();
-      if (!/^\d{5}$/.test(zip)) {
-        input.style.borderColor = 'var(--red)';
-        input.placeholder = '5 digits required';
-        setTimeout(() => {
-          input.style.borderColor = '';
-          input.placeholder = 'Enter ZIP code';
-        }, 1800);
-        return;
-      }
-      geocodeZip(zip);
-    } else {
-      // Label mode — re-request geolocation
-      requestGeolocation();
+      el.classList.add('empty');
     }
   }
 
-  // ── Geolocation ────────────────────────────────────────────────────
-  // Sticky location: cache lat/lng + label in localStorage so repeat
-  // visits skip the OS-level geolocation prompt. 24h TTL — fresh enough
-  // for distance-sort, expired entries fall through to a fresh prompt.
-  const LOC_KEY = 'dogbeach.user_loc';
-  const LOC_TTL_MS = 24 * 60 * 60 * 1000;
-
-  function _saveCachedLocation(lat, lng, label) {
-    try {
-      localStorage.setItem(LOC_KEY, JSON.stringify({
-        lat, lng, label, ts: Date.now(),
-      }));
-    } catch {}
+  // ─── Filter chip UI sync ────────────────────────────────────────────
+  function syncWantChips() {
+    document.querySelectorAll('#want-chips .chip').forEach(el => {
+      el.classList.toggle('active', wants.has(el.getAttribute('data-want')));
+    });
   }
-
-  function _readCachedLocation() {
-    try {
-      const raw = localStorage.getItem(LOC_KEY);
-      if (!raw) return null;
-      const obj = JSON.parse(raw);
-      if (!Number.isFinite(obj?.lat) || !Number.isFinite(obj?.lng)) return null;
-      if (typeof obj.ts !== 'number') return null;
-      if (Date.now() - obj.ts > LOC_TTL_MS) return null;
-      return obj;
-    } catch { return null; }
-  }
-
-  // Returns true if cached location was applied (no prompt needed).
-  function hydrateLocationFromCache() {
-    const cached = _readCachedLocation();
-    if (!cached) return false;
-    setUserLocation(cached.lat, cached.lng);
-    showLocationLabel('📍 ' + (cached.label || 'Saved location'));
-    enableDistanceSorts();
-    sortAndRender();
-    // Refresh the label in background if it was stale-looking
-    if (!cached.label) {
-      reverseGeocode(cached.lat, cached.lng).then(name => {
-        showLocationLabel('📍 ' + name);
-        _saveCachedLocation(cached.lat, cached.lng, name);
-      }).catch(() => {});
-    }
-    return true;
-  }
-
-  function requestGeolocation() {
-    showLocationLabel('📍 Detecting…');
-    navigator.geolocation.getCurrentPosition(
-      async pos => {
-        setUserLocation(pos.coords.latitude, pos.coords.longitude);
-        const name = await reverseGeocode(userLat, userLng);
-        _saveCachedLocation(pos.coords.latitude, pos.coords.longitude, name);
-        showLocationLabel('📍 ' + name);
-        enableDistanceSorts();
-        sortAndRender();
-      },
-      () => showZipInput()
-    );
-  }
-
-  // ── ZIP geocoding ──────────────────────────────────────────────────
-  async function geocodeZip(zip) {
-    showLocationLabel('📍 Looking up ZIP…');
-    try {
-      const res  = await fetch(
-        `https://nominatim.openstreetmap.org/search?postalcode=${zip}&countrycodes=us&format=json&limit=1`,
-        { headers: { 'User-Agent': 'DogBeachScout/1.0' } }
-      );
-      const data = await res.json();
-      if (!data[0]) { showZipInput(); return; }
-      setUserLocation(parseFloat(data[0].lat), parseFloat(data[0].lon));
-      _saveCachedLocation(parseFloat(data[0].lat), parseFloat(data[0].lon), `ZIP ${zip}`);
-      showLocationLabel(`📍 ZIP ${zip}`);
-      enableDistanceSorts();
-      sortAndRender();
-    } catch {
-      showZipInput();
-    }
-  }
-
-  // Updates the resolved user location and invalidates caches so the next
-  // sortAndRender fetches a spatially-bounded result set instead of
-  // reusing any location-less response already in the cache.
-  function setUserLocation(lat, lng) {
-    userLat = lat;
-    userLng = lng;
-    beachCache = {};
-    nowBeaches = null;
-    dogParkCache = {};
-    Object.keys(scoutCache).forEach(k => delete scoutCache[k]);
-  }
-
-  // ── Reverse geocode ────────────────────────────────────────────────
-  async function reverseGeocode(lat, lng) {
-    try {
-      const res  = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
-        { headers: { 'User-Agent': 'DogBeachScout/1.0' } }
-      );
-      const data = await res.json();
-      const city  = data.address?.city || data.address?.town || data.address?.village || '';
-      const state = (data.address?.state_code || '').replace(/^US-/, '');
-      return city && state ? `${city}, ${state}` : 'Your Location';
-    } catch {
-      return 'Your Location';
-    }
-  }
-
-  // ── Enable distance sort options ───────────────────────────────────
-  // Only 'opt-distance' (Closest First) needs location to be meaningful.
-  // 'opt-blend' (Best Nearby) is enabled by default and degrades
-  // gracefully to score-only when distance is unknown.
-  function enableDistanceSorts() {
-    document.getElementById('opt-distance').disabled = false;
-  }
-
-  function onSortChange(val) {
-    currentSort = val;
-    sortAndRender();
-  }
-
-  function onLeashFilterChange(val) {
-    leashFilter = val;
-    nowBeaches  = null; // reset NOW cache so filter applies
-    sortAndRender();
-  }
-
-  // Toggle one want chip; persist + re-render.
-  function onWantChipToggle(want) {
-    if (!ALL_WANTS.includes(want)) return;
-    if (wants.has(want)) {
-      // Disallow deselecting the last chip — user must always have something selected
-      if (wants.size <= 1) return;
-      wants.delete(want);
-    } else {
-      wants.add(want);
-    }
-    persistWants();
-    syncWantChipUI();
-    dogParkCache = {};
-    nowBeaches = null;
-    sortAndRender();
-  }
-
-  function persistWants() {
-    const arr = [...wants];
-    try { localStorage.setItem(WANTS_KEY, arr.join(',')); } catch {}
-    try {
-      const url = new URL(window.location.href);
-      url.searchParams.delete('dest'); // drop legacy
-      // Default is off+dog_park → omit param when it matches default for cleaner URLs
-      const defaultArr = ['off_leash_beach', 'dog_park'];
-      const sameAsDefault = arr.length === defaultArr.length
-        && defaultArr.every(w => arr.includes(w));
-      if (sameAsDefault) url.searchParams.delete('want');
-      else url.searchParams.set('want', arr.join(','));
-      window.history.replaceState({}, '', url);
-    } catch {}
-  }
-
-  function syncWantChipUI() {
-    document.querySelectorAll('.want-chip').forEach(el => {
-      const w = el.getAttribute('data-want');
-      el.classList.toggle('active', wants.has(w));
+  function syncAmenityChips() {
+    document.querySelectorAll('#amenity-chips .chip').forEach(el => {
+      el.classList.toggle('active', amenityFilters.has(el.getAttribute('data-amenity')));
     });
   }
 
-  function onDistanceFilterChange(val) {
+  function onWantToggle(want) {
+    if (wants.has(want)) wants.delete(want);
+    else                 wants.add(want);
+    // Don't let the user clear ALL want-chips — leave the last one on
+    if (wants.size === 0) wants.add(want);
+    persistWants();
+    syncWantChips();
+    renderCards();
+  }
+  function onAmenityToggle(amenity) {
+    if (amenityFilters.has(amenity)) amenityFilters.delete(amenity);
+    else                              amenityFilters.add(amenity);
+    persistAmenities();
+    syncAmenityChips();
+    renderCards();
+  }
+
+  function onDistanceChange(val) {
     distanceFilterMi = val === 'any' ? 'any' : parseFloat(val);
-    try { localStorage.setItem(DIST_KEY, String(distanceFilterMi)); } catch {}
-    try {
-      const url = new URL(window.location.href);
-      if (val === '10') url.searchParams.delete('max_mi');
-      else url.searchParams.set('max_mi', val);
-      window.history.replaceState({}, '', url);
-    } catch {}
-    nowBeaches = null;  // re-apply filter to NOW set
-    sortAndRender();
+    persistDistance();
+    renderCards();
   }
 
-  // Distance filter predicate — returns true when item passes.
-  // Items without a known distance pass through (no penalty for missing data).
-  function matchesDistanceFilter(distanceMi) {
-    if (distanceFilterMi === 'any') return true;
-    if (distanceMi == null) return true;
-    return distanceMi <= distanceFilterMi;
+  // ─── Search ─────────────────────────────────────────────────────────
+  let _searchDebounce = null;
+  function onSearchInput(value) {
+    const clear = document.getElementById('search-clear');
+    clear.classList.toggle('visible', !!value);
+    if (_searchDebounce) clearTimeout(_searchDebounce);
+    _searchDebounce = setTimeout(() => {
+      searchQuery = (value || '').trim();
+      renderCards();
+    }, 120);
+  }
+  function clearSearch() {
+    const inp = document.getElementById('search-input');
+    inp.value = '';
+    document.getElementById('search-clear').classList.remove('visible');
+    searchQuery = '';
+    renderCards();
+    inp.focus();
   }
 
-  function matchesLeashFilter(beach) {
-    if (leashFilter === 'any') return true;
-
-    // Modern path — binary presence flags from beach_dog_policy
-    // (find_beaches RPC returns has_on_leash + has_off_leash as of 2026-05-07).
-    // Filter semantics:
-    //   "off_leash" → user wants off-leash access → has_off_leash=T (any beach where off-leash is possible)
-    //   "on_leash"  → user wants leashed-only beaches → has_on_leash=T AND has_off_leash !== T
-    //   "mixed"     → user wants both modes available → both binaries=T
-    const hasOn  = beach.has_on_leash;
-    const hasOff = beach.has_off_leash;
-    if (hasOn !== null && hasOn !== undefined && hasOff !== null && hasOff !== undefined) {
-      if (leashFilter === 'off_leash') return hasOff === true;
-      if (leashFilter === 'mixed')     return hasOn === true && hasOff === true;
-      if (leashFilter === 'on_leash')  return hasOn === true && hasOff !== true;
-    }
-
-    // Legacy fallback — for beaches not yet promoted with binaries
-    return (beach.access_rule ?? 'off_leash') === leashFilter;
-  }
-
-  // ── Directions modal (Leaflet + OSRM) ────────────────────────────
-  let dirMap       = null;
-  let routeLayer   = null;
-  let markersLayer = null;
-
-  async function openDirections(lat, lng, beachName, distance) {
-    document.getElementById('dir-beach').textContent = beachName;
-    document.getElementById('dir-meta').textContent  = distance != null ? `${distance.toFixed(1)} mi away` : '';
+  // ─── Directions sheet ───────────────────────────────────────────────
+  let dirMap = null, dirRoute = null, dirMarkers = null;
+  async function openDirections(card) {
+    const lat = card.lat, lng = card.lng;
+    document.getElementById('dir-beach').textContent = card.name;
+    const dist = card.distanceMi != null ? `${card.distanceMi.toFixed(1)} mi` : '';
+    document.getElementById('dir-meta').textContent = dist;
     document.getElementById('dir-overlay').classList.add('open');
     document.getElementById('dir-sheet').classList.add('open');
 
-    // Init map once
     if (!dirMap) {
       dirMap = L.map('dir-map', { zoomControl: true, attributionControl: false });
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 18,
-      }).addTo(dirMap);
+      L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', { maxZoom: 19 })
+        .addTo(dirMap);
     }
+    if (dirRoute)   { dirMap.removeLayer(dirRoute);   dirRoute   = null; }
+    if (dirMarkers) { dirMap.removeLayer(dirMarkers); dirMarkers = null; }
+    dirMarkers = L.layerGroup().addTo(dirMap);
 
-    // Clear previous layers
-    if (routeLayer)   { dirMap.removeLayer(routeLayer);   routeLayer   = null; }
-    if (markersLayer) { dirMap.removeLayer(markersLayer); markersLayer = null; }
-
-    markersLayer = L.layerGroup().addTo(dirMap);
-
-    // Beach marker
     const beachIcon = L.divIcon({
-      html: '🏖️',
-      className: '',
-      iconSize: [28, 28],
-      iconAnchor: [14, 14],
+      html: `<div class="pin pin-${card.kind === 'dog_park' ? 'park' : (card.tone || 'unk')}">${card.kind === 'dog_park' ? '★' : (card.score ?? '•')}</div>`,
+      className: '', iconSize: [34, 34], iconAnchor: [17, 17],
     });
-    L.marker([lat, lng], { icon: beachIcon }).addTo(markersLayer);
+    L.marker([lat, lng], { icon: beachIcon }).addTo(dirMarkers);
 
-    if (userLat !== null) {
-      // User marker
-      const userIcon = L.divIcon({
-        html: '📍',
-        className: '',
-        iconSize: [24, 24],
-        iconAnchor: [12, 24],
-      });
-      L.marker([userLat, userLng], { icon: userIcon }).addTo(markersLayer);
-
-      // Fetch route from OSRM
+    if (userLat != null) {
+      const userIcon = L.divIcon({ html: `<div class="pin-user"></div>`, className: '', iconSize: [22, 22], iconAnchor: [11, 11] });
+      L.marker([userLat, userLng], { icon: userIcon }).addTo(dirMarkers);
       try {
         const url = `https://router.project-osrm.org/route/v1/driving/${userLng},${userLat};${lng},${lat}?overview=full&geometries=geojson`;
-        const res  = await fetch(url);
+        const res = await fetch(url);
         const data = await res.json();
         if (data.routes?.[0]) {
-          routeLayer = L.geoJSON(data.routes[0].geometry, {
-            style: { color: '#4c6ef5', weight: 4, opacity: 0.85 },
+          dirRoute = L.geoJSON(data.routes[0].geometry, {
+            style: { color: '#1d4ed8', weight: 4, opacity: 0.85 },
           }).addTo(dirMap);
-          dirMap.fitBounds(routeLayer.getBounds(), { padding: [24, 24] });
-        } else {
-          dirMap.setView([lat, lng], 13);
-        }
-      } catch {
-        dirMap.setView([lat, lng], 13);
-      }
+          dirMap.fitBounds(dirRoute.getBounds(), { padding: [28, 28] });
+        } else { dirMap.setView([lat, lng], 13); }
+      } catch { dirMap.setView([lat, lng], 13); }
     } else {
       dirMap.setView([lat, lng], 13);
     }
-
-    // Leaflet needs a size invalidation after the sheet animates in
-    setTimeout(() => dirMap.invalidateSize(), 50);
+    setTimeout(() => dirMap.invalidateSize(), 60);
   }
 
   function closeDirections() {
     document.getElementById('dir-overlay').classList.remove('open');
     document.getElementById('dir-sheet').classList.remove('open');
   }
-
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeDirections();
   });
 
-  // ── Aggregated product chip strip ─────────────────────────────────
-  // Single PostgREST fetch across all beaches × next 7 days. Any
-  // condition firing anywhere in that window surfaces its product chip.
-  // Bowl is the universal fallback so the strip is never empty.
-  const CHIP_DEFS = {
-    bowl:      { icon: '💧',  label: 'Collapsible Bowl', href: 'https://www.amazon.com/s?k=collapsible+dog+water+bowl' },
-    ball:      { icon: '🦴',  label: 'Fetch Ball',       href: 'https://www.amazon.com/s?k=chuckit+ball+launcher' },
-    towel:     { icon: '🛍️', label: 'Quick-Dry Towel',  href: 'https://www.amazon.com/s?k=microfiber+dog+towel' },
-    sunscreen: { icon: '🌞',  label: 'Dog Sunscreen',    href: 'https://www.amazon.com/s?k=dog+sunscreen' },
-    booties:   { icon: '👟',  label: 'Booties',          href: 'https://www.amazon.com/s?k=dog+boots+for+hot+sand' },
-    leash:     { icon: '🐕',  label: 'Long Leash',       href: 'https://www.amazon.com/s?k=long+dog+training+leash' },
-  };
-
-  async function loadAggregatedChips() {
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-    const seventh = new Date(Date.now() + 6 * 86400000)
-      .toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-    let rows;
-    try {
-      const r = await fetch(
-        `${SUPABASE_URL}/rest/v1/beach_day_recommendations` +
-        `?select=avg_uv,avg_temp,lowest_tide_height,bacteria_risk,busyness_category` +
-        `&local_date=gte.${today}&local_date=lte.${seventh}`,
-        { headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` } });
-      if (!r.ok) return;
-      rows = await r.json();
-    } catch { return; }
-    if (!Array.isArray(rows) || rows.length === 0) return;
-
-    // Day-level numeric thresholds mirror scoring_config severity bands
-    // (no/caution/advisory): UV {11,8,6}, hot temp {95,85,80}, crowd
-    // category, low tide {0, 0.5, 1.0}. Take max intensity across all
-    // beach-days for each chip, filter > 0, sort desc, cap at 3.
-    const num = (v) => v === null || v === undefined ? null : Number(v);
-    const tier = (v, t) => v === null ? 0
-                       : v >= t[0] ? 3 : v >= t[1] ? 2 : v >= t[2] ? 1 : 0;
-    const tideTier  = (v) => v === null ? 0 : v <= 0 ? 3 : v <= 0.5 ? 2 : v <= 1.0 ? 1 : 0;
-    const busyTier  = (c) => c === 'too_crowded' ? 3 : c === 'dog_party' ? 2 : 0;
-    const swimSafe  = (d) => !d.bacteria_risk || d.bacteria_risk === 'none' || d.bacteria_risk === 'low';
-
-    const maxBy = (fn) => rows.reduce((m, d) => Math.max(m, fn(d) ?? 0), 0);
-    const uvInt    = maxBy(d => tier(num(d.avg_uv),   [11, 8, 6]));
-    const tempInt  = maxBy(d => tier(num(d.avg_temp), [95, 85, 80]));
-    const crowdInt = maxBy(d => busyTier(d.busyness_category));
-    const tideInt  = maxBy(d => swimSafe(d) ? tideTier(num(d.lowest_tide_height)) : 0);
-
-    const candidates = [
-      { def: CHIP_DEFS.bowl,      intensity: 0.5 },
-      { def: CHIP_DEFS.ball,      intensity: tideInt },
-      { def: CHIP_DEFS.towel,     intensity: tideInt },
-      { def: CHIP_DEFS.sunscreen, intensity: uvInt    },
-      { def: CHIP_DEFS.booties,   intensity: tempInt  },
-      { def: CHIP_DEFS.leash,     intensity: crowdInt },
-    ];
-
-    const chips = candidates
-      .filter(c => c.intensity > 0)
-      .sort((a, b) => b.intensity - a.intensity)
-      .slice(0, 3);
-
-    const el = document.getElementById('product-chips');
-    el.innerHTML = chips.map(c =>
-      `<a class="product-chip" href="${c.def.href}" target="_blank" rel="noopener noreferrer">[ ${c.def.icon} ${c.def.label} ]</a>`
-    ).join('');
-    el.style.display = '';
+  // ─── Orchestrator ───────────────────────────────────────────────────
+  async function loadEverything() {
+    // Parallel: beach list, dog-park list, user-coord weather
+    await Promise.all([
+      loadBeaches(),
+      loadDogParks(),
+      loadNowAtUser(),
+    ]);
+    initMap();
+    if (userMarker) { try { map.removeLayer(userMarker); } catch {} userMarker = null; }
+    if (userLat != null) {
+      const ui = L.divIcon({ html: `<div class="pin-user"></div>`, className: '', iconSize: [22, 22], iconAnchor: [11, 11] });
+      userMarker = L.marker([userLat, userLng], { icon: ui, zIndexOffset: 600 }).addTo(map);
+    }
+    renderCards();
   }
 
-  // ── Boot ───────────────────────────────────────────────────────────
-  // Cached-location-first: skip the OS geolocation prompt if we have a
-  // fresh (<24h) cached fix from a prior visit. Only prompt on cache
-  // miss / expiry. Per Franz 2026-05-27 — don't re-prompt every visit.
-  if (!hydrateLocationFromCache()) {
+  // ─── Boot ───────────────────────────────────────────────────────────
+  // Wire chips + selects
+  syncWantChips();
+  syncAmenityChips();
+  document.getElementById('dist-select').value =
+    distanceFilterMi === 'any' ? 'any' : String(distanceFilterMi);
+
+  document.querySelectorAll('#want-chips .chip').forEach(el => {
+    el.addEventListener('click', () => onWantToggle(el.getAttribute('data-want')));
+  });
+  document.querySelectorAll('#amenity-chips .chip').forEach(el => {
+    el.addEventListener('click', () => onAmenityToggle(el.getAttribute('data-amenity')));
+  });
+  document.getElementById('search-input').addEventListener('input', e => onSearchInput(e.target.value));
+
+  // Hydrate location → fetch
+  if (hydrateLocationFromCache()) {
+    loadEverything();
+  } else {
     requestGeolocation();
   }
-  // Pre-fetch today so TDY pill is instant; warms beach list for NOW mode
-  const _todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-  loadBeachesForDate(_todayISO);
-
-  // Wire want-chip click handlers + sync initial visual state
-  (function initWantChips() {
-    syncWantChipUI();
-    document.querySelectorAll('.want-chip').forEach(el => {
-      el.addEventListener('click', () => onWantChipToggle(el.getAttribute('data-want')));
-    });
-  })();
-
-  // Restore distance-filter select
-  (function initDistSelect() {
-    const el = document.getElementById('dist-select');
-    if (el) el.value = distanceFilterMi === 'any' ? 'any' : String(distanceFilterMi);
-  })();
-
-  // Initial render dispatch — same dispatcher as user-triggered renders
-  leashFilter = effectiveBeachLeash();
-  if (wantsDogParks() && !wantsBeaches()) {
-    sortAndRenderDogParks();
-  } else if (wantsDogParks() && wantsBeaches()) {
-    sortAndRenderBlended();
-    loadAggregatedChips();
-  } else {
-    sortAndRenderNow();   // beach-only path
-    loadAggregatedChips();
-  }
 </script>
+
 <script>
+  // Scout chat anchors to the current top-ranked beach. Re-evaluates on each
+  // render so the chat panel always opens against the freshest #1.
   window.CHAT_CONFIG = {
     getLocationId: () => {
-      const top = document.getElementById('top-card')?.querySelector('[data-location-id]');
-      return top?.dataset.locationId ?? null;
+      const first = lastRenderedCards.find(c => c.kind === 'beach');
+      return first ? first.location_id : null;
     },
     placeholder: 'Which beach is best this weekend?',
   };
 </script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="src/chat.js"></script>
 </body>
 </html>

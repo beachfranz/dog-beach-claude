@@ -1442,10 +1442,22 @@
     return map[code] ?? 2;
   }
 
-  // Longest contiguous run of "good" hours (score ≥ 65) from now forward,
-  // capped at 5h. Mirrors the picker shape in beach.html's _bestWindowFromNowV2.
+  // Best daylight window for walking, biased toward sooner.
+  //
+  // Eligibility: daylight hours from now forward, score ≥ 55 (relaxed
+  // from 65 since daylight filter already excludes the trivially-easy
+  // post-sunset hours that used to dominate).
+  //
+  // Ranking: avg score + soonness bonus. Bonus decays from +8 at "right
+  // now" linearly at -1.5 per hour out, floor 0 by ~5h+. So a window
+  // 4h from now needs to score ≥6 higher than NOW to win — matching
+  // Franz's heuristic: "going on a walk now vs a little nicer in a
+  // couple of hours is a no-brainer."
+  //
+  // Cap at 5h, ties broken by earlier start.
   function pickBestWalkWindow(hourly, nowMs) {
-    const eligible = hourly.filter(h => h.tsMs >= nowMs - 30 * 60_000 && h.score >= 65);
+    const eligible = hourly.filter(h =>
+      h.isDay === true && h.tsMs >= nowMs - 30 * 60_000 && h.score >= 55);
     if (eligible.length < 2) return null;
     const runs = [];
     let cur = [eligible[0]];
@@ -1460,23 +1472,34 @@
     }
     if (cur.length >= 2) runs.push(cur);
     if (!runs.length) return null;
-    // Best by avg score, cap at 5h
+
+    // Soonness bonus: +8 at now, decaying 1.5/hour, floor 0.
+    const soonBonus = startMs => {
+      const hrs = Math.max(0, (startMs - nowMs) / 3600_000);
+      return Math.max(0, 8 - hrs * 1.5);
+    };
+
     const MAX_LEN = 5;
-    let best = null;
+    const candidates = [];
     for (const run of runs) {
-      const slice = run.length <= MAX_LEN ? run : (() => {
-        let bestSlice = null, bestSum = -Infinity;
-        for (let i = 0; i + MAX_LEN <= run.length; i++) {
-          const s = run.slice(i, i + MAX_LEN);
-          const sum = s.reduce((acc, h) => acc + h.score, 0);
-          if (sum > bestSum) { bestSum = sum; bestSlice = s; }
-        }
-        return bestSlice;
-      })();
-      const avg = slice.reduce((s, h) => s + h.score, 0) / slice.length;
-      if (!best || avg > best.avg) best = { slice, avg };
+      // For runs longer than the cap, every sliding window IS a
+      // candidate — picking up the soonness bonus means we can't just
+      // pick the highest-sum slice within the run.
+      const sliceLen = Math.min(MAX_LEN, run.length);
+      for (let i = 0; i + sliceLen <= run.length; i++) {
+        const slice = run.slice(i, i + sliceLen);
+        const avg = slice.reduce((s, h) => s + h.score, 0) / slice.length;
+        const rank = avg + soonBonus(slice[0].tsMs);
+        candidates.push({ slice, avg, rank });
+      }
     }
-    if (!best) return null;
+    if (!candidates.length) return null;
+    // Sort by rank desc, then earliest start.
+    candidates.sort((a, b) => {
+      if (b.rank !== a.rank) return b.rank - a.rank;
+      return a.slice[0].tsMs - b.slice[0].tsMs;
+    });
+    const best = candidates[0];
     const startMs = best.slice[0].tsMs;
     const endMs   = best.slice[best.slice.length - 1].tsMs + 3600_000;
     return {

@@ -174,6 +174,70 @@
   .search-clear:hover { background: var(--bg); color: var(--text); }
   .search-clear.visible { display: inline-flex; align-items: center; justify-content: center; }
 
+  /* ── Day pills (NOW + 7-day forecast) ───────────────────────────── */
+  .day-pills {
+    margin: 8px 14px 0;
+    padding: 8px 4px;
+    display: flex; gap: 6px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .day-pills::-webkit-scrollbar { display: none; }
+  .day-pill {
+    flex: 0 0 auto;
+    display: inline-flex; flex-direction: column;
+    align-items: center; gap: 1px;
+    min-width: 48px;
+    padding: 7px 10px 6px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--card);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.12s;
+    scroll-snap-align: start;
+    font-family: 'DM Mono', monospace;
+  }
+  .day-pill:hover { background: var(--bg); border-color: var(--text-dim); color: var(--text); }
+  .day-pill .day-pill-label {
+    font-size: 10.5px; font-weight: 500;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    line-height: 1;
+  }
+  .day-pill .day-pill-num {
+    font-family: 'Outfit', sans-serif;
+    font-size: 15px; font-weight: 700; color: var(--text);
+    line-height: 1.05; letter-spacing: -0.01em;
+    font-variant-numeric: tabular-nums;
+  }
+  .day-pill.active {
+    background: var(--advisory);
+    border-color: var(--advisory);
+    color: white;
+  }
+  .day-pill.active .day-pill-num { color: white; }
+  .day-pill.active .day-pill-label { color: rgba(255,255,255,0.85); }
+  .day-pill.now-pill .day-pill-num::before {
+    content: '';
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    margin-right: 5px;
+    transform: translateY(-2px);
+    animation: nowDot 1.8s ease-in-out infinite;
+  }
+  .day-pill.now-pill.active .day-pill-num::before {
+    background: #fde68a;
+    box-shadow: 0 0 6px rgba(253,230,138,0.8);
+  }
+  @keyframes nowDot {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.4; }
+  }
+
   .filter-row {
     display: flex; flex-wrap: wrap; gap: 6px;
     margin-top: 10px;
@@ -851,6 +915,8 @@
     </div>
   </section>
 
+  <nav class="day-pills" id="day-pills" role="tablist" aria-label="Forecast day"></nav>
+
   <div class="map-wrap">
     <div id="map" role="application" aria-label="Map of nearby beaches and dog parks"></div>
   </div>
@@ -926,6 +992,23 @@
   let amenityFilters = restoreAmenitiesFromStorage();
   let distanceFilterMi = restoreDistanceFromStorage();
   let searchQuery = '';
+
+  // selectedDay = 'now' (live current-hour view) | 'YYYY-MM-DD' (forecast).
+  // NOW is the default; pill is keyboard/persisted to localStorage so a
+  // return visitor lands back on their last pick.
+  const DAY_KEY = 'find.selectedDay';
+  let selectedDay = (() => {
+    try {
+      const stored = localStorage.getItem(DAY_KEY);
+      if (stored === 'now') return 'now';
+      if (stored && /^\d{4}-\d{2}-\d{2}$/.test(stored)) {
+        // Only honor stored date if it's today or future (no time travel)
+        const today = new Date().toLocaleDateString('en-CA');
+        if (stored >= today) return stored;
+      }
+    } catch {}
+    return 'now';
+  })();
 
   let beachResults = [];      // raw rows from get-beaches-find
   let dogParkResults = [];    // raw rows from nearest_dog_parks
@@ -1244,8 +1327,13 @@
 
   // ─── Fetch beaches + dog parks ──────────────────────────────────────
   async function loadBeaches() {
+    // selectedDay='now' → today (the RPC will also populate
+    // current_hour_score). selectedDay='YYYY-MM-DD' → that forecast
+    // day; current_hour_score will be null and disc falls back to
+    // composite_score_v2 (peak for that day).
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-    const params = new URLSearchParams({ date: today, scored: 'false' });
+    const date = selectedDay === 'now' ? today : selectedDay;
+    const params = new URLSearchParams({ date, scored: 'false' });
     if (userLat != null && userLng != null) {
       params.set('lat',   String(userLat));
       params.set('lng',   String(userLng));
@@ -1279,7 +1367,7 @@
             p_lng:   userLng,
             p_limit: NEAREST_LIMIT,
             p_state: null,
-            p_date:  null,
+            p_date:  selectedDay === 'now' ? null : selectedDay,
           }),
         });
       if (!res.ok) { dogParkResults = []; return; }
@@ -1296,17 +1384,25 @@
   //           tier, raw }
   function normalizeBeach(b) {
     // Disc semantics:
-    //  - current_hour_score present → show it, colored tone (live signal)
-    //  - current null, composite_score_v2 present → fall back to peak,
-    //    rendered with tone-unk (grey) so users can tell it's a
-    //    "best today, not right now" number. Tier-3 limited-access
-    //    beaches (off-leash 6am-10am only) have null at noon — without
-    //    the fallback they look unscored even though they're rated 92
-    //    for their good hours. Per Franz 2026-06-07.
-    //  - both null → truly unscored, show "—" with tone-unk.
-    // Rank uses the same value so order matches displayed number.
-    const score = b.current_hour_score ?? b.composite_score_v2 ?? null;
-    const scoreIsCurrent = b.current_hour_score != null;
+    //  NOW pill: prefer current_hour_score (live signal, colored tone);
+    //  fall back to composite_score_v2 (today's peak) when current is
+    //  null — disc renders grey with label "Best" so the user sees the
+    //  beach IS scored, just not for this exact hour (tier-3 limited-
+    //  access at noon, etc.). Truly unscored → "—" with tone-unk.
+    //
+    //  Day pills (TDY / TMW / SAT / ...): always show composite_score_v2
+    //  for that date — "best window" peak. NOW vs TDY would otherwise
+    //  render identically when both query today's date. Disc label
+    //  reads "Best" with tone colored by the peak (these dates have no
+    //  "right now" so the peak IS the headline signal for the day).
+    let score, scoreIsCurrent;
+    if (selectedDay === 'now') {
+      score = b.current_hour_score ?? b.composite_score_v2 ?? null;
+      scoreIsCurrent = b.current_hour_score != null;
+    } else {
+      score = b.composite_score_v2 ?? null;
+      scoreIsCurrent = false;
+    }
     const rankScore = score;
     const dMi = b.distance_m != null ? b.distance_m / 1609.34
               : (userLat != null && b.latitude != null
@@ -1326,7 +1422,12 @@
       rankScore,
       scoreIsCurrent,
       bestWindow: b.best_window_label || null,
-      tone: scoreIsCurrent ? scoreTone(score) : 'unk',
+      // Tone rules:
+      //  NOW + live current_hour_score → colored (live signal)
+      //  NOW + peak fallback           → grey (informational, not "right now")
+      //  Day pill (any future day)     → colored (peak IS the headline)
+      tone: (selectedDay !== 'now' && score != null) ? scoreTone(score)
+          : (scoreIsCurrent ? scoreTone(score) : 'unk'),
       bacteriaRisk: b.bacteria_risk ?? 'none',
       hasOffLeash: b.has_off_leash === true,
       hasOnLeash:  b.has_on_leash === true,
@@ -1364,13 +1465,20 @@
     const start = parseHHMM(b?.dogs_prohibited_start);
     const end   = parseHHMM(b?.dogs_prohibited_end);
     if (start == null && end == null) return null;
-    const tz = b?.timezone || 'America/Los_Angeles';
-    const nowH = currentLocalHour(tz);
     const startLbl = start != null ? fmtHourMin(start) : '?';
     const endLbl   = end   != null ? fmtHourMin(end)   : '?';
-    // In-prohibition test: if both bounds known, normal range check.
-    // If only start known (dogs prohibited from X onward — e.g. after-X)
-    // treat now as prohibited when nowH >= start.
+    const label = start != null && end != null
+      ? `Dogs out ${startLbl}–${endLbl}`
+      : (start != null ? `Dogs out after ${startLbl}` : `Dogs out before ${endLbl}`);
+    // For future-day views (selectedDay !== 'now') the "right now in
+    // prohibition" check doesn't apply — surface the chip as informational
+    // (neutral). Only color it red when the user is looking at NOW and
+    // current local time falls inside the prohibition window.
+    if (selectedDay !== 'now') {
+      return { state: 'now_ok_window', label, icon: '🐾' };
+    }
+    const tz = b?.timezone || 'America/Los_Angeles';
+    const nowH = currentLocalHour(tz);
     let inProhib;
     if (start != null && end != null) {
       // Range may wrap midnight (unlikely but possible)
@@ -1381,22 +1489,9 @@
     } else {
       inProhib = nowH < end;
     }
-    if (inProhib) {
-      return {
-        state: 'now_prohibited',
-        label: start != null && end != null
-          ? `Dogs out ${startLbl}–${endLbl}`
-          : (start != null ? `Dogs out after ${startLbl}` : `Dogs out before ${endLbl}`),
-        icon: '🚫',
-      };
-    }
-    return {
-      state: 'now_ok_window',
-      label: start != null && end != null
-        ? `Dogs out ${startLbl}–${endLbl}`
-        : (start != null ? `Dogs out after ${startLbl}` : `Dogs out before ${endLbl}`),
-      icon: '🐾',
-    };
+    return inProhib
+      ? { state: 'now_prohibited', label, icon: '🚫' }
+      : { state: 'now_ok_window',  label, icon: '🐾' };
   }
 
   // Parse "HH:MM:SS" → minutes since midnight. Returns null when input
@@ -1928,6 +2023,85 @@
     renderCards();
   }
 
+  // ─── Day pills ──────────────────────────────────────────────────────
+  // NOW + today + next 6 days. Click → set selectedDay, refetch
+  // beach/dog-park data for that date, re-render. selectedDay='now'
+  // is the live current-hour view (dot indicator on the pill).
+  function buildDayList() {
+    const days = [];
+    days.push({ id: 'now', topLabel: 'LIVE', mainLabel: 'NOW' });
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    days.push({ id: today, topLabel: 'TODAY', mainLabel: dateNum(today) });
+    for (let i = 1; i <= 6; i++) {
+      const d = new Date(Date.now() + i * 86400000);
+      const iso = d.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+      const wk = d.toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short' }).toUpperCase();
+      days.push({ id: iso, topLabel: wk, mainLabel: dateNum(iso) });
+    }
+    return days;
+  }
+  // "2026-06-07" → "7" (day of month, no leading zero)
+  function dateNum(iso) {
+    return String(parseInt(iso.slice(-2), 10));
+  }
+
+  function renderDayPills() {
+    const wrap = document.getElementById('day-pills');
+    const days = buildDayList();
+    wrap.innerHTML = days.map(d => {
+      const isActive = d.id === selectedDay;
+      const cls = `day-pill${d.id === 'now' ? ' now-pill' : ''}${isActive ? ' active' : ''}`;
+      return `<button type="button" class="${cls}" role="tab"
+                       aria-selected="${isActive}" data-day="${d.id}">
+        <span class="day-pill-label">${d.topLabel}</span>
+        <span class="day-pill-num">${d.mainLabel}</span>
+      </button>`;
+    }).join('');
+    wrap.querySelectorAll('.day-pill').forEach(el => {
+      el.addEventListener('click', () => onDayPick(el.getAttribute('data-day')));
+    });
+  }
+
+  async function onDayPick(dayId) {
+    if (dayId === selectedDay) return;
+    selectedDay = dayId;
+    try { localStorage.setItem(DAY_KEY, dayId); } catch {}
+    renderDayPills();
+    // Hide the "Now at you" strip when the user is looking at a future
+    // day — that widget is about live conditions at the user's location.
+    const nowStrip = document.getElementById('now-strip');
+    if (nowStrip) nowStrip.style.display = dayId === 'now' ? '' : 'none';
+    // Update the results heading to name the day they're viewing
+    updateResultsTitle();
+    // Refetch beach + park data for the new date and re-render.
+    showLoadingSkeletons();
+    await Promise.all([loadBeaches(), loadDogParks()]);
+    renderCards();
+  }
+
+  function updateResultsTitle() {
+    const t = document.getElementById('results-title');
+    if (!t) return;
+    if (selectedDay === 'now') {
+      t.textContent = 'Better picks nearby';
+      return;
+    }
+    const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    if (selectedDay === todayISO) {
+      t.textContent = "Today's picks";
+      return;
+    }
+    const dt = new Date(selectedDay + 'T12:00:00');
+    const wk = dt.toLocaleDateString('en-US', { weekday: 'long' });
+    t.textContent = `${wk} picks`;
+  }
+
+  function showLoadingSkeletons() {
+    const list = document.getElementById('result-list');
+    if (!list) return;
+    list.innerHTML = Array(4).fill('<div class="skeleton"></div>').join('');
+  }
+
   // ─── Search ─────────────────────────────────────────────────────────
   let _searchDebounce = null;
   function onSearchInput(value) {
@@ -2019,9 +2193,18 @@
   }
 
   // ─── Boot ───────────────────────────────────────────────────────────
-  // Wire chips + selects
+  // Wire chips + day pills + selects
   syncWantChips();
   syncAmenityChips();
+  renderDayPills();
+  updateResultsTitle();
+  // If the user landed on a non-NOW day (persisted), hide the live
+  // weather strip up front so the page renders correctly even before
+  // the first fetch completes.
+  if (selectedDay !== 'now') {
+    const ns = document.getElementById('now-strip');
+    if (ns) ns.style.display = 'none';
+  }
   document.getElementById('dist-select').value =
     distanceFilterMi === 'any' ? 'any' : String(distanceFilterMi);
 

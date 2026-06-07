@@ -115,7 +115,17 @@ def _shape(rows, entity: str):
                 "dogs_allowed": "yes",   # dog parks are definitionally yes
             })
         else:
-            if r.get("lat") is None or r.get("lon") is None:
+            # Beach entity: PostgREST returns nav_lat/nav_lon (per
+            # ENTITIES["beach"].select_fields). Earlier select_fields
+            # used lat/lon directly; 2026-05-26 entity-aware refactor
+            # renamed the columns to nav_* but missed this read site.
+            # Result: every beach row was skipped, Wikimedia loads dropped
+            # from ~700/day → 0 from 2026-05-26 onward (catalog audit
+            # 2026-06-06). Fixed: read nav_lat/nav_lon directly. Fallback
+            # to lat/lon for forward-compat if a future refactor renames.
+            lat = r.get("nav_lat") if r.get("nav_lat") is not None else r.get("lat")
+            lng = r.get("nav_lon") if r.get("nav_lon") is not None else r.get("lon")
+            if lat is None or lng is None:
                 continue
             try:
                 info = supa(f"/rest/v1/rpc/{ent['lat_lon_rpc']}", method="POST",
@@ -126,7 +136,7 @@ def _shape(rows, entity: str):
                 dogs_allowed = None
             out.append({
                 "fid": r["fid"], "name": name,
-                "lat": r.get("lat"), "lng": r.get("lon"),
+                "lat": lat, "lng": lng,
                 "state": r.get("state"),
                 "scoring_tier": r.get("scoring_tier"),
                 "dogs_allowed": dogs_allowed,
@@ -301,6 +311,21 @@ NAME_STOPWORDS = {
     "north", "south", "east", "west",
 }
 import re as _re_global
+
+# Dog-word filter ([[this-is-a-dog-app]] + [[apply-loader-bias-to-beach-photos]]).
+# Commons geosearch returns whatever is geo-tagged near the centroid (boats,
+# tents, panoramas, occasional dogs). API has no keyword arg, so we filter
+# post-fetch: keep only files whose title OR description mentions a dog token.
+# Word-bounded to skip "dogwood", "dogleg", "doggerel" etc. Catalog-wide
+# audit 2026-06-06: untargeted geosearch yields ~1.7% has_dog; this filter
+# is ~5x dog-yield uplift per Franz directive 2026-06-06 LATE.
+_DOG_WORD_RE = _re_global.compile(
+    r"\b(dogs?|puppy|puppies|canines?|retriever|labrador|poodle|terrier|"
+    r"shepherd|dachshund|husky|corgi|beagle|chihuahua)\b",
+    _re_global.I,
+)
+
+
 def _name_tokens(s: str) -> set[str]:
     if not s: return set()
     return {t for t in _re_global.findall(r"[a-z]+", s.lower())
@@ -321,12 +346,18 @@ def _name_match_score(beach_name: str, title: str) -> float:
     return round(3.0 * matched / len(beach_t), 2)
 
 
+def _has_dog_text(title: str, desc: str) -> bool:
+    """True iff title or description mentions a dog token (word-bounded)."""
+    return bool(_DOG_WORD_RE.search((title or "") + " " + (desc or "")))
+
+
 def rank_and_pick(geo_results: list[dict], info_map: dict[int, dict],
                   beach_lat: float, beach_lng: float,
                   max_radius_m: int, top_n: int,
                   blocked_artists: set[str] | None = None,
                   beach_name: str = "",
-                  beach_meta: dict | None = None) -> list[dict]:
+                  beach_meta: dict | None = None,
+                  require_dog: bool = True) -> list[dict]:
     """Pick the best Wikimedia Commons candidates per the unified v3
     ingest filter. Refactored 2026-05-19 per Franz collapsed-architecture
     decision — same pattern as load_flickr_photos.pick_best().
@@ -363,6 +394,14 @@ def rank_and_pick(geo_results: list[dict], info_map: dict[int, dict],
         extmd = info.get("extmetadata") or {}
         desc = (extmd.get("ImageDescription", {}) or {}).get("value") or ""
         desc = _re_global.sub(r"<[^>]+>", "", desc)
+
+        # Dog-word filter (require_dog=True by default per [[this-is-a-dog-app]]).
+        # Skips files whose title+description don't mention a dog token.
+        # Drops ~98% of geosearch hits (boats, tents, panoramas) and lifts
+        # the surviving has_dog rate substantially. Override with
+        # --no-dog-filter for backfills (e.g., scenic placeholders).
+        if require_dog and not _has_dog_text(title, desc):
+            continue
 
         # Skip blocklisted photographers
         artist_raw = _meta(extmd, "Artist") or ""
@@ -486,6 +525,11 @@ def main():
                     help="Entity type. Default: beach (back-compat).")
     ap.add_argument("--radius", type=int, default=RADIUS_M)
     ap.add_argument("--per-beach", type=int, default=PER_BEACH)
+    ap.add_argument("--no-dog-filter", action="store_true",
+                    help="Disable the post-fetch title/description dog-word filter. "
+                         "Default is to require dogs|puppy|retriever|... in title or "
+                         "description (per [[this-is-a-dog-app]]). Use this flag only "
+                         "for scenic-placeholder backfills.")
     args = ap.parse_args()
 
     ent = ENTITIES[args.entity]
@@ -531,7 +575,8 @@ def main():
                                    args.radius, args.per_beach, blocked,
                                    beach_name=b.get("name", ""),
                                    beach_meta={"scoring_tier": b.get("scoring_tier"),
-                                               "dogs_allowed": b.get("dogs_allowed")})
+                                               "dogs_allowed": b.get("dogs_allowed")},
+                                   require_dog=not args.no_dog_filter)
             if not picked:
                 no_photos += 1
                 replace_commons(b["fid"], [], entity=args.entity)

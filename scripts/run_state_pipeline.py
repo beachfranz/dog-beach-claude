@@ -2992,7 +2992,14 @@ def action_photos_websearch(state: str) -> int:
     return _chunked_subprocess(
         'scripts/load_websearch_photos.py', fids,
         flag_name='--fids', chunk_size=50, per_chunk_timeout=900,
-        extra_args=['--per-entity', '10'],
+        # --entity beach is REQUIRED: loader default is 'dog_park' (line 261
+        # of load_websearch_photos.py), so without this flag the loader
+        # queries dog_parks_gold for beach fids and writes to dog_park_photos.
+        # Bug since the entity-aware refactor 2026-05-26 — every state
+        # launched after that date got 0 websearch beach photos through the
+        # pipeline. MD/VA/CA/OR have websearch photos only because Franz
+        # ran the loader manually with --entity beach on those days.
+        extra_args=['--entity', 'beach', '--per-entity', '10'],
         parse_fn=_parse_photos_saved,
     )
 

@@ -1549,15 +1549,37 @@
       if (c.kind === 'dog_park') return c.rankScore ?? 60;
       return c.rankScore != null ? c.rankScore : 0;
     };
-    return [...filtered]
-      .sort((a, b) => {
-        const sa = sortKey(a), sb = sortKey(b);
-        if (sb !== sa) return sb - sa;
-        const da = a.distanceMi ?? Infinity;
-        const db = b.distanceMi ?? Infinity;
-        return da - db;
-      })
-      .slice(0, DISPLAY_LIMIT);
+    const cmp = (a, b) => {
+      const sa = sortKey(a), sb = sortKey(b);
+      if (sb !== sa) return sb - sa;
+      const da = a.distanceMi ?? Infinity;
+      const db = b.distanceMi ?? Infinity;
+      return da - db;
+    };
+    // Min-quota merge: when both a beach chip AND the dog-park chip are
+    // active, reserve up to MIN_DP dog-park slots so a strong beach
+    // pool can't crowd out parks entirely. Was: pure rankScore sort,
+    // which buried dog parks (anchored at 60) under any nearby region
+    // with on-leash beaches scoring 75-93. Reported by Franz 2026-06-07
+    // — "toggle on off-leash beaches and dog parks disappear."
+    const wantsBeach = wants.has('off_leash_beach') || wants.has('on_leash_beach');
+    const wantsPark  = wants.has('dog_park');
+    const MIN_DP = 3;
+    const sortedBeaches = filtered.filter(c => c.kind === 'beach').sort(cmp);
+    const sortedParks   = filtered.filter(c => c.kind === 'dog_park').sort(cmp);
+    if (wantsBeach && wantsPark) {
+      const reservedParks = sortedParks.slice(0, Math.min(MIN_DP, sortedParks.length));
+      const reservedSet = new Set(reservedParks);
+      const remaining = [...sortedBeaches, ...sortedParks]
+        .filter(c => !reservedSet.has(c))
+        .sort(cmp);
+      const fillSlots = Math.max(0, DISPLAY_LIMIT - reservedParks.length);
+      const merged = [...reservedParks, ...remaining.slice(0, fillSlots)];
+      merged.sort(cmp);
+      return merged;
+    }
+    // Single-kind path: plain rank sort
+    return [...filtered].sort(cmp).slice(0, DISPLAY_LIMIT);
   }
 
   // ─── Distance helper ────────────────────────────────────────────────

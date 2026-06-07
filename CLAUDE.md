@@ -405,18 +405,35 @@ Four edge functions read from grid instead of fetching Open-Meteo:
 - `get-beach-now` (W2.3) — `fetchCurrentWeatherFromGrid()` replaces `fetchCurrentWeather()`.
 - `get-dog-park-now` (W2.4) — same swap.
 
-All four have direct-fetch fallback if grid cell is unloaded.
-
 ### Cost / call volume
 
-Pre-cutover: ~16,500 Open-Meteo calls/day across all consumers. Post-cutover: <100/day (mostly the grid loader + occasional fallback). ~165× reduction.
+Pre-cutover: ~16,500 Open-Meteo calls/day across all consumers. Post-cutover: <100/day (mostly the grid loader + occasional NOW-path fallback). ~165× reduction.
+
+### Per-cell warmth gate — the canonical pattern (2026-06-06)
+
+Every consumer that reads from `weather_grid_hourly` (or the analogous `marine_grid_hourly`) MUST gate on per-cell coverage. Falling back to per-entity direct Open-Meteo fetch on partial cells is the **anti-pattern** — it re-introduces N calls every fresh-state launch and erodes the 165× cost-collapse. Pin: `[[grid-consumers-require-cell-warmth-gate]]`.
+
+The loader fans out per-cell fetches across batches over minutes-to-hours (per-tier schedule + retry-with-backoff). If a consumer races the loader, it sees partial coverage. Without a gate, it writes partial output silently — the canonical incident was HI fid 13882 on 2026-06-07: daily-beach-refresh fired at UTC 00:21 when t1 hadn't yet covered UTC 06-08 in the cell. The function wrote 213 of 240 expected hourly rows; bar charts on detail.html ended at HI 1PM.
+
+**Two gate shapes:**
+
+1. **Picker SQL fn** (`beaches_due_for_refresh`, `dog_parks_due_for_refresh`): CTE filters entities whose cell has < 45 forecast rows in `[now, now+48h]`. Pattern in `20260606ze_picker_weather_grid_warm_gate.sql`.
+2. **Direct SQL fn** (`refresh_beach_day_hourly_scores_bulk`, `refresh_marine_advisories`): same filter embedded in the `_scope` CTE so cold-cell entities never reach the JOIN. Don't add a fallback — let the entity drop out; next loader-tier tick + next consumer-tick auto-recovers.
+
+**Orchestrator gate** (state-launch): `weather_grid_warm` phase in `run_state_pipeline.py` polls cell coverage, fires `refresh-weather-grid {tier:'t1', state_filter}` if cold, criterion ≥95% of state cells warm. Belt-and-suspenders so a fresh-state launch completes without operator intervention.
+
+**Threshold = ≥45 of next-48h** because t1 owns the next-48h window and fires every hour with retries. A wider 7-day threshold was tried first and false-negative'd cells where t3 (12h schedule) hadn't yet caught up — CA/MA cells dropped to 39–55% pass rate. The near-48h window is what daily refresh actually depends on (today + tomorrow bars).
+
+### Direct-fetch fallback — when it's OK
+
+ONE remaining surface still uses direct-fetch fallback: `get-beach-now` / `get-dog-park-now`. They fetch a single hour per beach per tick (hourly cron), so worst-case fallback cost = ~hundreds of calls in the first hour after a state launch, not thousands sustained. Acceptable. The gate pattern is still preferred if you're refactoring, but lower priority.
 
 ### Caveats
 
-- **Dagster schedules default STOPPED** per project convention. Toggle ON via Dagster UI (`hourly_weather_grid_schedule` + `daily_weather_grid_inventory_schedule`) or grid goes stale within 1-3 days as forecasts age out. Consumers degrade to direct-fetch fallback if grid is empty.
+- **Dagster schedules default STOPPED** per project convention. Toggle ON via Dagster UI (`hourly_weather_grid_schedule` + `daily_weather_grid_inventory_schedule`) or grid goes stale within 1-3 days as forecasts age out. Picker gate then keeps consumers from racing the cold grid.
 - **WORKER_RESOURCE_LIMIT still possible** on `daily-beach-refresh` at >50 beaches/call. Mitigated via 2-min chunked cron (`beach_refresh_chunked`) + 22h stale filter. Real fix is Phase W4 (Dagster port of daily refreshes).
 
-Migrations: `20260525_weather_grid_schema.sql` + `_helpers.sql` + `_materialization.sql`. Pin: `[[weather-grid-reference-layer]]`.
+Migrations: `20260525_weather_grid_schema.sql` + `_helpers.sql` + `_materialization.sql` + `20260606ze_picker_weather_grid_warm_gate.sql`. Pins: `[[weather-grid-reference-layer]]`, `[[grid-consumers-require-cell-warmth-gate]]`.
 
 ---
 

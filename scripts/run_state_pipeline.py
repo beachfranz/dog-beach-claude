@@ -32,7 +32,8 @@ Phases (in order):
    geom_queue             — process_geom_change_queue
    <LLM/external phases — operator_llm_extract, operator_merge, bep_refire,
                           section_extract, descriptions, photos_wikimedia,
-                          daily_refresh_fire, field_population_check>
+                          marine_grid_warm, weather_grid_warm, daily_refresh_fire,
+                          post_refresh_propagation, field_population_check>
 
 Usage:
    python scripts/run_state_pipeline.py --state OR
@@ -396,13 +397,15 @@ PHASES = [
     },
     {
         'key': 'promote',
-        'action':
-            # Uses public.state_code_to_fips() helper (gap #31, 2026-05-23 LATE).
-            "with f as (select array_agg(a.fid) fids from public.arena a "
-            "  join public.counties c on c.geoid = a.county_fips "
-            "  where a.is_active and c.state_fp = public.state_code_to_fips($STATE)) "
-            "select coalesce((select rows_promoted + rows_already_in_gold "
-            "                   from public.promote_to_gold((select fids from f)::bigint[], false::boolean, true::boolean)), 0)::int",
+        # Chunked Python action — was a single-SQL action that ran
+        # promote_to_gold over ALL active arena fids in one transaction.
+        # Supavisor session-mode pooler severs connections at variable
+        # points (3m–12m wall-clock observed on HI run #46) under pool
+        # pressure, killing long-running transactions. Chunking caps each
+        # transaction to ~50 fids = under 1 min wall-clock, well inside
+        # any pool tolerance.
+        'kind': 'python',
+        'action': 'promote_chunked',
         'criterion':
             "select public.assert_promote_complete_for_state($STATE)",
         'criterion_text':
@@ -1249,6 +1252,80 @@ PHASES = [
         'criterion_text': 'description leak-pattern audit (informational; warnings printed)',
     },
     {
+        # 2026-06-06: marine grid warmth — symmetric to weather_grid_warm.
+        # Brand-new states register marine cells via tg_compute_marine_grid_cell
+        # but the next-48h marine forecast doesn't land until the hourly
+        # refresh_marine_grid tick. Without this phase, the first
+        # hourly_marine_advisories pass for the state silently drops
+        # cold-cell beaches via the gate (zf migration) and recovers in
+        # the next 1h tick. Phase makes launch deterministic.
+        # Scope: only beaches with marine_grid_lat IS NOT NULL — inland
+        # / lake beaches (e.g., OR lake beaches, UT Bonneville beaches)
+        # don't have marine cells and are excluded from the count.
+        'key': 'marine_grid_warm',
+        'kind': 'python',
+        'action': 'marine_grid_warm',
+        'criterion':
+            "with cells as (select distinct marine_grid_lat g_lat, marine_grid_lon g_lon "
+            "                 from public.beaches_gold "
+            "                where state = $STATE and is_active and scoring_tier in ('daily','hourly') "
+            "                  and marine_grid_lat is not null) "
+            "select coalesce((count(*) filter (where "
+            "          (select count(*) from public.marine_grid_hourly w "
+            "            where w.grid_lat = c.g_lat and w.grid_lon = c.g_lon "
+            "              and w.forecast_ts >  now() "
+            "              and w.forecast_ts <= now() + interval '48 hours') >= 45 "
+            "        )::float >= count(*)::float * 0.95)::boolean, true) "
+            "from cells c",
+        'criterion_text': '≥95% of state marine cells have ≥45 forecast rows in next 48h '
+                          '(or no marine cells in state — vacuously true)',
+        'progress_sql':
+            "with cells as (select distinct marine_grid_lat g_lat, marine_grid_lon g_lon "
+            "                 from public.beaches_gold "
+            "                where state = $STATE and is_active and scoring_tier in ('daily','hourly') "
+            "                  and marine_grid_lat is not null) "
+            "select count(*) filter (where "
+            "          (select count(*) from public.marine_grid_hourly w "
+            "            where w.grid_lat = c.g_lat and w.grid_lon = c.g_lon "
+            "              and w.forecast_ts >  now() "
+            "              and w.forecast_ts <= now() + interval '48 hours') >= 45 "
+            "        )::int done, count(*)::int total from cells c",
+    },
+    {
+        # 2026-06-06: gate against the W2 grid-loader race. Picker now
+        # filters out beaches/dog-parks whose weather_grid cell has < 45
+        # forecast rows in [now, now+48h] (see migration ze) — so on a
+        # fresh state launch the picker returns 0 beaches until t1 has
+        # warmed the new cells. This phase explicitly kicks t1 + polls
+        # cell coverage so daily_refresh_fire below doesn't keep failing
+        # its criterion while the loader catches up.
+        'key': 'weather_grid_warm',
+        'kind': 'python',
+        'action': 'weather_grid_warm',
+        'criterion':
+            "with cells as (select distinct weather_grid_lat g_lat, weather_grid_lon g_lon "
+            "                 from public.beaches_gold "
+            "                where state = $STATE and is_active and scoring_tier in ('daily','hourly')) "
+            "select (count(*) filter (where "
+            "          (select count(*) from public.weather_grid_hourly w "
+            "            where w.grid_lat = c.g_lat and w.grid_lon = c.g_lon "
+            "              and w.forecast_ts >  now() "
+            "              and w.forecast_ts <= now() + interval '48 hours') >= 45 "
+            "        )::float >= count(*)::float * 0.95)::boolean "
+            "from cells c",
+        'criterion_text': '≥95% of state cells have ≥45 forecast rows in next 48h',
+        'progress_sql':
+            "with cells as (select distinct weather_grid_lat g_lat, weather_grid_lon g_lon "
+            "                 from public.beaches_gold "
+            "                where state = $STATE and is_active and scoring_tier in ('daily','hourly')) "
+            "select count(*) filter (where "
+            "          (select count(*) from public.weather_grid_hourly w "
+            "            where w.grid_lat = c.g_lat and w.grid_lon = c.g_lon "
+            "              and w.forecast_ts >  now() "
+            "              and w.forecast_ts <= now() + interval '48 hours') >= 45 "
+            "        )::int done, count(*)::int total from cells c",
+    },
+    {
         'key': 'daily_refresh_fire',
         'kind': 'python',
         'action': 'daily_refresh_fire',
@@ -1270,6 +1347,57 @@ PHASES = [
             "             join public.beaches_gold g on g.location_id=r.location_id "
             "            where g.state=$STATE and r.local_date=current_date) "
             "select d.n done, t.n total from d, t",
+    },
+    {
+        # 2026-06-06: post-refresh propagation. daily_refresh_fire writes
+        # beach_day_hourly_scores raw + beach_day_recommendations, but the
+        # downstream artifacts that the consumer surface needs —
+        # composite_score_v2, beach_advisory rows, marine_threshold rows —
+        # are written by separate cron jobs (apply_v2_best_window_beach,
+        # daily_weather_advisories, hourly_marine_advisories) that run on
+        # 5-min / hourly cadences. Without this phase, state launch can
+        # exit while V2 + advisories are still 0–60 min behind, leaving
+        # find.html and detail.html partially populated for the new state.
+        #
+        # Fires the three set-based SQL fns directly for THIS state's fids
+        # so the launch's consumer surface lands before exit. Each fn is
+        # idempotent — re-firing what cron would fire 5 min later is a
+        # no-op from the consumer's perspective.
+        'key': 'post_refresh_propagation',
+        'kind': 'python',
+        'action': 'post_refresh_propagation',
+        'criterion':
+            # V2 coverage for today+forward across the state's recs.
+            # Marine + advisory rows are rule-conditional (can be 0
+            # legitimately if no rules fire), so the criterion gates on
+            # V2 coverage only — the surest existence proof.
+            "with f as (select count(*)::int n from public.beach_day_recommendations r "
+            "             join public.beaches_gold b on b.fid = r.arena_group_id "
+            "            where b.state = $STATE and b.is_active "
+            "              and b.scoring_tier in ('daily','hourly') "
+            "              and r.local_date >= current_date), "
+            "     v as (select count(*)::int n from public.beach_day_recommendations r "
+            "             join public.beaches_gold b on b.fid = r.arena_group_id "
+            "            where b.state = $STATE and b.is_active "
+            "              and b.scoring_tier in ('daily','hourly') "
+            "              and r.local_date >= current_date "
+            "              and r.composite_score_v2 is not null) "
+            "select (v.n::float >= f.n::float * 0.95)::boolean from f, v",
+        'criterion_text': 'composite_score_v2 populated on ≥95% of today+forward recs '
+                          '(advisories are rule-conditional, not gated)',
+        'progress_sql':
+            "with f as (select count(*)::int n from public.beach_day_recommendations r "
+            "             join public.beaches_gold b on b.fid = r.arena_group_id "
+            "            where b.state = $STATE and b.is_active "
+            "              and b.scoring_tier in ('daily','hourly') "
+            "              and r.local_date >= current_date), "
+            "     v as (select count(*)::int n from public.beach_day_recommendations r "
+            "             join public.beaches_gold b on b.fid = r.arena_group_id "
+            "            where b.state = $STATE and b.is_active "
+            "              and b.scoring_tier in ('daily','hourly') "
+            "              and r.local_date >= current_date "
+            "              and r.composite_score_v2 is not null) "
+            "select v.n done, f.n total from f, v",
     },
     {
         # codify_coverage_check — end-of-pipeline drift check.
@@ -1958,6 +2086,55 @@ def action_ensure_pad_us(state: str) -> int:
             (source, state, row_count),
         )
     return 1
+
+def action_promote_chunked(state: str) -> int:
+    """Promote arena rows to beaches_gold in fid-chunks (~50 per batch).
+
+    Each chunk runs in its own autocommit transaction. Replaces the
+    single-SQL promote action that exceeded Supavisor session-pooler
+    connection limits on states with >100 arena rows. Per-chunk wall
+    time is ~30-60s; total wall time is roughly the same as the
+    monolithic call but no single transaction risks a pool sever.
+
+    Returns total rows_promoted + rows_already_in_gold summed across
+    chunks (matches the prior SQL action's return shape so the criterion
+    is unchanged).
+    """
+    chunk_size = 50
+    total = 0
+    fids: list[int] = []
+    with open_conn() as c, c.cursor() as cur:
+        cur.execute(
+            "select a.fid from public.arena a "
+            "  join public.counties c on c.geoid = a.county_fips "
+            "  where a.is_active and c.state_fp = public.state_code_to_fips(%s) "
+            "  order by a.fid",
+            (state,),
+        )
+        fids = [row[0] for row in cur.fetchall()]
+    log(f'    promote_chunked: {len(fids)} arena fids → {(len(fids) + chunk_size - 1) // chunk_size} chunks of {chunk_size}')
+    if not fids:
+        return 0
+    for i in range(0, len(fids), chunk_size):
+        batch = fids[i:i + chunk_size]
+        # Fresh autocommit conn per chunk — bounded transaction lifetime.
+        cc = psycopg2.connect(**PG)
+        cc.set_session(autocommit=True)
+        try:
+            with cc.cursor() as cu:
+                cu.execute("set statement_timeout = '600s'")
+                cu.execute(
+                    "select coalesce((select rows_promoted + rows_already_in_gold "
+                    "                   from public.promote_to_gold(%s::bigint[], false::boolean, true::boolean)), 0)::int",
+                    (batch,),
+                )
+                got = cu.fetchone()[0]
+                total += got
+                log(f'    promote_chunked: chunk {i // chunk_size + 1}/{(len(fids) + chunk_size - 1) // chunk_size} → +{got} rows (cumulative {total})')
+        finally:
+            cc.close()
+    return total
+
 
 def action_ensure_overpass(state: str) -> int:
     return _ensure_loader(state, 'osm_landing', 'bulk_load_overpass.py', timeout=1200)
@@ -2870,6 +3047,179 @@ def action_descriptions_audit(state: str) -> int:
     return n_failures
 
 
+def action_marine_grid_warm(state: str) -> int:
+    """Kick refresh-marine-grid for this state and poll until ≥95% of the
+    state's MARINE cells have ≥45 forecast rows in [now, now+48h]. Inland /
+    lake beaches (marine_grid_lat IS NULL) are excluded from the count.
+    Vacuously true for states with no marine cells (UT, MI inland, etc.)."""
+    sql = ("select count(*) from ("
+           "  select distinct marine_grid_lat g_lat, marine_grid_lon g_lon "
+           "    from public.beaches_gold "
+           "   where state = %s and is_active and scoring_tier in ('daily','hourly') "
+           "     and marine_grid_lat is not null"
+           ") c "
+           "where (select count(*) from public.marine_grid_hourly w "
+           "        where w.grid_lat = c.g_lat and w.grid_lon = c.g_lon "
+           "          and w.forecast_ts >  now() "
+           "          and w.forecast_ts <= now() + interval '48 hours') >= 45")
+    total_sql = ("select count(*) from ("
+                 "  select distinct marine_grid_lat, marine_grid_lon "
+                 "    from public.beaches_gold "
+                 "   where state = %s and is_active and scoring_tier in ('daily','hourly') "
+                 "     and marine_grid_lat is not null"
+                 ") c")
+    def _coverage() -> tuple:
+        with open_conn() as c, c.cursor() as cur:
+            cur.execute(sql, (state,))
+            warm = cur.fetchone()[0]
+            cur.execute(total_sql, (state,))
+            total = cur.fetchone()[0]
+        return warm, total
+
+    warm, total = _coverage()
+    log(f'    marine cell warmth at start: {warm}/{total} cells')
+    if total == 0:
+        log('    state has no marine cells — vacuously warm')
+        return 0
+    if warm >= total * 0.95:
+        return warm
+
+    url = os.environ['SUPABASE_URL'].rstrip('/') + '/functions/v1/refresh-marine-grid'
+    headers = {
+        'Authorization': f"Bearer {os.environ['SUPABASE_SERVICE_KEY']}",
+        'apikey':         os.environ['SUPABASE_SERVICE_KEY'],
+        'x-admin-secret': os.environ['ADMIN_SECRET'],
+        'Content-Type':   'application/json',
+    }
+    # refresh-marine-grid is single-tier (no t1/t2/t3) with limit≤1000 cells/call.
+    # Up to ~6 minutes of polling: 12 attempts × 30s sleep.
+    for attempt in range(12):
+        try:
+            r = httpx.post(url, headers=headers,
+                           json={'state_filter': state, 'limit': 400, 'force_full': True},
+                           timeout=180.0)
+            if not r.is_success:
+                log(f'    refresh-marine-grid attempt {attempt+1}: HTTP {r.status_code} {r.text[:200]}')
+        except Exception as e:
+            log(f'    refresh-marine-grid attempt {attempt+1}: EXC {e}')
+        time.sleep(30)
+        warm, total = _coverage()
+        log(f'    marine cell warmth after attempt {attempt+1}: {warm}/{total} cells')
+        if warm >= total * 0.95:
+            return warm
+    return warm
+
+
+def action_post_refresh_propagation(state: str) -> int:
+    """Fire the three set-based SQL fns that downstream cron jobs would
+    fire on 5-min / hourly cadences, but for THIS state's fids RIGHT NOW
+    so the launch's consumer surface is fully populated before exit.
+
+      1. apply_v2_best_window_to_beach_recommendations_bulk(state) →
+         composite_score_v2 + best_window_label on beach_day_recommendations
+      2. refresh_beach_advisories(state) → deterministic weather advisories
+         on beach_advisory
+      3. refresh_marine_advisories(state) → marine_threshold advisories
+         on beach_advisory (no-op for non-marine states)
+
+    All three are idempotent; re-firing matches what cron would fire 5 min
+    later. Returns total rows touched across the three fns."""
+    total = 0
+    with open_conn() as c, c.cursor() as cur:
+        try:
+            cur.execute("select beaches_processed, hour_scores_written, recs_written, windows_picked "
+                        "from public.apply_v2_best_window_to_beach_recommendations_bulk(%s, NULL, NULL, 6)",
+                        (state,))
+            row = cur.fetchone() or (0, 0, 0, 0)
+            log(f'    apply_v2_best_window: beaches={row[0]} hour_scores={row[1]} recs={row[2]} windows={row[3]}')
+            total += int(row[1] or 0) + int(row[2] or 0)
+        except Exception as e:
+            log(f'    apply_v2_best_window: EXC {e}')
+
+        try:
+            cur.execute("select upserted, retired from public.refresh_beach_advisories(%s, NULL)",
+                        (state,))
+            row = cur.fetchone() or (0, 0)
+            log(f'    refresh_beach_advisories: upserted={row[0]} retired={row[1]}')
+            total += int(row[0] or 0)
+        except Exception as e:
+            log(f'    refresh_beach_advisories: EXC {e}')
+
+        try:
+            cur.execute("select upserted, retired from public.refresh_marine_advisories(%s, NULL, 48)",
+                        (state,))
+            row = cur.fetchone() or (0, 0)
+            log(f'    refresh_marine_advisories: upserted={row[0]} retired={row[1]}')
+            total += int(row[0] or 0)
+        except Exception as e:
+            log(f'    refresh_marine_advisories: EXC {e}')
+    return total
+
+
+def action_weather_grid_warm(state: str) -> int:
+    """Kick refresh-weather-grid (t1) for this state and poll until ≥95% of
+    the state's grid cells have ≥45 forecast rows in [now, now+48h]. Returns
+    number of cells WARM at exit.
+
+    Belt-and-suspenders for the picker grid-warm gate (migration ze): the
+    picker would also gate daily_refresh_fire to 0 beaches if cells are cold,
+    but firing the loader here makes a fresh-state launch finish without
+    needing the operator to come back later. Self-heals if the loader
+    is already current."""
+    sql = ("select count(*) from ("
+           "  select distinct weather_grid_lat g_lat, weather_grid_lon g_lon "
+           "    from public.beaches_gold "
+           "   where state = %s and is_active and scoring_tier in ('daily','hourly')"
+           ") c "
+           "where (select count(*) from public.weather_grid_hourly w "
+           "        where w.grid_lat = c.g_lat and w.grid_lon = c.g_lon "
+           "          and w.forecast_ts >  now() "
+           "          and w.forecast_ts <= now() + interval '48 hours') >= 45")
+    total_sql = ("select count(*) from ("
+                 "  select distinct weather_grid_lat, weather_grid_lon "
+                 "    from public.beaches_gold "
+                 "   where state = %s and is_active and scoring_tier in ('daily','hourly')"
+                 ") c")
+    def _coverage() -> tuple:
+        with open_conn() as c, c.cursor() as cur:
+            cur.execute(sql, (state,))
+            warm = cur.fetchone()[0]
+            cur.execute(total_sql, (state,))
+            total = cur.fetchone()[0]
+        return warm, total
+
+    warm, total = _coverage()
+    log(f'    grid warmth at start: {warm}/{total} cells')
+    if total == 0 or warm >= total * 0.95:
+        return warm
+
+    url = os.environ['SUPABASE_URL'].rstrip('/') + '/functions/v1/refresh-weather-grid'
+    headers = {
+        'Authorization': f"Bearer {os.environ['SUPABASE_SERVICE_KEY']}",
+        'apikey':         os.environ['SUPABASE_SERVICE_KEY'],
+        'x-admin-secret': os.environ['ADMIN_SECRET'],
+        'Content-Type':   'application/json',
+    }
+    # Up to ~6 minutes of polling: 12 attempts × 30s sleep.
+    # Each refresh-weather-grid invocation processes up to 200 cells of t1
+    # (next-48h) horizon. A fresh state with 400 cells needs ~2 invocations.
+    for attempt in range(12):
+        try:
+            r = httpx.post(url, headers=headers,
+                           json={'tier': 't1', 'state_filter': state, 'limit': 200},
+                           timeout=180.0)
+            if not r.is_success:
+                log(f'    refresh-weather-grid attempt {attempt+1}: HTTP {r.status_code} {r.text[:200]}')
+        except Exception as e:
+            log(f'    refresh-weather-grid attempt {attempt+1}: EXC {e}')
+        time.sleep(30)
+        warm, total = _coverage()
+        log(f'    grid warmth after attempt {attempt+1}: {warm}/{total} cells')
+        if warm >= total * 0.95:
+            return warm
+    return warm
+
+
 def action_daily_refresh_fire(state: str) -> int:
     """Fire daily-beach-refresh with state's scoreable location_ids in batches.
     Honors COUNTIES_FILTER if set."""
@@ -3237,6 +3587,7 @@ PYTHON_ACTIONS = {
     'ensure_overpass':         action_ensure_overpass,
     'ensure_osm_beach_polys':  action_ensure_osm_beach_polys,
     'ensure_poi_landing':      action_ensure_poi_landing,
+    'promote_chunked':         action_promote_chunked,
     'ensure_amenities':        action_ensure_amenities,
     'ensure_dog_features':     action_ensure_dog_features,
     'refresh_nearest_dog_park': action_refresh_nearest_dog_park,
@@ -3261,7 +3612,10 @@ PYTHON_ACTIONS = {
     'harvest_park_text':       action_harvest_park_text,
     'descriptions':            action_descriptions,
     'descriptions_audit':      action_descriptions_audit,
+    'marine_grid_warm':        action_marine_grid_warm,
+    'weather_grid_warm':       action_weather_grid_warm,
     'daily_refresh_fire':      action_daily_refresh_fire,
+    'post_refresh_propagation': action_post_refresh_propagation,
     'field_population_check':  action_field_population_check,
 }
 

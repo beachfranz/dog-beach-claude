@@ -1957,8 +1957,52 @@ const AMENITY_DEFS = [
   { key: 'has_picnic_area',     icon: '🧺',  label: 'Picnic area' },
   { key: 'has_fire_pits',       icon: '🔥',  label: 'Fire pits' },
   { key: 'has_lifeguards',      icon: '🛟',  label: 'Lifeguards' },
-  { key: 'has_disabled_access', icon: '♿',  label: 'ADA access' },
+  { key: 'has_disabled_access', icon: '♿',  label: 'Accessibility' },
 ];
+
+// Phase 4 of [[dwell-ada-crowd-autocurate]]: when beach_amenities.accessibility_features
+// JSONB is present, the tile renders a multi-line tooltip listing the specific known
+// features (Q2(a) — single Accessibility badge + tooltip). Falls back to "ADA access"
+// generic when only the legacy boolean is set.
+const _PATH_TO_SAND_LABEL = {
+  boardwalk:   'Wheelchair-accessible boardwalk to sand',
+  ramp:        'Wheelchair-accessible ramp to sand',
+  mat:         'Beach mat (Mobi-Mat) over sand',
+  stairs_only: 'Stairs only — no wheelchair path',
+  none:        'No accessible path to sand',
+};
+
+function _accessibilityFeatureSummary(features) {
+  if (!features || typeof features !== 'object') return null;
+  const lines = [];
+  if (features.path_to_sand && _PATH_TO_SAND_LABEL[features.path_to_sand]) {
+    lines.push(_PATH_TO_SAND_LABEL[features.path_to_sand]);
+  }
+  if (features.beach_mat === true && features.path_to_sand !== 'mat') {
+    lines.push('Beach mat available');
+  }
+  if (features.boardwalk === true && features.path_to_sand !== 'boardwalk') {
+    lines.push('Boardwalk');
+  }
+  if (features.wheelchair_rental && features.wheelchair_rental.available === true) {
+    const provider = features.wheelchair_rental.provider;
+    lines.push(provider ? `Beach wheelchair rental — ${provider}` : 'Beach wheelchair rental available');
+  }
+  if (features.beach_wheelchair_program && features.beach_wheelchair_program.available === true) {
+    const provider = features.beach_wheelchair_program.provider;
+    lines.push(provider ? `Wheelchair program — ${provider}` : 'Wheelchair program available');
+  }
+  if (features.accessible_restrooms === true) lines.push('Accessible restrooms');
+  if (features.accessible_parking === true)   lines.push('Accessible parking');
+  if (features.accessible_viewing === true)   lines.push('Accessible viewing platform');
+  if (features.notes) lines.push(features.notes);
+  if (lines.length === 0) return null;
+  // Source attribution as a quiet final line if both sources contributed.
+  if (Array.isArray(features._sources) && features._sources.length > 1) {
+    lines.push(`(Source: ${features._sources.join(' + ')})`);
+  }
+  return lines.join(' · ');
+}
 
 const PARKING_TYPE_LABEL = {
   lot: 'Lot', mixed: 'Mixed', metered: 'Metered',
@@ -2046,6 +2090,17 @@ function _renderAmenityTileWithRule(def, amenities, rule) {
       _parkingCostLabel(amenities) === 'Paid' ? true
         : _parkingCostLabel(amenities) === 'Free' ? false : null,
       ruleClass, rule);
+  }
+  // Accessibility tile: rich tooltip from accessibility_features JSONB when
+  // present (Phase 4 of [[dwell-ada-crowd-autocurate]]). Falls back to the
+  // generic _amenityTooltip when only the legacy boolean is set.
+  if (def.key === 'has_disabled_access') {
+    const richTip = _accessibilityFeatureSummary(amenities?.accessibility_features);
+    const finalTip = richTip ? `${def.label} · ${richTip}` : tip;
+    return `<div class="amenity${ruleClass}" data-tip="${escHtml(finalTip)}">
+      <span class="amenity-icon">${def.icon}</span>
+      <span class="amenity-label">${def.label}</span>
+    </div>`;
   }
   // Lifeguards always render with the "Seasonal" sublabel — staffing is
   // seasonal at almost every US beach, never year-round (see
@@ -2146,6 +2201,13 @@ function _visibleAmenityTiles(amenities) {
       return (Array.isArray(amenities.parking_options) && amenities.parking_options.length > 0)
           || (amenities.parking_fee != null) || amenities.parking_subtype
           || amenities.parking_type || amenities.parking_notes;
+    }
+    // Phase 4 of [[dwell-ada-crowd-autocurate]]: surface the Accessibility
+    // tile when JSONB has any known feature, even if the legacy boolean is
+    // null/false. Lets new evidence (LLM-extracted, CCC-derived) reach the
+    // consumer surface without requiring the cascade to also set the boolean.
+    if (d.key === 'has_disabled_access' && _accessibilityFeatureSummary(amenities.accessibility_features)) {
+      return true;
     }
     return false;
   });

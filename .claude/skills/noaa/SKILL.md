@@ -181,15 +181,32 @@ If HI beaches are missing tides, confirm:
 
 ## When to widen with subordinate stations
 
-NOAA CO-OPS has ~296 primary stations + **~3,200 subordinate stations** derived from those primaries' harmonics. Some beaches are 30+ miles from their assigned primary — prediction error grows with distance because tide timing/amplitude varies with coastal geometry.
+NOAA CO-OPS has ~296 primary (reference) stations + **~3,200 subordinate stations**. Subordinates aren't independent measurements — they derive from a primary's harmonic constants but apply a station-specific **corrections table**:
 
-Same API endpoint, just different `station_id` list. To widen:
+- **Time offset** — high/low tide arrives N minutes earlier or later than at the primary
+- **Height ratio** — high-tide height is X% of the primary's (and same for low)
+- **MLW correction** — datum offset
 
-1. Find subordinate station candidates near beaches with poor coverage (NOAA's station finder: https://tidesandcurrents.noaa.gov/stations.html)
-2. Update `beaches_gold.noaa_station_id` for affected beaches → the trigger registers the new station in `tide_station_inventory`
+The output curve is the primary's curve shifted in time and scaled in amplitude for the subordinate's actual geography. NOAA's API handles the math — same endpoint, different `station_id`, response is the corrected values. We don't compute anything.
+
+**When the correction is large enough to matter:**
+
+- Bay / estuary beaches behind a headland from the nearest primary — tide can arrive 30-60 min later and run 20-50% higher than the primary
+- Beaches up a tidal river or shielded inlet
+- Beaches >30mi from primary along irregular coast (less common; most US coast is well-covered)
+
+**When primaries are fine:**
+
+- Open-coast beaches within ~10mi of a primary — correction is small
+- Lake / inland beaches with no NOAA station — primary OR subordinate both irrelevant; tide score defaults to neutral
+
+To widen:
+
+1. Find subordinate candidates near affected beaches (NOAA's station finder: https://tidesandcurrents.noaa.gov/stations.html — toggle "Subordinate" + filter by region)
+2. Update `beaches_gold.noaa_station_id` for those beaches → the trigger registers the new station in `tide_station_inventory`
 3. Fire `refresh-tide-stations` to warm the new station: `{"station_ids": ["<id>"]}`
 
-Widening is parked Phase 2 — primaries cover the bulk acceptably. Revisit if specific beaches show real-world tide drift complaints.
+Widening is parked Phase 2 — primaries cover the bulk acceptably. Open it when specific beaches surface tide-drift complaints (e.g. a bay beach where the rendered high-tide time is off by an hour from observed).
 
 ## Reference files
 

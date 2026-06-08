@@ -2680,11 +2680,11 @@ def action_harvest_park_text(state: str) -> int:
     park_url_scrape_queue stale window). No-ops for states without a
     loader (CA harvests via extract_from_park_url.py / queue view).
     """
-    # Only OR/WA have loaders today. Skip silently for others —
-    # `harvest_park_text.py --state X` would argparse-reject unknown X
-    # and the phase would halt unnecessarily. CA harvests via the
-    # existing park_url_scrape_queue / extract_from_park_url.py path.
-    if state not in ('CA', 'OR', 'WA'):
+    # States with a StateParksLoader wired into harvest_park_text.py.
+    # Skip silently for others — argparse would reject unknown states and
+    # the phase would halt unnecessarily. CA harvests via the existing
+    # park_url_scrape_queue / extract_from_park_url.py path.
+    if state not in ('CA', 'OR', 'WA', 'MD', 'DE', 'NH'):
         log(f'  [{state}] no leaf-URL harvester wired — skip')
         return 0
     cmd = [sys.executable, 'scripts/harvest_park_text.py',

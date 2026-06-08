@@ -717,6 +717,35 @@
     font-size: 14px; color: var(--text); line-height: 1.55;
     margin: 28px 16px 16px;
   }
+  /* One-sentence accessibility hint — sits under the overview blurb
+   * when applicable. Full detail lives in the dedicated Accessibility
+   * card below. Italic to signal tag-not-marketing. */
+  .overview-accessibility {
+    font-size: 13px; color: var(--text); line-height: 1.5;
+    margin: -8px 16px 16px;
+    font-style: italic; opacity: 0.85;
+  }
+  /* Dedicated Accessibility card (Franz 2026-06-07). Sits in left rail
+   * above Pack List. Each feature gets its own row with icon + label. */
+  .accessibility-card h2 {
+    font-size: 16px; font-weight: 700; margin: 0 0 10px; color: var(--text);
+  }
+  .acc-rows { display: flex; flex-direction: column; gap: 8px; }
+  .acc-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    font-size: 14px; color: var(--text); line-height: 1.45;
+  }
+  .acc-icon { font-size: 18px; line-height: 1.2; flex: 0 0 auto; }
+  .acc-label { flex: 1 1 auto; }
+  .acc-label a { color: var(--text); text-decoration: underline; }
+  .acc-notes {
+    font-size: 13px; color: var(--text); line-height: 1.5;
+    margin: 12px 0 0; opacity: 0.85;
+  }
+  .acc-sources {
+    font-size: 11px; color: var(--text); opacity: 0.55;
+    margin: 8px 0 0;
+  }
   /* Scout blurb — uniform 14px / 1.55 line-height. */
   .scout-card #scout-blurb,
   .scout-card #scout-beach-blurb,
@@ -1137,6 +1166,7 @@ function render(data, beachFid) {
   // DP suggestion mount — async-filled by loadDogParkSuggestion below.
   // Sits next to Pack List so the "what's next" prompts cluster.
   leftRail.push(`<section class="card dog-park-card-mount" id="dog-park-mount" style="display:none"></section>`);
+  leftRail.push(buildAccessibilityCard(amenities));
   leftRail.push(buildPackListCard(beach, dog_policy, amenities, data.hours_today));
   leftRail.push(buildDetailsSection(dog_policy));
   leftRail.push(buildLinksSection(beach, beachFid));
@@ -1390,10 +1420,10 @@ const AMENITY_DEFS = [
   { key: 'has_disabled_access', icon: '♿',  label: 'Accessibility' },
 ];
 
-// Phase 4 of [[dwell-ada-crowd-autocurate]]: when beach_amenities.accessibility_features
-// JSONB is present, the tile renders a multi-line tooltip listing the specific known
-// features. Mirrors beach.html. Falls back to "ADA access" generic when only the legacy
-// boolean is set.
+// Phase 4 of [[dwell-ada-crowd-autocurate]] (revised 2026-06-07): mirrors
+// beach.html. Rich detail lives in the dedicated Accessibility card just
+// above Pack List; the overview gets a one-sentence summary; the amenity
+// tile keeps a simple tooltip.
 const _PATH_TO_SAND_LABEL = {
   boardwalk:   'Wheelchair-accessible boardwalk to sand',
   ramp:        'Wheelchair-accessible ramp to sand',
@@ -1402,35 +1432,57 @@ const _PATH_TO_SAND_LABEL = {
   none:        'No accessible path to sand',
 };
 
-function _accessibilityFeatureSummary(features) {
-  if (!features || typeof features !== 'object') return null;
-  const lines = [];
+function _accessibilityFeatureItems(features) {
+  if (!features || typeof features !== 'object') return [];
+  const items = [];
   if (features.path_to_sand && _PATH_TO_SAND_LABEL[features.path_to_sand]) {
-    lines.push(_PATH_TO_SAND_LABEL[features.path_to_sand]);
+    items.push({ icon: '♿', label: _PATH_TO_SAND_LABEL[features.path_to_sand] });
   }
   if (features.beach_mat === true && features.path_to_sand !== 'mat') {
-    lines.push('Beach mat available');
+    items.push({ icon: '♿', label: 'Beach mat available' });
   }
   if (features.boardwalk === true && features.path_to_sand !== 'boardwalk') {
-    lines.push('Boardwalk');
+    items.push({ icon: '🪵', label: 'Boardwalk' });
   }
   if (features.wheelchair_rental && features.wheelchair_rental.available === true) {
     const provider = features.wheelchair_rental.provider;
-    lines.push(provider ? `Beach wheelchair rental — ${provider}` : 'Beach wheelchair rental available');
+    items.push({ icon: '🦽',
+                 label: provider ? `Beach wheelchair rental — ${provider}` : 'Beach wheelchair rental available',
+                 url: features.wheelchair_rental.url || null });
   }
   if (features.beach_wheelchair_program && features.beach_wheelchair_program.available === true) {
     const provider = features.beach_wheelchair_program.provider;
-    lines.push(provider ? `Wheelchair program — ${provider}` : 'Wheelchair program available');
+    const phone    = features.beach_wheelchair_program.phone;
+    const resUrl   = features.beach_wheelchair_program.reservation_url;
+    let label = provider ? `Wheelchair program — ${provider}` : 'Wheelchair program available';
+    if (phone) label += ` · ${phone}`;
+    items.push({ icon: '🦽', label, url: resUrl });
   }
-  if (features.accessible_restrooms === true) lines.push('Accessible restrooms');
-  if (features.accessible_parking === true)   lines.push('Accessible parking');
-  if (features.accessible_viewing === true)   lines.push('Accessible viewing platform');
-  if (features.notes) lines.push(features.notes);
-  if (lines.length === 0) return null;
-  if (Array.isArray(features._sources) && features._sources.length > 1) {
-    lines.push(`(Source: ${features._sources.join(' + ')})`);
+  if (features.accessible_restrooms === true) items.push({ icon: '🚻', label: 'Accessible restrooms' });
+  if (features.accessible_parking   === true) items.push({ icon: '🅿️', label: 'Accessible parking' });
+  if (features.accessible_viewing   === true) items.push({ icon: '👁️', label: 'Accessible viewing platform' });
+  return items;
+}
+
+function _accessibilityOverviewLine(features) {
+  if (!features || typeof features !== 'object') return null;
+  if (features.path_to_sand === 'boardwalk') return 'This beach has a wheelchair-accessible boardwalk to the sand.';
+  if (features.path_to_sand === 'ramp')      return 'This beach has a wheelchair-accessible ramp to the sand.';
+  if (features.path_to_sand === 'mat')       return 'This beach has a beach mat for wheelchair access to the sand.';
+  if ((features.wheelchair_rental && features.wheelchair_rental.available === true) ||
+      (features.beach_wheelchair_program && features.beach_wheelchair_program.available === true)) {
+    return 'This beach has a beach wheelchair available for visitors.';
   }
-  return lines.join(' · ');
+  if (features.accessible_restrooms === true || features.accessible_parking === true ||
+      features.accessible_viewing === true || features.boardwalk === true) {
+    return 'This beach has accessibility features — see the Accessibility card for details.';
+  }
+  if (features.path_to_sand === 'stairs_only') return 'Beach access is stairs-only; no wheelchair path to the sand.';
+  return null;
+}
+
+function _accessibilityHasContent(features) {
+  return _accessibilityFeatureItems(features).length > 0;
 }
 
 const PARKING_TYPE_LABEL = {
@@ -1521,11 +1573,11 @@ function _renderAmenityTileWithRule(def, amenities, rule) {
         : _parkingCostLabel(amenities) === 'Free' ? false : null,
       ruleClass, rule);
   }
-  // Accessibility tile: rich tooltip from accessibility_features JSONB when
-  // present (Phase 4 of [[dwell-ada-crowd-autocurate]]).
+  // Accessibility tile: simple tooltip. Rich detail lives in the dedicated
+  // Accessibility card above Pack List (Franz 2026-06-07 revision).
   if (def.key === 'has_disabled_access') {
-    const richTip = _accessibilityFeatureSummary(amenities?.accessibility_features);
-    const finalTip = richTip ? `${def.label} · ${richTip}` : tip;
+    const hasJsonb = _accessibilityHasContent(amenities?.accessibility_features);
+    const finalTip = hasJsonb ? `${def.label} — see Accessibility card below` : tip;
     return `<div class="amenity${ruleClass} amenity-iconic" data-tip="${escHtml(finalTip)}">
       <span class="amenity-icon">${def.icon}</span>
     </div>`;
@@ -1624,7 +1676,7 @@ function _visibleAmenityTiles(amenities) {
     }
     // Phase 4 of [[dwell-ada-crowd-autocurate]]: surface Accessibility tile
     // when JSONB has any known feature, even if legacy boolean is null/false.
-    if (d.key === 'has_disabled_access' && _accessibilityFeatureSummary(amenities.accessibility_features)) {
+    if (d.key === 'has_disabled_access' && _accessibilityHasContent(amenities.accessibility_features)) {
       return true;
     }
     return false;
@@ -1998,12 +2050,40 @@ function _deriveTideCurveFromHours(hoursToday) {
 // Beach overview card. Title = beach display name. Carries the
 // LLM static description + async Scout narrative. The best-window
 // info lives in its own card (buildBestTimeCard).
-function buildOverviewCard(beach, description) {
+function buildOverviewCard(beach, description, amenities) {
   const blurb = description?.text;
-  if (!blurb) return '';
-  // Beach text — bare prose, no card chrome, no title. Beach name
-  // already appears in the page header next to the Your-Fit badge.
-  return `<p class="overview-blurb">${escHtml(blurb)}</p>`;
+  const accLine = _accessibilityOverviewLine(amenities?.accessibility_features);
+  if (!blurb && !accLine) return '';
+  const blurbHtml = blurb ? `<p class="overview-blurb">${escHtml(blurb)}</p>` : '';
+  const accHtml = accLine ? `<p class="overview-accessibility">${escHtml(accLine)}</p>` : '';
+  return blurbHtml + accHtml;
+}
+
+// Dedicated Accessibility card (Franz 2026-06-07): mirrors beach.html.
+// On mobile this sits in the left rail above Pack List.
+function buildAccessibilityCard(amenities) {
+  const features = amenities?.accessibility_features;
+  const items = _accessibilityFeatureItems(features);
+  if (!items.length) return '';
+  const rows = items.map(it => {
+    const labelHtml = it.url
+      ? `<a href="${escHtml(it.url)}" target="_blank" rel="noopener">${escHtml(it.label)}</a>`
+      : escHtml(it.label);
+    return `<div class="acc-row">
+      <span class="acc-icon">${it.icon}</span>
+      <span class="acc-label">${labelHtml}</span>
+    </div>`;
+  }).join('');
+  const notesHtml = features.notes
+    ? `<p class="acc-notes">${escHtml(features.notes)}</p>` : '';
+  const sourcesHtml = Array.isArray(features._sources) && features._sources.length > 1
+    ? `<p class="acc-sources">Source: ${escHtml(features._sources.join(' + '))}</p>` : '';
+  return `<section class="card accessibility-card">
+    <h2>Accessibility</h2>
+    <div class="acc-rows">${rows}</div>
+    ${notesHtml}
+    ${sourcesHtml}
+  </section>`;
 }
 
 // Best-window card — standalone, all black text. Status pill keeps

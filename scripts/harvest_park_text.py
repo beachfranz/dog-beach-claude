@@ -51,6 +51,9 @@ from dotenv import load_dotenv
 from scripts.loaders._base import BROWSER_HEADERS, ParkInfo
 from scripts.loaders.oprd import OprdLoader
 from scripts.loaders.wsprc import WsprcLoader
+from scripts.loaders.md_dnr import MdDnrLoader
+from scripts.loaders.dnrec_de import DnrecDeLoader
+from scripts.loaders.nhsp import NhspLoader
 
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / "scripts" / "pipeline" / ".env")
@@ -83,7 +86,13 @@ RAW_TEXT_CAP = 8000
 MIN_USEFUL_CHARS = 500
 FETCH_TIMEOUT_S = 30.0
 
-LOADERS = {"OR": OprdLoader, "WA": WsprcLoader}
+LOADERS = {
+    "OR": OprdLoader,
+    "WA": WsprcLoader,
+    "MD": MdDnrLoader,
+    "DE": DnrecDeLoader,
+    "NH": NhspLoader,
+}
 # CA uses a different code path — see discover_ca_parks(). cpad_units
 # carries park_url directly, so no master-list discovery step is needed;
 # polygon-via-membership joins beaches_gold MVP+ to cpad_units in one SQL.

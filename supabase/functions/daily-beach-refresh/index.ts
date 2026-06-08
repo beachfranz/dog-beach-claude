@@ -1,11 +1,13 @@
 // daily-beach-refresh/index.ts
 // Supabase Edge Function — orchestrates the full daily data pipeline.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders }  from "../_shared/cors.ts";
 import { ensureNotTruncated } from "../_shared/safeSelect.ts";
 import { fetchWeather, wmoToSummaryWeather }   from "./openmeteo.ts";
-import { fetchTides }                           from "./noaa.ts";
+// noaa.ts (fetchTides) retired 2026-06-07 — tides now read from the
+// tide_grid_hourly reference layer via lookupTidesFromGrid() (see
+// 20260607j migration + refresh-tide-stations edge fn).
 import { fetchCrowds, jsDayToBestTimeDay }      from "./besttime.ts";
 import {
   scoreHours,
@@ -385,31 +387,21 @@ async function processBeach(
   if (!beach.noaa_station_id) {
     phases.noaa = "skipped";
     console.log(`[${beach.location_id}] No NOAA station (inland) — scoring without tide`);
-  } else if (opts.forceTideRefresh) {
-    // Weekly cron path only — actually fetch from NOAA.
-    try {
-      tideMap = await fetchTides(beach, runAt, opts.tideWindowDays);
-      phases.noaa = "ok";
-      console.log(`[${beach.location_id}] Tides fetched — ${tideMap.size} hours (${opts.tideWindowDays}d window, weekly force-refresh)`);
-    } catch (err) {
-      await logError(supabase, beach.location_id, "noaa", err);
-      phases.noaa = "error";
-      tideMap = new Map();
-      console.warn(`[${beach.location_id}] NOAA failed — proceeding without tide data`);
-    }
   } else {
-    // Daily path — cache only, never call NOAA.
+    // All paths now read tide from the tide_grid_hourly reference layer
+    // (per 20260607j) — keyed by station_id, populated by the
+    // refresh-tide-stations edge fn on a weekly cron. NO per-beach NOAA
+    // fetches from this function — that path used to time out at ~11%
+    // coverage. Per Franz 2026-06-07.
+    //
+    // The forceTideRefresh body knob is now ignored; this fn always
+    // reads cache. Fresh NOAA writes happen in refresh-tide-stations.
     try {
-      const cached = await tryReadTideCache(supabase, beach, runAt);
-      if (cached) {
-        tideMap = cached;
-        tideFromCache = true;
-        phases.noaa = "skipped";
-        console.log(`[${beach.location_id}] Tides cached — ${tideMap.size} hours (no NOAA call)`);
-      } else {
-        phases.noaa = "skipped";
-        console.log(`[${beach.location_id}] No tide cache — proceeding without tides (neutral score)`);
-      }
+      tideMap = await lookupTidesFromGrid(
+        supabase, beach, runAt, opts.tideWindowDays || 7);
+      tideFromCache = tideMap.size > 0;
+      phases.noaa = tideMap.size > 0 ? "ok" : "skipped";
+      console.log(`[${beach.location_id}] Tides from grid — ${tideMap.size} hours`);
     } catch (err) {
       phases.noaa = "skipped";
       tideMap = new Map();
@@ -1000,6 +992,51 @@ function round1(val: number | null | undefined): number | null {
 //   * All 7 forecast days (today + next 6) present in the table
 //   * Every row's tide_refreshed_at is within the last 7 days
 //   * Every row has a non-null tide_height
+// Read tide hours from the tide_grid_hourly reference layer for this
+// beach's NOAA station. Returns Map<hourKey, height_ft> where hourKey
+// is "YYYY-MM-DD HH" in BEACH LOCAL TIME — the same key shape the
+// downstream join with Open-Meteo hourly data uses. (Grid stores UTC
+// timestamptz; we convert at read.)
+async function lookupTidesFromGrid(
+  supabase: SupabaseClient,
+  beach: Beach,
+  runAt: Date,
+  windowDays: number,
+): Promise<Map<string, number>> {
+  if (!beach.noaa_station_id) return new Map();
+  const startTs = new Date(runAt);
+  startTs.setUTCDate(startTs.getUTCDate() - 1);   // small back-buffer
+  const endTs = new Date(runAt);
+  endTs.setUTCDate(endTs.getUTCDate() + windowDays);
+  const { data, error } = await supabase.rpc("tide_for_station", {
+    p_station_id: beach.noaa_station_id,
+    p_start_ts:   startTs.toISOString(),
+    p_end_ts:     endTs.toISOString(),
+  });
+  if (error || !Array.isArray(data) || data.length === 0) return new Map();
+  const tz = beach.timezone || "America/Los_Angeles";
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", hour12: false,
+  });
+  const m = new Map<string, number>();
+  for (const r of data as Array<{ forecast_ts: string; tide_height_ft: number }>) {
+    // Intl.DateTimeFormat returns parts like "YYYY-MM-DD, HH" — normalize
+    // to the historical "YYYY-MM-DD HH" key with no comma.
+    const parts = fmt.formatToParts(new Date(r.forecast_ts));
+    const y = parts.find(p => p.type === "year")?.value;
+    const mo = parts.find(p => p.type === "month")?.value;
+    const d = parts.find(p => p.type === "day")?.value;
+    const h = parts.find(p => p.type === "hour")?.value;
+    if (!y || !mo || !d || !h) continue;
+    // Intl returns "24" for midnight in hour12=false on some locales; normalize.
+    const hh = h === "24" ? "00" : h;
+    m.set(`${y}-${mo}-${d} ${hh}`, Number(r.tide_height_ft));
+  }
+  return m;
+}
+
 async function tryReadTideCache(
   supabase: ReturnType<typeof createClient>,
   beach: Beach,

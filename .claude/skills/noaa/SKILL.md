@@ -35,7 +35,7 @@ tide_grid_hourly
    (station_id, forecast_ts, tide_height_ft, tide_direction, fetched_at, source)
         │
         ├── tide_for_station(station_id, start, end)  ← per-station read
-        ├── tide_for_beach(fid, start, end)            ← per-beach read (joins via station)
+        ├── tide_for_beach(fid, start, end)            ← per-beach read with auto-fallback
         └── tide_station_is_warm(station_id, hours)    ← gate for partial coverage
         │
         ▼
@@ -203,8 +203,12 @@ The output curve is the primary's curve shifted in time and scaled in amplitude 
 To widen:
 
 1. Find subordinate candidates near affected beaches (NOAA's station finder: https://tidesandcurrents.noaa.gov/stations.html — toggle "Subordinate" + filter by region)
-2. Update `beaches_gold.noaa_station_id` for those beaches → the trigger registers the new station in `tide_station_inventory`
-3. Fire `refresh-tide-stations` to warm the new station: `{"station_ids": ["<id>"]}`
+2. Update `beaches_gold.noaa_station_id` for those beaches → the trigger registers the new station in `tide_station_inventory`. **It also registers the subordinate's parent reference primary** (`noaa_stations.reference_id`) so the loader keeps both warm — needed for the fallback below.
+3. Fire `refresh-tide-stations` to warm the new station: `{"station_ids": ["<sub_id>", "<parent_id>"]}`
+
+**Auto-fallback to primary** (migration 20260607l): `tide_for_beach(fid, start, end)` checks the assigned station for any rows in the requested window. If empty (NOAA didn't return data for that subordinate, loader hasn't warmed it yet, or station_id is misassigned), it transparently falls back to the parent reference primary. Caller can't tell which station the curve came from — by design. Better a directionally-correct primary curve than an empty rendering.
+
+The fallback only kicks in on 0 rows. Sparse-but-nonzero (e.g. 3 of 24 hours) does NOT fall back currently — that case would surface as broken UI, not silent fallback. If we discover sparse subs in practice, tighten the threshold here.
 
 Widening is parked Phase 2 — primaries cover the bulk acceptably. Open it when specific beaches surface tide-drift complaints (e.g. a bay beach where the rendered high-tide time is off by an hour from observed).
 

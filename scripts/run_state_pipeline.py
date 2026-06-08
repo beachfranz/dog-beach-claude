@@ -1264,6 +1264,20 @@ PHASES = [
             'no-ops if state has no operator URLs',
     },
     {
+        # 2026-06-08: ADA accessibility — from state-agency ArcGIS REST
+        # POI services. Zero-LLM, authoritative tags. Currently registered:
+        # OH (Ohio DNR Points of Interest layer). Future states with similar
+        # services (WI / MN / PA / NY all confirmed to publish them) plug
+        # into GIS_SOURCES dict in the script.
+        'key': 'extract_accessibility_arcgis',
+        'kind': 'python',
+        'action': 'extract_accessibility_arcgis',
+        'criterion': "select true",
+        'criterion_text':
+            'ADA from state ArcGIS POI service — opportunistic; '
+            'no-ops if no registered GIS_SOURCES entry for state',
+    },
+    {
         # 2026-05-21: descriptions moved AFTER photos_tag + photos_curate
         # so the generator can reference the tagged + curated gallery.
         'key': 'descriptions',
@@ -2823,6 +2837,33 @@ def action_extract_accessibility_operator_url(state: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+def action_extract_accessibility_arcgis(state: str) -> int:
+    """Extract ADA from a state-agency ArcGIS REST POI service.
+
+    Fourth source class — zero-LLM, authoritative agency tags. Currently
+    registered: OH (Ohio DNR Points of Interest). Future states with
+    similar services plug into GIS_SOURCES dict in the script.
+
+    Skips silently for states without a GIS_SOURCES entry.
+    """
+    try:
+        src = Path('scripts/extract_accessibility_from_arcgis.py').read_text()
+        # Look for state keys inside GIS_SOURCES dict block
+        registered = set(re.findall(r'^\s*"([A-Z]{2})":\s*\{\s*$', src, re.MULTILINE))
+    except Exception:
+        registered = set()
+    if state not in registered:
+        log(f'  [{state}] no ArcGIS source registered — skip')
+        return 0
+    cmd = [sys.executable, 'scripts/extract_accessibility_from_arcgis.py',
+           '--state', state, '--apply', '--skip-if-fresh-within', '14']
+    rc, out, err = _run_subprocess(cmd, timeout=600)
+    if rc != 0:
+        raise RuntimeError(f'extract_accessibility_from_arcgis exit {rc}: {err[-500:]}')
+    m = re.search(r'inserted=(\d+)', out or '')
+    return int(m.group(1)) if m else 0
+
+
 def action_extract_accessibility_ccc_directory(state: str) -> int:
     """One-shot CCC beach-wheelchair directory extractor — CA only.
 
@@ -3793,6 +3834,7 @@ PYTHON_ACTIONS = {
     'extract_accessibility_state_directory': action_extract_accessibility_state_directory,
     'extract_accessibility_operator_url':    action_extract_accessibility_operator_url,
     'extract_accessibility_ccc_directory':   action_extract_accessibility_ccc_directory,
+    'extract_accessibility_arcgis':          action_extract_accessibility_arcgis,
     'descriptions':            action_descriptions,
     'descriptions_audit':      action_descriptions_audit,
     'marine_grid_warm':        action_marine_grid_warm,

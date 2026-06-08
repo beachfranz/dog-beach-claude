@@ -3033,21 +3033,27 @@ function _renderTidesToday(tides, forecast) {
     return `<text x="${x.toFixed(1)}" y="${H - 4}" text-anchor="${anchor}" class="tide-hour-axis-label">${lbl}</text>`;
   }).join('');
 
-  // NOW marker — filled dot + "NOW" label, with hover title.
-  const now = new Date();
-  const nowHour = now.getHours() + now.getMinutes()/60;
-  const nowX = (nowHour / 24) * W;
-  const iLo = Math.floor(nowHour);
-  const iHi = Math.min(iLo + 1, pts.length - 1);
-  const frac = nowHour - iLo;
-  const nowY = (pts[iLo]?.y ?? padTop) * (1 - frac) + (pts[iHi]?.y ?? padTop) * frac;
-  const nowHeight = (parseFloat(hourly[iLo]?.v ?? 0) * (1 - frac)
-                  + parseFloat(hourly[iHi]?.v ?? 0) * frac).toFixed(1);
-  const nowMarker = `
-    <circle cx="${nowX.toFixed(1)}" cy="${nowY.toFixed(1)}" r="4" class="tide-now-dot">
-      <title>Now · ${nowHeight}ft</title>
-    </circle>
-    <text x="${nowX.toFixed(1)}" y="${(nowY - 9).toFixed(1)}" text-anchor="middle" class="tide-now-label">NOW</text>`;
+  // NOW marker only on today's view. On future-day-pill clicks the
+  // marker would point at a meaningless x-position (browser's current
+  // hour overlaid on tomorrow's tide curve).
+  const _isTodayTide = window.__beachIsToday !== false;
+  let nowMarker = '';
+  if (_isTodayTide) {
+    const now = new Date();
+    const nowHour = now.getHours() + now.getMinutes()/60;
+    const nowX = (nowHour / 24) * W;
+    const iLo = Math.floor(nowHour);
+    const iHi = Math.min(iLo + 1, pts.length - 1);
+    const frac = nowHour - iLo;
+    const nowY = (pts[iLo]?.y ?? padTop) * (1 - frac) + (pts[iHi]?.y ?? padTop) * frac;
+    const nowHeight = (parseFloat(hourly[iLo]?.v ?? 0) * (1 - frac)
+                    + parseFloat(hourly[iHi]?.v ?? 0) * frac).toFixed(1);
+    nowMarker = `
+      <circle cx="${nowX.toFixed(1)}" cy="${nowY.toFixed(1)}" r="4" class="tide-now-dot">
+        <title>Now · ${nowHeight}ft</title>
+      </circle>
+      <text x="${nowX.toFixed(1)}" y="${(nowY - 9).toFixed(1)}" text-anchor="middle" class="tide-now-label">NOW</text>`;
+  }
 
   // Precompute 48 static hover zones (one per 30-min bucket). Each
   // is an invisible rect carrying a native SVG <title> with the
@@ -3122,11 +3128,17 @@ async function loadWeather(beach, hoursToday) {
 // array become hi/lo events. Replaces the previous NOAA fetch.
 function _deriveTideCurveFromHours(hoursToday) {
   if (!Array.isArray(hoursToday)) return null;
-  const _t = new Date();
-  const _y = _t.getFullYear();
-  const _m = String(_t.getMonth() + 1).padStart(2, '0');
-  const _d = String(_t.getDate()).padStart(2, '0');
-  const datePrefix = `${_y}-${_m}-${_d}`;
+  // datePrefix must reflect the REQUESTED day (window.__beachSelectedDate),
+  // not the browser's wall clock. On a future-day-pill click, the
+  // hours_today rows are for that future day; stamping them with the
+  // browser's today (the old behavior) caused the tide curve to render
+  // with today's timestamps overlaid on tomorrow's heights — wonky.
+  // Per Franz 2026-06-07.
+  let datePrefix = window.__beachSelectedDate;
+  if (!datePrefix || !/^\d{4}-\d{2}-\d{2}$/.test(datePrefix)) {
+    const _t = new Date();
+    datePrefix = `${_t.getFullYear()}-${String(_t.getMonth() + 1).padStart(2, '0')}-${String(_t.getDate()).padStart(2, '0')}`;
+  }
   const hourly = hoursToday
     .filter(h => h && h.tide_height != null && h.local_hour != null)
     .sort((a, b) => a.local_hour - b.local_hour)
@@ -4135,32 +4147,29 @@ async function loadWaterConditionAdvisories(beachFid) {
   if (!card) return;
   let items = [];
   try {
+    // Pass dateFromQs when present so a Monday-pill click on find.html
+    // surfaces Monday's cautions, not today's. RPC defaults to today
+    // at the beach's own tz when p_date is omitted.
+    const body = { p_fid: parseInt(beachFid, 10) };
+    if (dateFromQs && /^\d{4}-\d{2}-\d{2}$/.test(dateFromQs)) {
+      body.p_date = dateFromQs;
+    }
     const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_beach_advisories`, {
       method:  'POST',
       headers: {
         apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ p_fid: parseInt(beachFid, 10), p_horizon_hours: 24 }),
+      body: JSON.stringify(body),
     });
     if (!r.ok) return;
     items = await r.json();
   } catch { return; }
-  // Next-24h filter (per Franz 2026-06-04, loosening the prior end-of-today
-  // local cutoff). The RPC already bounds candidates with p_horizon_hours=24;
-  // we re-apply that ceiling client-side to keep behavior explicit even if
-  // the RPC default changes. The prior end-of-today-local cutoff dropped
-  // tomorrow-morning advisories whenever the page was loaded in the evening,
-  // which gave the appearance of "missing" cautions on beaches with daytime-
-  // peaked hot-car / UV / asphalt windows.
-  if (Array.isArray(items)) {
-    const horizon = new Date(Date.now() + 24 * 3600_000);
-    items = items.filter(a => {
-      if (!a.valid_from) return true;
-      const from = new Date(a.valid_from);
-      return isNaN(from.getTime()) || from <= horizon;
-    });
-  }
+  // RPC now clips valid_from/valid_to to the requested day's bounds at
+  // beach-tz midnight, so no client-side horizon filter is needed. The
+  // prior next-24h client clamp was a holdover from the old "horizon
+  // hours" semantics and would incorrectly drop tomorrow's afternoon
+  // cautions on a Monday-pill click made on a Sunday evening.
   if (!Array.isArray(items) || items.length === 0) {
     card.style.display = 'none';
     return;

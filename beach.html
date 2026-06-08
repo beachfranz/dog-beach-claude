@@ -2956,15 +2956,16 @@ function _renderWeatherToday(forecast) {
 function _renderTidesToday(tides, forecast) {
   const mount = document.getElementById('tide-mount');
   if (!mount) return;
-  // NOAA can return predictions that include trailing hours from the
-  // next day. Filter to today's local date prefix so the polyline
-  // doesn't wrap around (a 24th point dated tomorrow lands back at
-  // x=0 and produces a stray diagonal across the whole chart).
-  const _today = new Date();
-  const _y = _today.getFullYear(),
-        _m = String(_today.getMonth()+1).padStart(2,'0'),
-        _d = String(_today.getDate()).padStart(2,'0');
-  const _todayStr = `${_y}-${_m}-${_d}`;
+  // Filter to the REQUESTED day's prefix (window.__beachSelectedDate) so
+  // the polyline doesn't wrap around if hours bleed into next day. Use
+  // browser's local today only as the fallback for the no-?date= path.
+  // Mirrors the same fix in _deriveTideCurveFromHours line 3137 — both
+  // sides of the filter must agree on which day the curve represents.
+  let _todayStr = window.__beachSelectedDate;
+  if (!_todayStr || !/^\d{4}-\d{2}-\d{2}$/.test(_todayStr)) {
+    const _today = new Date();
+    _todayStr = `${_today.getFullYear()}-${String(_today.getMonth()+1).padStart(2,'0')}-${String(_today.getDate()).padStart(2,'0')}`;
+  }
   const hourly = (tides?.hourly || []).filter(p => p?.t && p.t.startsWith(_todayStr));
   const hilo   = (tides?.hilo   || []).filter(p => p?.t && p.t.startsWith(_todayStr));
   if (!Array.isArray(hourly) || hourly.length === 0) {

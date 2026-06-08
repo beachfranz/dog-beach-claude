@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ADA Phase 4 verify · 2026-06-07</title>
+<style>
+  body { font-family: system-ui; max-width: 900px; margin: 24px auto; padding: 0 16px;
+         background: #f5f5f5; color: #222; line-height: 1.5; }
+  h1 { margin: 0 0 8px 0; }
+  .target { background: white; border-radius: 8px; padding: 14px 18px;
+            margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .target h3 { margin: 0 0 4px 0; font-size: 16px; }
+  .target a { display: inline-block; padding: 4px 10px; background: #0ea5e9; color: white;
+              border-radius: 4px; text-decoration: none; font-size: 13px; margin-right: 8px; }
+  .target a:hover { background: #0284c7; }
+  .target a.mobile { background: #16a34a; }
+  .expect { font-size: 13px; color: #475569; margin-top: 8px;
+            font-family: ui-monospace, SFMono-Regular, monospace; }
+</style>
+</head>
+<body>
+<h1>ADA Phase 4 verify — 2026-06-07 (dedicated card layout)</h1>
+<p>Open each beach. Three things to confirm:</p>
+<ol>
+  <li><b>Overview</b> — one-sentence accessibility line appears under the prose blurb (italic, slightly dimmed).</li>
+  <li><b>Accessibility card</b> — a dedicated card with the ♿ items, sitting just above the Pack List card.</li>
+  <li><b>Amenity tile</b> — ♿ Accessibility tile still appears in the left-rail amenities row,
+      but tooltip is now simple ("Accessibility — see Accessibility card below").</li>
+</ol>
+
+<div class="target">
+  <h3>Ten Mile Beach, CA (fid 6166)</h3>
+  <a href="../beach.html?fid=6166">Desktop</a>
+  <a class="mobile" href="../mobile-beach.html?fid=6166">Mobile</a>
+  <div class="expect">Overview line: "This beach has a wheelchair-accessible boardwalk to the sand."<br>
+    Card: ♿ boardwalk · 🦽 wheelchair rental — MacKerricher State Park · 👁️ accessible viewing<br>
+    Notes paragraph: "Boardwalk at Laguna Point and Haul Road. Beach wheelchair available by calling
+    (707) 937-5721 with 7 days advance notice…"</div>
+</div>
+
+<div class="target">
+  <h3>Refugio State Beach, CA (fid 5939)</h3>
+  <a href="../beach.html?fid=5939">Desktop</a>
+  <a class="mobile" href="../mobile-beach.html?fid=5939">Mobile</a>
+  <div class="expect">Overview line: "This beach has a beach wheelchair available for visitors."<br>
+    Card: 🦽 wheelchair rental — Refugio State Beach (ranger or lifeguard) · 🚻 accessible restrooms<br>
+    Notes paragraph: "Beach wheelchairs available at no cost at several beach access locations…"</div>
+</div>
+
+<div class="target">
+  <h3>Camel Rock Surf, CA (fid 3602)</h3>
+  <a href="../beach.html?fid=3602">Desktop</a>
+  <a class="mobile" href="../mobile-beach.html?fid=3602">Mobile</a>
+  <div class="expect">Overview line: "This beach has a beach wheelchair available for visitors."<br>
+    Card: 🦽 wheelchair rental — TCLT<br>
+    Notes paragraph: "Beach wheelchair program mentioned in Resources section…"</div>
+</div>
+
+<div class="target">
+  <h3>Control: beach without JSONB (fid 8270, Seal Beach CA — legacy boolean only)</h3>
+  <a href="../beach.html?fid=8270">Desktop</a>
+  <a class="mobile" href="../mobile-beach.html?fid=8270">Mobile</a>
+  <div class="expect">Expected: NO Accessibility card (no JSONB items). NO overview accessibility line.
+    Amenity tile shows ONLY if has_disabled_access=true (legacy boolean alone); tooltip is plain "Accessibility".</div>
+</div>
+
+<h2 style="margin-top: 32px; font-size: 14px;">If anything looks off</h2>
+<ul style="font-size: 13px;">
+  <li>Tile missing entirely → check browser console for JS errors</li>
+  <li>Tooltip blank → <code>accessibility_features</code> might not be in the response payload</li>
+  <li>Tooltip says "ADA access" (old label) → cached HTML, hard refresh (Ctrl+Shift+R)</li>
+</ul>
+</body>
+</html>

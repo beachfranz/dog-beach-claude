@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>2026-06-05 DP Verify Sweep — Dog Beach Scout</title>
+<style>
+  :root {
+    --bg: #f8fafc; --card: #fff; --text: #0f2742; --muted: #64748b;
+    --border: #e2e8f0; --link: #1d4ed8; --link-visited: #6366f1;
+    --green: #16a34a; --red: #dc2626; --amber: #f59e0b;
+  }
+  body { font-family: ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); max-width: 1100px; margin: 24px auto; padding: 0 16px; line-height: 1.5; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 28px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+  .lead { color: var(--muted); font-size: 14px; margin: 0 0 24px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--card); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  th, td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; font-size: 12px; }
+  tr:last-child td { border-bottom: none; }
+  a { color: var(--link); text-decoration: none; }
+  a:visited { color: var(--link-visited); }
+  a:hover { text-decoration: underline; }
+  .pill { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .pill-va { background: #fef3c7; color: #92400e; }
+  .pill-al { background: #fee2e2; color: #991b1b; }
+  .pill-oh { background: #d1fae5; color: #065f46; }
+  .pill-de { background: #dbeafe; color: #1e40af; }
+  .pill-ma { background: #fce7f3; color: #9d174d; }
+  .pill-v2 { background: #d1fae5; color: #064e3b; }
+  .pill-osm { background: #f1f5f9; color: #475569; }
+  .check { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; margin: 16px 0; }
+  code { font-family: ui-monospace, monospace; font-size: 12px; background: #f1f5f9; padding: 1px 4px; border-radius: 3px; }
+  .meta { font-size: 12px; color: var(--muted); margin: 4px 0 16px; }
+</style>
+</head>
+<body>
+
+<h1>2026-06-05 — Dog-Park Verify Sweep (5 new MVP+ states)</h1>
+<p class="lead">
+  Spot-check after running <code>dog-park-state-launch</code> across VA, AL, OH, DE, MA.
+  10 parks total: 2 per state (one <span class="pill pill-v2">v2</span> operator-posted, one <span class="pill pill-osm">osm</span> default).
+  Open each in a new tab. Scan for 500s, missing operator name, missing hours, blank Scout blurb, wrong policy.
+</p>
+
+<div class="check">
+  <strong>What to look for:</strong>
+  <ul style="margin: 6px 0 0; padding-left: 20px; font-size: 13px;">
+    <li><strong>500 / blank page</strong> — pipeline didn't propagate cleanly</li>
+    <li><strong>Missing operator name</strong> — line that should say "City of …" or agency name is empty</li>
+    <li><strong>Missing hours</strong> — open/close not shown (osm_default expected to show dawn-dusk)</li>
+    <li><strong>Wrong leash policy</strong> — disagrees with what you'd expect for that park</li>
+    <li><strong>No Scout blurb</strong> — narrative paragraph absent</li>
+  </ul>
+</div>
+
+<h2>Verify targets</h2>
+<table>
+  <thead>
+    <tr><th>State</th><th>Policy</th><th>Park</th><th>fid</th><th>Open</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><span class="pill pill-va">VA</span></td>
+      <td><span class="pill pill-v2">v2</span></td>
+      <td>Banneker Dog Park</td>
+      <td>1823</td>
+      <td><a href="../dog-park.html?fid=1823" target="_blank">dog-park.html?fid=1823</a></td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-va">VA</span></td>
+      <td><span class="pill pill-osm">osm</span></td>
+      <td>Bark Park</td>
+      <td>1997</td>
+      <td><a href="../dog-park.html?fid=1997" target="_blank">dog-park.html?fid=1997</a></td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-al">AL</span></td>
+      <td><span class="pill pill-v2">v2</span></td>
+      <td>Astro Dog Spot</td>
+      <td>1459</td>
+      <td><a href="../dog-park.html?fid=1459" target="_blank">dog-park.html?fid=1459</a></td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-al">AL</span></td>
+      <td><span class="pill pill-osm">osm</span></td>
+      <td>Avenues of Lakeshore Bark Park</td>
+      <td>1552</td>
+      <td><a href="../dog-park.html?fid=1552" target="_blank">dog-park.html?fid=1552</a></td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-oh">OH</span></td>
+      <td><span class="pill pill-v2">v2</span></td>
+      <td>BrewDog Dog Park</td>
+      <td>2025</td>
+      <td><a href="../dog-park.html?fid=2025" target="_blank">dog-park.html?fid=2025</a></td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-oh">OH</span></td>
+      <td><span class="pill pill-osm">osm</span></td>
+      <td>Bark Park</td>
+      <td>2021</td>
+      <td><a href="../dog-park.html?fid=2021" target="_blank">dog-park.html?fid=2021</a></td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-de">DE</span></td>
+      <td><span class="pill pill-v2">v2</span></td>
+      <td>Bark Park</td>
+      <td>1932</td>
+      <td><a href="../dog-park.html?fid=1932" target="_blank">dog-park.html?fid=1932</a></td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-de">DE</span></td>
+      <td><span class="pill pill-osm">osm</span></td>
+      <td>Arundel Dog Park</td>
+      <td>1923</td>
+      <td><a href="../dog-park.html?fid=1923" target="_blank">dog-park.html?fid=1923</a></td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-ma">MA</span></td>
+      <td><span class="pill pill-v2">v2</span></td>
+      <td>Agawam Dog Park</td>
+      <td>2338</td>
+      <td><a href="../dog-park.html?fid=2338" target="_blank">dog-park.html?fid=2338</a></td>
+    </tr>
+    <tr>
+      <td><span class="pill pill-ma">MA</span></td>
+      <td><span class="pill pill-osm">osm</span></td>
+      <td>Gardner Dog Park</td>
+      <td>2390</td>
+      <td><a href="../dog-park.html?fid=2390" target="_blank">dog-park.html?fid=2390</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<p class="meta">Run reference: <code>nohup ... for s in VA AL OH DE MA; do python -m scripts.dog_park_pipeline.run --state $s; done</code> (background, ~47min wall, +6 v2 promotions). Pipeline log: <code>tmp/dp_state_launch_2026-06-05.log</code>.</p>
+
+<h2>If you find something broken</h2>
+<div class="check">
+  <ol style="margin: 0 0 0 20px; font-size: 13px;">
+    <li>Open browser dev tools → Network tab → reload the broken page</li>
+    <li>Find the 4xx/5xx response (red row) or the empty response</li>
+    <li>Copy the error body (usually <code>{"error": "..."}</code>) — paste back to Claude</li>
+    <li>Most likely culprits: missing operator-id, broken PostgREST embed, edge fn stale deploy</li>
+  </ol>
+</div>
+
+</body>
+</html>

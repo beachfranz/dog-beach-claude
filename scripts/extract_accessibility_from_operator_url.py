@@ -206,6 +206,24 @@ def fire_resolver_promote_sweep() -> None:
 
 # ───────────────────────── Main ─────────────────────────
 
+def _state_is_fresh(state_code: str, days: int) -> bool:
+    """True if ANY BEP row with source='operator_url' for this state was
+    updated within N days. Used by --skip-if-fresh-within."""
+    with connect() as c, c.cursor() as cur:
+        cur.execute("""
+            SELECT EXISTS(
+              SELECT 1
+                FROM public.beach_enrichment_provenance bep
+                JOIN public.beaches_gold g ON g.fid = bep.gold_fid
+               WHERE bep.field_group = 'accessibility'
+                 AND bep.source = 'operator_url'
+                 AND g.state = %s
+                 AND bep.updated_at > now() - (%s || ' days')::interval
+            )
+        """, (state_code, days))
+        return bool(cur.fetchone()[0])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--state", help="single state code (e.g. DE)")
@@ -213,6 +231,10 @@ def main():
     ap.add_argument("--apply", action="store_true", help="write BEP rows")
     ap.add_argument("--dry-run", action="store_true", help="just print URL/fid map")
     ap.add_argument("--limit-urls", type=int, default=None, help="cap URLs processed")
+    ap.add_argument("--skip-if-fresh-within", type=int, default=0, metavar="DAYS",
+                    help="skip the entire state run if ANY BEP row with source='operator_url' "
+                         "for this state was updated within N days (default 0 = always run; "
+                         "pipeline passes 14)")
     args = ap.parse_args()
 
     if args.state and args.states:
@@ -220,6 +242,18 @@ def main():
     if not args.state and not args.states:
         sys.exit("must pass --state or --states")
     states = [args.state.upper()] if args.state else [s.strip().upper() for s in args.states.split(",")]
+
+    # State-level freshness: if all states are fresh, skip entirely. If
+    # any state is stale, run the whole batch (cheaper to over-fetch the
+    # picker once than to filter mid-run).
+    if args.skip_if_fresh_within > 0:
+        stale_states = [s for s in states if not _state_is_fresh(s, args.skip_if_fresh_within)]
+        if not stale_states:
+            print(f"  SKIP — all states {states} have operator_url BEP rows fresh within {args.skip_if_fresh_within}d")
+            return 0
+        if stale_states != states:
+            print(f"  freshness filter: running {stale_states} (others fresh)")
+            states = stale_states
 
     print(f"  picker scope: states={states}", flush=True)
     pairs = fetch_targets(states)

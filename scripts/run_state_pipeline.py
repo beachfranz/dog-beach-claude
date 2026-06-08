@@ -1211,6 +1211,59 @@ PHASES = [
             'leaf-page harvest opportunistic — runs OR/WA, no-ops elsewhere',
     },
     {
+        # 2026-06-08: ADA accessibility — read park_url_extractions raw_text
+        # for ADA-keyword pages, Haiku → BEP source='park_url'. Runs AFTER
+        # harvest_park_text so the cache is populated. Allowlist matches
+        # harvest_park_text. Informational (script self-no-ops; the criterion
+        # is permissive — different states have very different ADA densities).
+        'key': 'extract_accessibility_park_url',
+        'kind': 'python',
+        'action': 'extract_accessibility_park_url',
+        'criterion': "select true",
+        'criterion_text':
+            'ADA from park_url cache — opportunistic; no-ops if state has no harvester',
+    },
+    {
+        # 2026-06-08: ADA accessibility — extract from a per-state tourism /
+        # agency directory page (DIRECTORIES dict in the script). Each
+        # registered state gets one Haiku call against one URL; entries
+        # name-match to fids or fan out to address_city. Cloudflare-blocked
+        # hosts auto-route to Playwright per cloudflare-fallback skill.
+        # Independent of upstream phases beyond beaches_gold + address_city.
+        'key': 'extract_accessibility_state_directory',
+        'kind': 'python',
+        'action': 'extract_accessibility_state_directory',
+        'criterion': "select true",
+        'criterion_text':
+            'ADA from per-state directory page — opportunistic; '
+            'no-ops if no registered DIRECTORIES entry for state',
+    },
+    {
+        # 2026-06-08: ADA accessibility — CA-only one-shot from the CCC
+        # beach-wheelchair directory (coastal.ca.gov/access/beach-wheelchairs).
+        # Only fires when state='CA'; no-op for other states.
+        'key': 'extract_accessibility_ccc_directory',
+        'kind': 'python',
+        'action': 'extract_accessibility_ccc_directory',
+        'criterion': "select true",
+        'criterion_text':
+            'CCC beach-wheelchair directory — CA only, no-ops elsewhere',
+    },
+    {
+        # 2026-06-08: ADA accessibility — from operator_dogs_policy.source_url
+        # pages. Runs LATE (after codify + operator_attribution have populated
+        # the source_url column). Picker auto-skips states with no
+        # (fid, source_url) pairs; no state allowlist needed. Modest yield
+        # (operator URLs are dog-narrow) but cheap.
+        'key': 'extract_accessibility_operator_url',
+        'kind': 'python',
+        'action': 'extract_accessibility_operator_url',
+        'criterion': "select true",
+        'criterion_text':
+            'ADA from operator_dogs_policy URLs — opportunistic; '
+            'no-ops if state has no operator URLs',
+    },
+    {
         # 2026-05-21: descriptions moved AFTER photos_tag + photos_curate
         # so the generator can reference the tagged + curated gallery.
         'key': 'descriptions',
@@ -2698,6 +2751,97 @@ def action_harvest_park_text(state: str) -> int:
     return int(m.group(1)) if m else 1
 
 
+def action_extract_accessibility_park_url(state: str) -> int:
+    """Extract ADA accessibility signals from park_url_extractions raw_text.
+
+    Depends on: harvest_park_text (or older park_url_scrape_queue path
+    for CA) populating park_url_extractions first. Haiku pulls structured
+    accessibility shape into BEP rows with source='park_url'.
+
+    State allowlist matches harvest_park_text: skip silently for states
+    without a leaf-URL harvester. Each script's --skip-if-fresh-within 14
+    no-ops the state when prior BEP rows are fresh.
+    """
+    if state not in ('CA', 'OR', 'WA', 'MD', 'DE', 'NH'):
+        log(f'  [{state}] no leaf-URL park_url harvest — skip ADA park_url extraction')
+        return 0
+    cmd = [sys.executable, 'scripts/extract_accessibility_from_park_url.py',
+           '--state', state, '--skip-if-fresh-within', '14']
+    rc, out, err = _run_subprocess(cmd, timeout=900)
+    if rc != 0:
+        raise RuntimeError(f'extract_accessibility_from_park_url exit {rc}: {err[-500:]}')
+    m = re.search(r'emitted=(\d+)', out or '')
+    return int(m.group(1)) if m else 0
+
+
+def action_extract_accessibility_state_directory(state: str) -> int:
+    """Extract ADA from a per-state tourism/agency directory page.
+
+    Each registered state has one curated URL in the DIRECTORIES dict of
+    extract_accessibility_from_state_directory.py (currently OR / ME / HI
+    / MA / MI; more added in Phase C). Cloudflare-blocked hosts (mass.gov,
+    michigan.gov) auto-route to Playwright per cloudflare-fallback skill.
+    Site entries match by trigram; city entries fan out to all active
+    fids in that address_city.
+    """
+    # Read the script's DIRECTORIES key list dynamically to avoid drift
+    # from this allowlist. Cheap: opens the .py file and greps for keys.
+    try:
+        src = Path('scripts/extract_accessibility_from_state_directory.py').read_text()
+        registered = set(re.findall(r'^\s*"([A-Z]{2})":\s*\{', src, re.MULTILINE))
+    except Exception:
+        registered = set()
+    if state not in registered:
+        log(f'  [{state}] no state-directory URL registered — skip')
+        return 0
+    cmd = [sys.executable, 'scripts/extract_accessibility_from_state_directory.py',
+           '--state', state, '--llm-resolve', '--apply',
+           '--skip-if-fresh-within', '14']
+    rc, out, err = _run_subprocess(cmd, timeout=900)
+    if rc != 0:
+        raise RuntimeError(f'extract_accessibility_from_state_directory exit {rc}: {err[-500:]}')
+    m = re.search(r'inserted=(\d+)', out or '')
+    return int(m.group(1)) if m else 0
+
+
+def action_extract_accessibility_operator_url(state: str) -> int:
+    """Extract ADA from operator_dogs_policy.source_url pages.
+
+    Depends on: codify-state + operator_attribution populating
+    operator_dogs_policy. The picker auto-skips states with no
+    (fid, source_url) pairs, so no state allowlist is needed. Yield is
+    modest (operator URLs are dog-narrow), but cheap (~$0.01-0.03 per
+    state). Cloudflare-blocked hosts (amlegal, codepublishing) skip via
+    fetch-fail; not Playwright-wrapped here since per-host hit rate is low.
+    """
+    cmd = [sys.executable, 'scripts/extract_accessibility_from_operator_url.py',
+           '--state', state, '--apply', '--skip-if-fresh-within', '14']
+    rc, out, err = _run_subprocess(cmd, timeout=1800)
+    if rc != 0:
+        raise RuntimeError(f'extract_accessibility_from_operator_url exit {rc}: {err[-500:]}')
+    m = re.search(r'inserted=(\d+)', out or '')
+    return int(m.group(1)) if m else 0
+
+
+def action_extract_accessibility_ccc_directory(state: str) -> int:
+    """One-shot CCC beach-wheelchair directory extractor — CA only.
+
+    Fires only for state='CA'. The CCC page (coastal.ca.gov/access/
+    beach-wheelchairs.html) lists ~130 CA beaches; the script extracts +
+    name-matches them in one Haiku pass + LLM-resolve. Idempotent via
+    --skip-if-fresh-within and BEP upsert.
+    """
+    if state != 'CA':
+        return 0
+    cmd = [sys.executable, 'scripts/extract_accessibility_from_ccc_directory.py',
+           '--apply', '--skip-if-fresh-within', '14']
+    rc, out, err = _run_subprocess(cmd, timeout=600)
+    if rc != 0:
+        raise RuntimeError(f'extract_accessibility_from_ccc_directory exit {rc}: {err[-500:]}')
+    m = re.search(r'inserted=(\d+)', out or '')
+    return int(m.group(1)) if m else 0
+
+
 def action_descriptions(state: str) -> int:
     """Generate descriptions for state's tier-1+2 fids. Chunked into
     groups of 30 fids (~5min each).
@@ -3645,6 +3789,10 @@ PYTHON_ACTIONS = {
     # function retained for ad-hoc use but no phase references it.
     'photos_curate':           action_photos_curate,
     'harvest_park_text':       action_harvest_park_text,
+    'extract_accessibility_park_url':        action_extract_accessibility_park_url,
+    'extract_accessibility_state_directory': action_extract_accessibility_state_directory,
+    'extract_accessibility_operator_url':    action_extract_accessibility_operator_url,
+    'extract_accessibility_ccc_directory':   action_extract_accessibility_ccc_directory,
     'descriptions':            action_descriptions,
     'descriptions_audit':      action_descriptions_audit,
     'marine_grid_warm':        action_marine_grid_warm,

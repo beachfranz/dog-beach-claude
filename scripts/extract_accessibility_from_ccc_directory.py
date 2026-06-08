@@ -511,6 +511,21 @@ def run_apply(manifest_path: Path) -> int:
     return 0
 
 
+def _ccc_is_fresh(days: int) -> bool:
+    """True if ANY ccc_directory BEP row was updated within N days."""
+    with connect() as c, c.cursor() as cur:
+        cur.execute("""
+            SELECT EXISTS(
+              SELECT 1
+                FROM public.beach_enrichment_provenance
+               WHERE field_group = 'accessibility'
+                 AND source = 'ccc_directory'
+                 AND updated_at > now() - (%s || ' days')::interval
+            )
+        """, (days,))
+        return bool(cur.fetchone()[0])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true",
@@ -522,7 +537,14 @@ def main():
     ap.add_argument("--llm-resolve", action="store_true",
                     help="(preview only) after deterministic matching, send each unmatched "
                          "entry + top-3 candidates to Haiku for a same-beach? decision (~$0.05)")
+    ap.add_argument("--skip-if-fresh-within", type=int, default=0, metavar="DAYS",
+                    help="skip the run if ANY ccc_directory BEP row was updated within N days "
+                         "(default 0 = always run; pipeline passes 14)")
     args = ap.parse_args()
+
+    if args.skip_if_fresh_within > 0 and _ccc_is_fresh(args.skip_if_fresh_within):
+        print(f"  SKIP — ccc_directory BEP rows fresh within {args.skip_if_fresh_within}d")
+        return 0
 
     if args.apply:
         return run_apply(args.manifest)

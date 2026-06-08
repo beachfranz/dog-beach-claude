@@ -68,6 +68,9 @@ except Exception:
 PLAYWRIGHT_HOSTS = {
     "mass.gov", "www.mass.gov",
     "michigan.gov", "www.michigan.gov",
+    "oceancitymd.gov",
+    "visitmaine.com",  # 403s urllib but works via Playwright (confirmed 2026-06-08)
+    "gohawaii.com",    # same
 }
 
 AUTO_MATCH_MIN_SIM = 0.85
@@ -98,6 +101,26 @@ DIRECTORIES: dict[str, dict] = {
     "MI": {
         "url": "https://www.michigan.gov/dnr/about/accessibility/track-chairs",
         "notes": "Michigan DNR — official track-chair program (25+ state-park locations). Cloudflare-blocked → Playwright fallback.",
+    },
+    "NH": {
+        "url": "https://drcnh.org/ada/beach-and-lake-accessibility-for-all/",
+        "notes": "DRC NH — disability rights of NH. 6 sites (Hampton Beach + 5 state parks) with beach wheelchair / Mobi-Chair detail.",
+    },
+    "MD": {
+        "url": "https://oceancitymd.gov/oc/ada/",
+        "notes": "Ocean City MD — official ADA page. Beach mat streets + wheelchair pickup + accessible playgrounds. OC covers most of MD's coastal beach inventory. Cloudflare-blocked → Playwright fallback.",
+    },
+    "VA": {
+        "url": "https://www.visitvirginiabeach.com/trip-ideas/a-beach-for-every-body/",
+        "notes": "Visit Virginia Beach — 4 named beach areas (Oceanfront, Sandbridge, First Landing SP, Back Bay NWR) + Grommet Island accessible playground.",
+    },
+    "RI": {
+        "url": "https://access-ri.org/accessible-ri/wpbdp_category/beaches/",
+        "notes": "Access RI — disability advocacy directory. 10 named RI beaches with wheelchair / parking / restroom detail.",
+    },
+    "AL": {
+        "url": "https://www.gulfshores.com/blog/things-to-do/wheelchair-accessible-beaches-and-trails-in-gulf-shores-and-orange-beach/",
+        "notes": "Gulf Shores / Orange Beach tourism — 3 named AL beaches with ADA Mobi-Mats (Gulf Place, The Pavilion, Cotton Bayou).",
     },
 }
 
@@ -634,6 +657,25 @@ def run_apply(state: str, manifest_path: Path) -> int:
     return 0
 
 
+def _state_is_fresh(state_code: str, days: int) -> bool:
+    """True if ANY BEP row for this state's <state>_directory source was
+    updated within the last `days` days. Used by --skip-if-fresh-within."""
+    source = f"{state_code.lower()}_directory"
+    with connect() as c, c.cursor() as cur:
+        cur.execute("""
+            SELECT EXISTS(
+              SELECT 1
+                FROM public.beach_enrichment_provenance bep
+                JOIN public.beaches_gold g ON g.fid = bep.gold_fid
+               WHERE bep.field_group = 'accessibility'
+                 AND bep.source = %s
+                 AND g.state = %s
+                 AND bep.updated_at > now() - (%s || ' days')::interval
+            )
+        """, (source, state_code, days))
+        return bool(cur.fetchone()[0])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--state", required=True, help="2-letter state code; must be a key in DIRECTORIES")
@@ -642,10 +684,17 @@ def main():
                     help="(preview only) Haiku second-pass on unmatched site entries")
     ap.add_argument("--manifest", type=Path, default=None,
                     help="manifest override (default: tmp/<state>_directory_matches.json)")
+    ap.add_argument("--skip-if-fresh-within", type=int, default=0, metavar="DAYS",
+                    help="skip the entire state run if ANY BEP row for source='<state>_directory' "
+                         "was updated within N days (default 0 = always run; pipeline passes 14)")
     args = ap.parse_args()
 
     state = args.state.upper()
     manifest_path = args.manifest or (TMP_DIR / f"{state.lower()}_directory_matches.json")
+
+    if args.skip_if_fresh_within > 0 and _state_is_fresh(state, args.skip_if_fresh_within):
+        print(f"  [{state}] SKIP — state_directory BEP rows fresh within {args.skip_if_fresh_within}d")
+        return 0
 
     if args.apply:
         return run_apply(state, manifest_path)

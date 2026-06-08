@@ -157,14 +157,41 @@ def upsert_bep(fid: int, parsed: dict):
     return True
 
 
+def _state_is_fresh(state_code: str, days: int) -> bool:
+    """True if ANY BEP row with source='park_url' for this state was
+    updated within N days. Used by --skip-if-fresh-within."""
+    from scripts.common.db import connect
+    with connect() as c, c.cursor() as cur:
+        cur.execute("""
+            SELECT EXISTS(
+              SELECT 1
+                FROM public.beach_enrichment_provenance bep
+                JOIN public.beaches_gold g ON g.fid = bep.gold_fid
+               WHERE bep.field_group = 'accessibility'
+                 AND bep.source = 'park_url'
+                 AND g.state = %s
+                 AND bep.updated_at > now() - (%s || ' days')::interval
+            )
+        """, (state_code, days))
+        return bool(cur.fetchone()[0])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fids", help="comma-separated fid list")
     ap.add_argument("--state", help="restrict to state code")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--skip-if-fresh-within", type=int, default=0, metavar="DAYS",
+                    help="skip the state run if ANY park_url BEP row for this state was "
+                         "updated within N days (default 0 = always run; pipeline passes 14)")
     args = ap.parse_args()
     fids = [int(s) for s in args.fids.split(",")] if args.fids else None
     states = [args.state.upper()] if args.state else None
+
+    if args.skip_if_fresh_within > 0 and args.state and not args.fids:
+        if _state_is_fresh(args.state.upper(), args.skip_if_fresh_within):
+            print(f"  [{args.state.upper()}] SKIP — park_url BEP rows fresh within {args.skip_if_fresh_within}d")
+            return 0
 
     targets = fetch_targets(states, fids)
     print(f"targets: {len(targets)} fids with ADA-keyword in park_url text", flush=True)

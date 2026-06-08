@@ -2202,8 +2202,12 @@
       return `${i + 1}. ${c.name} (${score}, ${distStr})`;
     }).join('; ');
 
+    // Cache key includes selectedDay so flipping pills refreshes the
+    // blurb instead of replaying the previous day's text when the top
+    // beach happens to be the same.
     const cacheKey = JSON.stringify({
       first: first.id,
+      day:   selectedDay,
       wants: [...wants].sort(),
       amen: [...amenityFilters].sort(),
       dist: distanceFilterMi,
@@ -2221,14 +2225,32 @@
     _scoutAbortCtrl = new AbortController();
     const myCtrl = _scoutAbortCtrl;
 
-    const nowSummary = nowAtUser
+    // Day framing for the prompt — drives whether the blurb reads
+    // "right now" / "today" / "this Saturday." Only NOW carries the
+    // user-coord weather hint since that's all we fetch for non-NOW.
+    const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    let dayPhrase, framing;
+    if (selectedDay === 'now') {
+      dayPhrase = 'right now';
+      framing   = 'tell the owner what to expect there right now';
+    } else if (selectedDay === todayISO) {
+      dayPhrase = 'today';
+      framing   = "tell the owner what to expect at the best part of today's window";
+    } else {
+      const dt = new Date(selectedDay + 'T12:00:00');
+      const wk = dt.toLocaleDateString('en-US', { weekday: 'long' });
+      dayPhrase = `this ${wk}`;
+      framing   = `tell the owner what to plan for ${wk}'s best window`;
+    }
+
+    const nowSummary = (selectedDay === 'now' && nowAtUser)
       ? `It's ${Math.round(nowAtUser.tempF)}°F with ${WMO_LABELS[nowAtUser.wmoCode] || 'mixed sky'} where the user is.`
       : '';
     const amenitySummary = amenityFilters.size
       ? ` The user is filtering for ${[...amenityFilters].join(', ')}.`
       : '';
 
-    const question = `${nowSummary}${amenitySummary} Ranked options: ${contextLines}. In two sentences, recommend ${first.name} (or — if its conditions are weak — call out a better trade-off from this list) and tell the owner what to expect there right now.`;
+    const question = `${nowSummary}${amenitySummary} Ranked options for ${dayPhrase}: ${contextLines}. In two sentences, recommend ${first.name} (or — if its conditions are weak — call out a better trade-off from this list) and ${framing}.`;
 
     // For dog-park first picks, we don't have a location_id to anchor
     // beach-chat to; fall back to the highest-ranked beach if one exists.
@@ -2257,7 +2279,7 @@
       const text = data.answer || '';
       scoutCache[cacheKey] = text;
       el.classList.remove('loading');
-      el.textContent = text || `${first.name} is the standout right now.`;
+      el.textContent = text || `${first.name} is the standout ${dayPhrase}.`;
     } catch (e) {
       if (e.name === 'AbortError') return;
       el.classList.remove('loading');

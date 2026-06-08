@@ -53,6 +53,23 @@ USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 MAX_INPUT_CHARS = 40000
 
+# Playwright fallback for Cloudflare/403-blocked hosts (mass.gov, michigan.gov,
+# etc.). Pattern ported from scripts/extract_per_beach_offleash_v2.py:181.
+# Pin: [[403-means-playwright-skip-ua-tricks]].
+try:
+    from scripts.fetch.fetch_html import fetch as playwright_fetch  # type: ignore
+    PLAYWRIGHT_AVAILABLE = True
+except Exception:
+    playwright_fetch = None  # type: ignore
+    PLAYWRIGHT_AVAILABLE = False
+
+# Known Cloudflare/JS-blocker hosts — go straight to Playwright, skip the
+# urllib round-trip. Add new hosts as discovered.
+PLAYWRIGHT_HOSTS = {
+    "mass.gov", "www.mass.gov",
+    "michigan.gov", "www.michigan.gov",
+}
+
 AUTO_MATCH_MIN_SIM = 0.85
 AUTO_MATCH_MARGIN = 0.10
 CANDIDATE_MIN_SIM = 0.30
@@ -65,6 +82,22 @@ DIRECTORIES: dict[str, dict] = {
     "OR": {
         "url": "https://traveloregon.com/things-to-do/trip-ideas/accessible-and-inclusive-travel-on-the-oregon-coast/",
         "notes": "Travel Oregon — accessible & inclusive Oregon coast guide. ~25-30 sites N-to-S; David's Chair program covers multiple cities.",
+    },
+    "ME": {
+        "url": "https://visitmaine.com/articles/beach-accessibility/",
+        "notes": "Visit Maine — Maine BPL three-star-rated beaches. 7 named beaches with mobi-mat / beach wheelchair detail.",
+    },
+    "HI": {
+        "url": "https://www.gohawaii.com/trip-planning/accessibility",
+        "notes": "Go Hawaii — accessibility guide. 10 named beaches across Oahu + Kauai with all-terrain wheelchair availability.",
+    },
+    "MA": {
+        "url": "https://www.mass.gov/info-details/accessible-beaches",
+        "notes": "Mass.gov DCR — official MA accessible beaches. State parks (Nickerson, Scusset, South Cape, Horseneck) + Cape Cod's 15 town beaches. Cloudflare-blocked → Playwright fallback.",
+    },
+    "MI": {
+        "url": "https://www.michigan.gov/dnr/about/accessibility/track-chairs",
+        "notes": "Michigan DNR — official track-chair program (25+ state-park locations). Cloudflare-blocked → Playwright fallback.",
     },
 }
 
@@ -92,15 +125,38 @@ def normalize_name(n: str) -> str:
 # ───────────────────────── HTTP + LLM ─────────────────────────
 
 def fetch_html(url: str, timeout: int = 30) -> str:
-    req = urllib.request.Request(url, headers={
-        "User-Agent": USER_AGENT,
-        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-    })
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        raw = resp.read()
-        charset = resp.headers.get_content_charset() or "utf-8"
-        return raw.decode(charset, errors="replace")
+    """Fetch URL via urllib; auto-escalate to Playwright on 403/503 (Cloudflare).
+    Hosts in PLAYWRIGHT_HOSTS skip urllib and go straight to Playwright.
+    Pattern: scripts/extract_per_beach_offleash_v2.py:181.
+    """
+    host = (urllib.parse.urlparse(url).hostname or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    use_playwright = any(host.endswith(h.removeprefix("www.")) for h in PLAYWRIGHT_HOSTS)
+
+    if use_playwright and PLAYWRIGHT_AVAILABLE:
+        print(f"    using Playwright for known-blocked host {host!r}", flush=True)
+        text = playwright_fetch(url, selector=None, raw_html=True,
+                                wait_seconds=2.0, timeout_ms=45000)
+        return text or ""
+
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+            charset = resp.headers.get_content_charset() or "utf-8"
+            return raw.decode(charset, errors="replace")
+    except urllib.error.HTTPError as e:
+        if e.code in (403, 503) and PLAYWRIGHT_AVAILABLE:
+            print(f"    urllib {e.code} on {host!r}; escalating to Playwright", flush=True)
+            text = playwright_fetch(url, selector=None, raw_html=True,
+                                    wait_seconds=4.0, timeout_ms=45000)
+            return text or ""
+        raise
 
 
 def bs4_strip(html: str) -> str:

@@ -2075,9 +2075,14 @@
 
   function navUrl(c) {
     if (c.kind === 'dog_park') return `dog-park.html?fid=${c.fid}`;
+    // Carry the selected day forward when the user clicked a non-NOW
+    // pill. beach.html honors ?date= via get_beach_info(p_fid, p_date).
+    // NOW pill omits the param so beach.html uses its default
+    // (current_date) and renders the live-hour signal.
+    const dateQs = selectedDay && selectedDay !== 'now' ? `&date=${selectedDay}` : '';
     return c.fid
-      ? `beach.html?fid=${c.fid}`
-      : `beach.html?location_id=${c.location_id}`;
+      ? `beach.html?fid=${c.fid}${dateQs}`
+      : `beach.html?location_id=${c.location_id}${dateQs}`;
   }
 
   function navigateToCard(c) {

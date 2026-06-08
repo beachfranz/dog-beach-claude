@@ -758,6 +758,36 @@
     font-size: 14px; color: var(--text); line-height: 1.55;
     margin: 28px 16px 16px;
   }
+  /* One-sentence accessibility hint — same edge padding as overview,
+   * sits directly under the blurb. Italic to signal it's a tag, not
+   * marketing prose. Full detail is in the dedicated card below. */
+  .overview-accessibility {
+    font-size: 13px; color: var(--text); line-height: 1.5;
+    margin: -8px 16px 16px;
+    font-style: italic; opacity: 0.85;
+  }
+  /* Dedicated Accessibility card — sits just above Pack List. Each
+   * feature gets its own row with an icon and label. Notes / source
+   * appear at the bottom in quieter text. */
+  .accessibility-card h2 {
+    font-size: 16px; font-weight: 700; margin: 0 0 10px; color: var(--text);
+  }
+  .acc-rows { display: flex; flex-direction: column; gap: 8px; }
+  .acc-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    font-size: 14px; color: var(--text); line-height: 1.45;
+  }
+  .acc-icon { font-size: 18px; line-height: 1.2; flex: 0 0 auto; }
+  .acc-label { flex: 1 1 auto; }
+  .acc-label a { color: var(--text); text-decoration: underline; }
+  .acc-notes {
+    font-size: 13px; color: var(--text); line-height: 1.5;
+    margin: 12px 0 0; opacity: 0.85;
+  }
+  .acc-sources {
+    font-size: 11px; color: var(--text); opacity: 0.55;
+    margin: 8px 0 0;
+  }
   /* Scout blurb — uniform 14px / 1.55 line-height. */
   .scout-card #scout-blurb {
     font-size: 14px; line-height: 1.55;
@@ -1074,16 +1104,23 @@ function formatClosureLine(c) {
 
 function renderHourlyBarsV2(p, nowH) {
   const hours = p.hours || [];
-  // Mark the 🐶 on the REMAINING best window — same _bestWindowFromNowV2
-  // call the headline uses (line 1348). Previously read full-day
-  // p.best_window_v2_start/end from the payload, which marked the
-  // global-best block (often the morning window for HI/SD). Bars then
-  // contradicted the headline — chart said "morning was best" while the
-  // text said "5pm–10pm is your window." Per Franz 2026-06-07: the
-  // headline is correct; the chart was looking at the wrong window.
-  const remaining = _bestWindowFromNowV2(hours, nowH);
-  const bestStart = remaining?.startHour ?? null;
-  const bestEnd   = remaining?.endHour ?? null;
+  // 🐶 marker source depends on whether we're viewing today vs a
+  // future day pill:
+  //  TODAY → remaining-from-now (chart agrees with the headline,
+  //    which restricts to forward hours per Franz 2026-06-07).
+  //  FUTURE DAY → full-day window from the payload's
+  //    best_window_v2_start/end (the day's overall peak; remaining-
+  //    from-now doesn't apply when "now" isn't on this date).
+  const _isToday = window.__beachIsToday !== false;
+  let bestStart = null, bestEnd = null;
+  if (_isToday) {
+    const remaining = _bestWindowFromNowV2(hours, nowH);
+    bestStart = remaining?.startHour ?? null;
+    bestEnd   = remaining?.endHour ?? null;
+  } else if (p.best_window_v2_start != null && p.best_window_v2_end != null) {
+    bestStart = p.best_window_v2_start;
+    bestEnd   = p.best_window_v2_end;
+  }
   let maxPos = 0, maxNeg = 0;
   for (const h of hours) {
     const drivePos = Math.max(0, h.drive || 0);
@@ -1154,7 +1191,8 @@ function renderHourlyBarsV2(p, nowH) {
       .map(d => `<div class="hourbar-seg neg-rank-${d.rank}" style="height:${(d.val / NEG_MAX * 100).toFixed(1)}%"></div>`)
       .join('');
 
-    const isNow = h.local_hour === nowH;
+    // "Now" marker only meaningful for today's view; suppress on future days.
+    const isNow = _isToday && h.local_hour === nowH;
     const isInBest = bestStart != null && bestEnd != null
                   && h.local_hour >= bestStart && h.local_hour <= bestEnd;
     // Per-hour positive total drives the dog's float position (10px above
@@ -1346,18 +1384,18 @@ function applyBeachHourlyV2(payload, todayRec) {
         ? `${verbNow} — reopens ${reopenLabel}`
         : verbRest;
     } else if (todayRec?.best_window_label) {
-      // Today's stored best_window_label is full-day. Recompute from
-      // current hour forward so a 7am view of a "6am-9am" window
-      // shows "7am-9am", and a 10am view of a passed window shows
-      // "no good window remaining today" rather than a stale label.
-      // Per Franz 2026-05-30: "when looking at the current day, we
-      // look only at the current hour forward — true of all location
-      // types."
-      const remaining = _bestWindowFromNowV2(hours, nowH);
-      if (remaining?.label) {
-        headlineEl.textContent = remaining.label;
+      // Two modes:
+      //  TODAY → recompute remaining-from-now (so a 10am view of a
+      //    passed window correctly says "Today's window has passed",
+      //    not a stale label).
+      //  FUTURE DAY → use stored full-day best_window_label (passed in
+      //    via todayRec; the SQL fn already wrote the day's peak).
+      const isToday = window.__beachIsToday !== false;
+      if (isToday) {
+        const remaining = _bestWindowFromNowV2(hours, nowH);
+        headlineEl.textContent = remaining?.label || "Today's window has passed";
       } else {
-        headlineEl.textContent = "Today's window has passed";
+        headlineEl.textContent = todayRec.best_window_label;
       }
     } else {
       // No v2 window picked. Distinguish "closed all day" from "open but mediocre".
@@ -1568,17 +1606,33 @@ async function load() {
   }
 
   try {
+    // dateFromQs (set at line 975) is now honored — when find.html
+    // clicks through with ?date=YYYY-MM-DD from a non-NOW pill, render
+    // that day's data. Default (no param) uses RPC's current_date.
+    const rpcBody = { p_fid: parseInt(resolvedFid, 10) };
+    if (dateFromQs && /^\d{4}-\d{2}-\d{2}$/.test(dateFromQs)) {
+      rpcBody.p_date = dateFromQs;
+    }
     const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_beach_info`, {
       method: 'POST',
       headers: {
         apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ p_fid: parseInt(resolvedFid, 10) }),
+      body: JSON.stringify(rpcBody),
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     if (!data?.beach) return showError('Beach not found.');
+    // Surface "is this today?" as a window global so other render fns
+    // (renderHourlyBarsV2, applyBeachHourlyV2, _appealScores etc.)
+    // can branch without re-parsing the param.
+    const beachTzForToday = data.beach?.timezone || 'America/Los_Angeles';
+    const localToday = new Date().toLocaleDateString('en-CA',
+      { timeZone: beachTzForToday });
+    const requestedDate = data.requested_date || localToday;
+    window.__beachIsToday = (requestedDate === localToday);
+    window.__beachSelectedDate = requestedDate;
     // V2 → V1 alias so existing reads of h.hour_score / day.composite_score
     // transparently get v2 values when present. Mirrors detail.html:644.
     // Lets bulk SQL refresh (which writes v2-only) cut over without touching
@@ -1605,22 +1659,30 @@ function showError(msg) {
 function render(data, beachFid) {
   const { beach, dog_policy, amenities } = data;
   document.title = `${beach.display_name} — Dog Beach Scout`;
-  // Beach name + inline region (city · state) — same h1, lighter color.
-  // Score badge renders the CURRENT-HOUR hour_score_v2 (not today's
-  // composite_score_v2 peak). Per Franz 2026-06-07: composite_score_v2
-  // is the peak hour score within today's best window — it diverged
-  // from the chart's "Now" bar (current hour). Badge now tracks Now
-  // directly, so the number you see at the top of the page is the same
-  // number under the "Now" bar marker. find.html badge follows the
-  // same rule once find_beaches is extended to return current_hour_score.
-  // Null when current hour is closed / pre-dawn / post-sunset — show
-  // "—" with neutral tone rather than falling back to peak (that would
-  // re-introduce the inconsistency we just removed).
+  // Score badge:
+  //  TODAY view → current-hour hour_score_v2 (live signal, matches Now
+  //    bar on the chart). Falls back to "—" when closed/pre-dawn/etc.
+  //  FUTURE day view → composite_score_v2 (that day's peak). There's
+  //    no "current hour" for tomorrow, so the peak is the headline.
+  // Tone always colors when score available; only NOW-with-null shows
+  // grey-with-dash.
   const nameEl = document.getElementById('beach-name');
   nameEl.textContent = '';
-  const _nowH = _currentLocalHour(beach?.timezone);
-  const _nowRow = (data.hours_today || []).find(h => h.local_hour === _nowH);
-  const todayScore = _nowRow?.hour_score_v2 ?? _nowRow?.hour_score ?? null;
+  const _isToday = window.__beachIsToday !== false;
+  let todayScore, badgeTitle;
+  if (_isToday) {
+    const _nowH = _currentLocalHour(beach?.timezone);
+    const _nowRow = (data.hours_today || []).find(h => h.local_hour === _nowH);
+    todayScore = _nowRow?.hour_score_v2 ?? _nowRow?.hour_score ?? null;
+    badgeTitle = todayScore != null
+      ? `Score now · ${todayScore}/100`
+      : 'Closed or no score for this hour';
+  } else {
+    todayScore = data.today?.composite_score_v2 ?? null;
+    badgeTitle = todayScore != null
+      ? `Best this day · ${todayScore}/100`
+      : 'No score for this day';
+  }
   const badge = document.createElement('span');
   const tone = todayScore == null ? 'tone-unk'
              : todayScore >= 70   ? 'tone-go'
@@ -1628,9 +1690,7 @@ function render(data, beachFid) {
              :                       'tone-low';
   badge.className = `fit-badge ${tone}`;
   badge.textContent = todayScore != null ? todayScore : '—';
-  badge.title = todayScore != null
-    ? `Score now · ${todayScore}/100`
-    : 'Closed or no score for this hour';
+  badge.title = badgeTitle;
   nameEl.appendChild(badge);
   nameEl.appendChild(document.createTextNode(' ' + beach.display_name));
   const regionParts = [];
@@ -1670,7 +1730,7 @@ function render(data, beachFid) {
   //   Overview, Best Window, Location, Details, Links
   const hasPhotos = Array.isArray(data.photos) && data.photos.length > 0;
   const main = [];
-  main.push(buildOverviewCard(beach, data.description));
+  main.push(buildOverviewCard(beach, data.description, amenities));
   // Zone-rules card removed from main column per Franz 2026-05-21 —
   // section coloring + time pills live in the left-rail Amenities card.
   main.push(buildAlternativesSection(dog_policy, data.alternatives));
@@ -1692,6 +1752,7 @@ function render(data, beachFid) {
   // OR reframed ("better fit") depending on trigger. Sits next to Pack
   // List so the "what's next" prompts cluster together.
   main.push(`<section class="card dog-park-card-mount" id="dog-park-mount" style="display:none"></section>`);
+  main.push(buildAccessibilityCard(amenities));
   main.push(buildPackListCard(beach, dog_policy, amenities, data.hours_today));
   main.push(buildDetailsSection(dog_policy));
   main.push(buildLinksSection(beach, beachFid));
@@ -1960,10 +2021,11 @@ const AMENITY_DEFS = [
   { key: 'has_disabled_access', icon: '♿',  label: 'Accessibility' },
 ];
 
-// Phase 4 of [[dwell-ada-crowd-autocurate]]: when beach_amenities.accessibility_features
-// JSONB is present, the tile renders a multi-line tooltip listing the specific known
-// features (Q2(a) — single Accessibility badge + tooltip). Falls back to "ADA access"
-// generic when only the legacy boolean is set.
+// Phase 4 of [[dwell-ada-crowd-autocurate]] (revised 2026-06-07): the rich
+// accessibility detail lives in its own dedicated card (buildAccessibilityCard)
+// just above Pack List. The amenity tile in the left-rail stays simple; the
+// overview card carries a one-sentence summary. Helpers below feed all three
+// surfaces from the same beach_amenities.accessibility_features JSONB.
 const _PATH_TO_SAND_LABEL = {
   boardwalk:   'Wheelchair-accessible boardwalk to sand',
   ramp:        'Wheelchair-accessible ramp to sand',
@@ -1972,36 +2034,63 @@ const _PATH_TO_SAND_LABEL = {
   none:        'No accessible path to sand',
 };
 
-function _accessibilityFeatureSummary(features) {
-  if (!features || typeof features !== 'object') return null;
-  const lines = [];
+// Structured list of accessibility items for the dedicated card. Each item
+// has an icon + label; the card renders them as rows.
+function _accessibilityFeatureItems(features) {
+  if (!features || typeof features !== 'object') return [];
+  const items = [];
   if (features.path_to_sand && _PATH_TO_SAND_LABEL[features.path_to_sand]) {
-    lines.push(_PATH_TO_SAND_LABEL[features.path_to_sand]);
+    items.push({ icon: '♿', label: _PATH_TO_SAND_LABEL[features.path_to_sand] });
   }
   if (features.beach_mat === true && features.path_to_sand !== 'mat') {
-    lines.push('Beach mat available');
+    items.push({ icon: '♿', label: 'Beach mat available' });
   }
   if (features.boardwalk === true && features.path_to_sand !== 'boardwalk') {
-    lines.push('Boardwalk');
+    items.push({ icon: '🪵', label: 'Boardwalk' });
   }
   if (features.wheelchair_rental && features.wheelchair_rental.available === true) {
     const provider = features.wheelchair_rental.provider;
-    lines.push(provider ? `Beach wheelchair rental — ${provider}` : 'Beach wheelchair rental available');
+    items.push({ icon: '🦽',
+                 label: provider ? `Beach wheelchair rental — ${provider}` : 'Beach wheelchair rental available',
+                 url: features.wheelchair_rental.url || null });
   }
   if (features.beach_wheelchair_program && features.beach_wheelchair_program.available === true) {
     const provider = features.beach_wheelchair_program.provider;
-    lines.push(provider ? `Wheelchair program — ${provider}` : 'Wheelchair program available');
+    const phone    = features.beach_wheelchair_program.phone;
+    const resUrl   = features.beach_wheelchair_program.reservation_url;
+    let label = provider ? `Wheelchair program — ${provider}` : 'Wheelchair program available';
+    if (phone) label += ` · ${phone}`;
+    items.push({ icon: '🦽', label, url: resUrl });
   }
-  if (features.accessible_restrooms === true) lines.push('Accessible restrooms');
-  if (features.accessible_parking === true)   lines.push('Accessible parking');
-  if (features.accessible_viewing === true)   lines.push('Accessible viewing platform');
-  if (features.notes) lines.push(features.notes);
-  if (lines.length === 0) return null;
-  // Source attribution as a quiet final line if both sources contributed.
-  if (Array.isArray(features._sources) && features._sources.length > 1) {
-    lines.push(`(Source: ${features._sources.join(' + ')})`);
+  if (features.accessible_restrooms === true) items.push({ icon: '🚻', label: 'Accessible restrooms' });
+  if (features.accessible_parking   === true) items.push({ icon: '🅿️', label: 'Accessible parking' });
+  if (features.accessible_viewing   === true) items.push({ icon: '👁️', label: 'Accessible viewing platform' });
+  return items;
+}
+
+// One-sentence summary for the overview card. Picks the strongest known
+// feature and leads with it. Returns null when no actionable feature exists.
+function _accessibilityOverviewLine(features) {
+  if (!features || typeof features !== 'object') return null;
+  if (features.path_to_sand === 'boardwalk') return 'This beach has a wheelchair-accessible boardwalk to the sand.';
+  if (features.path_to_sand === 'ramp')      return 'This beach has a wheelchair-accessible ramp to the sand.';
+  if (features.path_to_sand === 'mat')       return 'This beach has a beach mat for wheelchair access to the sand.';
+  if ((features.wheelchair_rental && features.wheelchair_rental.available === true) ||
+      (features.beach_wheelchair_program && features.beach_wheelchair_program.available === true)) {
+    return 'This beach has a beach wheelchair available for visitors.';
   }
-  return lines.join(' · ');
+  if (features.accessible_restrooms === true || features.accessible_parking === true ||
+      features.accessible_viewing === true || features.boardwalk === true) {
+    return 'This beach has accessibility features — see the Accessibility card for details.';
+  }
+  if (features.path_to_sand === 'stairs_only') return 'Beach access is stairs-only; no wheelchair path to the sand.';
+  return null;
+}
+
+// Back-compat alias kept for the surfacing check in _visibleAmenityTiles
+// (any item present ⇒ tile renders).
+function _accessibilityHasContent(features) {
+  return _accessibilityFeatureItems(features).length > 0;
 }
 
 const PARKING_TYPE_LABEL = {
@@ -2091,12 +2180,11 @@ function _renderAmenityTileWithRule(def, amenities, rule) {
         : _parkingCostLabel(amenities) === 'Free' ? false : null,
       ruleClass, rule);
   }
-  // Accessibility tile: rich tooltip from accessibility_features JSONB when
-  // present (Phase 4 of [[dwell-ada-crowd-autocurate]]). Falls back to the
-  // generic _amenityTooltip when only the legacy boolean is set.
+  // Accessibility tile: simple tooltip. Rich detail lives in the dedicated
+  // Accessibility card above Pack List (Franz 2026-06-07 revision).
   if (def.key === 'has_disabled_access') {
-    const richTip = _accessibilityFeatureSummary(amenities?.accessibility_features);
-    const finalTip = richTip ? `${def.label} · ${richTip}` : tip;
+    const hasJsonb = _accessibilityHasContent(amenities?.accessibility_features);
+    const finalTip = hasJsonb ? `${def.label} — see Accessibility card below` : tip;
     return `<div class="amenity${ruleClass}" data-tip="${escHtml(finalTip)}">
       <span class="amenity-icon">${def.icon}</span>
       <span class="amenity-label">${def.label}</span>
@@ -2206,7 +2294,7 @@ function _visibleAmenityTiles(amenities) {
     // tile when JSONB has any known feature, even if the legacy boolean is
     // null/false. Lets new evidence (LLM-extracted, CCC-derived) reach the
     // consumer surface without requiring the cascade to also set the boolean.
-    if (d.key === 'has_disabled_access' && _accessibilityFeatureSummary(amenities.accessibility_features)) {
+    if (d.key === 'has_disabled_access' && _accessibilityHasContent(amenities.accessibility_features)) {
       return true;
     }
     return false;
@@ -3067,12 +3155,17 @@ function _deriveTideCurveFromHours(hoursToday) {
 // Beach overview card. Title = beach display name. Carries the
 // LLM static description + async Scout narrative. The best-window
 // info lives in its own card (buildBestTimeCard).
-function buildOverviewCard(beach, description) {
+function buildOverviewCard(beach, description, amenities) {
   const blurb = description?.text;
-  if (!blurb) return '';
+  const accLine = _accessibilityOverviewLine(amenities?.accessibility_features);
+  if (!blurb && !accLine) return '';
   // Beach text — bare prose, no card chrome, no title. Beach name
   // already appears in the page header next to the Your-Fit badge.
-  return `<p class="overview-blurb">${escHtml(blurb)}</p>`;
+  // Accessibility one-liner appended when JSONB present; full detail
+  // lives in the dedicated Accessibility card above Pack List.
+  const blurbHtml = blurb ? `<p class="overview-blurb">${escHtml(blurb)}</p>` : '';
+  const accHtml = accLine ? `<p class="overview-accessibility">${escHtml(accLine)}</p>` : '';
+  return blurbHtml + accHtml;
 }
 
 // Best-window card — standalone, all black text. Status pill keeps
@@ -3359,18 +3452,20 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
     return;
   }
 
-  // Best window for the day. Stored today.best_window_label is the
-  // full-day v2 pick — we want the CURRENT-HOUR-FORWARD slice so the
-  // LLM doesn't see a window whose START is already in the past and
-  // mistakenly suggest tomorrow morning. Per Franz 2026-05-30: "we
-  // shouldn't needlessly deprive users of a great experience today".
-  // Falls back to the stored label when no hours_today data is
-  // available (rare; the recs cron lags occasionally).
+  // Window framing branches on today-vs-future-day:
+  //  TODAY → remaining-from-now slice (so LLM doesn't suggest a window
+  //    whose start has already passed). Per Franz 2026-05-30.
+  //  FUTURE DAY → stored full-day best_window_label (no "remaining"
+  //    semantics when the date isn't today).
+  const _isTodayScout = window.__beachIsToday !== false;
   const nowH_scout = _currentLocalHour(beach?.timezone) ?? new Date().getHours();
-  const remainingScout = _bestWindowFromNowV2Hours(hoursToday || [], nowH_scout);
-  const windowLabel = remainingScout?.label
-                    || today.best_window_label
-                    || 'today';
+  let windowLabel;
+  if (_isTodayScout) {
+    const remainingScout = _bestWindowFromNowV2Hours(hoursToday || [], nowH_scout);
+    windowLabel = remainingScout?.label || today.best_window_label || 'today';
+  } else {
+    windowLabel = today.best_window_label || 'this day';
+  }
   const windowStatus = today.best_window_status ?? 'go';
   const signals = [
     today.lowest_tide_height != null ? `tide ${parseFloat(today.lowest_tide_height).toFixed(1)}ft` : null,
@@ -3395,9 +3490,26 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
   const lengthDirective = isCompact
     ? `Write ONE compact paragraph — 2 SHORT sentences max (mobile screen, brevity matters). LEAD WITH THE FUN — stoke moment, not a forecast. `
     : `Write ONE flowing conversational paragraph (3-4 sentences). LEAD WITH THE FUN — frame the window as a stoke moment, not a forecast. `;
+  // Day framing — drives whether the prompt says "right now / remaining"
+  // or "this Saturday / forward-looking forecast."
+  const _selectedDate = window.__beachSelectedDate;
+  let dayContext, windowFraming, timeRule;
+  if (_isTodayScout) {
+    dayContext = `Current local time: ${nowLabel || 'now'}.`;
+    windowFraming = `Best window remaining: ${windowLabel} (${windowStatus})`;
+    timeRule = 'Never reference times before the current local time.';
+  } else {
+    const _dt = new Date((_selectedDate || '') + 'T12:00:00');
+    const _wk = isNaN(_dt) ? 'that day'
+      : _dt.toLocaleDateString('en-US', { weekday: 'long' });
+    dayContext = `Forecasting for ${_wk} (not today).`;
+    windowFraming = `Best window for ${_wk}: ${windowLabel} (${windowStatus})`;
+    timeRule = `Frame as a forward-looking plan for ${_wk}, not "right now." Don't say "now" or reference the current hour.`;
+  }
+
   const question =
-    `Current local time: ${nowLabel || 'now'}. Best window remaining: ${windowLabel} (${windowStatus}). Conditions: ${signals}. ` +
-    `Activities the zone rules ALLOW today (weave 2-3 of these naturally — DON'T invent, DON'T list all): ${actPhrases.join(' · ')}. ` +
+    `${dayContext} ${windowFraming}. Conditions: ${signals}. ` +
+    `Activities the zone rules ALLOW (weave 2-3 of these naturally — DON'T invent, DON'T list all): ${actPhrases.join(' · ')}. ` +
     `Pack items to mention concretely (weave ${isCompact ? '1-2' : '2-3'} of these into the prose — DON'T invent gear): ${packPhrases.join(' · ')}. ` +
     lengthDirective +
     `ALWAYS include the best time window '${windowLabel}' as plain text somewhere in the paragraph (no need to bold it — the headline above already styles it). Weave it in naturally — e.g. "${windowLabel} is your window", "hit it ${windowLabel}", "${windowLabel} is firing" — not as a forecast restatement. ` +
@@ -3406,7 +3518,7 @@ async function loadScoutBlurb(beach, today, dogPolicy, hoursToday, amenities) {
     `high UV (≥8) → "sun's punching hard — sunscreen for you and a shade break, pup's coat is its sunscreen"; ` +
     `high wind (≥15mph) → "wind's blowing through, secure hats and treats, your pup will want shelter"; ` +
     `bacteria → "water quality's iffy — keep your dog out of the surf and don't let them drink seawater". ` +
-    `STRICT: respect the DOG POLICY ZONE RULES in the system prompt. Never describe activities in sections marked not_allowed. Never reference times before the current local time. Use only the activities + pack items provided above — don't invent gear or activities.`;
+    `STRICT: respect the DOG POLICY ZONE RULES in the system prompt. Never describe activities in sections marked not_allowed. ${timeRule} Use only the activities + pack items provided above — don't invent gear or activities.`;
 
   try {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/beach-chat`, {
@@ -3813,6 +3925,37 @@ function _packListItems(beach, dogPolicy, amenities, hoursToday) {
   }
 
   return items;
+}
+
+// Dedicated Accessibility card (Franz 2026-06-07): full detail from
+// beach_amenities.accessibility_features JSONB, rendered just above
+// Pack List. Returns '' when no actionable items exist — the legacy
+// has_disabled_access boolean ALONE doesn't trigger this card; we need
+// structured items in the JSONB. Source attribution lives in the card
+// footer when both an LLM + CCC source contributed.
+function buildAccessibilityCard(amenities) {
+  const features = amenities?.accessibility_features;
+  const items = _accessibilityFeatureItems(features);
+  if (!items.length) return '';
+  const rows = items.map(it => {
+    const labelHtml = it.url
+      ? `<a href="${escHtml(it.url)}" target="_blank" rel="noopener">${escHtml(it.label)}</a>`
+      : escHtml(it.label);
+    return `<div class="acc-row">
+      <span class="acc-icon">${it.icon}</span>
+      <span class="acc-label">${labelHtml}</span>
+    </div>`;
+  }).join('');
+  const notesHtml = features.notes
+    ? `<p class="acc-notes">${escHtml(features.notes)}</p>` : '';
+  const sourcesHtml = Array.isArray(features._sources) && features._sources.length > 1
+    ? `<p class="acc-sources">Source: ${escHtml(features._sources.join(' + '))}</p>` : '';
+  return `<section class="card accessibility-card">
+    <h2>Accessibility</h2>
+    <div class="acc-rows">${rows}</div>
+    ${notesHtml}
+    ${sourcesHtml}
+  </section>`;
 }
 
 function buildPackListCard(beach, dogPolicy, amenities, hoursToday) {

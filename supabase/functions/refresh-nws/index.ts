@@ -1,15 +1,23 @@
-// refresh-nws-srf/index.ts
+// refresh-nws/index.ts
 //
-// NWS Surf Zone Forecast (SRF) loader — fetches the daily text product for
-// ~30 coastal Weather Forecast Offices, parses per-zone Rip Current Risk
-// (Low / Moderate / High), UPSERTs into public.wfo_srf_forecast.
+// Unified NWS fetcher (renamed from refresh-nws-srf 2026-06-10). Runs hourly.
+// Two phases, both writing to public.beach_advisory (different `source`):
 //
-// On first run (or whenever a previously-unseen zone appears in the SRF),
-// the function lazily warms public.nws_zones with that zone's GeoJSON
-// polygon via api.weather.gov/zones/forecast/<ZONE_ID>. After UPSERT, the
-// function fires a no-op UPDATE on beaches_gold for affected states to
-// re-fire the tg_compute_coastal_zone trigger — this populates the cached
-// coastal_zone_id column for newly-warmed zones.
+//   Phase 1 (SRF):  per-WFO Surf Zone Forecast text products → wfo_srf_forecast.
+//                   Downstream refresh_rip_current_advisories() emits the
+//                   beach_advisory source='rip_current' rows.
+//
+//   Phase 2 (alerts): per-state api.weather.gov/alerts/active fetch, PIP
+//                     against beach polygons via nws_zones, UPSERT
+//                     beach_advisory source='nws' rows.
+//
+//   Phase 3 (sweep):  DELETE source='nws' rows whose fetched_at < this
+//                     run's started_at. Watermark-style cleanup so stale
+//                     alerts (zone risk dropped, expiration passed) fall
+//                     out of the consumer surface.
+//
+// On first encounter with a zone (SRF or alert), the function lazily warms
+// public.nws_zones with the zone's GeoJSON polygon via the NWS API.
 //
 // Source URL pattern:
 //   https://forecast.weather.gov/product.php?site=NWS&issuedby=<WFO>&product=SRF&format=txt
@@ -46,7 +54,7 @@ const SUPABASE_URL         = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ADMIN_SECRET         = Deno.env.get("ADMIN_SECRET") ?? "";
 
-const USER_AGENT = "DogBeachScout/1.0 (https://dogbeachscout.com; franz@franzfunk.com) srf-loader";
+const USER_AGENT = "DogBeachScout/1.0 (https://dogbeachscout.com; franz@franzfunk.com) nws-fetcher";
 
 // Coastal WFOs. Stable list; SRFs only issue from coastal WFOs so this is
 // our universe. Inland WFOs return 404 on the SRF URL.
@@ -62,11 +70,32 @@ const COASTAL_WFOS = [
   "HFO", "AJK", "AFC", "AFG",
 ];
 
+// Phase-2 alert scope. Mirror of scripts/load_nws_coastal_zones.py's
+// COASTAL_STATES — coastal + Great Lakes (Great Lakes states have inland
+// beaches that need AQ / heat alerts even if no rip risk).
+const ALERT_STATES = [
+  "CA","OR","WA","HI","AK",
+  "MA","RI","CT","NY","NJ","DE","MD","VA","NC","SC",
+  "GA","FL","AL","MS","LA","TX","ME","NH",
+  "MI","WI","MN","IL","IN","OH","PA",
+];
+
 const SRF_URL = (wfo: string) =>
   `https://forecast.weather.gov/product.php?site=NWS&issuedby=${wfo}&product=SRF&format=txt`;
 
 const ZONE_GEOJSON_URL = (zone: string) =>
   `https://api.weather.gov/zones/forecast/${zone}`;
+
+const ALERTS_URL = (state: string) =>
+  `https://api.weather.gov/alerts/active?area=${state}`;
+
+// Parse zone_id + type from a zones URL like
+// https://api.weather.gov/zones/forecast/PZZ565 → ('PZZ565','forecast').
+function zoneIdAndTypeFromUrl(zoneUrl: string): [string | null, string | null] {
+  const m = zoneUrl.match(/\/zones\/([a-z]+)\/([A-Z0-9_]+)(?:\?|$|\/)/);
+  if (!m) return [null, null];
+  return [m[2], m[1]];
+}
 
 const FETCH_TIMEOUT_MS = 20_000;
 const CONCURRENT_FETCHES = 6;
@@ -257,6 +286,105 @@ async function ensureZoneCached(
   }
 }
 
+// ── Phase 2 alert helpers ───────────────────────────────────────────────
+
+interface AlertFeature {
+  id?: string;
+  geometry?: any;
+  properties?: any;
+}
+
+async function fetchActiveAlerts(state: string): Promise<AlertFeature[]> {
+  try {
+    const resp = await fetch(ALERTS_URL(state), {
+      headers: { "User-Agent": USER_AGENT, "Accept": "application/geo+json" },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!resp.ok) return [];
+    const j = await resp.json();
+    return Array.isArray(j?.features) ? j.features : [];
+  } catch (_e) {
+    return [];
+  }
+}
+
+// PIP an alert's inline geometry against scoreable beaches in a state.
+// Helper RPC handles the ST_Intersects + state filter server-side.
+async function pipAlertInline(
+  supabase: SupabaseClient, geom: any, state: string,
+): Promise<number[]> {
+  try {
+    const { data } = await supabase.rpc("_nws_alert_pip_beaches", {
+      p_geom_geojson: JSON.stringify(geom),
+      p_state: state,
+    });
+    if (!Array.isArray(data)) return [];
+    return data.map((n: any) => Number(n)).filter((n) => Number.isFinite(n));
+  } catch (_e) {
+    return [];
+  }
+}
+
+// PIP an alert against scoreable beaches via a cached zone polygon.
+// Does NOT lazy-warm zones — that's the daily bulk-load's job
+// (scripts/load_nws_coastal_zones.py). Missing zone → return []; on the
+// next bulk-load run the zone is cached and subsequent ticks match.
+async function pipAlertViaZone(
+  supabase: SupabaseClient, zoneUrl: string, state: string,
+): Promise<number[]> {
+  const [zone_id] = zoneIdAndTypeFromUrl(zoneUrl);
+  if (!zone_id) return [];
+  try {
+    const { data } = await supabase.rpc("_nws_alert_pip_via_zone", {
+      p_zone_id: zone_id,
+      p_state: state,
+    });
+    if (!Array.isArray(data)) return [];
+    return data.map((n: any) => Number(n)).filter((n) => Number.isFinite(n));
+  } catch (_e) {
+    return [];
+  }
+}
+
+// Build a beach_advisory row from an NWS alert + matched beach_fid.
+// Mirrors scripts/poll_nws_alerts.py:upsert_alert (lines 177-220).
+function buildAlertRow(
+  beach_fid: number, alert: AlertFeature, fetchedAtIso: string,
+): Record<string, any> | null {
+  const p = alert.properties ?? {};
+  const alert_id: string = alert.id ?? p.id ?? "";
+  const valid_from: string | null = p.effective ?? p.onset ?? p.sent ?? null;
+  const valid_to: string | null = p.ends ?? p.expires ?? null;
+  const event_type: string | null = p.event ?? null;
+  if (!alert_id || !valid_from || !valid_to || !event_type) return null;
+
+  const nwsSev = String(p.severity ?? "").toLowerCase();
+  const severity = ["minor", "moderate", "severe", "extreme"].includes(nwsSev)
+    ? nwsSev : "moderate";
+
+  return {
+    beach_fid,
+    advisory_key: `nws:${alert_id}`,
+    source: "nws",
+    event_type,
+    severity,
+    valid_from,
+    valid_to,
+    label: event_type,
+    icon: "⚠️",
+    raw_data: {
+      certainty:   p.certainty,
+      urgency:     p.urgency,
+      headline:    p.headline,
+      description: p.description,
+      instruction: p.instruction,
+      sender:      p.sender,
+      areaDesc:    p.areaDesc,
+    },
+    fetched_at: fetchedAtIso,
+  };
+}
+
 // ── Main ────────────────────────────────────────────────────────────────
 Deno.serve(async (req: Request): Promise<Response> => {
   const headers = corsHeaders(req, "POST, OPTIONS");
@@ -290,7 +418,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   });
 
   const t0 = Date.now();
+  const startedAtIso = new Date().toISOString();   // watermark anchor for phase 3
   const today = todayLocalDateInPacific();   // SRFs publish in WFO local tz; we anchor on Pacific noon-ish heuristic
+  const skipAlerts: boolean = body.skip_alerts === true;
   const stats = {
     wfos_attempted: 0,
     wfos_ok: 0,
@@ -298,6 +428,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     wfos_failed: 0,
     zone_rows_upserted: 0,
     zones_warmed: 0,
+    alerts_fetched: 0,
+    alerts_matched: 0,
+    alert_rows_upserted: 0,
+    alerts_swept: 0,
     affected_states: new Set<string>(),
     errors: [] as string[],
   };
@@ -420,15 +554,99 @@ Deno.serve(async (req: Request): Promise<Response> => {
   //    rebind runs as a separate daily orch_job depending on this
   //    refresh; see 20260610h_rebind_orch_job.sql.
 
+  // ── Phase 2: NWS active alerts → beach_advisory source='nws' ──────────
+  // Per-state fetch from api.weather.gov/alerts/active. For each feature,
+  // resolve affected beach fids via inline geometry OR per-affected-zone
+  // PIP, then UPSERT one row per (beach_fid, alert_id) tuple.
+  const alertRowBuffer: Record<string, any>[] = [];
+
+  if (!skipAlerts) {
+    for (let i = 0; i < ALERT_STATES.length; i += CONCURRENT_FETCHES) {
+      const batch = ALERT_STATES.slice(i, i + CONCURRENT_FETCHES);
+      const fetched = await Promise.all(
+        batch.map(async (state) => ({ state, alerts: await fetchActiveAlerts(state) })),
+      );
+      for (const { state, alerts } of fetched) {
+        stats.alerts_fetched += alerts.length;
+        for (const alert of alerts) {
+          // Two disjoint paths: alerts come either with inline geometry
+          // (e.g., County-Warning-Area-bounded products) OR zone-coded
+          // (NWS zone-public products). Try whichever shape the alert
+          // ships in; never run both — empty result from Path 1 means the
+          // alert geometry simply didn't intersect any in-scope beach.
+          let matched: number[] = [];
+          if (alert.geometry) {
+            matched = await pipAlertInline(supabase, alert.geometry, state);
+          } else {
+            const zoneUrls: string[] = Array.isArray(alert.properties?.affectedZones)
+              ? alert.properties.affectedZones : [];
+            const perZoneMatches = await Promise.all(
+              zoneUrls.map((zurl) => pipAlertViaZone(supabase, zurl, state)),
+            );
+            const merged = new Set<number>();
+            for (const arr of perZoneMatches) for (const fid of arr) merged.add(fid);
+            matched = [...merged];
+          }
+          if (matched.length === 0) continue;
+          stats.alerts_matched++;
+          for (const beach_fid of matched) {
+            const row = buildAlertRow(beach_fid, alert, startedAtIso);
+            if (row) alertRowBuffer.push(row);
+          }
+        }
+      }
+    }
+
+    if (alertRowBuffer.length > 0) {
+      const CHUNK = 500;
+      for (let i = 0; i < alertRowBuffer.length; i += CHUNK) {
+        const chunk = alertRowBuffer.slice(i, i + CHUNK);
+        const { error: upErr } = await supabase
+          .from("beach_advisory")
+          .upsert(chunk, { onConflict: "beach_fid,advisory_key" });
+        if (upErr) {
+          stats.errors.push(`alert upsert chunk ${i}: ${upErr.message.slice(0, 200)}`);
+        } else {
+          stats.alert_rows_upserted += chunk.length;
+        }
+      }
+    }
+
+    // ── Phase 3: watermark sweep ────────────────────────────────────────
+    // Drop any source='nws' rows whose fetched_at predates this run.
+    // Together with the upsert above this gives "set replacement" semantics:
+    // after this function returns, beach_advisory source='nws' reflects
+    // exactly the active NWS alert set as of startedAtIso.
+    const { count: sweepCount, error: sweepErr } = await supabase
+      .from("beach_advisory")
+      .delete({ count: "exact" })
+      .eq("source", "nws")
+      .lt("fetched_at", startedAtIso);
+    if (sweepErr) {
+      stats.errors.push(`watermark sweep: ${sweepErr.message.slice(0, 200)}`);
+    } else {
+      stats.alerts_swept = sweepCount ?? 0;
+    }
+  }
+
   return new Response(JSON.stringify({
     ok: true,
     today,
+    started_at: startedAtIso,
+    // Phase 1: SRF
     wfos_attempted: stats.wfos_attempted,
     wfos_ok: stats.wfos_ok,
     wfos_404: stats.wfos_404,
     wfos_failed: stats.wfos_failed,
     zones_warmed: stats.zones_warmed,
     zone_rows_upserted: stats.zone_rows_upserted,
+    // Phase 2: alerts
+    alerts_fetched: stats.alerts_fetched,
+    alerts_matched: stats.alerts_matched,
+    alert_rows_upserted: stats.alert_rows_upserted,
+    // Phase 3: sweep
+    alerts_swept: stats.alerts_swept,
+    skip_alerts: skipAlerts,
     elapsed_ms: Date.now() - t0,
     errors_sample: stats.errors.slice(0, 10),
   }), { status: 200, headers: { ...headers, "Content-Type": "application/json" } });

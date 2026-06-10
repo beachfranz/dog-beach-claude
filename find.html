@@ -411,133 +411,65 @@
   }
 
   /* ── "Now at you" weather strip ─────────────────────────────────── */
+  /* ── Walk-from-here band — own band above the result list, but
+   *    visually a result-card so the user recognizes it instantly.
+   *    Subtle accent-tinted background distinguishes it as a hero
+   *    "you are here" card vs the destination cards below. */
   .now-strip {
     margin: 14px 14px 4px;
     padding: 14px 16px;
     border-radius: var(--radius);
-    background: linear-gradient(135deg, rgba(3,105,161,0.06) 0%, rgba(29,78,216,0.05) 100%);
-    border: 1px solid rgba(3,105,161,0.18);
-    box-shadow: var(--shadow-sm);
-    display: flex; flex-direction: column; gap: 10px;
-  }
-  .now-strip.now-loading {
-    opacity: 0.6;
-  }
-  .now-head {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 10px;
-  }
-  .now-eyebrow {
-    font-family: 'DM Mono', monospace;
-    font-size: 10.5px; font-weight: 500;
-    letter-spacing: 0.18em; text-transform: uppercase;
-    color: var(--advisory);
-  }
-  .now-time {
-    font-family: 'DM Mono', monospace;
-    font-size: 11px; color: var(--text-muted);
-    font-variant-numeric: tabular-nums;
-  }
-  .now-body {
+    background: linear-gradient(135deg, rgba(3,105,161,0.06) 0%, rgba(3,105,161,0.03) 100%);
+    border: 1px solid rgba(3,105,161,0.22);
     display: grid;
-    grid-template-columns: auto 1fr;
+    grid-template-columns: auto auto 1fr auto;
     gap: 14px;
     align-items: center;
+    text-decoration: none; color: inherit;
+    transition: background 0.15s, border-color 0.15s;
+    position: relative;
+    overflow: hidden;
   }
-  /* Walkability score disc inside the now-strip — kept as a filled disc
-   * because it's the page's primary live signal. Self-contained styles
-   * (result-card scores are inline mono per 2026-06-10 redesign). */
-  #now-score-disc {
-    width: 48px; height: 48px;
-    border-radius: 50%;
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    font-family: 'DM Mono', monospace;
-    font-variant-numeric: tabular-nums;
-    color: white;
-    box-shadow: 0 2px 6px rgba(15,39,66,0.15);
+  .now-strip.now-loading { opacity: 0.6; }
+  .now-strip:hover {
+    background: linear-gradient(135deg, rgba(3,105,161,0.10) 0%, rgba(3,105,161,0.05) 100%);
+    border-color: rgba(3,105,161,0.32);
+  }
+
+  /* Mini-map thumb — locked Leaflet container at the user's lat/lng.
+   * Same dimensions as result-card thumbs so the cluster visual mass
+   * lines up. Placeholder when geolocation hasn't resolved yet. */
+  .now-thumb {
+    width: 60px; height: 60px;
+    border-radius: 10px;
+    overflow: hidden;
     flex-shrink: 0;
-    background: var(--text-dim);
+    background: var(--card-sunk);
+    position: relative;
   }
-  #now-score-disc.tone-go     { background: var(--green); }
-  #now-score-disc.tone-mid    { background: var(--amber); }
-  #now-score-disc.tone-low    { background: var(--red); }
-  #now-score-disc.tone-unk    { background: var(--text-dim); }
-  #now-score-disc .score-val  { font-size: 17px; font-weight: 700; line-height: 1; }
-  #now-score-disc .score-lbl  {
-    font-size: 8px; font-weight: 500;
-    letter-spacing: 0.1em; text-transform: uppercase;
-    opacity: 0.85;
-    margin-top: 1px;
+  .now-thumb.no-loc::after {
+    content: '📍';
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+    opacity: 0.35;
   }
-  .now-headline {
-    display: flex; align-items: baseline; gap: 8px;
-    line-height: 1;
+  /* Leaflet inside the locked thumb: kill controls, kill attribution */
+  .now-thumb .leaflet-control-container { display: none; }
+  .now-thumb .leaflet-container {
+    background: var(--card-sunk);
+    cursor: pointer;
   }
-  .now-icon {
-    font-size: 26px; line-height: 1;
-    width: auto; height: auto;
-    background: none;
-    border-radius: 0;
-    box-shadow: none;
-    flex-shrink: 0;
-  }
-  .now-figures {
-    display: flex; flex-direction: column; gap: 2px;
-    min-width: 0;
-  }
-  .now-temp {
-    font-family: 'Outfit', sans-serif;
-    font-size: 28px; font-weight: 700;
-    letter-spacing: -0.02em; line-height: 1;
-    color: var(--text);
-    font-variant-numeric: tabular-nums;
-  }
-  .now-temp-deg { color: var(--text-muted); font-weight: 500; font-size: 0.7em; }
-  /* Best-walk-window line — paws icon + label, sits under the headline
-   * but above the blurb. Hidden when no good window is found. */
-  .now-window {
-    font-size: 13px; color: var(--text);
-    padding-top: 10px;
-    margin-top: 4px;
-    border-top: 1px dashed rgba(3,105,161,0.20);
-  }
-  .now-window-icon { margin-right: 4px; }
-  .now-window strong { font-weight: 700; color: var(--advisory); }
-  /* Walkability blurb — deterministic 1-2 sentence prose. */
-  .now-blurb {
-    font-size: 13px; line-height: 1.5;
-    color: var(--text); opacity: 0.92;
-    margin-top: 2px;
-  }
-  .now-blurb:empty, .now-window:empty { display: none; }
-  .now-summary {
-    font-size: 13px; color: var(--text);
-    font-weight: 500;
-  }
-  .now-meta {
+
+  /* The 'Walk from here' name + window + locationLabel uses the same
+   * .result-name-row class as beach cards — styles already defined. */
+  .now-strip .result-info { color: var(--text-muted); }
+  .now-strip .now-time {
     font-family: 'DM Mono', monospace;
-    font-size: 11px; color: var(--text-muted);
-    display: flex; flex-wrap: wrap; gap: 4px 12px;
+    font-size: 11px;
+    color: var(--text-muted);
     font-variant-numeric: tabular-nums;
   }
-  .now-cautions {
-    display: flex; flex-wrap: wrap; gap: 6px;
-    padding-top: 8px;
-    border-top: 1px dashed rgba(3,105,161,0.20);
-  }
-  .now-cautions:empty { display: none; }
-  .caution-badge {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    font-size: 11.5px; font-weight: 600;
-    line-height: 1;
-  }
-  .caution-badge.sev-advisory { background: var(--advisory-soft); color: var(--advisory); }
-  .caution-badge.sev-caution  { background: var(--amber-soft);    color: #92400e; }
-  .caution-badge.sev-no_go    { background: var(--red-soft);      color: var(--red); }
-  .caution-badge .caution-icon { font-size: 13px; line-height: 1; }
 
   /* ── Scout blurb ────────────────────────────────────────────────── */
   .scout-blurb {
@@ -928,9 +860,8 @@
     .search-strip  { margin: 10px 12px 6px; padding: 11px 12px; }
     .map-wrap      { margin: 6px 12px 0; }
     #map           { height: 180px; }
-    .now-strip     { margin: 12px 12px 4px; padding: 12px 14px; }
-    .now-temp      { font-size: 28px; }
-    .now-icon      { width: 48px; height: 48px; font-size: 36px; }
+    .now-strip     { margin: 12px 12px 4px; padding: 12px 13px; gap: 10px; }
+    .now-thumb     { width: 52px; height: 52px; border-radius: 8px; }
     .scout-blurb   { margin: 8px 12px 4px; padding: 10px 14px; font-size: 13.5px; }
     .results-head  { margin: 16px 16px 6px; }
     .result-list   { margin: 0 12px; }
@@ -1042,27 +973,23 @@
   </div>
 
   <section class="now-strip now-loading" id="now-strip" aria-live="polite">
-    <div class="now-head">
-      <span class="now-eyebrow">Walk from here</span>
+    <div class="now-thumb no-loc" id="now-thumb" aria-hidden="true"></div>
+    <div class="result-left">
+      <span class="score-inline tone-unk" id="now-score">—</span>
+      <span class="weather-emoji" id="now-icon">🌤️</span>
+    </div>
+    <div class="result-body">
+      <div class="result-name-row">
+        <span class="result-name">Walk from here</span>
+        <span class="result-name-sep" id="now-window-sep" style="display:none">·</span>
+        <span class="result-window tone-unk" id="now-window-label" style="display:none"></span>
+      </div>
+      <div class="result-info" id="now-info"></div>
+      <div class="result-chips" id="now-chips"></div>
+    </div>
+    <div class="result-end">
       <span class="now-time" id="now-time">—</span>
     </div>
-    <div class="now-body">
-      <div class="score-disc" id="now-score-disc" aria-hidden="true">
-        <span class="score-val" id="now-score-val">—</span>
-        <span class="score-lbl">Now</span>
-      </div>
-      <div class="now-figures">
-        <div class="now-headline">
-          <span class="now-icon" id="now-icon">🌤️</span>
-          <span class="now-temp"><span id="now-temp-val">—</span><span class="now-temp-deg">°F</span></span>
-        </div>
-        <div class="now-summary" id="now-summary">Reading your sky…</div>
-        <div class="now-meta" id="now-meta"></div>
-      </div>
-    </div>
-    <div class="now-window" id="now-window"></div>
-    <div class="now-blurb" id="now-blurb"></div>
-    <div class="now-cautions" id="now-cautions"></div>
   </section>
 
   <div class="scout-blurb loading" id="scout-blurb" onclick="toggleChat()" title="Ask Scout">Scout is sniffing the wind…</div>
@@ -1234,6 +1161,9 @@
     if (label) locationLabel = label;
     document.getElementById('loc-pill-text').textContent =
       locationLabel || 'Saved location';
+    // Initialize the walk-from-here mini-map as soon as coords resolve,
+    // not gated on the weather fetch coming back.
+    if (typeof ensureWalkThumbMap === 'function') ensureWalkThumbMap();
   }
 
   function setLocationLabelText(text) {
@@ -1373,7 +1303,7 @@
         });
       const ensure = await ensureRes.json();
       if (!ensure?.is_warm) {
-        document.getElementById('now-summary').textContent = 'Warming up your neighborhood forecast…';
+        renderWalkFallback('Warming up your neighborhood forecast…');
         return;
       }
       const startISO = new Date().toISOString();
@@ -1395,7 +1325,7 @@
       if (!wfpRes.ok) throw new Error(`weather_for_point HTTP ${wfpRes.status}`);
       nowHourlyRows = (await wfpRes.json()) || [];
       if (!Array.isArray(nowHourlyRows) || nowHourlyRows.length === 0) {
-        document.getElementById('now-summary').textContent = 'Forecast not ready yet.';
+        renderWalkFallback('Forecast not ready yet.');
         return;
       }
       // Pick the current/nearest-future hour as "now" for the headline.
@@ -1415,7 +1345,7 @@
       };
       renderNowAtUser();
     } catch (e) {
-      document.getElementById('now-summary').textContent = 'Forecast unavailable.';
+      renderWalkFallback('Forecast unavailable.');
     } finally {
       strip.classList.remove('now-loading');
     }
@@ -1436,64 +1366,154 @@
     const strip = document.getElementById('now-strip');
     strip.classList.remove('now-loading');
     const n = nowAtUser; if (!n) return;
+
+    // Weather emoji + time
     document.getElementById('now-icon').textContent = wmoIcon(n.wmoCode);
-    document.getElementById('now-temp-val').textContent = Math.round(n.tempF);
-    document.getElementById('now-summary').textContent = nowSummary(n);
-    const meta = [];
-    if (n.feelsF != null && Math.abs(n.feelsF - n.tempF) >= 3) meta.push(`Feels ${Math.round(n.feelsF)}°`);
-    if (n.windMph != null) meta.push(`Wind ${Math.round(n.windMph)} mph`);
-    if (n.uv != null) meta.push(`UV ${n.uv.toFixed(1)}`);
-    document.getElementById('now-meta').innerHTML = meta
-      .map(t => `<span>${t}</span>`).join(`<span class="meta-dot">·</span>`);
     if (n.timeISO) {
       const dt = new Date(n.timeISO);
-      const fmt = new Intl.DateTimeFormat('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
+      const fmt = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
       document.getElementById('now-time').textContent = fmt.format(dt);
     }
-    document.getElementById('now-cautions').innerHTML = buildCautionBadges(n);
 
-    // ── Walkability score, best window, blurb ──
-    // Compute over the hourly rows fetched from weather_for_point.
-    const hourly = nowHourlyRows.map(walkabilityForRow).sort((a, b) => a.tsMs - b.tsMs);
-    const nowMs = Date.now();
+    // Mini-map of user location (locked Leaflet — no controls, no drag).
+    ensureWalkThumbMap();
+
+    // ── Walkability score + best walk window ──
+    // walkabilityForRow + pickBestWalkWindow compute over the hourly rows
+    // fetched from weather_for_point.
+    const hourly  = nowHourlyRows.map(walkabilityForRow).sort((a, b) => a.tsMs - b.tsMs);
+    const nowMs   = Date.now();
     const nowHour = hourly.find(h => h.tsMs >= nowMs - 30 * 60_000) ?? hourly[0];
     const nowScore = nowHour?.score ?? null;
-    // Disc
-    const disc  = document.getElementById('now-score-disc');
-    const dval  = document.getElementById('now-score-val');
+
+    // Inline mono score — matches beach result cards.
+    const scoreEl = document.getElementById('now-score');
     if (nowScore != null) {
-      dval.textContent = nowScore;
+      scoreEl.textContent = nowScore;
       const tone = nowScore >= 70 ? 'tone-go' : nowScore >= 45 ? 'tone-mid' : 'tone-low';
-      disc.className = `score-disc ${tone}`;
+      scoreEl.className = `score-inline ${tone}`;
     } else {
-      dval.textContent = '—';
-      disc.className = 'score-disc tone-unk';
+      scoreEl.textContent = '—';
+      scoreEl.className = 'score-inline tone-unk';
     }
-    // Best window from now → end of day at user's local tz (best-effort:
-    // use browser local). Same algorithm as beach.html _bestWindowFromNowV2.
+
+    // Best window — folds into the name row like beach cards' time.
     const win = pickBestWalkWindow(hourly, nowMs);
-    const winEl = document.getElementById('now-window');
+    const winSep = document.getElementById('now-window-sep');
+    const winLbl = document.getElementById('now-window-label');
     if (win) {
-      winEl.innerHTML = `<span class="now-window-icon">🐾</span> Best walk: <strong>${escapeHtml(win.label)}</strong>`;
-      winEl.style.display = '';
+      const tone = nowScore != null
+        ? (nowScore >= 70 ? 'tone-go' : nowScore >= 45 ? 'tone-mid' : 'tone-low')
+        : 'tone-unk';
+      winLbl.textContent = win.label;
+      winLbl.className = `result-window ${tone}`;
+      winLbl.style.display = '';
+      winSep.style.display = '';
     } else {
-      winEl.style.display = 'none';
+      winLbl.style.display = 'none';
+      winSep.style.display = 'none';
     }
-    // Blurb — deterministic rule-based copy keyed on dominant condition.
-    const blurbEl = document.getElementById('now-blurb');
-    const blurb = walkabilityBlurb(n, hourly, win);
-    if (blurb) {
-      blurbEl.textContent = blurb;
-      blurbEl.style.display = '';
+
+    // Condition chips — temp, wind, UV, asphalt, weather. Use the
+    // current hour's derived values (incl. asphalt computed inline).
+    document.getElementById('now-chips').innerHTML = buildWalkChips(nowHour, n);
+
+    // Info row — location label only (mileage doesn't apply: you ARE here).
+    const infoEl = document.getElementById('now-info');
+    if (locationLabel) {
+      infoEl.innerHTML = `<span class="meta-doghours-ok">📍 ${escapeHtml(locationLabel)}</span>`;
     } else {
-      blurbEl.style.display = 'none';
+      infoEl.innerHTML = '';
     }
+  }
+
+  // Error / loading fallback for the walk-from-here band. Routes a
+  // short message to the info slot so error paths can't NPE on the
+  // renamed structure.
+  function renderWalkFallback(msg) {
+    const strip = document.getElementById('now-strip');
+    if (strip) strip.classList.remove('now-loading');
+    const info = document.getElementById('now-info');
+    if (info) info.textContent = msg;
+    ensureWalkThumbMap();
+  }
+
+  // ── Walk-from-here mini-map ──────────────────────────────────────
+  // Initialized once when userLat/userLng resolve. Locked: no drag, no
+  // scroll-zoom, no controls. Tap re-uses the search-strip ZIP entry.
+  let walkThumbMap = null;
+  function ensureWalkThumbMap() {
+    if (walkThumbMap) return;
+    if (userLat == null || userLng == null) return;
+    const el = document.getElementById('now-thumb');
+    if (!el || typeof L === 'undefined') return;
+    el.classList.remove('no-loc');
+    walkThumbMap = L.map(el, {
+      zoomControl: false, attributionControl: false,
+      dragging: false, scrollWheelZoom: false, touchZoom: false,
+      doubleClickZoom: false, boxZoom: false, keyboard: false,
+      tap: false,
+    }).setView([userLat, userLng], 14);
+    L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+    }).addTo(walkThumbMap);
+    L.circleMarker([userLat, userLng], {
+      radius: 6, color: '#fff', weight: 2,
+      fillColor: '#0369a1', fillOpacity: 1,
+    }).addTo(walkThumbMap);
+    // Belt-and-suspenders for late-mounting containers
+    requestAnimationFrame(() => walkThumbMap.invalidateSize());
+    setTimeout(() => walkThumbMap.invalidateSize(), 400);
+  }
+
+  // Condition chips for the walk-from-here band. Mirrors beach
+  // buildCondChips shape but drops tide/surf/sand/crowd (irrelevant for
+  // neighborhood walking) and adds asphalt computed from temp_air via
+  // the same formula scoring.ts uses (UV → solar irradiance proxy +
+  // wind cooling). Cloud cover not available here so asphalt is a
+  // worst-case estimate, which is conservative for the warning.
+  function buildWalkChips(h, n) {
+    if (!h) return '';
+    const parts = [];
+    const tempF = h.tempF ?? n?.tempF ?? null;
+    const wind  = h.wind  ?? n?.windMph ?? null;
+    const uv    = h.uv    ?? n?.uv ?? null;
+
+    if (tempF != null) {
+      const st = chipStatus('temp', tempF);
+      parts.push(`<span class="cond-chip chip-${st}">🌡 ${Math.round(tempF)}°</span>`);
+    }
+    if (wind != null) {
+      const st = chipStatus('wind', wind);
+      parts.push(`<span class="cond-chip chip-${st}">💨 ${Math.round(wind)}mph</span>`);
+    }
+    if (uv != null) {
+      const st = chipStatus('uv', uv);
+      parts.push(`<span class="cond-chip chip-${st}">☀ UV${Math.round(uv)}</span>`);
+    }
+    if (h.asphaltF != null) {
+      const st = chipStatus('asphalt', h.asphaltF);
+      if (st) parts.push(`<span class="cond-chip chip-${st}">🛣 Asphalt ${Math.round(h.asphaltF)}°</span>`);
+    }
+    return parts.join('<span class="cond-chip-sep">·</span>');
+  }
+
+  // Worst-case asphalt estimate (cloud cover not in nowHourlyRows).
+  // Matches the formula in supabase/functions/_shared/scoring.ts
+  // estimateSurfaceTemps() with cloudCover=0 (full sun).
+  function estimateAsphaltF(airTempF, uvIndex, windMph, isDay) {
+    if (!isDay || airTempF == null) return null;
+    const irradiance     = Math.max(0, uvIndex ?? 0) * 100;
+    const asphaltHeating = irradiance * 0.05;
+    const windCool       = Math.min(Math.sqrt(Math.max(windMph ?? 0, 0)) * 1.2, 8);
+    return Math.round((airTempF + asphaltHeating - windCool) * 10) / 10;
   }
 
   // Per-row walkability: simplified weather-only v2 mirror. Same band
   // shapes as scoring_config_v2 (temp bell, wind, sky WMO, heat/UV neg,
   // harsh neg) minus amenities/dog-access/tide/crowd which don't apply
-  // to a generic neighborhood walk.
+  // to a generic neighborhood walk. Asphalt added 2026-06-10 — burning
+  // paws on hot sidewalks is the dominant walk-safety signal.
   function walkabilityForRow(r) {
     const tempF  = num(r.temp_air);
     const feelsF = num(r.feels_like) ?? tempF;
@@ -1502,6 +1522,8 @@
     const wmo    = intOrNull(r.weather_code);
     const precip = num(r.precip_mm);
     const tsMs   = new Date(r.forecast_ts).getTime();
+    const isDay  = r.is_day === true;
+    const asphaltF = estimateAsphaltF(tempF, uv, wind, isDay);
 
     // temp_pos: bell around 72°F, ±20° range, max 10
     const tempPos = tempF == null ? 4
@@ -1514,6 +1536,10 @@
     const uvNeg = uv == null ? 0 : uv >= 11 ? 8 : uv >= 8 ? 5 : uv >= 6 ? 2 : 0;
     const hotNeg = feelsF == null || feelsF < 90 ? 0
       : Math.min(4, Math.round((feelsF - 90) * 0.4));
+    // asphalt_neg — burning paws on hot sidewalks: ≥125°F is no-go
+    // (12 pts), ≥115°F is advisory (6 pts).
+    const asphaltNeg = asphaltF == null ? 0
+      : asphaltF >= 125 ? 12 : asphaltF >= 115 ? 6 : 0;
     // harsh_neg: strong wind, rain, cold
     const windHarsh = wind == null ? 0 : wind >= 25 ? 8 : wind >= 15 ? 4 : 0;
     const precipNeg = precip == null ? 0 : precip > 1.5 ? 6 : precip > 0.5 ? 3 : 0;
@@ -1521,9 +1547,9 @@
       : Math.min(6, Math.round((50 - feelsF) * 0.25));
 
     const positives = Math.min(22, tempPos + windPos + skyPos);
-    const negatives = Math.min(20, uvNeg + hotNeg + windHarsh + precipNeg + coldNeg);
+    const negatives = Math.min(28, uvNeg + hotNeg + asphaltNeg + windHarsh + precipNeg + coldNeg);
     const score = Math.max(0, Math.min(100, 50 + positives - negatives));
-    return { tsMs, score, tempF, feelsF, wind, uv, wmo, precip, isDay: r.is_day === true };
+    return { tsMs, score, tempF, feelsF, wind, uv, asphaltF, wmo, precip, isDay };
   }
 
   function wmoSkyPos(code) {

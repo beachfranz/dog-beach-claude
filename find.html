@@ -1809,8 +1809,17 @@
       //  NOW + live current_hour_score → colored (live signal)
       //  NOW + peak fallback           → grey (informational, not "right now")
       //  Day pill (any future day)     → colored (peak IS the headline)
-      tone: (selectedDay !== 'now' && score != null) ? scoreTone(score)
-          : (scoreIsCurrent ? scoreTone(score) : 'unk'),
+      //  Rip Mod/High overrides go/unk → mid (caution). Never downgrades
+      //  an already-mid or low tone. Matches Franz directive: rip risk
+      //  is a safety signal that elevates the card status regardless of
+      //  the composite score.
+      tone: (() => {
+        const baseTone = (selectedDay !== 'now' && score != null) ? scoreTone(score)
+                       : (scoreIsCurrent ? scoreTone(score) : 'unk');
+        const ripBump = b.rip_current_risk === 'High' || b.rip_current_risk === 'Moderate';
+        if (ripBump && (baseTone === 'go' || baseTone === 'unk')) return 'mid';
+        return baseTone;
+      })(),
       bacteriaRisk: b.bacteria_risk ?? 'none',
       // NWS-published rip current risk (Low/Moderate/High) for the
       // coastal forecast zone covering this beach. Sourced from the SRF

@@ -1812,6 +1812,11 @@
       tone: (selectedDay !== 'now' && score != null) ? scoreTone(score)
           : (scoreIsCurrent ? scoreTone(score) : 'unk'),
       bacteriaRisk: b.bacteria_risk ?? 'none',
+      // NWS-published rip current risk (Low/Moderate/High) for the
+      // coastal forecast zone covering this beach. Sourced from the SRF
+      // text product via wfo_srf_forecast. NULL for inland beaches or
+      // zones without a current-period row.
+      ripCurrentRisk: b.rip_current_risk ?? null,
       hasOffLeash: b.has_off_leash === true,
       hasOnLeash:  b.has_on_leash === true,
       // Condition-chip inputs (mirror index.html's day-card chips,
@@ -2280,6 +2285,12 @@
         if (v >=  95 || v <= 32) return 'caution';
         if (v >=  85 || v <= 50) return 'advisory';
         return 'go';
+      case 'rip':
+        // NWS-published categorical rip current risk: Low / Moderate / High.
+        // Low suppresses the chip (calm day; nothing to say).
+        if (v === 'High')     return 'no_go';
+        if (v === 'Moderate') return 'caution';
+        return null;
       default:
         return null;
     }
@@ -2287,6 +2298,12 @@
 
   function buildCondChips(c) {
     const parts = [];
+    // Rip current risk first — lifeguard-flag glyph, always shown when
+    // chipStatus returns non-null (suppresses Low). Mod = amber, High = red.
+    if (c.ripCurrentRisk) {
+      const st = chipStatus('rip', c.ripCurrentRisk);
+      if (st) parts.push(`<span class="cond-chip chip-${st}">🚩 Rip ${c.ripCurrentRisk}</span>`);
+    }
     if (c.lowestTideFt != null) {
       const st = chipStatus('tide', c.lowestTideFt);
       parts.push(`<span class="cond-chip chip-${st}">🌊 ${c.lowestTideFt}ft</span>`);

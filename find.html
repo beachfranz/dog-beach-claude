@@ -590,17 +590,17 @@
   }
 
   /* ── Result card — index.html aesthetic ──────────────────────────
-   * 3-col grid: left cluster (inline mono score + weather emoji) |
-   * body (name·window line / distance+warns / condition chips) | end
-   * (#rank + chevron). Status-tinted via left border (matches index's
-   * .day-card status-* pattern). */
+   * 4-col grid: hero thumb | left cluster (mono score + weather) |
+   * body (name·window·mileage / warns / chips) | end (#rank + chev).
+   * Status-tinted via left border (matches index's .day-card
+   * status-* pattern). */
   .result-card {
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 14px 16px;
     display: grid;
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: auto auto 1fr auto;
     gap: 14px;
     align-items: center;
     cursor: pointer;
@@ -609,6 +609,30 @@
     position: relative;
     overflow: hidden;
     -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Hero thumb tile — left of score. Square + rounded; mirrors the
+   * thumb sizing of the score cluster's visual mass. Empty-state
+   * placeholder when no photo so cards stay aligned. */
+  .result-thumb {
+    width: 60px; height: 60px;
+    border-radius: 10px;
+    overflow: hidden;
+    flex-shrink: 0;
+    background: var(--card-sunk);
+    position: relative;
+  }
+  .result-thumb img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .result-thumb.no-photo::after {
+    content: '🐾';
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+    opacity: 0.35;
   }
   .result-card.tone-go       { border-left: 3px solid var(--green); }
   .result-card.tone-mid      { border-left: 3px solid var(--amber); }
@@ -698,6 +722,15 @@
   .result-window.tone-mid  { color: var(--amber); }
   .result-window.tone-low  { color: var(--red); }
   .result-window.tone-unk  { color: var(--text-dim); }
+  /* Mileage sits inline with name + window. Same Outfit 16/600 as
+   * its row neighbors but charcoal so it reads as supporting info,
+   * not a primary signal. */
+  .result-mileage {
+    flex-shrink: 0;
+    color: #3a4555;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+  }
 
   /* Distance + warns row */
   .result-info {
@@ -707,9 +740,6 @@
     font-variant-numeric: tabular-nums;
     font-size: 11px;
     color: var(--text-muted);
-  }
-  .result-info .meta-dist {
-    color: var(--text); font-weight: 500;
   }
   .result-info .meta-warn {
     color: var(--red); font-weight: 500;
@@ -904,7 +934,9 @@
     .scout-blurb   { margin: 8px 12px 4px; padding: 10px 14px; font-size: 13.5px; }
     .results-head  { margin: 16px 16px 6px; }
     .result-list   { margin: 0 12px; }
-    .result-card   { padding: 12px 13px; gap: 12px; }
+    .result-card   { padding: 12px 13px; gap: 10px; }
+    .result-thumb  { width: 52px; height: 52px; border-radius: 8px; }
+    .result-thumb.no-photo::after { font-size: 18px; }
     .result-left   { min-width: 56px; gap: 8px; }
     .score-inline  { font-size: 22px; }
     .weather-emoji { font-size: 20px; }
@@ -1770,6 +1802,10 @@
       crowdCategory: b.busyness_category ?? null,
       weatherIcon:  getWeatherIcon(b.summary_weather, b.weather_code),
       weatherLabel: getWeatherLabel(b.summary_weather, b.weather_code),
+      // Hero photo from find_beaches RPC (LATERAL pick mirroring the
+      // diverse selector's prefer-dog-first priority). Falls back to
+      // image_url when thumb_url is missing.
+      heroThumbUrl: b.hero_thumb_url || b.hero_image_url || null,
       // Amenity presence flags — from find_beaches RPC (extended
       // 2026-06-07 to LEFT JOIN beach_amenities). NULL when the beach
       // has no amenity row yet; consumer treats NULL as unknown.
@@ -2104,9 +2140,14 @@
       ? `<span class="weather-emoji" title="${escapeAttr(c.weatherLabel ?? '')}">${c.weatherIcon}</span>`
       : '';
 
-    // Name + window time on one line, same font + size (Outfit 16/600).
-    // Window label is status-tinted; on day-pills the tone is colored,
-    // on NOW with peak-fallback the tone is unk (grey).
+    // Name + mileage + window time on one line, same Outfit 16/600.
+    // Mileage sits inline (left of window) in charcoal so it reads as
+    // a supporting signal next to the name. Window is status-tinted;
+    // on day-pills colored, on NOW peak-fallback grey.
+    let mileageHtml = '';
+    if (c.distanceMi != null) {
+      mileageHtml = `<span class="result-name-sep">·</span><span class="result-mileage" data-dir="${c.id}">${c.distanceMi.toFixed(1)} mi</span>`;
+    }
     let windowHtml = '';
     if (c.bestWindow) {
       windowHtml = `<span class="result-name-sep">·</span><span class="result-window ${toneClass}">${escapeHtml(c.bestWindow)}</span>`;
@@ -2114,11 +2155,9 @@
       windowHtml = `<span class="result-name-sep">·</span><span class="result-window tone-unk">No window</span>`;
     }
 
-    // Info row — distance + bacteria/dog-hour warnings (NOT chips).
+    // Info row — bacteria + dog-hour warnings only (mileage moved up
+    // to the name row 2026-06-10). Suppressed entirely on clean days.
     const infoParts = [];
-    if (c.distanceMi != null) {
-      infoParts.push(`<span class="meta-dist" data-dir="${c.id}" style="cursor:pointer">🚗 ${c.distanceMi.toFixed(1)} mi</span>`);
-    }
     if (c.bacteriaRisk === 'high' || c.bacteriaRisk === 'moderate') {
       infoParts.push(`<span class="meta-warn">⚠ 72h rain advisory</span>`);
     }
@@ -2140,11 +2179,18 @@
 
     const amenityHtml = renderAmenityStrip(c);
 
+    // Hero thumb tile — placeholder when no photo so card alignment
+    // is consistent across the list.
+    const thumbHtml = c.heroThumbUrl
+      ? `<div class="result-thumb"><img src="${escapeAttr(c.heroThumbUrl)}" alt="" loading="lazy" onerror="this.parentNode.classList.add('no-photo'); this.remove();"></div>`
+      : `<div class="result-thumb no-photo"></div>`;
+
     return `
       <a class="result-card ${toneClass} ${tierClass}"
          data-card-id="${c.id}"
          href="${navUrl(c)}"
          aria-label="${escapeAttr(c.name)} — rank ${rank}">
+        ${thumbHtml}
         <div class="result-left">
           ${scoreInline}
           ${weatherInline}
@@ -2153,6 +2199,7 @@
           <div class="result-name-row">
             <span class="result-name">${escapeHtml(c.name)}</span>
             ${windowHtml}
+            ${mileageHtml}
           </div>
           ${infoHtml}
           ${chipsBlock}

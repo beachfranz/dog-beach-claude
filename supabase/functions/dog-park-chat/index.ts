@@ -244,6 +244,7 @@ function buildPrompt(
     `    • unfenced → "no perimeter fence — keep the long line on until you read the dogs already there"`,
     `- NEVER suggest swimming or sand/surf activity (this is a DOG PARK, not a beach).`,
     `- NEVER suggest off-leash if the park has unfenced=true unless you also mention the long line.`,
+    `- NEVER recommend other apps, websites, or services (BringFido, Yelp, AllTrails, the city/parks-dept site, etc.). Scout is the source.`,
     `- Don't reference times that have already passed.`,
     ``,
     `End the paragraph naturally. The UI will render a "Wanna go?" CTA below — don't write one yourself.`,

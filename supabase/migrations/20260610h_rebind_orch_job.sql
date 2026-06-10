@@ -41,34 +41,40 @@ begin
     exit when v_iter > 200;                                   -- hard ceiling
     exit when clock_timestamp() - v_start > interval '45 sec';
 
+    -- COALESCE to a sentinel '__no_zone__' when no forecast zone is
+    -- within 200m. Without this, UPDATE writes NULL→NULL but ROW_COUNT
+    -- still increments — the WHERE filter (coastal_zone_id IS NULL)
+    -- re-picks the same beaches forever. The sentinel pulls them out
+    -- of the work pool. find_beaches still returns NULL rip_current_risk
+    -- because no wfo_srf_forecast row will match '__no_zone__'.
     update public.beaches_gold bg
-       set coastal_zone_id = (
-         select z.zone_id
-           from public.nws_zones z
-          where z.zone_type = 'forecast'
-            and z.geom is not null
-            and st_dwithin(
-                  z.geom::geography,
-                  st_setsrid(st_makepoint(bg.lon::float, bg.lat::float), 4326)::geography,
-                  200
-                )
-          order by st_distance(
-                     z.geom::geography,
-                     st_setsrid(st_makepoint(bg.lon::float, bg.lat::float), 4326)::geography
-                   )
-          limit 1
-       )
-     where bg.fid in (
-       select fid
-         from public.beaches_gold
-        where is_active = true
-          and coastal_zone_id is null
-          and lat is not null and lon is not null
-          and state in ('CA','OR','WA','HI','MA','RI','NH','ME','MD','VA','DE',
-                        'NC','SC','GA','FL','AL','MS','LA','TX','NJ','NY','CT')
-        order by state, fid
-        limit 200
-     );
+       set coastal_zone_id = coalesce(sub.zone_id, '__no_zone__')
+      from (
+        select bg2.fid,
+               (select z.zone_id
+                  from public.nws_zones z
+                 where z.zone_type = 'forecast'
+                   and z.geom is not null
+                   and st_dwithin(
+                         z.geom::geography,
+                         st_setsrid(st_makepoint(bg2.lon::float, bg2.lat::float), 4326)::geography,
+                         200
+                       )
+                 order by st_distance(
+                            z.geom::geography,
+                            st_setsrid(st_makepoint(bg2.lon::float, bg2.lat::float), 4326)::geography
+                          )
+                 limit 1) as zone_id
+          from public.beaches_gold bg2
+         where bg2.is_active = true
+           and bg2.coastal_zone_id is null
+           and bg2.lat is not null and bg2.lon is not null
+           and bg2.state in ('CA','OR','WA','HI','MA','RI','NH','ME','MD','VA','DE',
+                             'NC','SC','GA','FL','AL','MS','LA','TX','NJ','NY','CT')
+         order by bg2.state, bg2.fid
+         limit 200
+      ) sub
+     where bg.fid = sub.fid;
     get diagnostics v_chunk = row_count;
 
     v_total := v_total + v_chunk;

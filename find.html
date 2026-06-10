@@ -12,24 +12,24 @@
   integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
   crossorigin="">
 <style>
-  /* ── Tokens — matched to beach.html ─────────────────────────────── */
+  /* ── Tokens — matched to index.html (sea fog / marine navy POV) ─── */
   :root {
-    --bg:           #f8fafc;
+    --bg:           #eef4f8;
     --card:         #ffffff;
-    --card-sunk:    #f1f5f9;
+    --card-sunk:    #f5f9fc;
     --text:         #0f2742;
-    --text-muted:   #64748b;
+    --text-muted:   #5b6b7d;
     --text-dim:     #94a3b8;
-    --border:       #e2e8f0;
-    --border-soft:  #eef2f7;
-    --accent:       #1d4ed8;
-    --accent-soft:  rgba(29,78,216,0.10);
-    --green:        #16a34a;
-    --green-soft:   rgba(22,163,74,0.13);
-    --amber:        #f59e0b;
-    --amber-soft:   rgba(245,158,11,0.18);
-    --red:          #dc2626;
-    --red-soft:     rgba(220,38,38,0.13);
+    --border:       #d1dde8;
+    --border-soft:  #e2ecf3;
+    --accent:       #0369a1;
+    --accent-soft:  rgba(3,105,161,0.10);
+    --green:        #15803d;
+    --green-soft:   rgba(21,128,61,0.13);
+    --amber:        #b45309;
+    --amber-soft:   rgba(180,83,9,0.16);
+    --red:          #9f1239;
+    --red-soft:     rgba(159,18,57,0.13);
     --advisory:     #0369a1;
     --advisory-soft:rgba(3,105,161,0.10);
     --radius:       14px;
@@ -351,17 +351,16 @@
   }
   .zip-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
-  /* ── Map block ──────────────────────────────────────────────────── */
+  /* ── Map block — beach.html parity (200px fixed, contained) ─────── */
   .map-wrap {
     margin: 6px 14px 0;
-    border-radius: var(--radius);
+    border-radius: 8px;
     overflow: hidden;
     border: 1px solid var(--border);
     background: var(--card);
-    box-shadow: var(--shadow-sm);
   }
   #map {
-    height: 38vh; min-height: 240px; max-height: 360px;
+    height: 200px;
     width: 100%;
     background: #d9e7f0;
   }
@@ -445,14 +444,32 @@
     gap: 14px;
     align-items: center;
   }
-  /* Walkability score disc inside the now-strip — smaller than result-card
-   * discs (48px vs 56px) so it reads as a peer signal not a competitor. */
-  #now-score-disc.score-disc {
+  /* Walkability score disc inside the now-strip — kept as a filled disc
+   * because it's the page's primary live signal. Self-contained styles
+   * (result-card scores are inline mono per 2026-06-10 redesign). */
+  #now-score-disc {
     width: 48px; height: 48px;
+    border-radius: 50%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-family: 'DM Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    color: white;
     box-shadow: 0 2px 6px rgba(15,39,66,0.15);
+    flex-shrink: 0;
+    background: var(--text-dim);
   }
-  #now-score-disc .score-val { font-size: 17px; font-weight: 700; }
-  #now-score-disc .score-lbl { font-size: 8px; }
+  #now-score-disc.tone-go     { background: var(--green); }
+  #now-score-disc.tone-mid    { background: var(--amber); }
+  #now-score-disc.tone-low    { background: var(--red); }
+  #now-score-disc.tone-unk    { background: var(--text-dim); }
+  #now-score-disc .score-val  { font-size: 17px; font-weight: 700; line-height: 1; }
+  #now-score-disc .score-lbl  {
+    font-size: 8px; font-weight: 500;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    opacity: 0.85;
+    margin-top: 1px;
+  }
   .now-headline {
     display: flex; align-items: baseline; gap: 8px;
     line-height: 1;
@@ -572,49 +589,49 @@
     margin: 0 14px;
   }
 
+  /* ── Result card — index.html aesthetic ──────────────────────────
+   * 3-col grid: left cluster (inline mono score + weather emoji) |
+   * body (name·window line / distance+warns / condition chips) | end
+   * (#rank + chevron). Status-tinted via left border (matches index's
+   * .day-card status-* pattern). */
   .result-card {
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 12px 14px;
+    padding: 14px 16px;
     display: grid;
-    grid-template-columns: 56px 1fr auto;
-    gap: 12px;
+    grid-template-columns: auto 1fr auto;
+    gap: 14px;
     align-items: center;
     cursor: pointer;
     text-decoration: none; color: inherit;
-    box-shadow: var(--shadow-sm);
-    transition: transform 0.12s, box-shadow 0.15s, border-color 0.15s, background 0.15s;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
     position: relative;
     overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
   }
-  .result-card::before {
-    /* Status-tinted left edge accent */
-    content: '';
-    position: absolute;
-    left: 0; top: 0; bottom: 0;
-    width: 3px;
-    background: var(--border);
-    transition: background 0.15s;
-  }
-  .result-card.tone-go::before     { background: var(--green); }
-  .result-card.tone-mid::before    { background: var(--amber); }
-  .result-card.tone-low::before    { background: var(--red); }
-  .result-card.tone-park::before   { background: var(--accent); }
+  .result-card.tone-go       { border-left: 3px solid var(--green); }
+  .result-card.tone-mid      { border-left: 3px solid var(--amber); }
+  .result-card.tone-low      { border-left: 3px solid var(--red); }
+  .result-card.tone-park     { border-left: 3px solid var(--accent); }
   .result-card:hover {
-    transform: translateY(-1px);
+    background: var(--card-sunk);
     border-color: var(--text-dim);
-    box-shadow: var(--shadow-md);
   }
+  .result-card.tone-go:hover   { border-left-color: var(--green); }
+  .result-card.tone-mid:hover  { border-left-color: var(--amber); }
+  .result-card.tone-low:hover  { border-left-color: var(--red); }
+  .result-card.tone-park:hover { border-left-color: var(--accent); }
+  .result-card:active { transform: scale(0.997); }
   .result-card.highlight {
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-md);
+    box-shadow: 0 0 0 3px var(--accent-soft);
     animation: highlightPulse 1.6s ease-out;
   }
   @keyframes highlightPulse {
-    0%   { box-shadow: 0 0 0 0   var(--accent-soft), var(--shadow-md); }
-    40%  { box-shadow: 0 0 0 14px rgba(29,78,216,0); var(--shadow-md); }
-    100% { box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-md); }
+    0%   { box-shadow: 0 0 0 0   var(--accent-soft); }
+    40%  { box-shadow: 0 0 0 14px rgba(3,105,161,0); }
+    100% { box-shadow: 0 0 0 3px var(--accent-soft); }
   }
 
   /* Tier-4 (no dogs) — render muted so famous-but-prohibited beaches
@@ -626,68 +643,110 @@
   }
   .result-card.tier-4_no_dogs:hover { opacity: 1; filter: grayscale(0.25); }
 
-  .score-disc {
-    width: 56px; height: 56px;
-    border-radius: 50%;
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
+  /* Left cluster — inline mono score + weather emoji */
+  .result-left {
+    display: flex; align-items: center; gap: 10px;
+    flex-shrink: 0;
+    min-width: 64px;
+  }
+  .score-inline {
     font-family: 'DM Mono', monospace;
     font-variant-numeric: tabular-nums;
-    color: white;
-    box-shadow: 0 2px 6px rgba(15,39,66,0.15);
-    flex-shrink: 0;
+    font-size: 26px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.01em;
+    color: var(--text-dim);
   }
-  .score-disc.tone-go     { background: var(--green); }
-  .score-disc.tone-mid    { background: var(--amber); }
-  .score-disc.tone-low    { background: var(--red); }
-  .score-disc.tone-unk    { background: var(--text-dim); }
-  .score-disc.tone-park   { background: var(--accent); }
-  .score-disc .score-val  { font-size: 19px; font-weight: 700; line-height: 1; }
-  .score-disc .score-lbl  {
-    font-size: 8.5px; font-weight: 500;
-    letter-spacing: 0.1em; text-transform: uppercase;
-    opacity: 0.85;
-    margin-top: 1px;
+  .score-inline.tone-go     { color: var(--green); }
+  .score-inline.tone-mid    { color: var(--amber); }
+  .score-inline.tone-low    { color: var(--red); }
+  .score-inline.tone-unk    { color: var(--text-dim); }
+  .score-inline.tone-park   { color: var(--accent); font-size: 22px; }
+  .weather-emoji {
+    font-size: 22px;
+    line-height: 1;
   }
-  .score-disc.tone-unk .score-val { font-size: 22px; }
 
+  /* Body — name+window row / distance+warns / chip row */
   .result-body {
+    min-width: 0;
     display: flex; flex-direction: column; gap: 4px;
+  }
+  /* Beach name + window time inline; same font + size per Franz */
+  .result-name-row {
+    display: flex; align-items: baseline; flex-wrap: wrap;
+    gap: 6px;
+    font-family: 'Outfit', sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    color: var(--text);
+    line-height: 1.2;
     min-width: 0;
   }
   .result-name {
-    font-family: 'Outfit', sans-serif;
-    font-size: 16px; font-weight: 600;
-    color: var(--text);
-    letter-spacing: -0.005em;
-    line-height: 1.2;
-    overflow: hidden; text-overflow: ellipsis;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex-shrink: 1; min-width: 0;
   }
-  .result-meta {
-    display: flex; flex-wrap: wrap; gap: 4px 10px;
+  .result-name-sep {
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+  .result-window         { flex-shrink: 0; color: var(--text); }
+  .result-window.tone-go   { color: var(--green); }
+  .result-window.tone-mid  { color: var(--amber); }
+  .result-window.tone-low  { color: var(--red); }
+  .result-window.tone-unk  { color: var(--text-dim); }
+
+  /* Distance + warns row */
+  .result-info {
+    display: flex; flex-wrap: wrap;
+    gap: 4px 8px;
     font-family: 'DM Mono', monospace;
-    font-size: 11px; color: var(--text-muted);
     font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    color: var(--text-muted);
   }
-  .result-meta .meta-dot { opacity: 0.5; }
-  .result-meta .meta-dist {
-    color: var(--text);
-    font-weight: 500;
-  }
-  .result-meta .meta-window { color: var(--text); }
-  .result-meta .meta-warn {
-    color: var(--red); font-weight: 500;
-  }
-  /* Dog-hours chip — currently-prohibited = red, currently-allowed
-   * (but with a daily window) = neutral. Pairs with the grey "Best"
-   * disc on tier-3 limited-access beaches so the user sees both
-   * "92 Best" + "🚫 Dogs out 10am–4:30pm" and understands the gap. */
-  .result-meta .meta-doghours-out {
-    color: var(--red); font-weight: 500;
-  }
-  .result-meta .meta-doghours-ok {
+  .result-info .meta-dist {
     color: var(--text); font-weight: 500;
+  }
+  .result-info .meta-warn {
+    color: var(--red); font-weight: 500;
+  }
+  .result-info .meta-doghours-out {
+    color: var(--red); font-weight: 500;
+  }
+  .result-info .meta-doghours-ok {
+    color: var(--text); font-weight: 500;
+  }
+  .result-info .info-sep {
+    color: var(--text-dim); opacity: 0.6;
+  }
+
+  /* Condition chip row — terminal-style with · separators, status-tinted */
+  .result-chips {
+    display: flex; flex-wrap: wrap;
+    gap: 2px;
+    align-items: center;
+    margin-top: 2px;
+    font-family: 'DM Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .cond-chip {
+    display: inline-flex; align-items: center; gap: 3px;
+    white-space: nowrap;
+  }
+  .cond-chip.chip-go       { color: var(--green); }
+  .cond-chip.chip-advisory { color: var(--advisory); }
+  .cond-chip.chip-caution  { color: var(--amber); }
+  .cond-chip.chip-no_go    { color: var(--red); }
+  .cond-chip-sep {
+    color: var(--text-dim);
+    opacity: 0.6;
+    margin: 0 3px;
   }
 
   .amenity-strip {
@@ -730,7 +789,7 @@
   }
   .chev {
     color: var(--text-dim);
-    font-size: 22px; line-height: 1;
+    font-size: 18px; line-height: 1;
     transition: color 0.15s, transform 0.15s;
   }
   .result-card:hover .chev {
@@ -838,22 +897,23 @@
     .page-title    { font-size: 26px; }
     .search-strip  { margin: 10px 12px 6px; padding: 11px 12px; }
     .map-wrap      { margin: 6px 12px 0; }
-    #map           { height: 36vh; min-height: 220px; }
+    #map           { height: 180px; }
     .now-strip     { margin: 12px 12px 4px; padding: 12px 14px; }
     .now-temp      { font-size: 28px; }
     .now-icon      { width: 48px; height: 48px; font-size: 36px; }
     .scout-blurb   { margin: 8px 12px 4px; padding: 10px 14px; font-size: 13.5px; }
     .results-head  { margin: 16px 16px 6px; }
     .result-list   { margin: 0 12px; }
-    .result-card   { padding: 11px 12px; gap: 10px; grid-template-columns: 50px 1fr auto; }
-    .score-disc    { width: 50px; height: 50px; }
-    .score-disc .score-val { font-size: 17px; }
-    .result-name   { font-size: 15px; }
+    .result-card   { padding: 12px 13px; gap: 12px; }
+    .result-left   { min-width: 56px; gap: 8px; }
+    .score-inline  { font-size: 22px; }
+    .weather-emoji { font-size: 20px; }
+    .result-name-row { font-size: 15px; }
   }
 
   /* ── Tablet+ (≥ 760px) ─────────────────────────────────────────── */
   @media (min-width: 760px) {
-    #map { height: 44vh; max-height: 480px; }
+    #map { height: 240px; }
     .page-title { font-size: 34px; }
   }
 
@@ -1670,6 +1730,10 @@
                   ? haversine(userLat, userLng, parseFloat(b.latitude), parseFloat(b.longitude))
                   : null);
     const tier = b.location_tier ?? 'unknown';
+    // Surf height (marine wave_height_m → ft for display).
+    const surfFt = b.peak_wave_height_m != null
+      ? Number((parseFloat(b.peak_wave_height_m) * 3.28084).toFixed(1))
+      : null;
     return {
       kind: 'beach',
       id: `b:${b.arena_group_id ?? b.location_id}`,
@@ -1692,6 +1756,20 @@
       bacteriaRisk: b.bacteria_risk ?? 'none',
       hasOffLeash: b.has_off_leash === true,
       hasOnLeash:  b.has_on_leash === true,
+      // Condition-chip inputs (mirror index.html's day-card chips,
+      // with UV + sand + asphalt + surf added per 2026-06-10 redesign).
+      // Surface chips only render when peak crosses an advisory band;
+      // surf chip renders for any coastal beach with a marine_grid cell.
+      lowestTideFt: b.lowest_tide_height != null ? parseFloat(b.lowest_tide_height) : null,
+      avgTemp:      b.avg_temp != null           ? parseFloat(b.avg_temp)           : null,
+      avgWind:      b.avg_wind != null           ? parseFloat(b.avg_wind)           : null,
+      avgUv:        b.avg_uv   != null           ? parseFloat(b.avg_uv)             : null,
+      peakSand:     b.peak_sand_temp    != null  ? parseFloat(b.peak_sand_temp)     : null,
+      peakAsphalt:  b.peak_asphalt_temp != null  ? parseFloat(b.peak_asphalt_temp)  : null,
+      surfFt,
+      crowdCategory: b.busyness_category ?? null,
+      weatherIcon:  getWeatherIcon(b.summary_weather, b.weather_code),
+      weatherLabel: getWeatherLabel(b.summary_weather, b.weather_code),
       // Amenity presence flags — from find_beaches RPC (extended
       // 2026-06-07 to LEFT JOIN beach_amenities). NULL when the beach
       // has no amenity row yet; consumer treats NULL as unknown.
@@ -2015,41 +2093,50 @@
     const toneClass = `tone-${tone}`;
     const tierClass = c.kind === 'beach' && c.tier ? `tier-${c.tier}` : '';
 
-    // Disc label communicates which signal we're showing:
-    //  - Park (dog parks, no daily composite)
-    //  - Now (current_hour_score live signal, colored tone)
-    //  - Best (composite_score_v2 fallback when current is null but
-    //    today's peak is known — grey tone-unk; user sees a number
-    //    but the label tells them it's not current)
-    //  - No data (both null)
-    const discLabel = c.kind === 'dog_park' ? 'Park'
-                    : c.score == null       ? 'No data'
-                    : c.scoreIsCurrent      ? 'Now'
-                    :                          'Best';
-    const scoreDiscInner = c.kind === 'dog_park'
-      ? `<span class="score-val">★</span><span class="score-lbl">${discLabel}</span>`
-      : `<span class="score-val">${c.score != null ? c.score : '—'}</span><span class="score-lbl">${discLabel}</span>`;
+    // Left cluster — inline mono score + weather emoji. Dog-park
+    // rows use ★ in place of a numeric score; "No data" still gets
+    // the inline em-dash so the column stays aligned.
+    const scoreVal = c.kind === 'dog_park'
+      ? '★'
+      : (c.score != null ? c.score : '—');
+    const scoreInline = `<span class="score-inline ${toneClass}">${scoreVal}</span>`;
+    const weatherInline = c.weatherIcon
+      ? `<span class="weather-emoji" title="${escapeAttr(c.weatherLabel ?? '')}">${c.weatherIcon}</span>`
+      : '';
 
-    const metaParts = [];
-    if (c.distanceMi != null) {
-      metaParts.push(`<span class="meta-dist" data-dir="${c.id}" style="cursor:pointer">🚗 ${c.distanceMi.toFixed(1)} mi</span>`);
-    }
+    // Name + window time on one line, same font + size (Outfit 16/600).
+    // Window label is status-tinted; on day-pills the tone is colored,
+    // on NOW with peak-fallback the tone is unk (grey).
+    let windowHtml = '';
     if (c.bestWindow) {
-      metaParts.push(`<span class="meta-window">${escapeHtml(c.bestWindow)}</span>`);
+      windowHtml = `<span class="result-name-sep">·</span><span class="result-window ${toneClass}">${escapeHtml(c.bestWindow)}</span>`;
     } else if (c.kind === 'beach' && c.score != null) {
-      metaParts.push(`<span class="meta-window" style="color:var(--text-dim)">No good window today</span>`);
+      windowHtml = `<span class="result-name-sep">·</span><span class="result-window tone-unk">No window</span>`;
+    }
+
+    // Info row — distance + bacteria/dog-hour warnings (NOT chips).
+    const infoParts = [];
+    if (c.distanceMi != null) {
+      infoParts.push(`<span class="meta-dist" data-dir="${c.id}" style="cursor:pointer">🚗 ${c.distanceMi.toFixed(1)} mi</span>`);
     }
     if (c.bacteriaRisk === 'high' || c.bacteriaRisk === 'moderate') {
-      metaParts.push(`<span class="meta-warn">⚠ 72h rain advisory</span>`);
+      infoParts.push(`<span class="meta-warn">⚠ 72h rain advisory</span>`);
     }
-    // Dog-hours chip — explains the grey "Best" disc on tier-3
-    // limited-access beaches at noon. now_prohibited = red, currently
-    // OK (but with a cutoff coming) = neutral, always-no = red.
     if (c?.dogHours) {
       const cls = c.dogHours.state === 'now_ok_window' ? 'meta-doghours-ok' : 'meta-doghours-out';
-      metaParts.push(`<span class="${cls}">${c.dogHours.icon} ${escapeHtml(c.dogHours.label)}</span>`);
+      infoParts.push(`<span class="${cls}">${c.dogHours.icon} ${escapeHtml(c.dogHours.label)}</span>`);
     }
-    const metaHtml = metaParts.join(`<span class="meta-dot">·</span>`);
+    const infoHtml = infoParts.length
+      ? `<div class="result-info">${infoParts.join('<span class="info-sep">·</span>')}</div>`
+      : '';
+
+    // Condition chips — tide·surf·temp·wind·UV·[sand]·[asphalt]·crowd.
+    // Surface caution chips only render when peak crosses advisory.
+    // Dog parks skip the chip row entirely (no daily weather signal).
+    const chipsHtml = c.kind === 'dog_park' ? '' : buildCondChips(c);
+    const chipsBlock = chipsHtml
+      ? `<div class="result-chips">${chipsHtml}</div>`
+      : '';
 
     const amenityHtml = renderAmenityStrip(c);
 
@@ -2058,12 +2145,17 @@
          data-card-id="${c.id}"
          href="${navUrl(c)}"
          aria-label="${escapeAttr(c.name)} — rank ${rank}">
-        <div class="score-disc ${toneClass}" aria-hidden="true">
-          ${scoreDiscInner}
+        <div class="result-left">
+          ${scoreInline}
+          ${weatherInline}
         </div>
         <div class="result-body">
-          <div class="result-name">${escapeHtml(c.name)}</div>
-          <div class="result-meta">${metaHtml}</div>
+          <div class="result-name-row">
+            <span class="result-name">${escapeHtml(c.name)}</span>
+            ${windowHtml}
+          </div>
+          ${infoHtml}
+          ${chipsBlock}
           ${amenityHtml}
         </div>
         <div class="result-end">
@@ -2071,6 +2163,132 @@
           <div class="chev">›</div>
         </div>
       </a>`;
+  }
+
+  // ── Condition-chip helpers ────────────────────────────────────────
+  // chipStatus mirrors public.v2_signal_status thresholds (same source
+  // of truth as beach-chat's v2StatusFor + the SQL band defs). Keep in
+  // sync when bands change.
+  function chipStatus(signal, v) {
+    if (v == null) return null;
+    switch (signal) {
+      case 'uv':
+        if (v >= 11) return 'no_go';
+        if (v >=  9) return 'caution';
+        if (v >=  6) return 'advisory';
+        return 'go';
+      case 'sand':
+        if (v >= 145) return 'no_go';
+        if (v >= 125) return 'caution';
+        if (v >= 115) return 'advisory';
+        return null;   // chip suppressed below threshold
+      case 'asphalt':
+        if (v >= 125) return 'no_go';
+        if (v >= 115) return 'advisory';
+        return null;
+      case 'tide':
+        if (v >= 7) return 'no_go';
+        if (v >= 5) return 'caution';
+        if (v >= 3) return 'advisory';
+        return 'go';
+      case 'wind':
+        if (v >= 35) return 'no_go';
+        if (v >= 19) return 'caution';
+        if (v >= 13) return 'advisory';
+        return 'go';
+      case 'surf':
+        // v in meters. >2.5m ≈ 8.2ft (overhead+).
+        if (v >= 2.5) return 'no_go';
+        if (v >= 1.5) return 'caution';
+        if (v >= 0.9) return 'advisory';
+        return 'go';
+      case 'temp':
+        if (v >= 125 || v <= 20) return 'no_go';
+        if (v >=  95 || v <= 32) return 'caution';
+        if (v >=  85 || v <= 50) return 'advisory';
+        return 'go';
+      default:
+        return null;
+    }
+  }
+
+  function buildCondChips(c) {
+    const parts = [];
+    if (c.lowestTideFt != null) {
+      const st = chipStatus('tide', c.lowestTideFt);
+      parts.push(`<span class="cond-chip chip-${st}">🌊 ${c.lowestTideFt}ft</span>`);
+    }
+    if (c.surfFt != null) {
+      const st = chipStatus('surf', c.surfFt / 3.28084);
+      parts.push(`<span class="cond-chip chip-${st}">🏄 ${c.surfFt}ft</span>`);
+    }
+    if (c.avgTemp != null) {
+      const st = chipStatus('temp', c.avgTemp);
+      parts.push(`<span class="cond-chip chip-${st}">🌡 ${Math.round(c.avgTemp)}°</span>`);
+    }
+    if (c.avgWind != null) {
+      const st = chipStatus('wind', c.avgWind);
+      parts.push(`<span class="cond-chip chip-${st}">💨 ${Math.round(c.avgWind)}mph</span>`);
+    }
+    if (c.avgUv != null) {
+      const st = chipStatus('uv', c.avgUv);
+      parts.push(`<span class="cond-chip chip-${st}">☀ UV${Math.round(c.avgUv)}</span>`);
+    }
+    if (c.peakSand != null) {
+      const st = chipStatus('sand', c.peakSand);
+      if (st) parts.push(`<span class="cond-chip chip-${st}">🌶 Sand ${Math.round(c.peakSand)}°</span>`);
+    }
+    if (c.peakAsphalt != null) {
+      const st = chipStatus('asphalt', c.peakAsphalt);
+      if (st) parts.push(`<span class="cond-chip chip-${st}">🛣 Asphalt ${Math.round(c.peakAsphalt)}°</span>`);
+    }
+    if (c.crowdCategory) {
+      const meta = {
+        quiet:       { label: '✌️ Quiet',       st: 'go' },
+        moderate:    { label: '⚖️ Mod',         st: 'advisory' },
+        dog_party:   { label: '🎉 Dog Party',   st: 'go' },
+        too_crowded: { label: '🚫 Too Crowded', st: 'no_go' },
+      }[c.crowdCategory] || { label: c.crowdCategory, st: 'go' };
+      parts.push(`<span class="cond-chip chip-${meta.st}">${meta.label}</span>`);
+    }
+    return parts.join('<span class="cond-chip-sep">·</span>');
+  }
+
+  function getWeatherIcon(summaryWeather, wmoCode) {
+    const map = {
+      sunny:'☀️', partly_cloudy:'⛅', cloudy:'☁️',
+      foggy:'🌫️', rainy:'🌧️', windy:'💨',
+    };
+    if (summaryWeather && map[summaryWeather]) return map[summaryWeather];
+    if (wmoCode == null)  return '';
+    if (wmoCode === 0)    return '☀️';
+    if (wmoCode <= 2)     return '⛅';
+    if (wmoCode === 3)    return '☁️';
+    if (wmoCode <= 48)    return '🌫️';
+    if (wmoCode <= 67)    return '🌧️';
+    if (wmoCode <= 77)    return '🌨️';
+    if (wmoCode <= 82)    return '🌧️';
+    return '⛈️';
+  }
+
+  function getWeatherLabel(summaryWeather, wmoCode) {
+    const labels = {
+      sunny: 'Sunny', partly_cloudy: 'Partly cloudy', cloudy: 'Cloudy',
+      foggy: 'Foggy', rainy: 'Rainy', windy: 'Windy',
+    };
+    if (summaryWeather && labels[summaryWeather]) return labels[summaryWeather];
+    if (wmoCode == null) return '';
+    if (wmoCode === 0)   return 'Clear';
+    if (wmoCode <= 2)    return 'Partly cloudy';
+    if (wmoCode === 3)   return 'Overcast';
+    if (wmoCode <= 48)   return 'Fog';
+    if (wmoCode <= 57)   return 'Drizzle';
+    if (wmoCode <= 67)   return 'Rain';
+    if (wmoCode <= 77)   return 'Snow';
+    if (wmoCode <= 82)   return 'Showers';
+    if (wmoCode <= 86)   return 'Snow showers';
+    if (wmoCode <= 99)   return 'Thunderstorm';
+    return '';
   }
 
   function navUrl(c) {

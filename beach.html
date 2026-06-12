@@ -2938,7 +2938,36 @@ function _collapseSelfNamedRegions(regions, beachName) {
 
 function buildAmenitiesSection(amenities, dogPolicy, beach) {
   if (!amenities && !dogPolicy?.zone_rules) return '';
-  let regions = _zrRegions(dogPolicy?.zone_rules);
+
+  // Codifier gap (Franz 2026-06-11): 68% of ocean beaches (1,940 of
+  // 2,849) have a `sand` section but no `water` section in zone_rules.
+  // Source ordinances mostly treat the whole beach as one zone, so the
+  // codifier extracted sand but never wrote a separate water rule.
+  // Intent for those beaches is "water inherits the sand rule." Synthesize
+  // a water section mirroring sand when water is absent. Render path then
+  // picks it up via the normal _SECTION_TILE iteration so the 🌊 Water
+  // tile + hazard overlay both work. No data mutation.
+  const _synthesizeWaterFromSand = (zr) => {
+    if (!zr || (!zr.regions && !zr.seasons)) return zr;
+    const clone = JSON.parse(JSON.stringify(zr));
+    const visitRegions = (regs) => {
+      for (const reg of (regs || [])) {
+        const secs = reg?.sections;
+        if (secs && secs.sand && !secs.water) {
+          secs.water = JSON.parse(JSON.stringify(secs.sand));
+        }
+      }
+    };
+    if (Array.isArray(clone.seasons)) {
+      for (const s of clone.seasons) visitRegions(s.regions);
+    } else if (Array.isArray(clone.regions)) {
+      visitRegions(clone.regions);
+    }
+    return clone;
+  };
+  const effectiveZoneRules = _synthesizeWaterFromSand(dogPolicy?.zone_rules);
+
+  let regions = _zrRegions(effectiveZoneRules);
   regions = _collapseSelfNamedRegions(regions, beach?.display_name || beach?.name);
 
   // Build the all-zones amenity tiles (has_X=true items not tied to
@@ -2967,7 +2996,7 @@ function buildAmenitiesSection(amenities, dogPolicy, beach) {
 
   // SINGLE-ZONE (or no zone_rules) — collapse to one grid.
   if (regions.length <= 1) {
-    const ruleMap = _ruleMapFromZoneRules(dogPolicy?.zone_rules || {});
+    const ruleMap = _ruleMapFromZoneRules(effectiveZoneRules || {});
     // Render bare tile when section has NO time variation (or no
     // windows). When there's variation, chips cover the full day
     // including base-rule portions — bare tile would be redundant.

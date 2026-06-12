@@ -2308,17 +2308,23 @@ function _visibleAmenityTiles(amenities) {
   });
 }
 
-// Render a tile array. Sort: most-favorable-to-dogs first
-// (off_leash → on_leash → unknown/no-rule → not_allowed), parking
-// first within the same favorability bucket, then label length.
+// Render a tile array. Sort: sand always first, water always second
+// (Franz 2026-06-11 — these are the load-bearing "what is this beach"
+// signals and belong at the top regardless of dog rule). After that:
+// most-favorable-to-dogs first (off_leash → on_leash → unknown/no-rule
+// → not_allowed), parking first within the same favorability bucket,
+// then label length.
 const _DOG_FAVOR = { off_leash: 0, on_leash: 1, unknown: 2, not_allowed: 3 };
+const _PINNED_SECTION_ORDER = { sand: 0, water: 1 };  // sand first, water second
 function _renderTileSet(tiles, amenities, ruleFor) {
   const decorated = tiles.map(d => ({
     d,
     rule: ruleFor ? ruleFor(d) : null,
     favor: _DOG_FAVOR[(ruleFor ? ruleFor(d) : null) ?? 'unknown'] ?? 2,
+    pin:   _PINNED_SECTION_ORDER[d.sectionName] ?? 99,
   }));
   decorated.sort((a, b) => {
+    if (a.pin !== b.pin) return a.pin - b.pin;
     if (a.favor !== b.favor) return a.favor - b.favor;
     if (a.d.key === 'has_parking') return -1;
     if (b.d.key === 'has_parking') return 1;

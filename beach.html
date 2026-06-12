@@ -388,11 +388,23 @@
   .amenity-grid { gap: 4px; }
   /* Long labels wrap inside the narrow 2-col cell. */
   .amenity-label { white-space: normal; line-height: 1.2; }
-  /* Tiles tinted by dog-policy rule when the section has one. */
-  .amenity.rule-off_leash   { background: rgba(34,197,94,0.45); border-color: rgba(21,128,61,0.42); }
-  .amenity.rule-on_leash    { background: rgba(251,191,36,0.53); border-color: rgba(180,83,9,0.42); }
+  /* Dog-policy rule signaling. Background defaults to white (.amenity
+   * card color above) — the corner badge glyph below carries the
+   * off-leash / on-leash signal. Only `not_allowed` keeps a strong
+   * color, because "dogs prohibited" is a hard-stop signal that
+   * warrants the same red treatment as a no_go hazard. (Franz
+   * 2026-06-12: replace green/yellow tints with leash icons.) */
   .amenity.rule-not_allowed { background: rgba(239,68,68,0.45); border-color: rgba(153,27,27,0.42); }
   .amenity.rule-unknown     { background: rgba(0,0,0,0.04); }
+  /* Rule badge — the PRIMARY rule cue for off-leash / on-leash now
+   * that the color tint is gone. 🐾 off-leash, 🦮 on-leash, 🚫 not-
+   * allowed. Rendered inline immediately after the section emoji at
+   * the same size, so the pair reads as "[place] [rule]". */
+  .amenity-rule-badge {
+    font-size: 14px;     /* matches .amenity-icon */
+    line-height: 1;
+    flex-shrink: 0;
+  }
   /* Zone-name sub-header inside the unified Amenities card (multi-zone beaches). */
   .amenity-zone-header {
     font-size: 11px; font-weight: 700; text-transform: uppercase;
@@ -2195,6 +2207,26 @@ function _formatAcres(m2) {
   return Math.round(acres).toLocaleString('en-US');
 }
 
+// Corner-badge glyph + screen-reader phrase per dog-policy rule. Used
+// on every rule-bearing amenity tile (section tiles, time-bucket chips,
+// and any amenity that inherits a rule). The icon reinforces the
+// color tint so color-blind users / outdoor readers get the signal too.
+const _RULE_BADGE = {
+  off_leash:   '🐾',
+  on_leash:    '🦮',
+  not_allowed: '🚫',
+};
+const _RULE_ARIA_LABEL = {
+  off_leash:   'off-leash',
+  on_leash:    'on-leash',
+  not_allowed: 'dogs not allowed',
+};
+function _ruleBadgeHtml(rule) {
+  const glyph = _RULE_BADGE[rule];
+  if (!glyph) return '';   // unknown / null → no badge
+  return `<span class="amenity-rule-badge" aria-hidden="true">${glyph}</span>`;
+}
+
 // Build the data-attrs string for clickable amenity buttons. Keeps the
 // content-vs-copy split: structural data on the button, body text built
 // at click time from a copy lookup (so iterating on phrasing doesn't
@@ -2209,6 +2241,14 @@ function _amenityButtonAttrs(def, rule, opts) {
   if (o.value)        parts.push(`data-value="${escHtml(o.value)}"`);
   if (o.sub)          parts.push(`data-sub="${escHtml(o.sub)}"`);
   parts.push(`aria-expanded="false"`);
+  // Screen-reader equivalent of the corner badge: appends ", off-leash"
+  // etc. to the visible label so the rule is read aloud alongside the
+  // amenity name. Badge emoji itself is aria-hidden.
+  const rulePhrase = _RULE_ARIA_LABEL[rule];
+  if (rulePhrase) {
+    const labelBits = [def.label, o.sub, rulePhrase].filter(Boolean).join(', ');
+    parts.push(`aria-label="${escHtml(labelBits)}"`);
+  }
   return parts.join(' ');
 }
 
@@ -2220,6 +2260,7 @@ function _renderParkingTile(def, type, subtype, fee, ruleClass, rule) {
   const attrs = _amenityButtonAttrs(def, rule, { value: sub, sub });
   return `<button class="amenity${ruleClass || ''}" ${attrs} data-tip="${escHtml(tip)}">
     <span class="amenity-icon">${def.icon}</span>
+    ${_ruleBadgeHtml(rule)}
     <span class="amenity-text">
       <span class="amenity-label">${def.label}</span>
       ${sub ? `<span class="amenity-sub">${escHtml(sub)}</span>` : ''}
@@ -2250,6 +2291,7 @@ function _renderAmenityTileWithRule(def, amenities, rule) {
   if (def.sectionName) {
     return `<button class="amenity${ruleClass}${fwClass}" ${attrs} data-tip="${escHtml(tip)}">
       <span class="amenity-icon">${def.icon}</span>
+      ${_ruleBadgeHtml(rule)}
       <span class="amenity-label">${def.label}</span>
     </button>`;
   }
@@ -2272,6 +2314,7 @@ function _renderAmenityTileWithRule(def, amenities, rule) {
     const finalTip = hasJsonb ? `${def.label} — see Accessibility card below` : tip;
     return `<button class="amenity${ruleClass}" ${attrs} data-tip="${escHtml(finalTip)}">
       <span class="amenity-icon">${def.icon}</span>
+      ${_ruleBadgeHtml(rule)}
       <span class="amenity-label">${def.label}</span>
     </button>`;
   }
@@ -2282,6 +2325,7 @@ function _renderAmenityTileWithRule(def, amenities, rule) {
     const lgAttrs = _amenityButtonAttrs(def, rule, { sub: 'Seasonal' });
     return `<button class="amenity${ruleClass}" ${lgAttrs} data-tip="${escHtml(tip + ' · seasonal, typically Memorial Day–Labor Day')}">
       <span class="amenity-icon">${def.icon}</span>
+      ${_ruleBadgeHtml(rule)}
       <span class="amenity-text">
         <span class="amenity-label">${def.label}</span>
         <span class="amenity-sub">Seasonal</span>
@@ -2290,6 +2334,7 @@ function _renderAmenityTileWithRule(def, amenities, rule) {
   }
   return `<button class="amenity${ruleClass}" ${attrs} data-tip="${escHtml(tip)}">
     <span class="amenity-icon">${def.icon}</span>
+    ${_ruleBadgeHtml(rule)}
     <span class="amenity-label">${def.label}</span>
   </button>`;
 }
@@ -2854,13 +2899,18 @@ function _regionTimeBucketTiles(reg, beach) {
     // data-section so the per-section hazard overlay can color the
     // chip when today's conditions warrant (e.g. severe rip current
     // → red water chips). data-range / data-rule feed the click body.
+    const ariaLabel = _RULE_ARIA_LABEL[it.cls]
+      ? `${label}, ${range}, ${_RULE_ARIA_LABEL[it.cls]}`
+      : `${label}, ${range}`;
     return `<button type="button" class="amenity rule-${it.cls}${colClass}"
                     data-section="${escHtml(it.section)}"
                     data-rule="${escHtml(it.cls)}"
                     data-range="${escHtml(range)}"
                     aria-expanded="false"
+                    aria-label="${escHtml(ariaLabel)}"
                     data-tip="${escHtml(tip)}">
               <span class="amenity-icon">${icon}</span>
+              ${_ruleBadgeHtml(it.cls)}
               <span class="amenity-text">
                 <span class="amenity-label">${escHtml(label)}</span>
                 <span class="amenity-sub">${escHtml(range)}</span>

@@ -2078,7 +2078,7 @@ const AMENITY_DEFS = [
   { key: 'has_picnic_area',     icon: '🧺',  label: 'Picnic area' },
   { key: 'has_fire_pits',       icon: '🔥',  label: 'Fire pits' },
   { key: 'has_lifeguards',      icon: '🛟',  label: 'Lifeguards' },
-  { key: 'has_disabled_access', icon: '♿',  label: 'Accessibility' },
+  { key: 'has_disabled_access', icon: '♿',  label: 'ADA access' },
 ];
 
 // Phase 4 of [[dwell-ada-crowd-autocurate]] (revised 2026-06-07): the rich
@@ -2141,7 +2141,7 @@ function _accessibilityOverviewLine(features) {
   }
   if (features.accessible_restrooms === true || features.accessible_parking === true ||
       features.accessible_viewing === true || features.boardwalk === true) {
-    return 'This beach has accessibility features — see the Accessibility card for details.';
+    return 'This beach has accessibility features — see the ADA access card for details.';
   }
   if (features.path_to_sand === 'stairs_only') return 'Beach access is stairs-only; no wheelchair path to the sand.';
   return null;
@@ -2311,7 +2311,7 @@ function _renderAmenityTileWithRule(def, amenities, rule) {
   // Accessibility card above Pack List (Franz 2026-06-07 revision).
   if (def.key === 'has_disabled_access') {
     const hasJsonb = _accessibilityHasContent(amenities?.accessibility_features);
-    const finalTip = hasJsonb ? `${def.label} — see Accessibility card below` : tip;
+    const finalTip = hasJsonb ? `${def.label} — see ADA access card below` : tip;
     return `<button class="amenity${ruleClass}" ${attrs} data-tip="${escHtml(finalTip)}">
       <span class="amenity-icon">${def.icon}</span>
       ${_ruleBadgeHtml(rule)}
@@ -3343,7 +3343,7 @@ function _amenityDetailBody(btn) {
   } else if (key === 'has_food') {
     primaryBody = 'Food / concessions on site.';
   } else if (key === 'has_disabled_access') {
-    primaryBody = 'Accessible features available — see the Accessibility card below.';
+    primaryBody = 'Accessible features available — see the ADA access card below.';
   } else if (key === 'area') {
     const m2Str = _currentBeachAreaM2
       ? Math.round(_currentBeachAreaM2).toLocaleString('en-US')
@@ -4481,7 +4481,7 @@ function buildAccessibilityCard(amenities) {
   const sourcesHtml = Array.isArray(features._sources) && features._sources.length > 1
     ? `<p class="acc-sources">Source: ${escHtml(features._sources.join(' + '))}</p>` : '';
   return `<section class="card accessibility-card">
-    <h2>Accessibility</h2>
+    <h2>ADA access</h2>
     <div class="acc-rows">${rows}</div>
     ${notesHtml}
     ${sourcesHtml}

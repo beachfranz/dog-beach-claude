@@ -649,6 +649,14 @@
     color: var(--text-dim);
     flex-shrink: 0;
   }
+  /* Leash-rule glyph next to the beach name: 🐾 off-leash, 🦮 on-leash,
+   * 🚫 not-allowed. Mirrors beach.html's amenity-tile badge. Mixed
+   * beaches render both 🐾🦮. */
+  .result-leash {
+    flex-shrink: 0;
+    line-height: 1;
+    margin-left: 2px;
+  }
   .result-window         { flex-shrink: 0; color: var(--text); }
   .result-window.tone-go   { color: var(--green); }
   .result-window.tone-mid  { color: var(--amber); }
@@ -924,7 +932,7 @@
           <span class="chip-icon">🐾</span> Off-leash beaches
         </button>
         <button type="button" class="chip" data-want="on_leash_beach">
-          <span class="chip-icon">🐕</span> On-leash beaches
+          <span class="chip-icon">🦮</span> On-leash beaches
         </button>
         <button type="button" class="chip active" data-want="dog_park">
           <span class="chip-icon">★</span> Dog parks
@@ -945,6 +953,9 @@
         </button>
         <button type="button" class="chip chip-amenity" data-amenity="shade">
           <span class="chip-icon">🌳</span> Shade
+        </button>
+        <button type="button" class="chip chip-amenity" data-amenity="ada">
+          <span class="chip-icon">♿</span> ADA access
         </button>
       </div>
     </div>
@@ -1097,7 +1108,7 @@
     return new Set(['off_leash_beach', 'dog_park']);
   }
   function restoreAmenitiesFromStorage() {
-    const ALL = ['parking', 'restrooms', 'water', 'shade'];
+    const ALL = ['parking', 'restrooms', 'water', 'shade', 'ada'];
     try {
       const stored = localStorage.getItem(AMENS_KEY);
       if (stored) {
@@ -1860,6 +1871,7 @@
         restrooms: b.has_restrooms,
         water:     b.has_drinking_water,
         shade:     undefined,
+        ada:       b.has_disabled_access,
       },
       tier,
       // Dog hour exclusion — when the beach has a prohibited window,
@@ -2229,6 +2241,26 @@
 
     const amenityHtml = renderAmenityStrip(c);
 
+    // Leash-rule badge next to the beach name. Mirrors beach.html's
+    // amenity-tile badge vocabulary: 🐾 off-leash, 🦮 on-leash,
+    // 🚫 not-allowed. Mixed beaches (both zones) get both glyphs.
+    // Skipped for dog parks — the ★ already signals "off-leash by
+    // definition", and dog parks set hasOffLeash=true unconditionally
+    // (would be uninformative noise here).
+    let leashHtml = '';
+    if (c.kind === 'beach') {
+      const g = [];
+      let ariaBits = [];
+      if (c.hasOffLeash) { g.push('🐾'); ariaBits.push('off-leash'); }
+      if (c.hasOnLeash)  { g.push('🦮'); ariaBits.push('on-leash'); }
+      if (!c.hasOffLeash && !c.hasOnLeash) {
+        g.push('🚫'); ariaBits.push('dogs not allowed');
+      }
+      if (g.length) {
+        leashHtml = `<span class="result-leash" aria-label="${escapeAttr(ariaBits.join(', '))}">${g.join('')}</span>`;
+      }
+    }
+
     // Hero thumb tile — placeholder when no photo so card alignment
     // is consistent across the list.
     const thumbHtml = c.heroThumbUrl
@@ -2248,6 +2280,7 @@
         <div class="result-body">
           <div class="result-name-row">
             <span class="result-name">${escapeHtml(c.name)}</span>
+            ${leashHtml}
             ${windowHtml}
             ${mileageHtml}
           </div>
@@ -2451,6 +2484,7 @@
       restrooms: { icon:'🚻', label:'Restrooms' },
       water:     { icon:'💧', label:'Water' },
       shade:     { icon:'🌳', label:'Shade' },
+      ada:       { icon:'♿', label:'ADA access' },
     };
     const dots = [];
     for (const a of amenityFilters) {

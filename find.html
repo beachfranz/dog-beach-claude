@@ -2013,14 +2013,19 @@
 
   function matchesWant(card) {
     if (card.kind === 'dog_park') return wants.has('dog_park');
-    // Beach: depends on chips. Both off + on → either. Only off → has_off_leash.
-    // Only on → has_on_leash && !has_off_leash. Neither → exclude beaches.
+    // Beach: chip filter is "has the zone I want". Mixed beaches with
+    // BOTH on-leash and off-leash sections qualify for either filter
+    // — a user picking "on-leash" still wants a beach whose on-leash
+    // zone they can use, even if there's also an off-leash zone next
+    // door. Prior logic (`hasOnLeash && !hasOffLeash`) excluded the
+    // mixed case and zeroed out results in mixed-policy regions.
+    // Franz 2026-06-12.
     const wantOff = wants.has('off_leash_beach');
     const wantOn  = wants.has('on_leash_beach');
     if (!wantOff && !wantOn) return false;
-    if (wantOff && wantOn) return true;
+    if (wantOff && wantOn) return card.hasOffLeash || card.hasOnLeash;
     if (wantOff) return card.hasOffLeash;
-    if (wantOn)  return card.hasOnLeash && !card.hasOffLeash;
+    if (wantOn)  return card.hasOnLeash;
     return true;
   }
 

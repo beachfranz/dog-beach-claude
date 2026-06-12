@@ -2223,7 +2223,14 @@ const _SECTION_TO_AMENITY = {
 const _SECTION_TILE = {
   sand:           { icon: '🏖️', label: 'Sand' },
   trails:         { icon: '🥾', label: 'Trails' },
-  water_swim:     { icon: '🌊', label: 'Water' },
+  // Water — canonical key is `water` (matches SECTION_NOUN above).
+  // `water_swim` and `swimming_beach` are zone_rules synonyms that
+  // 20260611i_canonicalize_water_sections.sql collapses to `water`.
+  // Aliases retained here as belt-and-suspenders for any rows that
+  // miss the canonicalization sweep.
+  water:           { icon: '🌊', label: 'Water' },
+  water_swim:      { icon: '🌊', label: 'Water' },
+  swimming_beach:  { icon: '🌊', label: 'Water' },
   dunes:          { icon: '🏜️', label: 'Dunes' },
   bluff:          { icon: '🏔️', label: 'Bluff' },
   boardwalk:      { icon: '🚶', label: 'Boardwalk' },

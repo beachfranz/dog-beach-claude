@@ -333,6 +333,10 @@
   @media (min-width: 480px) {
     .amenity-grid { grid-template-columns: repeat(3, 1fr); }
   }
+  /* Sand + Water + their time-window chips claim a full row each so
+   * a beach with multiple time windows reads top-down (vertical stack)
+   * instead of cramming into the 2-col / 3-col grid. */
+  .amenity.amenity-fullwidth { grid-column: 1 / -1; }
   .amenity {
     display: flex; align-items: center; gap: 6px; padding: 6px 8px;
     border: 1px solid var(--border); border-radius: 6px;
@@ -2235,10 +2239,15 @@ function _renderAmenityTileWithRule(def, amenities, rule) {
   const ruleClass = rule ? ` rule-${rule}` : '';
   const tip = _amenityTooltip(def, rule);
   const attrs = _amenityButtonAttrs(def, rule);
+  // Sand + Water claim a full grid row so their tile + any time-window
+  // chips read top-down vertically rather than getting wedged into the
+  // 2-col / 3-col grid alongside other amenities.
+  const fwClass = (def.sectionName === 'sand' || def.sectionName === 'water')
+    ? ' amenity-fullwidth' : '';
   // Section-only tile (e.g. Sand, Trails) — no amenity boolean,
   // just emoji + label + rule color.
   if (def.sectionName) {
-    return `<button class="amenity${ruleClass}" ${attrs} data-tip="${escHtml(tip)}">
+    return `<button class="amenity${ruleClass}${fwClass}" ${attrs} data-tip="${escHtml(tip)}">
       <span class="amenity-icon">${def.icon}</span>
       <span class="amenity-label">${def.label}</span>
     </button>`;
@@ -2813,7 +2822,14 @@ function _regionTimeBucketTiles(reg, beach) {
     return minToFmt(min);
   };
 
-  return merged.map(it => {
+  // Sort: sand first, water second, everything else in stable order.
+  // This keeps the water/sand hour chips pinned at the top of the grid
+  // alongside their full-width row treatment.
+  const _SEC_PIN = { sand: 0, water: 1 };
+  const sortedMerged = [...merged].sort((a, b) =>
+    (_SEC_PIN[a.section] ?? 99) - (_SEC_PIN[b.section] ?? 99)
+  );
+  return sortedMerged.map(it => {
     // Display range:
     //   1. Sentinel endpoints (0 / 1440) substitute to operating hours
     //      (openMin/closeMin), which already fall back to sunrise/sunset
@@ -2833,7 +2849,10 @@ function _regionTimeBucketTiles(reg, beach) {
     const label = parts.slice(1).join(' ') || it.section;
     const ruleLabel = ({off_leash:'Off-leash', on_leash:'On-leash', not_allowed:'Not allowed'})[it.cls] || it.cls;
     const tip = `${label} · ${ruleLabel} · ${range}`;
-    return `<div class="amenity rule-${it.cls}" data-tip="${escHtml(tip)}">
+    // Sand + Water hour chips claim a full grid row (vertical stack).
+    const fw = (it.section === 'sand' || it.section === 'water')
+      ? ' amenity-fullwidth' : '';
+    return `<div class="amenity rule-${it.cls}${fw}" data-tip="${escHtml(tip)}">
               <span class="amenity-icon">${icon}</span>
               <span class="amenity-text">
                 <span class="amenity-label">${escHtml(label)}</span>
@@ -3036,9 +3055,12 @@ function buildAmenitiesSection(amenities, dogPolicy, beach) {
     const timeBuckets = regions.length === 1 ? _regionTimeBucketTiles(regions[0], beach) : '';
     if (!all.length && !timeBuckets) return '';
     const cells = _renderTileSet(all, amenities, ruleFor);
+    // timeBuckets render FIRST so sand+water time chips (sorted to
+    // start of timeBuckets) land at the very top of the grid. Bare
+    // amenity cells follow underneath.
     return `<section class="card amenities-card">
       <h2>Amenities</h2>
-      <div class="amenity-grid">${cells}${timeBuckets}</div>
+      <div class="amenity-grid">${timeBuckets}${cells}</div>
       <div class="amenity-detail" id="amenity-detail" hidden></div>
     </section>`;
   }
@@ -3140,8 +3162,10 @@ function buildAmenitiesSection(amenities, dogPolicy, beach) {
     };
     const tileCells = _renderTileSet(tilesForRegion, amenities, ruleFor);
     const timeBuckets = _regionTimeBucketTiles(reg, beach);
+    // timeBuckets first — sand+water chips sort to front + claim full
+    // rows, so they land at the top of each zone block.
     const tileGrid = (tileCells || timeBuckets)
-      ? `<div class="amenity-grid">${tileCells}${timeBuckets}</div>`
+      ? `<div class="amenity-grid">${timeBuckets}${tileCells}</div>`
       : '';
     blocks.push(`
       <div class="amenity-zone-header">${escHtml(zoneName)}</div>

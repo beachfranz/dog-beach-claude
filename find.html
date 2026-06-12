@@ -1826,6 +1826,11 @@
       // text product via wfo_srf_forecast. NULL for inland beaches or
       // zones without a current-period row.
       ripCurrentRisk: b.rip_current_risk ?? null,
+      // Hazards: array of {event_type, severity, value} from beach_advisory
+      // (8 categories landed in 20260611e). Frontend maps event_type to
+      // icon + short label via hazardChip(). Sorted severe → moderate
+      // by the RPC. Includes rip_current_risk; render dedupes it.
+      hazards: Array.isArray(b.hazards) ? b.hazards : [],
       hasOffLeash: b.has_off_leash === true,
       hasOnLeash:  b.has_on_leash === true,
       // Condition-chip inputs (mirror index.html's day-card chips,
@@ -2305,13 +2310,41 @@
     }
   }
 
+  // Per-event_type icon + short label for the cond-chip row. Severity
+  // → status colour comes from hazardStatus() below (severe=no_go red,
+  // moderate=caution amber). Rip keeps its dedicated 🚩 glyph + value
+  // suffix for backward continuity; the rest are short noun chips.
+  function hazardChip(eventType, severity, value) {
+    const sevText = severity === 'severe' ? '' : '';  // (no extra suffix today)
+    switch (eventType) {
+      case 'rip_current_risk':        return `🚩 Rip ${value || ''}`.trim();
+      case 'sneaker_wave_risk':       return '🌊 Sneaker';
+      case 'high_surf_risk':          return '🌊 Surf';
+      case 'longshore_current_risk':  return '🌀 Longshore';
+      case 'pier_hazard_risk':        return '⚠ Pier';
+      case 'beach_erosion_risk':      return '⛰ Erosion';
+      case 'cold_water_shock_risk':   return '❄ Cold water';
+      case 'shore_break_risk':        return '💥 Shore break';
+      default: return null;
+    }
+  }
+  // Severity → existing cond-chip status. severe=red, moderate=amber.
+  function hazardStatus(severity) {
+    if (severity === 'severe')   return 'no_go';
+    if (severity === 'moderate') return 'caution';
+    return null;
+  }
+
   function buildCondChips(c) {
     const parts = [];
-    // Rip current risk first — lifeguard-flag glyph, always shown when
-    // chipStatus returns non-null (suppresses Low). Mod = amber, High = red.
-    if (c.ripCurrentRisk) {
-      const st = chipStatus('rip', c.ripCurrentRisk);
-      if (st) parts.push(`<span class="cond-chip chip-${st}">🚩 Rip ${c.ripCurrentRisk}</span>`);
+    // Active hazards from beach_advisory (rip + sneaker + surf + longshore +
+    // pier + erosion + cold + shore_break). Already severity-sorted by RPC.
+    if (Array.isArray(c.hazards) && c.hazards.length > 0) {
+      for (const h of c.hazards) {
+        const label = hazardChip(h.event_type, h.severity, h.value);
+        const st = hazardStatus(h.severity);
+        if (label && st) parts.push(`<span class="cond-chip chip-${st}">${label}</span>`);
+      }
     }
     if (c.lowestTideFt != null) {
       const st = chipStatus('tide', c.lowestTideFt);

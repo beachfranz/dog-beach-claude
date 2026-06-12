@@ -2180,6 +2180,16 @@ function _amenityTooltip(def, rule) {
   return `${def.label}${ruleNote}`;
 }
 
+// m² → acres with sensible precision across our distribution
+// (median 2.3 acres, p90 53 acres, max 3,043 acres).
+function _formatAcres(m2) {
+  if (!m2 || m2 <= 0) return '';
+  const acres = m2 * 0.000247105;
+  if (acres < 0.1) return '<0.1';
+  if (acres < 10)  return acres.toFixed(1);
+  return Math.round(acres).toLocaleString('en-US');
+}
+
 // Build the data-attrs string for clickable amenity buttons. Keeps the
 // content-vs-copy split: structural data on the button, body text built
 // at click time from a copy lookup (so iterating on phrasing doesn't
@@ -2413,6 +2423,9 @@ function _sectionHazardSignal(sectionName, advisories, hoursToday) {
 // Set in the main render path; updated in loadWaterConditionAdvisories.
 let _advisoriesForOverlay = [];
 let _hoursForOverlay = [];
+// Stash beach.area_m2 (single number per page load) so the click-detail
+// body for the synthetic area tile can format m² with full precision.
+let _currentBeachAreaM2 = null;
 
 // Walk all rendered amenity buttons with data-section + apply overlay
 // classes, corner badges, and extended tooltips. Re-entrant — safe to
@@ -2934,6 +2947,21 @@ function buildAmenitiesSection(amenities, dogPolicy, beach) {
   // appear under their zones; pull them out here.
   const zoneTiedKeys = new Set(Object.values(_SECTION_TO_AMENITY));
   const allAmenityTiles = _visibleAmenityTiles(amenities);
+  // Synthetic area tile from beach.area_m2 (mirrors dog-park.html:1281).
+  // Only renders when populated — ~53% of beaches today via the OSM
+  // polygon backfill. _i: -1 sorts it ahead of rule-tied amenities so
+  // it sits near Sand + Water (the pinned section tiles) visually.
+  if (beach?.area_m2 > 0) {
+    _currentBeachAreaM2 = beach.area_m2;
+    allAmenityTiles.push({
+      key:   'area',
+      icon:  '📐',
+      label: `${_formatAcres(beach.area_m2)} acres`,
+      _i:    -1,
+    });
+  } else {
+    _currentBeachAreaM2 = null;
+  }
   const sharedAmenityTiles = allAmenityTiles.filter(t => !zoneTiedKeys.has(t.key));
   const zoneTiedAmenityTiles = allAmenityTiles.filter(t => zoneTiedKeys.has(t.key));
 
@@ -3194,6 +3222,13 @@ function _amenityDetailBody(btn) {
     primaryBody = 'Food / concessions on site.';
   } else if (key === 'has_disabled_access') {
     primaryBody = 'Accessible features available — see the Accessibility card below.';
+  } else if (key === 'area') {
+    const m2Str = _currentBeachAreaM2
+      ? Math.round(_currentBeachAreaM2).toLocaleString('en-US')
+      : '';
+    primaryBody = m2Str
+      ? `Beach footprint, from OSM polygon (${m2Str} m²).`
+      : 'Beach footprint, from OSM polygon.';
   } else {
     primaryBody = label;
   }

@@ -2850,13 +2850,22 @@ function _regionTimeBucketTiles(reg, beach) {
     const colClass = it.section === 'sand'  ? ' col-sand'
                    : it.section === 'water' ? ' col-water'
                    : '';
-    return `<div class="amenity rule-${it.cls}${colClass}" data-tip="${escHtml(tip)}">
+    // Use <button> (not <div>) so click-detail handler fires + add
+    // data-section so the per-section hazard overlay can color the
+    // chip when today's conditions warrant (e.g. severe rip current
+    // → red water chips). data-range / data-rule feed the click body.
+    return `<button type="button" class="amenity rule-${it.cls}${colClass}"
+                    data-section="${escHtml(it.section)}"
+                    data-rule="${escHtml(it.cls)}"
+                    data-range="${escHtml(range)}"
+                    aria-expanded="false"
+                    data-tip="${escHtml(tip)}">
               <span class="amenity-icon">${icon}</span>
               <span class="amenity-text">
                 <span class="amenity-label">${escHtml(label)}</span>
                 <span class="amenity-sub">${escHtml(range)}</span>
               </span>
-            </div>`;
+            </button>`;
   }).join('');
 }
 
@@ -3191,6 +3200,7 @@ function _amenityDetailBody(btn) {
   const sec        = btn.dataset.section || '';
   const rule       = btn.dataset.rule || '';
   const value      = btn.dataset.value || '';
+  const range      = btn.dataset.range || '';   // time-bucket chips
   const hazImpact  = btn.dataset.hazImpact || '';
   const hazSummary = btn.dataset.hazSummary || '';
   const label      = btn.querySelector('.amenity-label')?.textContent || '';
@@ -3227,14 +3237,25 @@ function _amenityDetailBody(btn) {
   if (sec === 'water') {
     if (hazImpact) {
       primaryBody = hazImpact;
-      secondaryBody = `Normally: ${policyForWater.toLowerCase()}`;
+      const norm = range
+        ? `${policyForWater.replace(/\.$/, '')} ${range}.`
+        : policyForWater;
+      secondaryBody = `Normally: ${norm.toLowerCase()}`;
+    } else if (range) {
+      // Time-bucket chip — show the rule for this window with explicit hours
+      primaryBody = `${policyForWater.replace(/\.$/, '')} ${range}.`;
     } else {
       primaryBody = policyForWater;
     }
   } else if (sec === 'sand') {
     if (hazImpact) {
       primaryBody = hazImpact;
-      secondaryBody = `Normally: ${policyForSand.toLowerCase()}`;
+      const norm = range
+        ? `${policyForSand.replace(/\.$/, '')} ${range}.`
+        : policyForSand;
+      secondaryBody = `Normally: ${norm.toLowerCase()}`;
+    } else if (range) {
+      primaryBody = `${policyForSand.replace(/\.$/, '')} ${range}.`;
     } else {
       primaryBody = policyForSand;
     }

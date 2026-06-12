@@ -338,7 +338,37 @@
     border: 1px solid var(--border); border-radius: 6px;
     font-size: 12px;
     background: var(--card);
+    /* Button reset — amenity tiles became clickable in this pass.
+     * Identity styling above; reset native button defaults so the tile
+     * looks identical to the prior <div> rendering. */
+    font-family: inherit; color: inherit; text-align: left;
+    cursor: pointer; position: relative;
   }
+  .amenity:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+  /* Hazard overlay: severity ring + corner badge. Worst-wins from
+   * today's beach_advisory rows (water hazards) + sand_temp peak +
+   * wind peak (sandblast). Doesn't change the rule-* background. */
+  .amenity.haz-moderate {
+    box-shadow: inset 0 0 0 3px rgba(251,146,60,0.75);
+  }
+  .amenity.haz-severe {
+    box-shadow: inset 0 0 0 3px rgba(239,68,68,0.85);
+  }
+  .haz-badge {
+    position: absolute; top: 3px; right: 4px;
+    font-size: 11px; line-height: 1; pointer-events: none;
+  }
+  /* Detail panel below the amenity grid — mirrors #caution-detail.
+   * Single-select: opening one tile closes any other open tile. */
+  .amenity-detail {
+    margin-top: 6px; padding: 8px 10px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: rgba(0,0,0,0.02); font-size: 12px;
+    color: var(--text); line-height: 1.35;
+  }
+  .amenity-detail-label { font-weight: 600; margin-bottom: 2px; }
+  .amenity-detail-value { font-weight: 500; color: var(--text-muted); margin-left: 6px; }
+  .amenity-detail-haz   { margin-top: 4px; color: #991b1b; font-size: 11px; }
   .amenity-icon { font-size: 14px; flex-shrink: 0; }
   .amenity-text { display: flex; flex-direction: column; line-height: 1.2; }
   .amenity-sub {
@@ -1725,6 +1755,14 @@ function render(data, beachFid) {
   leftRail.push(buildWeatherSection(beach));
   document.getElementById('left-rail').innerHTML = leftRail.filter(Boolean).join('');
 
+  // Wire up amenity tile click-to-detail (once) + apply today's
+  // environmental-hazard overlays to Sand + Water tiles. Hours are
+  // available synchronously; water-hazard advisories arrive async via
+  // loadWaterConditionAdvisories which re-runs the overlay pass.
+  setupAmenityDetailDelegation();
+  _hoursForOverlay = Array.isArray(data.hours_today) ? data.hours_today : [];
+  _applyAmenityHazardOverlays();
+
   // MAIN (top → bottom):
   //   Appeal, Alternatives (if triggered), Photos (only when present),
   //   Overview, Best Window, Location, Details, Links
@@ -2137,18 +2175,36 @@ function _amenityTooltip(def, rule) {
   return `${def.label}${ruleNote}`;
 }
 
+// Build the data-attrs string for clickable amenity buttons. Keeps the
+// content-vs-copy split: structural data on the button, body text built
+// at click time from a copy lookup (so iterating on phrasing doesn't
+// require re-rendering tiles).
+function _amenityButtonAttrs(def, rule, opts) {
+  const o = opts || {};
+  const parts = [];
+  parts.push(`type="button"`);
+  parts.push(`data-key="${escHtml(def.key || '')}"`);
+  if (def.sectionName) parts.push(`data-section="${escHtml(def.sectionName)}"`);
+  if (rule)           parts.push(`data-rule="${escHtml(rule)}"`);
+  if (o.value)        parts.push(`data-value="${escHtml(o.value)}"`);
+  if (o.sub)          parts.push(`data-sub="${escHtml(o.sub)}"`);
+  parts.push(`aria-expanded="false"`);
+  return parts.join(' ');
+}
+
 function _renderParkingTile(def, type, subtype, fee, ruleClass, rule) {
   const typeLabel = PARKING_TYPE_LABEL[type] || PARKING_SUBTYPE_LABEL[subtype] || '';
   const costLabel = fee === true ? 'Paid' : fee === false ? 'Free' : '';
   const sub = [typeLabel, costLabel].filter(Boolean).join(' · ');
   const tip = _amenityTooltip(def, rule) + (sub ? ` · ${sub}` : '');
-  return `<div class="amenity${ruleClass || ''}" data-tip="${escHtml(tip)}">
+  const attrs = _amenityButtonAttrs(def, rule, { value: sub, sub });
+  return `<button class="amenity${ruleClass || ''}" ${attrs} data-tip="${escHtml(tip)}">
     <span class="amenity-icon">${def.icon}</span>
     <span class="amenity-text">
       <span class="amenity-label">${def.label}</span>
       ${sub ? `<span class="amenity-sub">${escHtml(sub)}</span>` : ''}
     </span>
-  </div>`;
+  </button>`;
 }
 
 function _renderAmenityTile(def, amenities) {
@@ -2157,16 +2213,20 @@ function _renderAmenityTile(def, amenities) {
 
 // Section-tile and amenity-tile renderer with optional rule color.
 // rule: 'off_leash' | 'on_leash' | 'not_allowed' | 'unknown' | null
+// Tiles are <button> elements; click reveals a concise detail panel
+// below the amenities grid (mirrors the Cautions card pattern). Data
+// attrs hold the structural facts; body copy is built at click time.
 function _renderAmenityTileWithRule(def, amenities, rule) {
   const ruleClass = rule ? ` rule-${rule}` : '';
   const tip = _amenityTooltip(def, rule);
+  const attrs = _amenityButtonAttrs(def, rule);
   // Section-only tile (e.g. Sand, Trails) — no amenity boolean,
   // just emoji + label + rule color.
   if (def.sectionName) {
-    return `<div class="amenity${ruleClass}" data-tip="${escHtml(tip)}">
+    return `<button class="amenity${ruleClass}" ${attrs} data-tip="${escHtml(tip)}">
       <span class="amenity-icon">${def.icon}</span>
       <span class="amenity-label">${def.label}</span>
-    </div>`;
+    </button>`;
   }
   if (def.key === 'has_parking') {
     if (Array.isArray(amenities?.parking_options) && amenities.parking_options.length > 0) {
@@ -2185,27 +2245,28 @@ function _renderAmenityTileWithRule(def, amenities, rule) {
   if (def.key === 'has_disabled_access') {
     const hasJsonb = _accessibilityHasContent(amenities?.accessibility_features);
     const finalTip = hasJsonb ? `${def.label} — see Accessibility card below` : tip;
-    return `<div class="amenity${ruleClass}" data-tip="${escHtml(finalTip)}">
+    return `<button class="amenity${ruleClass}" ${attrs} data-tip="${escHtml(finalTip)}">
       <span class="amenity-icon">${def.icon}</span>
       <span class="amenity-label">${def.label}</span>
-    </div>`;
+    </button>`;
   }
   // Lifeguards always render with the "Seasonal" sublabel — staffing is
   // seasonal at almost every US beach, never year-round (see
   // [[lifeguards-seasonal-not-on-duty]]).
   if (def.key === 'has_lifeguards') {
-    return `<div class="amenity${ruleClass}" data-tip="${escHtml(tip + ' · seasonal, typically Memorial Day–Labor Day')}">
+    const lgAttrs = _amenityButtonAttrs(def, rule, { sub: 'Seasonal' });
+    return `<button class="amenity${ruleClass}" ${lgAttrs} data-tip="${escHtml(tip + ' · seasonal, typically Memorial Day–Labor Day')}">
       <span class="amenity-icon">${def.icon}</span>
       <span class="amenity-text">
         <span class="amenity-label">${def.label}</span>
         <span class="amenity-sub">Seasonal</span>
       </span>
-    </div>`;
+    </button>`;
   }
-  return `<div class="amenity${ruleClass}" data-tip="${escHtml(tip)}">
+  return `<button class="amenity${ruleClass}" ${attrs} data-tip="${escHtml(tip)}">
     <span class="amenity-icon">${def.icon}</span>
     <span class="amenity-label">${def.label}</span>
-  </div>`;
+  </button>`;
 }
 
 // Map zone-rules section names to amenity keys when they refer to the
@@ -2239,6 +2300,116 @@ const _SECTION_TILE = {
   tide_pools:     { icon: '🐚', label: 'Tide pools' },
   nesting_zones:  { icon: '🪺', label: 'Nesting zones' },
 };
+
+// ─── Section ↔ today's-hazard signal mapping ────────────────────────
+// Water hazards: any of these advisory event_types active today fires
+// the Water-tile overlay (worst-severity wins). Mirrors the 8 BHS-
+// extracted categories landed in 20260611e + the marine threshold
+// advisories from 20260606l + the rip merge from 20260611e.
+const _WATER_HAZARD_EVENT_TYPES = new Set([
+  'rip_current_risk', 'sneaker_wave_risk', 'high_surf_risk',
+  'longshore_current_risk', 'cold_water_shock_risk', 'shore_break_risk',
+  'pier_hazard_risk', 'bacteria_risk', 'too_cold_swim', 'swim_advisory',
+  'powerful_surf', 'strong_drift',
+]);
+// Hazards that also reach the sand edge (sneaker waves / shore break
+// wash people off rocks + sand). Demoted one tier on the Sand tile
+// (severe→moderate, moderate→none) since most of the dry sand is safe.
+const _SAND_EDGE_EVENT_TYPES = new Set([
+  'sneaker_wave_risk', 'shore_break_risk',
+]);
+// Sand temperature thresholds (°F).
+const _SAND_TEMP_SEVERE = 125;
+const _SAND_TEMP_MODERATE = 115;
+// Wind sandblast thresholds (mph).
+const _WIND_SANDBLAST_SEVERE = 25;
+const _WIND_SANDBLAST_MODERATE = 19;
+// Severity rank — used for max-wins logic across signals.
+const _HAZ_RANK = { severe: 2, moderate: 1 };
+const _RANK_TO_SEV = { 2: 'severe', 1: 'moderate' };
+
+// Per-section hazard signal aggregator. Returns {severity, summary}.
+// severity is 'severe' | 'moderate' | null. summary is a short text
+// fragment for the detail panel + tooltip extension.
+function _sectionHazardSignal(sectionName, advisories, hoursToday) {
+  const advs = Array.isArray(advisories) ? advisories : [];
+  const hours = Array.isArray(hoursToday) ? hoursToday : [];
+  let rank = 0;
+  const parts = [];
+
+  if (sectionName === 'water') {
+    for (const a of advs) {
+      if (!_WATER_HAZARD_EVENT_TYPES.has(a.event_type)) continue;
+      const r = _HAZ_RANK[a.severity] || 0;
+      if (r === 0) continue;
+      rank = Math.max(rank, r);
+      const lbl = a.label || a.event_type.replace(/_risk$/, '').replace(/_/g, ' ');
+      const val = a.value ? ` ${a.value}` : '';
+      parts.push(`${lbl}${val}`);
+    }
+  } else if (sectionName === 'sand') {
+    // sand_temp peak today
+    let maxSand = -Infinity;
+    let maxWind = -Infinity;
+    for (const h of hours) {
+      if (h?.sand_temp != null && h.sand_temp > maxSand) maxSand = h.sand_temp;
+      if (h?.wind_speed != null && h.wind_speed > maxWind) maxWind = h.wind_speed;
+    }
+    if (maxSand >= _SAND_TEMP_SEVERE) {
+      rank = Math.max(rank, 2); parts.push(`sand peak ${Math.round(maxSand)}°F`);
+    } else if (maxSand >= _SAND_TEMP_MODERATE) {
+      rank = Math.max(rank, 1); parts.push(`sand peak ${Math.round(maxSand)}°F`);
+    }
+    if (maxWind >= _WIND_SANDBLAST_SEVERE) {
+      rank = Math.max(rank, 2); parts.push(`gusty wind ${Math.round(maxWind)}mph`);
+    } else if (maxWind >= _WIND_SANDBLAST_MODERATE) {
+      rank = Math.max(rank, 1); parts.push(`breezy ${Math.round(maxWind)}mph`);
+    }
+    // sand-edge hazards demoted one tier
+    for (const a of advs) {
+      if (!_SAND_EDGE_EVENT_TYPES.has(a.event_type)) continue;
+      const r = _HAZ_RANK[a.severity] || 0;
+      if (r >= 2) {  // severe → moderate on sand
+        rank = Math.max(rank, 1);
+        parts.push(`${a.label || a.event_type.replace(/_risk$/, '').replace(/_/g, ' ')} reaches sand`);
+      }
+    }
+  }
+
+  if (rank === 0) return { severity: null, summary: '' };
+  // Dedup and join summary
+  const seen = new Set();
+  const unique = parts.filter(p => { if (seen.has(p)) return false; seen.add(p); return true; });
+  return { severity: _RANK_TO_SEV[rank], summary: unique.join(' · ') };
+}
+
+// Module-level stash for re-rendering when async advisories arrive.
+// Set in the main render path; updated in loadWaterConditionAdvisories.
+let _advisoriesForOverlay = [];
+let _hoursForOverlay = [];
+
+// Walk all rendered amenity buttons with data-section + apply overlay
+// classes, corner badges, and extended tooltips. Re-entrant — safe to
+// call multiple times as data arrives.
+function _applyAmenityHazardOverlays() {
+  document.querySelectorAll('.amenity[data-section]').forEach(el => {
+    const sec = el.getAttribute('data-section');
+    if (!sec) return;
+    const sig = _sectionHazardSignal(sec, _advisoriesForOverlay, _hoursForOverlay);
+    el.classList.remove('haz-severe', 'haz-moderate');
+    const oldBadge = el.querySelector('.haz-badge');
+    if (oldBadge) oldBadge.remove();
+    if (!sig.severity) return;
+    el.classList.add(`haz-${sig.severity}`);
+    const badge = document.createElement('span');
+    badge.className = 'haz-badge';
+    badge.setAttribute('aria-label', `today's hazard: ${sig.severity}`);
+    badge.textContent = '⚠';
+    el.appendChild(badge);
+    // Stash summary so the click-detail handler can include it
+    el.dataset.hazSummary = sig.summary;
+  });
+}
 
 // Walk zone_rules and return a map of {sectionName -> mostRestrictiveRule}.
 // "Most restrictive" priority: not_allowed > on_leash > off_leash > unknown.
@@ -2783,6 +2954,7 @@ function buildAmenitiesSection(amenities, dogPolicy, beach) {
     return `<section class="card amenities-card">
       <h2>Amenities</h2>
       <div class="amenity-grid">${cells}${timeBuckets}</div>
+      <div class="amenity-detail" id="amenity-detail" hidden></div>
     </section>`;
   }
 
@@ -2895,8 +3067,112 @@ function buildAmenitiesSection(amenities, dogPolicy, beach) {
   return `<section class="card amenities-card">
     <h2>Amenities</h2>
     ${blocks.join('')}
+    <div class="amenity-detail" id="amenity-detail" hidden></div>
   </section>`;
 }
+
+// Compose the detail panel body for a clicked amenity button.
+// Reads structural facts from the button's data-* attrs; copy lives
+// in this function so iterating on phrasing doesn't require re-render.
+function _amenityDetailBody(btn) {
+  const key   = btn.dataset.key || '';
+  const sec   = btn.dataset.section || '';
+  const rule  = btn.dataset.rule || '';
+  const value = btn.dataset.value || '';
+  const sub   = btn.dataset.sub || '';
+  const haz   = btn.dataset.hazSummary || '';
+  const label = btn.querySelector('.amenity-label')?.textContent || '';
+
+  // Rule phrasing for sections + general dog policy.
+  const rulePhrase = ({
+    off_leash:                'Dogs off-leash allowed',
+    on_leash:                 'Dogs on-leash only',
+    on_leash_or_voice:        'Dogs on-leash (voice control where posted)',
+    off_leash_voice_control:  'Dogs off-leash under voice control',
+    not_allowed:              'Dogs not allowed',
+    unknown:                  'Dog rule unknown',
+  })[rule] || '';
+
+  // Per-section / per-key concise body copy.
+  let body = '';
+  if (sec === 'water') {
+    body = rulePhrase ? `${rulePhrase} for swimming.` : 'Swim section.';
+  } else if (sec === 'sand') {
+    body = rulePhrase ? `${rulePhrase} on the sand.` : 'Sand section.';
+  } else if (sec === 'trails') {
+    body = rulePhrase ? `${rulePhrase} on the trails.` : 'Trails section.';
+  } else if (sec === 'dunes' || sec === 'bluff') {
+    body = rulePhrase ? `${rulePhrase} in this area.` : '';
+  } else if (sec === 'boardwalk') {
+    body = rulePhrase ? `${rulePhrase} on the boardwalk.` : '';
+  } else if (sec === 'campground' || sec === 'playground' || sec === 'tide_pools' || sec === 'nesting_zones') {
+    body = rulePhrase ? `${rulePhrase} in this area.` : '';
+  } else if (sec === 'global') {
+    body = rulePhrase ? `${rulePhrase} on the whole beach.` : '';
+  } else if (key === 'has_parking') {
+    body = value ? `Parking: ${value}.` : 'Parking on site.';
+  } else if (key === 'has_restrooms') {
+    body = 'Restrooms available.';
+  } else if (key === 'has_showers') {
+    body = 'Rinse showers available.';
+  } else if (key === 'has_drinking_water') {
+    body = 'Drinking water on site.';
+  } else if (key === 'has_lifeguards') {
+    body = 'Lifeguards on duty, seasonal (Memorial Day–Labor Day).';
+  } else if (key === 'has_picnic_area') {
+    body = 'Picnic area available.';
+  } else if (key === 'has_fire_pits') {
+    body = 'Fire pits available.';
+  } else if (key === 'has_food') {
+    body = 'Food on site.';
+  } else if (key === 'has_disabled_access') {
+    body = 'Accessibility info — see the Accessibility card below.';
+  } else {
+    body = label;
+  }
+
+  const valueHtml = value
+    ? `<span class="amenity-detail-value">${escHtml(value)}</span>`
+    : '';
+  const hazHtml = haz
+    ? `<div class="amenity-detail-haz">⚠ Today: ${escHtml(haz)}</div>`
+    : '';
+
+  return `
+    <div class="amenity-detail-label">${escHtml(label)}${valueHtml}</div>
+    <div>${escHtml(body)}</div>
+    ${hazHtml}
+  `;
+}
+
+// Event-delegated click handler for amenity tiles. Single-select:
+// opening one closes any other open tile. Mirrors the cautions card
+// pattern (lines 4225+). Wired once at top-level via setupAmenityDetailDelegation.
+function setupAmenityDetailDelegation() {
+  if (window.__amenityDetailWired) return;
+  window.__amenityDetailWired = true;
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.amenities-card .amenity[data-key], .amenities-card .amenity[data-section]');
+    if (!btn) return;
+    e.preventDefault();
+    const card = btn.closest('.amenities-card');
+    if (!card) return;
+    const detail = card.querySelector('#amenity-detail');
+    if (!detail) return;
+    const wasOpen = btn.getAttribute('aria-expanded') === 'true';
+    card.querySelectorAll('.amenity[aria-expanded="true"]')
+        .forEach(t => t.setAttribute('aria-expanded', 'false'));
+    if (wasOpen) {
+      detail.hidden = true;
+      detail.innerHTML = '';
+      return;
+    }
+    btn.setAttribute('aria-expanded', 'true');
+    detail.innerHTML = _amenityDetailBody(btn);
+    detail.hidden = false;
+  });
+}
+
 
 
 // _renderSectionPill / _renderTimeCell / _renderZoneCard /
@@ -4179,6 +4455,12 @@ async function loadWaterConditionAdvisories(beachFid) {
     if (!r.ok) return;
     items = await r.json();
   } catch { return; }
+  // Stash the advisories + re-run the amenity hazard overlay so Sand
+  // and Water tiles light up with today's water hazards (rip, sneaker,
+  // surf, etc.). Runs unconditionally — even an empty array needs to
+  // clear stale overlays from a prior render.
+  _advisoriesForOverlay = Array.isArray(items) ? items : [];
+  _applyAmenityHazardOverlays();
   // RPC now clips valid_from/valid_to to the requested day's bounds at
   // beach-tz midnight, so no client-side horizon filter is needed. The
   // prior next-24h client clamp was a holdover from the old "horizon

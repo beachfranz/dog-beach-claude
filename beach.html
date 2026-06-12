@@ -345,18 +345,23 @@
     cursor: pointer; position: relative;
   }
   .amenity:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
-  /* Hazard overlay: severity ring + corner badge. Worst-wins from
-   * today's beach_advisory rows (water hazards) + sand_temp peak +
-   * wind peak (sandblast). Doesn't change the rule-* background. */
-  .amenity.haz-moderate {
-    box-shadow: inset 0 0 0 3px rgba(251,146,60,0.75);
+  /* Hazard background overrides dog-policy background entirely.
+   * Today's environmental hazard is the dominant signal — when it
+   * fires, the tile should scream. The corner ⚠ badge + click-detail
+   * panel carry the specifics. Doubled selectors raise specificity
+   * above .amenity.rule-* which lives later in this stylesheet. */
+  .amenity.amenity.haz-moderate {
+    background: rgba(251,146,60,0.55);
+    border-color: rgba(154,52,18,0.55);
   }
-  .amenity.haz-severe {
-    box-shadow: inset 0 0 0 3px rgba(239,68,68,0.85);
+  .amenity.amenity.haz-severe {
+    background: rgba(239,68,68,0.55);
+    border-color: rgba(153,27,27,0.55);
   }
   .haz-badge {
     position: absolute; top: 3px; right: 4px;
-    font-size: 11px; line-height: 1; pointer-events: none;
+    font-size: 12px; line-height: 1; pointer-events: none;
+    filter: drop-shadow(0 0 1px rgba(255,255,255,0.9));
   }
   /* Detail panel below the amenity grid — mirrors #caution-detail.
    * Single-select: opening one tile closes any other open tile. */
@@ -2328,13 +2333,17 @@ const _WIND_SANDBLAST_MODERATE = 19;
 const _HAZ_RANK = { severe: 2, moderate: 1 };
 const _RANK_TO_SEV = { 2: 'severe', 1: 'moderate' };
 
-// Per-section hazard signal aggregator. Returns {severity, summary}.
-// severity is 'severe' | 'moderate' | null. summary is a short text
-// fragment for the detail panel + tooltip extension.
+// Per-section hazard signal aggregator. Returns:
+//   { severity:'severe'|'moderate'|null, summary:string, impactText:string }
+// summary  — short chip text for tooltip (e.g. "rip current High")
+// impactText — the rich dog_impact_text from the most-severe advisory,
+//   OR a synthesized one for sand_temp / wind. This is the primary body
+//   string used in the click-detail panel.
 function _sectionHazardSignal(sectionName, advisories, hoursToday) {
   const advs = Array.isArray(advisories) ? advisories : [];
   const hours = Array.isArray(hoursToday) ? hoursToday : [];
   let rank = 0;
+  let bestImpactText = '';
   const parts = [];
 
   if (sectionName === 'water') {
@@ -2342,45 +2351,62 @@ function _sectionHazardSignal(sectionName, advisories, hoursToday) {
       if (!_WATER_HAZARD_EVENT_TYPES.has(a.event_type)) continue;
       const r = _HAZ_RANK[a.severity] || 0;
       if (r === 0) continue;
-      rank = Math.max(rank, r);
+      if (r > rank || (r === rank && !bestImpactText && a.dog_impact_text)) {
+        rank = r;
+        bestImpactText = a.dog_impact_text || bestImpactText;
+      }
       const lbl = a.label || a.event_type.replace(/_risk$/, '').replace(/_/g, ' ');
       const val = a.value ? ` ${a.value}` : '';
       parts.push(`${lbl}${val}`);
     }
   } else if (sectionName === 'sand') {
-    // sand_temp peak today
     let maxSand = -Infinity;
     let maxWind = -Infinity;
     for (const h of hours) {
       if (h?.sand_temp != null && h.sand_temp > maxSand) maxSand = h.sand_temp;
       if (h?.wind_speed != null && h.wind_speed > maxWind) maxWind = h.wind_speed;
     }
+    const sandPhrases = [];
     if (maxSand >= _SAND_TEMP_SEVERE) {
-      rank = Math.max(rank, 2); parts.push(`sand peak ${Math.round(maxSand)}°F`);
+      rank = Math.max(rank, 2);
+      parts.push(`sand peak ${Math.round(maxSand)}°F`);
+      sandPhrases.push(`Dangerous sand temp ${Math.round(maxSand)}°F — risk of paw burns. Keep her off dry sand at midday or use booties.`);
     } else if (maxSand >= _SAND_TEMP_MODERATE) {
-      rank = Math.max(rank, 1); parts.push(`sand peak ${Math.round(maxSand)}°F`);
+      rank = Math.max(rank, 1);
+      parts.push(`sand peak ${Math.round(maxSand)}°F`);
+      sandPhrases.push(`Hot sand peaks at ${Math.round(maxSand)}°F today — paw discomfort likely. Walk her early or late.`);
     }
     if (maxWind >= _WIND_SANDBLAST_SEVERE) {
-      rank = Math.max(rank, 2); parts.push(`gusty wind ${Math.round(maxWind)}mph`);
+      rank = Math.max(rank, 2);
+      parts.push(`gusty wind ${Math.round(maxWind)}mph`);
+      sandPhrases.push(`Gusty winds to ${Math.round(maxWind)}mph today — blowing sand can irritate her eyes and ears.`);
     } else if (maxWind >= _WIND_SANDBLAST_MODERATE) {
-      rank = Math.max(rank, 1); parts.push(`breezy ${Math.round(maxWind)}mph`);
+      rank = Math.max(rank, 1);
+      parts.push(`breezy ${Math.round(maxWind)}mph`);
+      sandPhrases.push(`Breezy at ${Math.round(maxWind)}mph today — some sand blowing on the beach.`);
     }
     // sand-edge hazards demoted one tier
     for (const a of advs) {
       if (!_SAND_EDGE_EVENT_TYPES.has(a.event_type)) continue;
       const r = _HAZ_RANK[a.severity] || 0;
-      if (r >= 2) {  // severe → moderate on sand
+      if (r >= 2) {
         rank = Math.max(rank, 1);
-        parts.push(`${a.label || a.event_type.replace(/_risk$/, '').replace(/_/g, ' ')} reaches sand`);
+        const lbl = a.label || a.event_type.replace(/_risk$/, '').replace(/_/g, ' ');
+        parts.push(`${lbl} reaches sand`);
+        if (a.dog_impact_text) sandPhrases.push(a.dog_impact_text);
       }
     }
+    bestImpactText = sandPhrases.join(' ');
   }
 
-  if (rank === 0) return { severity: null, summary: '' };
-  // Dedup and join summary
+  if (rank === 0) return { severity: null, summary: '', impactText: '' };
   const seen = new Set();
   const unique = parts.filter(p => { if (seen.has(p)) return false; seen.add(p); return true; });
-  return { severity: _RANK_TO_SEV[rank], summary: unique.join(' · ') };
+  return {
+    severity:   _RANK_TO_SEV[rank],
+    summary:    unique.join(' · '),
+    impactText: bestImpactText,
+  };
 }
 
 // Module-level stash for re-rendering when async advisories arrive.
@@ -2399,6 +2425,8 @@ function _applyAmenityHazardOverlays() {
     el.classList.remove('haz-severe', 'haz-moderate');
     const oldBadge = el.querySelector('.haz-badge');
     if (oldBadge) oldBadge.remove();
+    delete el.dataset.hazSummary;
+    delete el.dataset.hazImpact;
     if (!sig.severity) return;
     el.classList.add(`haz-${sig.severity}`);
     const badge = document.createElement('span');
@@ -2406,8 +2434,8 @@ function _applyAmenityHazardOverlays() {
     badge.setAttribute('aria-label', `today's hazard: ${sig.severity}`);
     badge.textContent = '⚠';
     el.appendChild(badge);
-    // Stash summary so the click-detail handler can include it
     el.dataset.hazSummary = sig.summary;
+    el.dataset.hazImpact  = sig.impactText || '';
   });
 }
 
@@ -3074,74 +3102,117 @@ function buildAmenitiesSection(amenities, dogPolicy, beach) {
 // Compose the detail panel body for a clicked amenity button.
 // Reads structural facts from the button's data-* attrs; copy lives
 // in this function so iterating on phrasing doesn't require re-render.
+//
+// When a hazard fires on the tile, the rich dog_impact_text from the
+// most-severe advisory (or the synthesized sand/wind one) is the
+// PRIMARY body. The dog-policy phrase becomes a secondary "normally"
+// line below it. When no hazard, only the policy phrase shows.
 function _amenityDetailBody(btn) {
-  const key   = btn.dataset.key || '';
-  const sec   = btn.dataset.section || '';
-  const rule  = btn.dataset.rule || '';
-  const value = btn.dataset.value || '';
-  const sub   = btn.dataset.sub || '';
-  const haz   = btn.dataset.hazSummary || '';
-  const label = btn.querySelector('.amenity-label')?.textContent || '';
+  const key        = btn.dataset.key || '';
+  const sec        = btn.dataset.section || '';
+  const rule       = btn.dataset.rule || '';
+  const value      = btn.dataset.value || '';
+  const hazImpact  = btn.dataset.hazImpact || '';
+  const hazSummary = btn.dataset.hazSummary || '';
+  const label      = btn.querySelector('.amenity-label')?.textContent || '';
 
-  // Rule phrasing for sections + general dog policy.
-  const rulePhrase = ({
-    off_leash:                'Dogs off-leash allowed',
-    on_leash:                 'Dogs on-leash only',
-    on_leash_or_voice:        'Dogs on-leash (voice control where posted)',
-    off_leash_voice_control:  'Dogs off-leash under voice control',
-    not_allowed:              'Dogs not allowed',
-    unknown:                  'Dog rule unknown',
+  // Concise rule phrasings — no "Dogs" prefix, no "allowed" filler.
+  const policyForWater = ({
+    off_leash:               'Off-leash for swimming.',
+    on_leash:                'On-leash in the water.',
+    on_leash_or_voice:       'On-leash in the water (voice control where posted).',
+    off_leash_voice_control: 'Off-leash under voice control.',
+    not_allowed:             'Dogs not allowed in the water.',
+    unknown:                 'Swim policy unknown.',
+  })[rule] || 'Swim section.';
+  const policyForSand = ({
+    off_leash:               'Off-leash on the sand.',
+    on_leash:                'On-leash on the sand.',
+    on_leash_or_voice:       'On-leash on the sand (voice control where posted).',
+    off_leash_voice_control: 'Off-leash under voice control.',
+    not_allowed:             'Dogs not allowed on the sand.',
+    unknown:                 'Sand policy unknown.',
+  })[rule] || 'Sand section.';
+  const policyGeneric = ({
+    off_leash:               'Off-leash in this area.',
+    on_leash:                'On-leash in this area.',
+    on_leash_or_voice:       'On-leash (voice control where posted).',
+    off_leash_voice_control: 'Off-leash under voice control.',
+    not_allowed:             'Dogs not allowed in this area.',
+    unknown:                 'Dog rule unknown for this area.',
   })[rule] || '';
 
-  // Per-section / per-key concise body copy.
-  let body = '';
+  let primaryBody = '';
+  let secondaryBody = '';
+
   if (sec === 'water') {
-    body = rulePhrase ? `${rulePhrase} for swimming.` : 'Swim section.';
+    if (hazImpact) {
+      primaryBody = hazImpact;
+      secondaryBody = `Normally: ${policyForWater.toLowerCase()}`;
+    } else {
+      primaryBody = policyForWater;
+    }
   } else if (sec === 'sand') {
-    body = rulePhrase ? `${rulePhrase} on the sand.` : 'Sand section.';
+    if (hazImpact) {
+      primaryBody = hazImpact;
+      secondaryBody = `Normally: ${policyForSand.toLowerCase()}`;
+    } else {
+      primaryBody = policyForSand;
+    }
   } else if (sec === 'trails') {
-    body = rulePhrase ? `${rulePhrase} on the trails.` : 'Trails section.';
-  } else if (sec === 'dunes' || sec === 'bluff') {
-    body = rulePhrase ? `${rulePhrase} in this area.` : '';
+    primaryBody = ({
+      off_leash:    'Off-leash on the trails.',
+      on_leash:     'On-leash on the trails.',
+      not_allowed:  'Dogs not allowed on the trails.',
+    })[rule] || policyGeneric || 'Trails section.';
   } else if (sec === 'boardwalk') {
-    body = rulePhrase ? `${rulePhrase} on the boardwalk.` : '';
-  } else if (sec === 'campground' || sec === 'playground' || sec === 'tide_pools' || sec === 'nesting_zones') {
-    body = rulePhrase ? `${rulePhrase} in this area.` : '';
+    primaryBody = ({
+      off_leash:    'Off-leash on the boardwalk.',
+      on_leash:     'On-leash on the boardwalk.',
+      not_allowed:  'Dogs not allowed on the boardwalk.',
+    })[rule] || policyGeneric || 'Boardwalk section.';
   } else if (sec === 'global') {
-    body = rulePhrase ? `${rulePhrase} on the whole beach.` : '';
+    primaryBody = policyGeneric.replace('this area', 'this beach') || 'Whole beach.';
+  } else if (sec) {
+    // dunes / bluff / campground / playground / tide_pools / nesting_zones
+    primaryBody = policyGeneric || label;
   } else if (key === 'has_parking') {
-    body = value ? `Parking: ${value}.` : 'Parking on site.';
+    primaryBody = value ? `Parking: ${value}.` : 'Parking on site.';
   } else if (key === 'has_restrooms') {
-    body = 'Restrooms available.';
+    primaryBody = 'Restrooms on site.';
   } else if (key === 'has_showers') {
-    body = 'Rinse showers available.';
+    primaryBody = 'Outdoor rinse showers on site.';
   } else if (key === 'has_drinking_water') {
-    body = 'Drinking water on site.';
+    primaryBody = 'Drinking water on site.';
   } else if (key === 'has_lifeguards') {
-    body = 'Lifeguards on duty, seasonal (Memorial Day–Labor Day).';
+    primaryBody = 'Lifeguards on duty seasonally (Memorial Day–Labor Day).';
   } else if (key === 'has_picnic_area') {
-    body = 'Picnic area available.';
+    primaryBody = 'Picnic area on site.';
   } else if (key === 'has_fire_pits') {
-    body = 'Fire pits available.';
+    primaryBody = 'Fire pits on site (check local rules for use).';
   } else if (key === 'has_food') {
-    body = 'Food on site.';
+    primaryBody = 'Food / concessions on site.';
   } else if (key === 'has_disabled_access') {
-    body = 'Accessibility info — see the Accessibility card below.';
+    primaryBody = 'Accessible features available — see the Accessibility card below.';
   } else {
-    body = label;
+    primaryBody = label;
   }
 
   const valueHtml = value
     ? `<span class="amenity-detail-value">${escHtml(value)}</span>`
     : '';
-  const hazHtml = haz
-    ? `<div class="amenity-detail-haz">⚠ Today: ${escHtml(haz)}</div>`
+  const hazHeadlineHtml = (hazImpact && hazSummary)
+    ? `<div class="amenity-detail-haz">⚠ ${escHtml(hazSummary)}</div>`
+    : '';
+  const secondaryHtml = secondaryBody
+    ? `<div style="color:var(--text-muted); font-size:11px; margin-top:3px;">${escHtml(secondaryBody)}</div>`
     : '';
 
   return `
     <div class="amenity-detail-label">${escHtml(label)}${valueHtml}</div>
-    <div>${escHtml(body)}</div>
-    ${hazHtml}
+    ${hazHeadlineHtml}
+    <div>${escHtml(primaryBody)}</div>
+    ${secondaryHtml}
   `;
 }
 

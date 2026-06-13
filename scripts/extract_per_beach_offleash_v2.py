@@ -31,7 +31,11 @@ from anthropic import Anthropic
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scripts.common.db import connect
-from scripts.common.llm import SONNET
+from scripts.common.llm import SONNET, HAIKU
+
+# Module-level model selection; set by main() from --model arg.
+# Defaults to SONNET to preserve historical behavior for legacy calls.
+_MODEL: str = SONNET
 from scripts.extract_research_v2 import (
     strip_html, name_match, geo_gate, AUTH_DOMAINS as RV2_AUTH,
 )
@@ -479,7 +483,7 @@ def call_llm(content: str, beach_name: str, city: str | None,
                                          content=content[:30000])
 
     body = {
-        "model": SONNET,
+        "model": _MODEL,
         "max_tokens": 900,
         "system": sys_p,
         "messages": [{"role": "user", "content": user_p}],
@@ -595,21 +599,78 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--fids", type=str, default=None)
+    ap.add_argument("--state", type=str, default=None,
+                    help="2-letter state code; targets all active scored beaches in that state.")
+    ap.add_argument("--all", action="store_true",
+                    help="Target every active scored beach catalog-wide.")
+    ap.add_argument("--skip-if-fresh-within", type=int, default=30,
+                    help="Skip beaches with an existing per_beach_offleash_v2 BEP row "
+                         "(canonical or sentinel) fresher than this many days. Provides "
+                         "resumability — interrupted runs pick up where they left off. "
+                         "Set to 0 to disable.")
     ap.add_argument("--max-cands-per-beach", type=int, default=5)
     ap.add_argument("--no-web-search", action="store_true",
                     help="Disable Anthropic web_search fallback")
+    ap.add_argument("--model", choices=["sonnet", "haiku"], default="sonnet",
+                    help="LLM model for the extraction prompt. Haiku is ~67%% "
+                         "cheaper but has a higher no-result rate due to the "
+                         "tight verbatim+name-match contract. Recommended flow: "
+                         "Haiku for the bulk pass, then re-fire no_result fids "
+                         "on Sonnet.")
     args = ap.parse_args()
 
-    if args.fids:
-        target_fids = [int(x.strip()) for x in args.fids.split(",")]
-    else:
-        target_fids = DEFAULT_CANDIDATES
-    if args.limit:
-        target_fids = target_fids[:args.limit]
+    # Set module-level model from arg (call_llm reads _MODEL).
+    global _MODEL
+    _MODEL = SONNET if args.model == "sonnet" else HAIKU
+    print(f"Model: {_MODEL}")
 
     conn = connect()
     conn.set_client_encoding("UTF8")
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    # Resolve target_fids — priority: --fids > --all > --state > DEFAULT_CANDIDATES
+    if args.fids:
+        target_fids = [int(x.strip()) for x in args.fids.split(",")]
+    elif args.all:
+        cur.execute("""
+            SELECT fid FROM public.beaches_gold
+             WHERE is_active AND scoring_tier IN ('daily','hourly')
+             ORDER BY fid
+        """)
+        target_fids = [r['fid'] for r in cur.fetchall()]
+        print(f"--all: targeting {len(target_fids)} active scored beaches catalog-wide")
+    elif args.state:
+        cur.execute("""
+            SELECT fid FROM public.beaches_gold
+             WHERE is_active AND scoring_tier IN ('daily','hourly')
+               AND state = upper(%s)
+             ORDER BY fid
+        """, (args.state,))
+        target_fids = [r['fid'] for r in cur.fetchall()]
+        print(f"--state={args.state}: targeting {len(target_fids)} active scored beaches")
+    else:
+        target_fids = DEFAULT_CANDIDATES
+
+    # Apply freshness guard — skip beaches with a recent per_beach_offleash_v2
+    # BEP row (canonical OR sentinel). Provides resumability.
+    if args.skip_if_fresh_within > 0 and target_fids:
+        cur.execute("""
+            SELECT DISTINCT gold_fid AS fid
+              FROM public.beach_enrichment_provenance
+             WHERE source IN ('per_beach_offleash_v2', 'per_beach_offleash_v2_no_result')
+               AND gold_fid = ANY(%s)
+               AND coalesce(updated_at, now())
+                   > now() - (%s || ' days')::interval
+        """, (target_fids, args.skip_if_fresh_within))
+        already_fresh = {r['fid'] for r in cur.fetchall()}
+        if already_fresh:
+            target_fids = [f for f in target_fids if f not in already_fresh]
+            print(f"--skip-if-fresh-within={args.skip_if_fresh_within}d: "
+                  f"skipping {len(already_fresh)} beaches already fresh; "
+                  f"{len(target_fids)} remain")
+
+    if args.limit:
+        target_fids = target_fids[:args.limit]
 
     # Phase 10b: also pull operator_dogs_policy.source_url per beach via
     # entity_operator. Some beaches have 0 attributed ops with URLs; some

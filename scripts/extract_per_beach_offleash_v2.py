@@ -26,6 +26,7 @@ import argparse, json, os, re, sys, time
 import urllib.parse, urllib.request, urllib.error
 from pathlib import Path
 
+import psycopg2
 import psycopg2.extras
 from anthropic import Anthropic
 
@@ -703,6 +704,32 @@ def main() -> int:
                "unknown": 0, "no_match": 0, "sentinel": 0, "skipped": 0}
     yes_fids: list[int] = []
 
+    def _reconnect():
+        """Build a fresh conn+cur after a pooler-dropped connection.
+        Returns (conn, cur). Called from _safe_pg below when a write
+        site catches OperationalError/InterfaceError."""
+        nc = connect()
+        nc.set_client_encoding("UTF8")
+        return nc, nc.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    # Mutable refs so _safe_pg can swap conn/cur after reconnect without
+    # changing the names every PG call below uses.
+    pg = {'conn': conn, 'cur': cur}
+
+    def _safe_pg(fn):
+        """Run fn(cur). On dropped-connection error, reconnect + retry
+        once. Returns fn's return value, or raises on second failure."""
+        try:
+            return fn(pg['cur'])
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+            print(f"    [!] PG connection lost ({e.__class__.__name__}) — reconnecting")
+            try:
+                pg['conn'].close()
+            except Exception:
+                pass
+            pg['conn'], pg['cur'] = _reconnect()
+            return fn(pg['cur'])
+
     for fid in target_fids:
         if fid not in beaches:
             continue
@@ -803,11 +830,14 @@ def main() -> int:
         if winning:
             yes_fids.append(fid)
             if args.apply:
-                write_canonical(cur, fid, winning)
-                conn.commit()
-                cur.execute("SELECT public.compute_beach_field_consensus(%s)", (fid,))
-                cur.execute("SELECT public.promote_canonical_dogs_to_beach_dog_policy(%s)", (fid,))
-                conn.commit()
+                try:
+                    _safe_pg(lambda c: (write_canonical(c, fid, winning),
+                                         pg['conn'].commit(),
+                                         c.execute("SELECT public.compute_beach_field_consensus(%s)", (fid,)),
+                                         c.execute("SELECT public.promote_canonical_dogs_to_beach_dog_policy(%s)", (fid,)),
+                                         pg['conn'].commit()))
+                except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+                    print(f"    [!] PG write failed after retry for fid {fid}: {e} — skipping, will resume on next run")
         else:
             if last_ans == 'no':            summary['no'] += 1
             elif last_ans == 'unknown':     summary['unknown'] += 1
@@ -816,9 +846,12 @@ def main() -> int:
             else:                           summary['sentinel'] += 1
             # P5 — write sentinel (skip if dry-run)
             if args.apply:
-                write_sentinel(cur, fid, cands[0]['url'] if cands else None,
-                               why=f"last_ans={last_ans}; tried={len(cands)} cands")
-                conn.commit()
+                try:
+                    _safe_pg(lambda c: (write_sentinel(c, fid, cands[0]['url'] if cands else None,
+                                                        why=f"last_ans={last_ans}; tried={len(cands)} cands"),
+                                         pg['conn'].commit()))
+                except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+                    print(f"    [!] PG sentinel write failed after retry for fid {fid}: {e} — skipping, will resume on next run")
 
     print(f"\n{'='*60}\nSUMMARY:")
     for k, v in summary.items():

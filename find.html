@@ -2363,6 +2363,12 @@
       case 'beach_erosion_risk':      return '⛰ Erosion';
       case 'cold_water_shock_risk':   return '❄ Cold water';
       case 'shore_break_risk':        return '💥 Shore break';
+      // WMO weather-code cautions (deterministic_wmo source).
+      case 'lightning_status':        return '⚡ Lightning';
+      case 'fog_status':              return '🌫️ Fog';
+      case 'snow_status':             return '🌨️ Snow';
+      case 'heavy_rain_status':       return '🌧 Heavy rain';
+      case 'freezing_precip_status':  return '🥶 Freezing';
       default: return null;
     }
   }

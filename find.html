@@ -471,30 +471,24 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* ── Scout blurb ────────────────────────────────────────────────── */
+  /* ── Ask-Scout pill (static; opens chat on click) ───────────────── */
   .scout-blurb {
     margin: 10px 14px 4px;
-    padding: 12px 16px;
+    padding: 10px 16px;
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     border-left: 3px solid var(--accent);
-    font-size: 14px; line-height: 1.55;
+    font-size: 14px; line-height: 1.4;
     color: var(--text);
     box-shadow: var(--shadow-sm);
     cursor: pointer;
     transition: background 0.15s, transform 0.1s;
-    opacity: 1;
-    min-height: 44px;
+    min-height: 36px;
     display: flex; align-items: center;
   }
   .scout-blurb:hover { background: #fbfcfe; }
   .scout-blurb:active { transform: translateY(1px); }
-  .scout-blurb.loading {
-    color: var(--text-muted);
-    font-style: italic;
-  }
-  .scout-blurb.empty { display: none; }
 
   /* ── Result list ────────────────────────────────────────────────── */
   .results-head {
@@ -1003,7 +997,7 @@
     </div>
   </section>
 
-  <div class="scout-blurb loading" id="scout-blurb" onclick="toggleChat()" title="Ask Scout">Scout is sniffing the wind…</div>
+  <div class="scout-blurb" id="scout-blurb" onclick="toggleChat()" title="Ask Scout about these picks">Ask Scout about these picks →</div>
 
   <div class="results-head">
     <h2 id="results-title">Better picks nearby</h2>
@@ -1081,8 +1075,6 @@
   let lastRenderedCards = []; // mixed, ranked, filtered
 
   let nowAtUser = null;       // result of one-off Open-Meteo on user lat/lng
-  let _scoutAbortCtrl = null;
-  const scoutCache = {};
 
   let map = null;
   let pinsLayer = null;
@@ -2158,7 +2150,6 @@
         </div>`;
       head.textContent = '0 PLACES';
       renderPins([]);
-      renderScoutBlurb(cards);
       return;
     }
 
@@ -2183,7 +2174,6 @@
     });
 
     renderPins(cards);
-    renderScoutBlurb(cards);
   }
 
   function renderCardHTML(c, rank) {
@@ -2582,109 +2572,6 @@
       card.scrollIntoView({ behavior: 'smooth', block: 'center' });
       card.classList.add('highlight');
       setTimeout(() => card.classList.remove('highlight'), 1600);
-    }
-  }
-
-  // ─── Scout blurb ────────────────────────────────────────────────────
-  async function renderScoutBlurb(cards) {
-    const el = document.getElementById('scout-blurb');
-    if (!cards.length) {
-      el.classList.add('empty');
-      el.textContent = '';
-      return;
-    }
-    el.classList.remove('empty');
-
-    const first = cards[0];
-    const contextLines = cards.slice(0, 5).map((c, i) => {
-      const score = c.score != null ? c.score : 'park';
-      const distStr = c.distanceMi != null ? `${c.distanceMi.toFixed(1)} mi` : 'distance n/a';
-      return `${i + 1}. ${c.name} (${score}, ${distStr})`;
-    }).join('; ');
-
-    // Cache key includes selectedDay so flipping pills refreshes the
-    // blurb instead of replaying the previous day's text when the top
-    // beach happens to be the same.
-    const cacheKey = JSON.stringify({
-      first: first.id,
-      day:   selectedDay,
-      wants: [...wants].sort(),
-      amen: [...amenityFilters].sort(),
-      dist: distanceFilterMi,
-    });
-    if (scoutCache[cacheKey]) {
-      el.classList.remove('loading');
-      el.textContent = scoutCache[cacheKey];
-      return;
-    }
-
-    el.classList.add('loading');
-    el.textContent = 'Scout is sniffing the wind…';
-
-    if (_scoutAbortCtrl) _scoutAbortCtrl.abort();
-    _scoutAbortCtrl = new AbortController();
-    const myCtrl = _scoutAbortCtrl;
-
-    // Day framing for the prompt — drives whether the blurb reads
-    // "right now" / "today" / "this Saturday." Only NOW carries the
-    // user-coord weather hint since that's all we fetch for non-NOW.
-    const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-    let dayPhrase, framing;
-    if (selectedDay === 'now') {
-      dayPhrase = 'right now';
-      framing   = 'tell the owner what to expect there right now';
-    } else if (selectedDay === todayISO) {
-      dayPhrase = 'today';
-      framing   = "tell the owner what to expect at the best part of today's window";
-    } else {
-      const dt = new Date(selectedDay + 'T12:00:00');
-      const wk = dt.toLocaleDateString('en-US', { weekday: 'long' });
-      dayPhrase = `this ${wk}`;
-      framing   = `tell the owner what to plan for ${wk}'s best window`;
-    }
-
-    const nowSummary = (selectedDay === 'now' && nowAtUser)
-      ? `It's ${Math.round(nowAtUser.tempF)}°F with ${WMO_LABELS[nowAtUser.wmoCode] || 'mixed sky'} where the user is.`
-      : '';
-    const amenitySummary = amenityFilters.size
-      ? ` The user is filtering for ${[...amenityFilters].join(', ')}.`
-      : '';
-
-    const question = `${nowSummary}${amenitySummary} Ranked options for ${dayPhrase}: ${contextLines}. In two sentences, recommend ${first.name} (or — if its conditions are weak — call out a better trade-off from this list) and ${framing}.`;
-
-    // For dog-park first picks, we don't have a location_id to anchor
-    // beach-chat to; fall back to the highest-ranked beach if one exists.
-    const beachAnchor = cards.find(c => c.kind === 'beach');
-    if (!beachAnchor) {
-      el.classList.remove('loading');
-      el.textContent = `Dog parks lead today — ${first.name} is your nearest verified park.`;
-      scoutCache[cacheKey] = el.textContent;
-      return;
-    }
-
-    try {
-      const res  = await fetch(`${SUPABASE_URL}/functions/v1/beach-chat`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ANON_KEY}` },
-        body:    JSON.stringify({
-          location_id: beachAnchor.location_id,
-          arena_group_id: beachAnchor.fid,
-          question,
-        }),
-        signal: myCtrl.signal,
-      });
-      if (myCtrl !== _scoutAbortCtrl) return;
-      const data = await res.json();
-      if (myCtrl !== _scoutAbortCtrl) return;
-      const text = data.answer || '';
-      scoutCache[cacheKey] = text;
-      el.classList.remove('loading');
-      el.textContent = text || `${first.name} is the standout ${dayPhrase}.`;
-    } catch (e) {
-      if (e.name === 'AbortError') return;
-      el.classList.remove('loading');
-      el.textContent = '';
-      el.classList.add('empty');
     }
   }
 

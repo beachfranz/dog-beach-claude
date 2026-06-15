@@ -120,14 +120,41 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     grp = ap.add_mutually_exclusive_group(required=True)
     grp.add_argument('--ps-id', type=int)
+    grp.add_argument('--ps-ids', type=str,
+                     help='Comma-separated policy_source IDs')
     grp.add_argument('--all', action='store_true')
+    grp.add_argument('--refresh-short', type=int, default=None,
+                     help='Refresh ps rows where length(full_text) < N. '
+                          'Use to recover captcha-blocked / partially-loaded rows.')
     ap.add_argument('--dry-run', action='store_true')
+    ap.add_argument('--force-playwright', action='store_true',
+                    help='Skip urllib; go straight to Playwright. Useful for '
+                         'hosts that return captcha HTML via urllib (eCFR, '
+                         'Cloudflare-protected .gov, etc.).')
     args = ap.parse_args()
 
     conn = connect()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     if args.ps_id:
         cur.execute("SELECT id, subtype, citation, source_url FROM policy_source WHERE id=%s", (args.ps_id,))
+    elif args.ps_ids:
+        ids = [int(x) for x in args.ps_ids.split(',') if x.strip()]
+        cur.execute("SELECT id, subtype, citation, source_url FROM policy_source WHERE id = ANY(%s) ORDER BY id", (ids,))
+    elif args.refresh_short is not None:
+        # Refresh short/blocked rows; exclude per-beach stubs (operator_posted_policy
+        # rows that the per_beach extractor framework intentionally stubs to ~60 chars)
+        # and rows without source_url. Skip rows the loader already failed on
+        # (source_url='[web_search]' sentinel).
+        cur.execute("""SELECT id, subtype, citation, source_url FROM policy_source
+                       WHERE length(coalesce(full_text,'')) < %s
+                         AND source_url IS NOT NULL
+                         AND source_url <> '[web_search]'
+                         AND NOT (subtype = 'operator_posted_policy'
+                                  AND citation LIKE '%% per-beach policy (v1)%%')
+                         AND EXISTS (SELECT 1 FROM beach_policy_source bps
+                                      WHERE bps.policy_source_id = policy_source.id)
+                       ORDER BY length(coalesce(full_text,'')) ASC, id""",
+                    (args.refresh_short,))
     else:
         cur.execute("""SELECT id, subtype, citation, source_url FROM policy_source
                        WHERE full_text IS NULL AND source_url IS NOT NULL
@@ -142,13 +169,21 @@ def main() -> int:
     for i, r in enumerate(rows, 1):
         url = r['source_url']
         is_pdf = url.lower().endswith('.pdf')
-        text, err = (fetch_pdf if is_pdf else fetch_html)(url)
-        via = 'pdf' if is_pdf else 'html'
-        # Playwright fallback when urllib HTML extraction returned too
-        # little (SPAs render via JS; the static HTML has empty body).
-        if (not text) and (not is_pdf) and playwright_fetch is not None:
+        if args.force_playwright and not is_pdf and playwright_fetch is not None:
+            # Skip urllib; go straight to Playwright. For hosts that return
+            # captcha HTML via urllib (urllib succeeds but with garbage),
+            # the Playwright fallback below never triggers, so force is
+            # the only way through.
             text, err = fetch_html_playwright(url)
-            via = 'playwright' if text else via
+            via = 'playwright' if text else 'playwright_failed'
+        else:
+            text, err = (fetch_pdf if is_pdf else fetch_html)(url)
+            via = 'pdf' if is_pdf else 'html'
+            # Playwright fallback when urllib HTML extraction returned too
+            # little (SPAs render via JS; the static HTML has empty body).
+            if (not text) and (not is_pdf) and playwright_fetch is not None:
+                text, err = fetch_html_playwright(url)
+                via = 'playwright' if text else via
         if not text:
             print(f'  [{i}/{len(rows)}] ps={r["id"]} {r["subtype"]:<26} FAIL: {err}')
             totals['failed'] += 1
@@ -159,9 +194,32 @@ def main() -> int:
         if args.dry_run:
             print(f'  [{i}/{len(rows)}] ps={r["id"]} {r["subtype"]:<26} fetched {len(text)} chars [dry-run]')
         else:
-            cur.execute("UPDATE policy_source SET full_text = %s WHERE id = %s",
-                        (text, r['id']))
-            conn.commit()
+            # Supavisor closes idle/long-lived connections after ~15min.
+            # Retry-with-reconnect so long runs survive both the per-conn
+            # drop AND short network blips (refetch + eastern bulk-cache
+            # both died this way on 2026-06-14). 5 attempts × exp backoff
+            # capped at 30s = ~75s total tolerance before giving up.
+            for attempt in range(5):
+                try:
+                    cur.execute("UPDATE policy_source SET full_text = %s WHERE id = %s",
+                                (text, r['id']))
+                    conn.commit()
+                    break
+                except psycopg2.OperationalError as e:
+                    if attempt == 4:
+                        raise
+                    delay = min(2 ** attempt, 30)
+                    print(f'  [{i}/{len(rows)}] ps={r["id"]} reconnecting in {delay}s after pooler drop: {str(e)[:80]}', flush=True)
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    time.sleep(delay)
+                    try:
+                        conn = connect()
+                        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                    except Exception as e2:
+                        print(f'  [{i}/{len(rows)}] ps={r["id"]} reconnect failed: {str(e2)[:80]}', flush=True)
             totals['persisted'] += 1
             print(f'  [{i}/{len(rows)}] ps={r["id"]} {r["subtype"]:<26} PERSISTED {len(text)} chars')
         time.sleep(0.5)

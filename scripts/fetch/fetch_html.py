@@ -63,10 +63,25 @@ def fetch(
             if wait_seconds > 0:
                 page.wait_for_timeout(int(wait_seconds * 1000))
             if selector:
-                el = page.query_selector(selector)
-                if el is None:
-                    raise RuntimeError(f"selector {selector!r} not found")
-                return el.inner_html() if raw_html else el.inner_text()
+                # Use wait_for_selector — retries until the selector renders
+                # OR the timeout expires. Falls back to body on miss so we
+                # at least get *something* instead of failing the whole row.
+                # 2026-06-14: query_selector → wait_for_selector after Municode
+                # refetch showed sporadic "selector not found" on pages that
+                # rendered cleanly when probed in isolation; the page just
+                # needed more settle time than wait_seconds.
+                try:
+                    page.wait_for_selector(selector, timeout=timeout_ms,
+                                           state="attached")
+                    el = page.query_selector(selector)
+                    if el is not None:
+                        return el.inner_html() if raw_html else el.inner_text()
+                except Exception:
+                    pass  # fall through to body
+                body = page.query_selector("body")
+                if body is None:
+                    raise RuntimeError(f"selector {selector!r} not found and no body")
+                return body.inner_html() if raw_html else body.inner_text()
             if raw_html:
                 return page.content()
             body = page.query_selector("body")

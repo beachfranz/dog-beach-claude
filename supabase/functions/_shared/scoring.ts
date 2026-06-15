@@ -319,8 +319,14 @@ function worstOf(...statuses: (HourStatus | null)[]): HourStatus {
 
 function tideStatus(h: number | null, cfg: ScoringConfig): HourStatus | null {
   if (h === null) return null;
-  if (h >= cfg.caution_tide_height)  return "caution";   // ≥ 5.0 ft
-  if (h >= cfg.advisory_tide_height) return "advisory";  // 3.0–4.9 ft
+  // 20260615: tide demoted by one severity tier — it's an availability
+  // signal, not a safety one. caution_tide_height (≥5 ft) now maps to
+  // advisory; advisory_tide_height (≥3 ft) maps to go. Mirrors the
+  // tide_neg special-case added to public.v2_signal_status in the same
+  // ship. Keep cfg field NAMES (caution_tide_height, advisory_tide_height)
+  // for backwards compat with scoring_config rows; only the returned
+  // severity label changed.
+  if (h >= cfg.caution_tide_height) return "advisory";
   return "go";
 }
 
@@ -572,8 +578,10 @@ function scoreOneHour(raw: RawHourData, cfg: ScoringConfig): ScoredHour {
   else if (ms.crowd === "advisory")  { failedChecks.push("advisory_crowds"); riskReasonCodes.push("moderate_crowds"); }
   else passedChecks.push("crowds_ok");
 
-  if (ms.tide === "caution")         { failedChecks.push("caution_tide");    riskReasonCodes.push("high_tide"); }
-  else if (ms.tide === "advisory")   { failedChecks.push("advisory_tide");   riskReasonCodes.push("rising_tide"); }
+  // 20260615: tide capped at advisory severity (see tideStatus above).
+  // Use "high_tide" reason code since this branch now covers the 5+ ft
+  // range that previously read as caution_tide / high_tide.
+  if (ms.tide === "advisory")        { failedChecks.push("advisory_tide");   riskReasonCodes.push("high_tide"); }
   else passedChecks.push("tide_ok");
 
   if (ms.uv === "no_go")             { failedChecks.push("extreme_uv");      riskReasonCodes.push("extreme_uv"); }

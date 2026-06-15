@@ -311,9 +311,11 @@ function v2StatusFor(signal: string, v: number | null | undefined): V2Status | n
       if (v >= 115) return "advisory";
       return "clear";
     case "tide":
-      if (v >= 7) return "no_go";
-      if (v >= 5) return "caution";     // 5-7 score 6/10 = 60% caution
-      if (v >= 3) return "advisory";
+      // 20260615: capped at caution. Tide is an availability signal,
+      // not a safety one. Keep in sync with public.v2_signal_status
+      // (migration 20260615a_tide_demote_one_severity.sql).
+      if (v >= 7) return "caution";
+      if (v >= 5) return "advisory";
       return "clear";
     case "wind":
       if (v >= 35) return "no_go";

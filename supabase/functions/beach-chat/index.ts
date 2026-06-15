@@ -102,7 +102,7 @@ Deno.serve(async (req: Request) => {
           .eq("is_active", true),
         supabase
           .from("beach_day_recommendations")
-          .select("location_id, local_date, composite_score_v2, best_window_label, best_window_text, avg_temp, avg_wind, avg_uv, avg_tide_height, lowest_tide_height, busyness_category, go_hours_count, caution_hours_count, no_go_hours_count, caution_text, risk_reason_codes, positive_reason_codes, summary_weather, bacteria_risk, precip_72h_mm")
+          .select("location_id, local_date, composite_score_v2, composite_score_v3, best_window_label, best_window_text, avg_temp, avg_wind, avg_uv, avg_tide_height, lowest_tide_height, busyness_category, go_hours_count, caution_hours_count, no_go_hours_count, caution_text, risk_reason_codes, positive_reason_codes, summary_weather, bacteria_risk, precip_72h_mm")
           .gte("local_date", todayPacific)
           .order("local_date", { ascending: true })
           .order("location_id", { ascending: true })
@@ -214,7 +214,7 @@ Deno.serve(async (req: Request) => {
         .eq("location_id", location_id);
       const hourQuery = supabase
         .from("beach_day_hourly_scores")
-        .select("local_date, local_hour, hour_label, hour_score_v2, tide_height, wind_speed, temp_air, feels_like, sand_temp, asphalt_temp, busyness_score, precip_chance, uv_index, busyness_category, is_in_best_window, is_candidate_window")
+        .select("local_date, local_hour, hour_label, hour_score_v2, hour_score_v3, tide_height, wind_speed, temp_air, feels_like, sand_temp, asphalt_temp, busyness_score, precip_chance, uv_index, busyness_category, is_in_best_window, is_candidate_window")
         .eq("location_id", location_id);
 
       const [{ data: days, error: daysErr }, { data: hours, error: hoursErr }] = await Promise.all([

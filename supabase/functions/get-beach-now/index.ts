@@ -305,6 +305,7 @@ async function refreshNow(
     // disagree. Soft-fail: never block the NOW write on the rec update.
     // Per Franz 2026-05-30.
     let hourScoreV2: number | null = null;
+    let hourScoreV3: number | null = null;
     if (beach.arena_group_id != null) {
       const { error: bwErr } = await supabase.rpc(
         "apply_v2_best_window_to_beach_recommendations",
@@ -314,11 +315,12 @@ async function refreshNow(
 
       const { data: v2row } = await supabase
         .from("beach_day_hourly_scores")
-        .select("hour_score_v2")
+        .select("hour_score_v2, hour_score_v3")
         .eq("arena_group_id", beach.arena_group_id)
         .eq("forecast_ts", row.forecast_ts)
         .maybeSingle();
       hourScoreV2 = (v2row?.hour_score_v2 as number | null) ?? null;
+      hourScoreV3 = (v2row?.hour_score_v3 as number | null) ?? null;
     }
 
     return {
@@ -328,6 +330,7 @@ async function refreshNow(
         ...row,
         tide_direction: tide.direction,
         hour_score_v2:  hourScoreV2,
+        hour_score_v3:  hourScoreV3,
       },
     };
 

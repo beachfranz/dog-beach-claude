@@ -255,18 +255,20 @@ async function refreshNow(
     if (bwErr) console.warn(`[dog_park:${park.fid}] apply_v2 window soft-fail:`, bwErr.message);
 
     let hourScoreV2: number | null = null;
+    let hourScoreV3: number | null = null;
     const { data: v2row } = await supabase
       .from("dog_park_day_hourly_scores")
-      .select("hour_score_v2")
+      .select("hour_score_v2, hour_score_v3")
       .eq("dog_park_fid", park.fid)
       .eq("forecast_ts", row.forecast_ts)
       .maybeSingle();
     hourScoreV2 = (v2row?.hour_score_v2 as number | null) ?? null;
+    hourScoreV3 = (v2row?.hour_score_v3 as number | null) ?? null;
 
     return {
       fid: park.fid,
       ok: true,
-      row: { ...row, hour_score_v2: hourScoreV2 },
+      row: { ...row, hour_score_v2: hourScoreV2, hour_score_v3: hourScoreV3 },
     };
   } catch (err) {
     console.error(`[dog_park:${park.fid}] NOW refresh error:`, String(err));

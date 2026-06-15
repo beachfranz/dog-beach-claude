@@ -94,7 +94,7 @@ Deno.serve(async (req: Request) => {
           // statuses inline from raw values via the v2 TS port.
           "local_hour, hour_label, is_in_best_window, is_candidate_window, " +
           "tide_height, wind_speed, temp_air, feels_like, precip_chance, busyness_score, " +
-          "uv_index, weather_code, hour_text, is_daylight, hour_score_v2, " +
+          "uv_index, weather_code, hour_text, is_daylight, hour_score_v2, hour_score_v3, " +
           "tide_score, wind_score, crowd_score, rain_score, temp_score, uv_score, weather_score, " +
           "sand_temp, asphalt_temp"
         )
@@ -229,7 +229,8 @@ function buildWindowLabel(startHour: number, endHour: number): string {
 }
 
 type CandidateHour = {
-  local_hour: number; hour_score: number; hour_score_v2?: number | null;
+  local_hour: number; hour_score: number;
+  hour_score_v2?: number | null; hour_score_v3?: number | null;
   tide_status: string | null; wind_status: string | null;
   rain_status: string | null; crowd_status: string | null;
   temp_status: string | null; uv_status: string | null;
@@ -242,8 +243,10 @@ function findBestRemainingWindow(hours: CandidateHour[]): {
 } | null {
   if (!hours.length) return null;
 
-  // Prefer v2 score; fall back to v1 during transition. Per Franz 2026-05-30.
-  const score = (h: CandidateHour) => Number(h.hour_score_v2 ?? h.hour_score ?? 0);
+  // v3-first with v2 fallback (cutover 2026-06-15). v1 hour_score remains
+  // as last fallback for any beach that hasn't been rerun on v2-or-newer.
+  const score = (h: CandidateHour) =>
+    Number(h.hour_score_v3 ?? h.hour_score_v2 ?? h.hour_score ?? 0);
 
   const sorted    = [...hours].sort((a, b) => a.local_hour - b.local_hour);
   const peak      = sorted.reduce((b, h) => score(h) > score(b) ? h : b);

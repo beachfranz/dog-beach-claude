@@ -94,7 +94,7 @@ Deno.serve(async (req: Request) => {
     // inline v2 port. hour_score_v2 powers the composite.
     const { data: futureHours } = futureDates.length ? await supabase
       .from("beach_day_hourly_scores")
-      .select("local_date, local_hour, hour_score_v2, tide_height, wind_speed, precip_chance, busyness_score, feels_like, uv_index, sand_temp, asphalt_temp")
+      .select("local_date, local_hour, hour_score_v2, hour_score_v3, tide_height, wind_speed, precip_chance, busyness_score, feels_like, uv_index, sand_temp, asphalt_temp")
       .eq("arena_group_id", fid)
       .in("local_date", futureDates)
       .eq("is_in_best_window", true) : { data: [] };
@@ -102,7 +102,7 @@ Deno.serve(async (req: Request) => {
     // Query 2: remaining candidate hours for today (keyed on arena_group_id)
     const { data: todayHours } = await supabase
       .from("beach_day_hourly_scores")
-      .select("local_hour, hour_score_v2, tide_height, wind_speed, precip_chance, busyness_score, feels_like, uv_index, sand_temp, asphalt_temp")
+      .select("local_hour, hour_score_v2, hour_score_v3, tide_height, wind_speed, precip_chance, busyness_score, feels_like, uv_index, sand_temp, asphalt_temp")
       .eq("arena_group_id", fid)
       .eq("local_date", today)
       .eq("is_candidate_window", true)
@@ -130,7 +130,7 @@ Deno.serve(async (req: Request) => {
         sum: 0, count: 0, tide: null, wind: null, rain: null, crowd: null, temp: null, uv: null,
       };
       const agg = byDate[h.local_date];
-      agg.sum   += Number(h.hour_score_v2 ?? 0);
+      agg.sum   += Number(h.hour_score_v3 ?? h.hour_score_v2 ?? 0);
       agg.count += 1;
       const sTemp = v2Worst(
         v2StatusFor("feels_hot",  h.feels_like as number | null),
@@ -224,7 +224,7 @@ function buildWindowLabel(startHour: number, endHour: number): string {
 }
 
 type HourRow = {
-  local_hour: number; hour_score_v2: number | null;
+  local_hour: number; hour_score_v2: number | null; hour_score_v3: number | null;
   tide_height: number | null; wind_speed: number | null;
   precip_chance: number | null; busyness_score: number | null;
   feels_like: number | null; uv_index: number | null;
@@ -262,8 +262,10 @@ function findBestRemainingWindow(hours: HourRow[]): {
 } | null {
   if (!hours.length) return null;
 
-  // v2-only after Franz 2026-05-30 task #12.
-  const score = (h: HourRow) => Number(h.hour_score_v2 ?? 0);
+  // v3-first with v2 fallback (cutover 2026-06-15). Pin
+  // [[v3-advisory-driven-scoring]]. Drop v2 fallback once v3 has 100%
+  // coverage across all scoring-tier beaches.
+  const score = (h: HourRow) => Number(h.hour_score_v3 ?? h.hour_score_v2 ?? 0);
 
   const sorted    = [...hours].sort((a, b) => a.local_hour - b.local_hour);
   const peak      = sorted.reduce((b, h) => score(h) > score(b) ? h : b);

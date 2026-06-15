@@ -4786,12 +4786,12 @@ async function loadWaterConditionAdvisories(beachFid) {
     const value = a.value || a.event_type || '';
     const window = _formatAdvisoryWindow(a.valid_from, a.valid_to);
     detail.innerHTML = `
+      ${window ? `<div>${escHtml(window)}</div>` : ''}
       <div style="font-weight:600; margin-bottom:2px;">
         ${escHtml(a.label || a.event_type || 'Advisory')}
         ${value ? `<span style="font-weight:500; color:var(--text-muted); margin-left:6px;">${escHtml(value)}</span>` : ''}
       </div>
-      <div>${escHtml(text)}</div>
-      ${window ? `<div style="margin-top:4px; color:var(--text-muted); font-size:11px;">${escHtml(window)}</div>` : ''}`;
+      <div>${escHtml(text)}</div>`;
     detail.hidden = false;
   });
 }

@@ -85,17 +85,80 @@ Decide which scenario fits this beach. Return JSON ONLY:
 }}"""
 
 
+# ── No-notes prompt (operator/county/city populator rows) ──────────────
+# These rows came from PROGRAMMATIC populators that read upstream tables
+# (operator_dogs_policy, county_dog_policy, city_dog_policy, etc.) where
+# the upstream often conflated beach-level prohibition with a city/county
+# leash rule that wouldn't apply at the beach itself. There are no `notes`
+# to read; Sonnet has to reason from beach identity + source URL +
+# operator/mng name + typical patterns.
+PROMPT_USER_NO_NOTES_TEMPLATE = """BEACH: {name}{geo}
+SOURCE: {source_tier} ({source_label})
+SOURCE_URL: {source_url}
+OPERATOR/MANAGER: {operator}
+SOURCE_QUOTE: {source_quote}
+
+ORIGINAL EXTRACTION (contradictory — no notes captured):
+  allowed: no
+  leash_required: {leash}
+
+This row came from a programmatic populator that reads upstream
+operator/county/city tables. The upstream usually conflates:
+  - A BEACH-LEVEL prohibition ("no dogs on this beach")
+  - WITH a city/county/operator leash rule ("dogs city-wide must be leashed")
+into one row, producing the impossible allowed=no + leash_required combination.
+
+Reason about THIS beach specifically:
+  - If the source is a county/city ordinance applied via geographic membership
+    (operator_county / operator_city / county_policy / city_policy), the
+    leash component usually reflects city-wide rules, not the beach. If the
+    beach name suggests a wildlife reserve / wilderness / strict-protection
+    area, scenario A. If the beach is a typical public access beach, the
+    "no" may itself be wrong (extractor misread a leash rule as prohibition);
+    consider scenario B.
+  - If the source is operator_pad_us / pad_us_dogs_policy_v1 (federal
+    land manager), prohibition is usually real → scenario A.
+  - If the source is unified_v1 / beach_policy_v2_dogs / research and you
+    have only the beach name to go on, default to ambiguous unless the
+    beach name itself is decisive.
+
+Return JSON ONLY:
+{{
+  "scenario": "A" | "B" | "ambiguous",
+  "corrected_allowed": "no" | "yes" | null,
+  "corrected_leash_required": "on_leash" | "off_leash" | "mixed" | null,
+  "confidence": "high" | "medium" | "low",
+  "reasoning": "<one sentence explaining the choice>"
+}}"""
+
+
 def call_sonnet(beach_name: str, geo: str, leash: str, notes: str) -> dict:
+    return _call(PROMPT_USER_TEMPLATE.format(
+        name=beach_name, geo=geo, leash=leash, notes=notes,
+    ))
+
+
+def call_sonnet_no_notes(beach_name: str, geo: str, leash: str, *,
+                         source_tier: str, source_label: str,
+                         source_url: str, operator: str,
+                         source_quote: str) -> dict:
+    """No-notes variant: pass beach identity + source metadata; Sonnet
+    reasons from patterns rather than verbatim source text."""
+    return _call(PROMPT_USER_NO_NOTES_TEMPLATE.format(
+        name=beach_name, geo=geo, leash=leash,
+        source_tier=source_tier, source_label=source_label,
+        source_url=source_url or "(none)",
+        operator=operator or "(unknown)",
+        source_quote=source_quote or "(none)",
+    ))
+
+
+def _call(user_content: str) -> dict:
     body = {
         "model": SONNET,
         "max_tokens": 600,
         "system": PROMPT_SYSTEM,
-        "messages": [{
-            "role": "user",
-            "content": PROMPT_USER_TEMPLATE.format(
-                name=beach_name, geo=geo, leash=leash, notes=notes,
-            ),
-        }],
+        "messages": [{"role": "user", "content": user_content}],
     }
     req = urllib.request.Request(
         "https://api.anthropic.com/v1/messages",
@@ -169,6 +232,11 @@ def main() -> int:
                     help="Filter to one BEP source (e.g. city_policy)")
     ap.add_argument("--skip-if-fresh-within", type=int, default=30,
                     help="Skip beaches already disambiguated within N days")
+    ap.add_argument("--include-no-notes", action="store_true",
+                    help="Also process rows from operator/county/city populators "
+                         "that have NO `notes` field. Uses an alternate prompt that "
+                         "feeds Sonnet beach identity + source_url + operator_name "
+                         "and asks it to reason from patterns.")
     args = ap.parse_args()
 
     conn = connect()
@@ -178,33 +246,69 @@ def main() -> int:
     where_source = "AND bep.source = %s" if args.source else ""
     params = [args.source] if args.source else []
 
-    cur.execute(f"""
-        SELECT bep.gold_fid AS fid, bep.source,
-               coalesce(b.display_name_override, b.name) AS name,
-               b.county_name, b.state,
-               bep.claimed_values->>'leash_required' AS leash,
-               bep.claimed_values->>'notes' AS notes
-        FROM public.beach_enrichment_provenance bep
-        JOIN public.beaches_gold b ON b.fid = bep.gold_fid
-        WHERE bep.field_group = 'dogs'
-          AND bep.claimed_values->>'allowed' = 'no'
-          AND bep.claimed_values->>'leash_required' IN ('on_leash','off_leash','mixed')
-          AND bep.claimed_values->>'notes' IS NOT NULL
-          AND length(bep.claimed_values->>'notes') > 20
-          AND NOT (
-            bep.claimed_values ? 'area_sand'        OR bep.claimed_values ? 'area_water'
-            OR bep.claimed_values ? 'area_trails'      OR bep.claimed_values ? 'area_picnic_area'
-            OR bep.claimed_values ? 'area_parking_lot' OR bep.claimed_values ? 'area_campground'
-            OR bep.claimed_values ? 'sections'         OR bep.claimed_values ? 'rules'
-            OR bep.claimed_values ? 'prohibited_areas' OR bep.claimed_values ? 'designated_dog_zones'
-          )
-          AND bep.source NOT IN ('operator_county','operator_pad_us','operator_city',
-                                 'state_dogs_policy_v1','pad_us_dogs_policy_v1')
-          {where_source}
-        ORDER BY bep.gold_fid
-    """, params)
+    if args.include_no_notes:
+        # No-notes path: include operator_*/county_/city_/pad_us_/unified_v1/
+        # beach_policy_v2_dogs/research rows. Pull bep.source_url + operator_name
+        # + mng_name + source_quote so the alternate prompt has SOMETHING to
+        # reason from. Skip fids that already have a per-section-evidence row
+        # for the same beach (those were handled by the 20260613n normalizer).
+        cur.execute(f"""
+            SELECT bep.gold_fid AS fid, bep.source, bep.source_url AS bep_source_url,
+                   coalesce(b.display_name_override, b.name) AS name,
+                   b.county_name, b.state,
+                   bep.claimed_values->>'leash_required' AS leash,
+                   bep.claimed_values->>'notes' AS notes,
+                   bep.claimed_values->>'operator_name' AS operator_name,
+                   bep.claimed_values->>'mng_name' AS mng_name,
+                   bep.claimed_values->>'source_quote' AS source_quote
+            FROM public.beach_enrichment_provenance bep
+            JOIN public.beaches_gold b ON b.fid = bep.gold_fid
+            WHERE bep.field_group = 'dogs'
+              AND bep.claimed_values->>'allowed' = 'no'
+              AND bep.claimed_values->>'leash_required' IN ('on_leash','off_leash','mixed')
+              AND NOT (
+                bep.claimed_values ? 'area_sand'        OR bep.claimed_values ? 'area_water'
+                OR bep.claimed_values ? 'area_trails'      OR bep.claimed_values ? 'area_picnic_area'
+                OR bep.claimed_values ? 'area_parking_lot' OR bep.claimed_values ? 'area_campground'
+                OR bep.claimed_values ? 'sections'         OR bep.claimed_values ? 'rules'
+                OR bep.claimed_values ? 'prohibited_areas' OR bep.claimed_values ? 'designated_dog_zones'
+              )
+              AND bep.source NOT IN ('per_beach_disambiguate_v1','per_beach_disambiguate_v1_no_result')
+              {where_source}
+            ORDER BY bep.gold_fid
+        """, params)
+    else:
+        cur.execute(f"""
+            SELECT bep.gold_fid AS fid, bep.source, bep.source_url AS bep_source_url,
+                   coalesce(b.display_name_override, b.name) AS name,
+                   b.county_name, b.state,
+                   bep.claimed_values->>'leash_required' AS leash,
+                   bep.claimed_values->>'notes' AS notes,
+                   bep.claimed_values->>'operator_name' AS operator_name,
+                   bep.claimed_values->>'mng_name' AS mng_name,
+                   bep.claimed_values->>'source_quote' AS source_quote
+            FROM public.beach_enrichment_provenance bep
+            JOIN public.beaches_gold b ON b.fid = bep.gold_fid
+            WHERE bep.field_group = 'dogs'
+              AND bep.claimed_values->>'allowed' = 'no'
+              AND bep.claimed_values->>'leash_required' IN ('on_leash','off_leash','mixed')
+              AND bep.claimed_values->>'notes' IS NOT NULL
+              AND length(bep.claimed_values->>'notes') > 20
+              AND NOT (
+                bep.claimed_values ? 'area_sand'        OR bep.claimed_values ? 'area_water'
+                OR bep.claimed_values ? 'area_trails'      OR bep.claimed_values ? 'area_picnic_area'
+                OR bep.claimed_values ? 'area_parking_lot' OR bep.claimed_values ? 'area_campground'
+                OR bep.claimed_values ? 'sections'         OR bep.claimed_values ? 'rules'
+                OR bep.claimed_values ? 'prohibited_areas' OR bep.claimed_values ? 'designated_dog_zones'
+              )
+              AND bep.source NOT IN ('operator_county','operator_pad_us','operator_city',
+                                     'state_dogs_policy_v1','pad_us_dogs_policy_v1')
+              {where_source}
+            ORDER BY bep.gold_fid
+        """, params)
     candidates = cur.fetchall()
-    print(f"Found {len(candidates)} bare contradictory rows")
+    print(f"Found {len(candidates)} bare contradictory rows"
+          f"{' (no-notes mode)' if args.include_no_notes else ''}")
 
     # Apply freshness guard
     if args.skip_if_fresh_within > 0 and candidates:
@@ -235,10 +339,27 @@ def main() -> int:
         leash = row["leash"]
         notes = (row["notes"] or "")[:1500]
         print(f"\n[{fid}] {name}  leash={leash}  source={row['source']}")
-        print(f"  notes: {notes[:120]}")
 
         try:
-            resp = call_sonnet(name, geo, leash, notes)
+            if notes and len(notes) > 20:
+                print(f"  notes: {notes[:120]}")
+                resp = call_sonnet(name, geo, leash, notes)
+            elif args.include_no_notes:
+                op = (row.get("operator_name") or row.get("mng_name") or "").strip()
+                src_url = (row.get("bep_source_url") or "").strip()
+                src_quote = (row.get("source_quote") or "").strip()[:400]
+                print(f"  no-notes mode: source_url={src_url[:80]}  op={op[:40]}")
+                resp = call_sonnet_no_notes(
+                    name, geo, leash,
+                    source_tier=row["source"],
+                    source_label=row["source"],
+                    source_url=src_url,
+                    operator=op,
+                    source_quote=src_quote,
+                )
+            else:
+                # Should not happen — selection query gates this — but defensive.
+                continue
         except Exception as e:
             print(f"  [!] LLM error: {e}")
             continue

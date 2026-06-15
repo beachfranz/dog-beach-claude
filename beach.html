@@ -355,6 +355,10 @@
    * fires, the tile should scream. The corner ⚠ badge + click-detail
    * panel carry the specifics. Doubled selectors raise specificity
    * above .amenity.rule-* which lives later in this stylesheet. */
+  .amenity.amenity.haz-minor {
+    background: rgba(251,191,36,0.45);
+    border-color: rgba(180,83,9,0.40);
+  }
   .amenity.amenity.haz-moderate {
     background: rgba(251,146,60,0.55);
     border-color: rgba(154,52,18,0.55);
@@ -2383,19 +2387,30 @@ const _WATER_HAZARD_EVENT_TYPES = new Set([
 ]);
 // Hazards that also reach the sand edge (sneaker waves / shore break
 // wash people off rocks + sand). Demoted one tier on the Sand tile
-// (severe→moderate, moderate→none) since most of the dry sand is safe.
+// (severe→moderate, moderate→minor, minor→none) since most of the dry
+// sand is safe.
 const _SAND_EDGE_EVENT_TYPES = new Set([
   'sneaker_wave_risk', 'shore_break_risk',
 ]);
-// Sand temperature thresholds (°F).
-const _SAND_TEMP_SEVERE = 125;
-const _SAND_TEMP_MODERATE = 115;
-// Wind sandblast thresholds (mph).
-const _WIND_SANDBLAST_SEVERE = 25;
-const _WIND_SANDBLAST_MODERATE = 19;
-// Severity rank — used for max-wins logic across signals.
-const _HAZ_RANK = { severe: 2, moderate: 1 };
-const _RANK_TO_SEV = { 2: 'severe', 1: 'moderate' };
+// Sand-relevant deterministic_weather advisories applied at the
+// advisory's own severity (no demotion). Hot-sand + strong-wind +
+// hot-asphalt are the trio that directly affects walking on the beach:
+//   - wind_status carries the "blowing sand" impact (the spec text says
+//     so explicitly) so it surfaces on Sand at whatever severity the
+//     orch wrote it as.
+//   - sand_status is the same metric the prior maxSand-from-hours logic
+//     was deriving directly; reading from the advisory row aligns with
+//     the rest of the page (Cautions card uses the same row).
+//   - asphalt_status is paws-related; covers the walk from car to sand.
+const _SAND_HAZARD_EVENT_TYPES = new Set([
+  'wind_status', 'sand_status', 'asphalt_status',
+]);
+// Severity rank — used for max-wins logic across signals. Includes
+// minor (advisory tier, amber-yellow) so single-source-of-truth
+// advisories at minor severity propagate to the Sand/Water tile
+// overlays without disappearing.
+const _HAZ_RANK = { minor: 1, moderate: 2, severe: 3 };
+const _RANK_TO_SEV = { 1: 'minor', 2: 'moderate', 3: 'severe' };
 
 // Per-section hazard signal aggregator. Returns:
 //   { severity:'severe'|'moderate'|null, summary:string, impactText:string }
@@ -2424,43 +2439,37 @@ function _sectionHazardSignal(sectionName, advisories, hoursToday) {
       parts.push(`${lbl}${val}`);
     }
   } else if (sectionName === 'sand') {
-    let maxSand = -Infinity;
-    let maxWind = -Infinity;
-    for (const h of hours) {
-      if (h?.sand_temp != null && h.sand_temp > maxSand) maxSand = h.sand_temp;
-      if (h?.wind_speed != null && h.wind_speed > maxWind) maxWind = h.wind_speed;
-    }
     const sandPhrases = [];
-    if (maxSand >= _SAND_TEMP_SEVERE) {
-      rank = Math.max(rank, 2);
-      parts.push(`sand peak ${Math.round(maxSand)}°F`);
-      sandPhrases.push(`Dangerous sand temp ${Math.round(maxSand)}°F — risk of paw burns. Keep her off dry sand at midday or use booties.`);
-    } else if (maxSand >= _SAND_TEMP_MODERATE) {
-      rank = Math.max(rank, 1);
-      parts.push(`sand peak ${Math.round(maxSand)}°F`);
-      sandPhrases.push(`Hot sand peaks at ${Math.round(maxSand)}°F today — paw discomfort likely. Walk her early or late.`);
+    // Direct sand-relevance advisories at full severity. Same
+    // single-source-of-truth pattern as Water above.
+    for (const a of advs) {
+      if (!_SAND_HAZARD_EVENT_TYPES.has(a.event_type)) continue;
+      const r = _HAZ_RANK[a.severity] || 0;
+      if (r === 0) continue;
+      if (r > rank || (r === rank && !bestImpactText && a.dog_impact_text)) {
+        rank = r;
+        bestImpactText = a.dog_impact_text || bestImpactText;
+      }
+      const lbl = a.label || a.event_type.replace(/_status$/, '').replace(/_/g, ' ');
+      const val = a.value ? ` ${a.value}` : '';
+      parts.push(`${lbl}${val}`);
+      if (a.dog_impact_text) sandPhrases.push(a.dog_impact_text);
     }
-    if (maxWind >= _WIND_SANDBLAST_SEVERE) {
-      rank = Math.max(rank, 2);
-      parts.push(`gusty wind ${Math.round(maxWind)}mph`);
-      sandPhrases.push(`Gusty winds to ${Math.round(maxWind)}mph today — blowing sand can irritate her eyes and ears.`);
-    } else if (maxWind >= _WIND_SANDBLAST_MODERATE) {
-      rank = Math.max(rank, 1);
-      parts.push(`breezy ${Math.round(maxWind)}mph`);
-      sandPhrases.push(`Breezy at ${Math.round(maxWind)}mph today — some sand blowing on the beach.`);
-    }
-    // sand-edge hazards demoted one tier
+    // Sand-edge water hazards — demoted one tier. severe→moderate,
+    // moderate→minor, minor falls off entirely (dry sand is safe).
     for (const a of advs) {
       if (!_SAND_EDGE_EVENT_TYPES.has(a.event_type)) continue;
       const r = _HAZ_RANK[a.severity] || 0;
       if (r >= 2) {
-        rank = Math.max(rank, 1);
+        const demoted = r - 1;
+        rank = Math.max(rank, demoted);
         const lbl = a.label || a.event_type.replace(/_risk$/, '').replace(/_/g, ' ');
         parts.push(`${lbl} reaches sand`);
         if (a.dog_impact_text) sandPhrases.push(a.dog_impact_text);
       }
     }
-    bestImpactText = sandPhrases.join(' ');
+    if (sandPhrases.length && !bestImpactText) bestImpactText = sandPhrases.join(' ');
+    else if (sandPhrases.length) bestImpactText = sandPhrases.join(' ');
   }
 
   if (rank === 0) return { severity: null, summary: '', impactText: '' };
@@ -2489,7 +2498,7 @@ function _applyAmenityHazardOverlays() {
     const sec = el.getAttribute('data-section');
     if (!sec) return;
     const sig = _sectionHazardSignal(sec, _advisoriesForOverlay, _hoursForOverlay);
-    el.classList.remove('haz-severe', 'haz-moderate');
+    el.classList.remove('haz-severe', 'haz-moderate', 'haz-minor');
     const oldBadge = el.querySelector('.haz-badge');
     if (oldBadge) oldBadge.remove();
     delete el.dataset.hazSummary;

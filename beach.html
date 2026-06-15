@@ -367,11 +367,6 @@
     background: rgba(239,68,68,0.55);
     border-color: rgba(153,27,27,0.55);
   }
-  .haz-badge {
-    position: absolute; top: 3px; right: 4px;
-    font-size: 12px; line-height: 1; pointer-events: none;
-    filter: drop-shadow(0 0 1px rgba(255,255,255,0.9));
-  }
   /* Detail panel below the amenity grid — mirrors #caution-detail.
    * Single-select: opening one tile closes any other open tile. */
   .amenity-detail {
@@ -2518,8 +2513,10 @@ let _hoursForOverlay = [];
 let _currentBeachAreaM2 = null;
 
 // Walk all rendered amenity buttons with data-section + apply overlay
-// classes, corner badges, and extended tooltips. Re-entrant — safe to
-// call multiple times as data arrives.
+// classes and extended tooltips. Re-entrant — safe to call multiple
+// times as data arrives. (Corner ⚠ badge removed 2026-06-15 — the
+// tinted tile background is loud enough on its own; the click-detail
+// panel still carries the specifics.)
 function _applyAmenityHazardOverlays() {
   document.querySelectorAll('.amenity[data-section]').forEach(el => {
     const sec = el.getAttribute('data-section');
@@ -2527,16 +2524,11 @@ function _applyAmenityHazardOverlays() {
     const sig = _sectionHazardSignal(sec, _advisoriesForOverlay, _hoursForOverlay);
     el.classList.remove('haz-severe', 'haz-moderate', 'haz-minor');
     const oldBadge = el.querySelector('.haz-badge');
-    if (oldBadge) oldBadge.remove();
+    if (oldBadge) oldBadge.remove();   // belt-and-suspenders for old DOM
     delete el.dataset.hazSummary;
     delete el.dataset.hazImpact;
     if (!sig.severity) return;
     el.classList.add(`haz-${sig.severity}`);
-    const badge = document.createElement('span');
-    badge.className = 'haz-badge';
-    badge.setAttribute('aria-label', `today's hazard: ${sig.severity}`);
-    badge.textContent = '⚠';
-    el.appendChild(badge);
     el.dataset.hazSummary = sig.summary;
     el.dataset.hazImpact  = sig.impactText || '';
   });

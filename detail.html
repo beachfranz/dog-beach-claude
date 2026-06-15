@@ -1137,7 +1137,10 @@
       const dog     = metric.barIconFn ? metric.barIconFn(h) : (h.is_in_best_window ? '🐶' : '');
 
       const activeStatus = metric.statusFn ? metric.statusFn(h) : (metric.statusKey ? h[metric.statusKey] : h.hour_status);
-      const statusIcon  = activeStatus === 'go' ? '✓' : activeStatus === 'no_go' ? '✕' : '⚠';
+      // 2026-06-15: caution / advisory glyph dropped — the colored status
+      // text (statusClass below) carries the severity. Match beach.html
+      // tile-badge removal.
+      const statusIcon  = activeStatus === 'go' ? '✓' : activeStatus === 'no_go' ? '✕' : '';
       const statusText  = activeStatus === 'go' ? 'Go' : activeStatus === 'advisory' ? 'Advisory' : activeStatus === 'caution' ? 'Caution' : 'No Go';
       const statusClass = `tooltip-status-${activeStatus}`;
       const reason      = metric.reasonFn ? metric.reasonFn(h) : '';
@@ -1215,7 +1218,7 @@
             <div class="tooltip-hour">${h.hour_label}</div>
             ${isScoreBar
               ? ''
-              : `<div class="tooltip-line ${statusClass}">${statusIcon} ${statusText}${scoreLine !== null ? ` · ${scoreLine}` : ''}</div>
+              : `<div class="tooltip-line ${statusClass}">${statusIcon ? `${statusIcon} ` : ''}${statusText}${scoreLine !== null ? ` · ${scoreLine}` : ''}</div>
                  ${metricLine ? `<div class="tooltip-line">${metricLine}</div>` : ''}
                  ${reason     ? `<div class="tooltip-line">${reason}</div>` : ''}`
             }

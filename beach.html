@@ -2393,17 +2393,16 @@ const _SAND_EDGE_EVENT_TYPES = new Set([
   'sneaker_wave_risk', 'shore_break_risk',
 ]);
 // Sand-relevant deterministic_weather advisories applied at the
-// advisory's own severity (no demotion). Hot-sand + strong-wind +
-// hot-asphalt are the trio that directly affects walking on the beach:
+// advisory's own severity (no demotion):
 //   - wind_status carries the "blowing sand" impact (the spec text says
 //     so explicitly) so it surfaces on Sand at whatever severity the
 //     orch wrote it as.
 //   - sand_status is the same metric the prior maxSand-from-hours logic
 //     was deriving directly; reading from the advisory row aligns with
 //     the rest of the page (Cautions card uses the same row).
-//   - asphalt_status is paws-related; covers the walk from car to sand.
+// asphalt_status belongs on a Parking tile, not Sand.
 const _SAND_HAZARD_EVENT_TYPES = new Set([
-  'wind_status', 'sand_status', 'asphalt_status',
+  'wind_status', 'sand_status',
 ]);
 // Severity rank — used for max-wins logic across signals. Includes
 // minor (advisory tier, amber-yellow) so single-source-of-truth

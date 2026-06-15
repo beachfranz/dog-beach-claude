@@ -2261,7 +2261,10 @@ function _renderParkingTile(def, type, subtype, fee, ruleClass, rule) {
   const sub = [typeLabel, costLabel].filter(Boolean).join(' · ');
   const tip = _amenityTooltip(def, rule) + (sub ? ` · ${sub}` : '');
   const attrs = _amenityButtonAttrs(def, rule, { value: sub, sub });
-  return `<button class="amenity${ruleClass || ''}" ${attrs} data-tip="${escHtml(tip)}">
+  // data-section="parking" hooks the tile into _applyAmenityHazardOverlays
+  // so asphalt_status / car_heat_status / car_cold_status advisories tint
+  // the tile at the advisory's own severity. Same pattern as Sand/Water.
+  return `<button class="amenity${ruleClass || ''}" ${attrs} data-section="parking" data-tip="${escHtml(tip)}">
     <span class="amenity-icon">${def.icon}</span>
     ${_ruleBadgeHtml(rule)}
     <span class="amenity-text">
@@ -2400,9 +2403,18 @@ const _SAND_EDGE_EVENT_TYPES = new Set([
 //   - sand_status is the same metric the prior maxSand-from-hours logic
 //     was deriving directly; reading from the advisory row aligns with
 //     the rest of the page (Cautions card uses the same row).
-// asphalt_status belongs on a Parking tile, not Sand.
 const _SAND_HAZARD_EVENT_TYPES = new Set([
   'wind_status', 'sand_status',
+]);
+// Parking-relevant deterministic_weather advisories. Applied at the
+// advisory's own severity (no demotion).
+//   - asphalt_status: hot parking-lot asphalt — paw burn risk on the
+//     walk from car to sand.
+//   - car_heat_status / car_cold_status: don't-leave-dog-in-parked-car
+//     warnings. Both spec texts are explicitly about the vehicle, and
+//     the parked car lives in the parking lot.
+const _PARKING_HAZARD_EVENT_TYPES = new Set([
+  'asphalt_status', 'car_heat_status', 'car_cold_status',
 ]);
 // Severity rank — used for max-wins logic across signals. Includes
 // minor (advisory tier, amber-yellow) so single-source-of-truth
@@ -2469,6 +2481,22 @@ function _sectionHazardSignal(sectionName, advisories, hoursToday) {
     }
     if (sandPhrases.length && !bestImpactText) bestImpactText = sandPhrases.join(' ');
     else if (sandPhrases.length) bestImpactText = sandPhrases.join(' ');
+  } else if (sectionName === 'parking') {
+    const parkingPhrases = [];
+    for (const a of advs) {
+      if (!_PARKING_HAZARD_EVENT_TYPES.has(a.event_type)) continue;
+      const r = _HAZ_RANK[a.severity] || 0;
+      if (r === 0) continue;
+      if (r > rank || (r === rank && !bestImpactText && a.dog_impact_text)) {
+        rank = r;
+        bestImpactText = a.dog_impact_text || bestImpactText;
+      }
+      const lbl = a.label || a.event_type.replace(/_status$/, '').replace(/_/g, ' ');
+      const val = a.value ? ` ${a.value}` : '';
+      parts.push(`${lbl}${val}`);
+      if (a.dog_impact_text) parkingPhrases.push(a.dog_impact_text);
+    }
+    if (parkingPhrases.length) bestImpactText = parkingPhrases.join(' ');
   }
 
   if (rank === 0) return { severity: null, summary: '', impactText: '' };
@@ -3330,6 +3358,18 @@ function _amenityDetailBody(btn) {
     })[rule] || policyGeneric || 'Boardwalk section.';
   } else if (sec === 'global') {
     primaryBody = policyGeneric.replace('this area', 'this beach') || 'Whole beach.';
+  } else if (sec === 'parking') {
+    // Parking tile uses data-section="parking" so the hazard overlay
+    // can apply asphalt_status / car_heat_status / car_cold_status.
+    // When a hazard fires the impact text leads; the normal parking
+    // summary becomes secondary.
+    const normalLine = value ? `Parking: ${value}.` : 'Parking on site.';
+    if (hazImpact) {
+      primaryBody = hazImpact;
+      secondaryBody = `Normally: ${normalLine.toLowerCase()}`;
+    } else {
+      primaryBody = normalLine;
+    }
   } else if (sec) {
     // dunes / bluff / campground / playground / tide_pools / nesting_zones
     primaryBody = policyGeneric || label;

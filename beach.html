@@ -173,17 +173,17 @@
   .hourbars-track {
     flex: 1 1 auto;
     display: flex; align-items: stretch; justify-content: space-between;
-    gap: 6px; height: 180px; padding: 0 2px; position: relative;
+    gap: 6px; height: 225px; padding: 0 2px; position: relative;
   }
   .hourbars-track::before {
     content: ''; position: absolute; left: 0; right: 0;
-    top: calc(14px + (100% - 14px) / 2);
+    top: calc(28px + (100% - 28px) / 2);
     height: 1px; background: var(--text-muted); opacity: 0.4;
     pointer-events: none;
   }
   .hourbars-track::after {
     content: ''; position: absolute; left: 0; right: 0;
-    top: 14px; bottom: 0;
+    top: 28px; bottom: 0;
     background-image:
       linear-gradient(to bottom,
         transparent calc(25% - 0.5px),
@@ -214,6 +214,10 @@
     margin-top: 6px;
     font-family: 'DM Mono', monospace;
     font-size: 10px; color: var(--text-muted); line-height: 1.4;
+  }
+  .hourbar-wx {
+    height: 14px; flex: none; text-align: center;
+    font-size: 12px; line-height: 14px;
   }
   .hourbar-score {
     height: 14px; flex: none; text-align: center;
@@ -1202,6 +1206,22 @@ function renderHourlyBarsV2(p, nowH) {
   // negative segments colored by advisory severity
   const SEV_CLS = { extreme: 'sev-severe', severe: 'sev-severe', moderate: 'sev-moderate', minor: 'sev-minor' };
   const sevCls = s => SEV_CLS[s] || 'sev-moderate';
+  // WMO weather code → emoji, shown above each hour's score
+  const wxIcon = code => {
+    const c = Number(code);
+    if (c === 0) return '☀️';
+    if (c === 1) return '🌤️';
+    if (c === 2) return '⛅';
+    if (c === 3) return '☁️';
+    if (c === 45 || c === 48) return '🌫️';
+    if (c >= 51 && c <= 57) return '🌦️';
+    if (c >= 61 && c <= 67) return '🌧️';
+    if (c >= 71 && c <= 77) return '🌨️';
+    if (c >= 80 && c <= 82) return '🌦️';
+    if (c === 85 || c === 86) return '🌨️';
+    if (c >= 95) return '⛈️';
+    return '';
+  };
   // one bar segment: colored by type/severity class, icon embedded when tall enough
   const seg = (cls, icon, val, MAX) => {
     const hpct = MAX > 0 ? (val / MAX * 100) : 0;
@@ -1294,6 +1314,7 @@ function renderHourlyBarsV2(p, nowH) {
     const tip = tipLines.join('\n');
 
     return `<div class="hourbar-col${closedClass}" data-tip="${escHtml(tip)}">
+      <div class="hourbar-wx">${wxIcon(h.weather_code)}</div>
       <div class="hourbar-score">${scoreText}</div>
       ${markerHtml}
       <div class="hourbar-pos">${posHtml}${dogIcon}</div>
@@ -1308,39 +1329,6 @@ function renderHourlyBarsV2(p, nowH) {
   const driveBadge = p.drive_minutes != null
     ? `<span class="hourbars-drive">🚗 ${p.drive_minutes}min ${p.drive_factor >= 0 ? '+' : ''}${p.drive_factor}</span>`
     : '';
-
-  // Legend — only icons present in this chart
-  const hasPos = (k) => hours.some(h => (h[k] || 0) > 0);
-  const hasDrivePos = hours.some(h => (h.drive || 0) > 0);
-  const hasDriveNeg = hours.some(h => (h.drive || 0) < 0);
-  const posItems = [
-    { icon: '🛎️', label: 'amenities', show: hasPos('pos_features_v3') },
-    { icon: '🐕', label: 'dog access', show: hasPos('pos_dog_access') },
-    { icon: '⛅', label: 'weather', show: hasPos('pos_weather') },
-    { icon: '🚗', label: 'short drive', show: hasDrivePos },
-  ].filter(x => x.show);
-  // Negatives in v3 are the advisory penalties actually present in the chart.
-  const _advSeen = new Map();
-  for (const h of hours) for (const c of (h.advisory_components || [])) {
-    if ((Number(c.contribution) || 0) > 0 && !_advSeen.has(c.event_type)) {
-      _advSeen.set(c.event_type, { icon: ADV_ICON[c.event_type] || '⚠️', label: advLabel(c.event_type) });
-    }
-  }
-  const negItems = [...(_advSeen.values())];
-  if (hours.some(h => h.status_v3 === 'no_go' && !h.is_closed)) {
-    negItems.unshift({ icon: '⛔', label: 'unsafe (→0)' });
-  }
-  if (hasDriveNeg) negItems.push({ icon: '🚗', label: 'long drive' });
-  const legendChip = (icon, label) =>
-    `<span class="hourbars-legend-label"><span class="legend-icon">${icon}</span>${label}</span>`;
-  const posLegend = posItems.map(i => legendChip(i.icon, i.label)).join('');
-  const negLegend = negItems.map(i => legendChip(i.icon, i.label)).join('');
-  const legendHtml = (posItems.length || negItems.length)
-    ? `<div class="hourbars-legend">
-        ${posItems.length ? `<div class="hourbars-legend-group">+ ${posLegend}</div>` : ''}
-        ${(posItems.length && negItems.length) ? `<span class="hourbars-legend-sep">·</span>` : ''}
-        ${negItems.length ? `<div class="hourbars-legend-group">− ${negLegend}</div>` : ''}
-      </div>` : '';
 
   const closures = Array.isArray(p.closures) ? p.closures : [];
   const closureLines = closures.map(formatClosureLine).filter(Boolean);
@@ -1364,7 +1352,6 @@ function renderHourlyBarsV2(p, nowH) {
       <div class="hourbars-track">${cols}</div>
     </div>
     <div class="hourbar-axis">${labels}</div>
-    ${legendHtml}
     ${closuresHtml}
   </div>`;
 }

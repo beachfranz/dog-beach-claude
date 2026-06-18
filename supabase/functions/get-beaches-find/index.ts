@@ -47,6 +47,14 @@ Deno.serve(async (req: Request) => {
     const scoredParam = url.searchParams.get("scored");
     const scoredOnly  = scoredParam === "true";
 
+    // Leash ("want") filter, pushed server-side so the fetched pool can be
+    // small. Mirrors find.html matchesWant (has_off_leash / has_on_leash).
+    // Absent param => null => RPC applies no want filter.
+    const wantOffParam = url.searchParams.get("want_off");
+    const wantOnParam  = url.searchParams.get("want_on");
+    const wantOff = wantOffParam === null ? null : wantOffParam === "true";
+    const wantOn  = wantOnParam  === null ? null : wantOnParam  === "true";
+
     // Spatial-KNN result cap. When the client passes ?limit= it's honored
     // up to MAX_LIMIT. Without an explicit limit, the RPC's default of 500
     // applies (set in the SQL function signature).
@@ -84,6 +92,8 @@ Deno.serve(async (req: Request) => {
       p_leash:        leash,
       p_limit:        limit,
       p_scored_only:  scoredOnly,
+      p_want_off:     wantOff,
+      p_want_on:      wantOn,
       p_now_hour:     nowHour,
     }, { count: "exact" });
     ensureNotTruncated(rpcResult as never, "find_beaches RPC");

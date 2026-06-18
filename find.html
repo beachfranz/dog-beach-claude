@@ -1034,7 +1034,8 @@
 
   const DEFAULT_LAT  = 33.665;   // Huntington Dog Beach fallback
   const DEFAULT_LNG  = -118.015;
-  const NEAREST_LIMIT = 14;
+  const NEAREST_LIMIT = 20;   // geo pool; leash filtered server-side, room for amenity trim
+  const NOGEO_LIMIT   = 50;   // no-geo pool — leash-filtered top-N by score (was RPC default 500)
   const DISPLAY_LIMIT = 12;
 
   const LOC_CACHE_KEY = 'dogbeach.user_loc';
@@ -1715,11 +1716,23 @@
     // composite_score_v2 (peak for that day).
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
     const date = selectedDay === 'now' ? today : selectedDay;
+
+    // Leash ("want") filter is pushed server-side so the fetched pool can be
+    // small. When neither beach-leash want is active (only dog_park), beaches
+    // would all be dropped by matchesWant anyway — skip the fetch entirely.
+    const wantOff = wants.has('off_leash_beach');
+    const wantOn  = wants.has('on_leash_beach');
+    if (!wantOff && !wantOn) { beachResults = []; return; }
+
     const params = new URLSearchParams({ date, scored: 'false' });
+    params.set('want_off', String(wantOff));
+    params.set('want_on',  String(wantOn));
     if (userLat != null && userLng != null) {
       params.set('lat',   String(userLat));
       params.set('lng',   String(userLng));
       params.set('limit', String(NEAREST_LIMIT));
+    } else {
+      params.set('limit', String(NOGEO_LIMIT));
     }
     try {
       const res = await fetch(
@@ -2587,13 +2600,19 @@
     });
   }
 
-  function onWantToggle(want) {
+  async function onWantToggle(want) {
     if (wants.has(want)) wants.delete(want);
     else                 wants.add(want);
     // Don't let the user clear ALL want-chips — leave the last one on
     if (wants.size === 0) wants.add(want);
     persistWants();
     syncWantChips();
+    // off/on leash wants are now filtered server-side, so the beach pool
+    // must be re-fetched. dog_park is client-only (parks come from a
+    // separate geo RPC), so just re-rank in that case.
+    if (want === 'off_leash_beach' || want === 'on_leash_beach') {
+      await loadBeaches();
+    }
     renderCards();
   }
   function onAmenityToggle(amenity) {

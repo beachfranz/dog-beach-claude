@@ -429,6 +429,7 @@
       rgba(100,116,139,0.32) 3px 6px);
   }
   .hourbar-col.bar-closed .hourbar-score { color: var(--text-muted); }
+  .hourbar-col.bar-gated .hourbar-score { color: var(--red); }
   /* Closure-context line below chart legend */
   .hourbars-closures {
     margin-top: 6px;
@@ -906,17 +907,38 @@ function renderHourlyBars(p, nowH) {
   const hours = p.hours || [];
   const bestStart = p.best_window_v2_start;
   const bestEnd   = p.best_window_v2_end;
+  // ── v3 advisory-driven decomposition (mirrors beach.html) ──────────
+  // Positives: rolled-up park features + capped weather + short-drive.
+  // Negatives: per-advisory penalty components (+ long-drive). Mirrors
+  // compute_dog_park_hourly_v2 score_v3. Dog parks have no dog-access
+  // term (definitionally off-leash) and no sand gate.
+  const ADV_ICON = {
+    rip_current_risk: '🚩', sneaker_wave_risk: '🌊', high_surf_risk: '🌊',
+    longshore_current_risk: '🌀', pier_hazard_risk: '⚠️', cold_water_shock_risk: '❄️',
+    shore_break_risk: '💥', lightning_status: '⚡', fog_status: '🌫️', snow_status: '❄️',
+    heavy_rain_status: '🌧️', freezing_precip_status: '🧊', bacteria_status: '🦠',
+    water_quality: '🦠', tide_status: '🌊', crowd_status: '👥', wind_status: '💨',
+    sand_status: '🔥', asphalt_status: '🔥', uv_status: '☀️', car_heat_status: '🚗',
+    car_cold_status: '🥶', too_warm_swim: '🌡️', cold_water_swim: '❄️',
+    swim_advisory: '🏊', powerful_surf: '🌊', paw_cold_status: '🐾', unfenced_status: '🚧',
+  };
+  const advLabel = et => (et || '').replace(/_(status|risk)$/, '').replace(/_/g, ' ').trim();
+  const _gateReasonDP = h =>
+      (h.asphalt_temp >= 125) ? `hot asphalt ${Math.round(h.asphalt_temp)}°F`
+    : (h.uv_index     >= 11)  ? `extreme UV ${Math.round(h.uv_index)}`
+    : (h.feels_like   <= 20)  ? `frigid ${Math.round(h.feels_like)}°F`
+    : 'unsafe';
+  const v3Pos = h => Math.max(0, h.drive || 0)
+    + (h.pos_features_v3 || 0) + (h.pos_weather || 0);
+  const v3AdvComps = h => Array.isArray(h.advisory_components) ? h.advisory_components : [];
+  const v3Neg = h => Math.max(0, -(h.drive || 0))
+    + v3AdvComps(h).reduce((s, c) => s + (Number(c.contribution) || 0), 0);
+
   let maxPos = 0, maxNeg = 0;
   for (const h of hours) {
-    const drivePos = Math.max(0, h.drive || 0);
-    const driveNeg = Math.max(0, -(h.drive || 0));
-    const posTotal = (h.pos_fence || 0) + (h.pos_water || 0) + (h.pos_shade || 0)
-                   + (h.pos_comfort || 0) + (h.pos_agility || 0) + (h.pos_water_play || 0)
-                   + (h.pos_temp || 0) + (h.pos_wind || 0) + (h.pos_sky || 0)
-                   + (h.pos_window || 0) + drivePos;
-    const negTotal = (h.neg_heat_uv || 0) + (h.neg_harsh || 0) + (h.neg_gotchas || 0) + driveNeg;
-    if (posTotal > maxPos) maxPos = posTotal;
-    if (negTotal > maxNeg) maxNeg = negTotal;
+    if (h.is_closed) continue;
+    if (v3Pos(h) > maxPos) maxPos = v3Pos(h);
+    if (v3Neg(h) > maxNeg) maxNeg = v3Neg(h);
   }
   // Nice-ceil to a 5-step boundary, floor at 10 so a flat-zero day
   // still has a usable scale. Both halves share the same scale so the
@@ -929,84 +951,65 @@ function renderHourlyBars(p, nowH) {
   const cols = hours.map(h => {
     const drivePos = Math.max(0, h.drive || 0);
     const driveNeg = Math.max(0, -(h.drive || 0));
+    const isClosed = h.is_closed === true;
+    const gated = !isClosed && h.status_v3 === 'no_go';
+    const scoreV3 = h.score_v3 ?? h.score;
 
-    // Component icons — used in BOTH chart-segment data attribute and tooltip.
-    // Positives green, negatives red (Franz 2026-05-27 LATE).
     const POS_DEFS = [
-      { cls: 'seg-fence',      icon: '🚧', val: h.pos_fence      || 0 },
-      { cls: 'seg-water',      icon: '💧', val: h.pos_water      || 0 },
-      { cls: 'seg-shade',      icon: '🌳', val: h.pos_shade      || 0 },
-      { cls: 'seg-comfort',    icon: '🌿', val: h.pos_comfort    || 0 },
-      { cls: 'seg-agility',    icon: '🤸', val: h.pos_agility    || 0 },
-      { cls: 'seg-water-play', icon: '💦', val: h.pos_water_play || 0 },
-      { cls: 'seg-temp',       icon: '🌡️', val: h.pos_temp       || 0 },
-      { cls: 'seg-wind',       icon: '💨', val: h.pos_wind       || 0 },
-      { cls: 'seg-sky',        icon: '☀️', val: h.pos_sky        || 0 },
-      { cls: 'seg-window',     icon: '⏰', val: h.pos_window     || 0 },
-      { cls: 'seg-drive',      icon: '🚗', val: drivePos },
+      { icon: '🛎️', label: 'features',    val: h.pos_features_v3 || 0 },
+      { icon: '⛅', label: 'weather',     val: h.pos_weather     || 0 },
+      { icon: '🚗', label: 'short drive', val: drivePos },
     ];
-    const NEG_DEFS = [
-      { cls: 'seg-heat_uv',    icon: '🔥', val: h.neg_heat_uv || 0 },
-      { cls: 'seg-harsh',      icon: '⛈️', val: h.neg_harsh   || 0 },
-      { cls: 'seg-gotchas',    icon: '⚠️', val: h.neg_gotchas || 0 },
-      { cls: 'seg-drive-neg',  icon: '🚗', val: driveNeg },
-    ];
-    // Sort by abs(value) desc — rank-1 = largest contribution this chart,
-    // gets the darkest shade. Identity is conveyed by tooltip icon, not color.
+    const NEG_DEFS = v3AdvComps(h).map(c => ({
+      icon: ADV_ICON[c.event_type] || '⚠️',
+      label: advLabel(c.event_type),
+      sev: c.severity,
+      val: Number(c.contribution) || 0,
+    })).concat(driveNeg > 0 ? [{ icon: '🚗', label: 'long drive', val: driveNeg }] : []);
+
     const posSorted = POS_DEFS.filter(d => d.val > 0).sort((a, b) => b.val - a.val);
     const negSorted = NEG_DEFS.filter(d => d.val > 0).sort((a, b) => b.val - a.val);
     posSorted.forEach((d, i) => { d.rank = i + 1; });
     negSorted.forEach((d, i) => { d.rank = i + 1; });
 
-    // VISUAL ORDER (reversed per Franz 2026-05-27 LATE): largest contribution
-    // sits CLOSEST TO THE AXIS, smaller contributions float to the outer
-    // edges. Reading from outer edge inward, both halves go small → large.
-    //   posHtml: column-reverse means first HTML child lands at the BOTTOM
-    //     of positive stack (= closest to axis). So we put largest FIRST
-    //     in HTML (posSorted is already largest-first).
-    //   negHtml: column means first HTML child lands at TOP of negative
-    //     stack (= closest to axis). Largest first too.
-    const posHtml = posSorted
-      .map(d => `<div class="hourbar-seg pos-rank-${d.rank}" style="height:${(d.val / POS_MAX * 100).toFixed(1)}%"></div>`)
+    const posHtml = (isClosed || gated) ? '' : posSorted
+      .map(d => `<div class="hourbar-seg pos-rank-${Math.min(d.rank, 11)}" style="height:${(d.val / POS_MAX * 100).toFixed(1)}%"></div>`)
       .join('');
-    const negHtml = negSorted
-      .map(d => `<div class="hourbar-seg neg-rank-${d.rank}" style="height:${(d.val / NEG_MAX * 100).toFixed(1)}%"></div>`)
-      .join('');
+    // Gate → one full red bar (score 0); else itemized advisory penalties.
+    const negHtml = isClosed ? '' : (gated
+      ? `<div class="hourbar-seg neg-rank-1" style="height:100%"></div>`
+      : negSorted
+          .map(d => `<div class="hourbar-seg neg-rank-${Math.min(d.rank, 4)}" style="height:${(d.val / NEG_MAX * 100).toFixed(1)}%"></div>`)
+          .join(''));
 
     const isNow = h.local_hour === nowH;
     const isInBest = bestStart != null && bestEnd != null
                   && h.local_hour >= bestStart && h.local_hour <= bestEnd;
-    // Per-hour positive total drives the dog's float position (10px above
-    // the top of this hour's positive bar). Mirrors the maxPos loop above.
-    const _drivePosThis = Math.max(0, h.drive || 0);
-    const posTotalThis = (h.pos_fence || 0) + (h.pos_water || 0) + (h.pos_shade || 0)
-                      + (h.pos_comfort || 0) + (h.pos_agility || 0) + (h.pos_water_play || 0)
-                      + (h.pos_temp || 0) + (h.pos_wind || 0) + (h.pos_sky || 0)
-                      + (h.pos_window || 0) + _drivePosThis;
+    const posTotalThis = (isClosed || gated) ? 0 : v3Pos(h);
     const barTopPct = POS_MAX > 0 ? (posTotalThis / POS_MAX * 100) : 0;
-    const dogIcon = isInBest
+    const dogIcon = (isInBest && !gated)
       ? `<span class="hourbar-dog" style="bottom: calc(${barTopPct.toFixed(1)}% + 6px);">🐶</span>`
       : '';
     const markerHtml = `<div class="hourbar-marker">${isNow ? 'Now' : ''}</div>`;
 
     const tipLines = [];
-    if (h.is_closed === true) {
+    if (isClosed) {
       tipLines.push(`${h.hour_label} · 🚧 closed`);
     } else {
-      tipLines.push(`${h.hour_label} · ${h.score ?? 0}`);
-      for (const d of [...posSorted].reverse()) tipLines.push(`${d.icon} +${d.val}%`);
-      for (const d of negSorted) tipLines.push(`${d.icon} −${d.val}%`);
+      tipLines.push(`${h.hour_label} · ${scoreV3 ?? 0}`);
+      if (gated) tipLines.push(`⛔ ${_gateReasonDP(h)} — unsafe, score 0`);
+      for (const d of [...posSorted].reverse()) tipLines.push(`${d.icon} +${d.val}`);
+      for (const d of negSorted) tipLines.push(`${d.icon} −${d.val}${d.sev ? ' (' + d.sev + ')' : ''}`);
     }
     const tip = tipLines.join('\n');
 
-    const isClosed = h.is_closed === true;
-    const closedClass = isClosed ? ' bar-closed' : '';
-    const scoreText = isClosed ? '' : (h.score != null ? h.score : '');
+    const closedClass = isClosed ? ' bar-closed' : (gated ? ' bar-gated' : '');
+    const scoreText = isClosed ? '' : (scoreV3 != null ? scoreV3 : '');
     return `<div class="hourbar-col${closedClass}" data-tip="${escHtml(tip)}">
       <div class="hourbar-score">${scoreText}</div>
       ${markerHtml}
-      <div class="hourbar-pos">${isClosed ? '' : posHtml}${isClosed ? '' : dogIcon}</div>
-      <div class="hourbar-neg">${isClosed ? '' : negHtml}</div>
+      <div class="hourbar-pos">${posHtml}${dogIcon}</div>
+      <div class="hourbar-neg">${negHtml}</div>
     </div>`;
   }).join('');
 
@@ -1023,24 +1026,22 @@ function renderHourlyBars(p, nowH) {
   const hasDrivePos = hours.some(h => (h.drive || 0) > 0);
   const hasDriveNeg = hours.some(h => (h.drive || 0) < 0);
   const posItems = [
-    { icon: '🚧', label: 'fence',       show: hasPos('pos_fence') },
-    { icon: '💧', label: 'water',       show: hasPos('pos_water') },
-    { icon: '🌳', label: 'shade',       show: hasPos('pos_shade') },
-    { icon: '🌿', label: 'comfort',     show: hasPos('pos_comfort') },
-    { icon: '🤸', label: 'agility',     show: hasPos('pos_agility') },
-    { icon: '💦', label: 'water play',  show: hasPos('pos_water_play') },
-    { icon: '🌡️', label: 'temp',        show: hasPos('pos_temp') },
-    { icon: '💨', label: 'wind',        show: hasPos('pos_wind') },
-    { icon: '☀️', label: 'sky',         show: hasPos('pos_sky') },
-    { icon: '⏰', label: 'window',      show: hasPos('pos_window') },
+    { icon: '🛎️', label: 'features',    show: hasPos('pos_features_v3') },
+    { icon: '⛅', label: 'weather',     show: hasPos('pos_weather') },
     { icon: '🚗', label: 'short drive', show: hasDrivePos },
   ].filter(x => x.show);
-  const negItems = [
-    { icon: '🔥', label: 'heat / UV',   show: hasPos('neg_heat_uv') },
-    { icon: '⛈️', label: 'harsh wx',    show: hasPos('neg_harsh') },
-    { icon: '⚠️', label: 'gotchas',     show: hasPos('neg_gotchas') },
-    { icon: '🚗', label: 'long drive',  show: hasDriveNeg },
-  ].filter(x => x.show);
+  // Negatives in v3 are the advisory penalties present in the chart.
+  const _advSeen = new Map();
+  for (const h of hours) for (const c of (h.advisory_components || [])) {
+    if ((Number(c.contribution) || 0) > 0 && !_advSeen.has(c.event_type)) {
+      _advSeen.set(c.event_type, { icon: ADV_ICON[c.event_type] || '⚠️', label: advLabel(c.event_type) });
+    }
+  }
+  const negItems = [...(_advSeen.values())];
+  if (hours.some(h => h.status_v3 === 'no_go' && !h.is_closed)) {
+    negItems.unshift({ icon: '⛔', label: 'unsafe (→0)' });
+  }
+  if (hasDriveNeg) negItems.push({ icon: '🚗', label: 'long drive' });
   const legendChip = (icon, label) =>
     `<span class="hourbars-legend-label"><span class="legend-icon">${icon}</span>${label}</span>`;
   const posLegend = posItems.map(i => legendChip(i.icon, i.label)).join('');

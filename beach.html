@@ -254,7 +254,9 @@
   /* positives: one light cerulean. cautions: light severity tints. */
   .hourbar-seg.pos-amenities,
   .hourbar-seg.pos-dog,
-  .hourbar-seg.pos-weather,
+  .hourbar-seg.pos-temp,
+  .hourbar-seg.pos-wind,
+  .hourbar-seg.pos-sky,
   .hourbar-seg.pos-drive     { background: #82bfe0; }
   .hourbar-seg.sev-severe    { background: #e88a8a; }
   .hourbar-seg.sev-moderate  { background: #f4ad72; }
@@ -1237,7 +1239,7 @@ function renderHourlyBarsV2(p, nowH) {
   const v3Pos = h => {
     const drivePos = Math.max(0, h.drive || 0);
     return (h.pos_features_v3 || 0) + (h.pos_dog_access || 0)
-      + (h.pos_weather || 0) + drivePos;
+      + (h.pos_temp || 0) + (h.pos_wind || 0) + (h.pos_sky || 0) + drivePos;
   };
   const v3AdvComps = h => Array.isArray(h.advisory_components) ? h.advisory_components : [];
   const v3Neg = h => Math.max(0, -(h.drive || 0))
@@ -1265,7 +1267,9 @@ function renderHourlyBarsV2(p, nowH) {
     const POS_DEFS = [
       { icon: '🛎️', label: 'amenities',   cls: 'pos-amenities', val: h.pos_features_v3 || 0 },
       { icon: '🐕', label: 'dog access',  cls: 'pos-dog',       val: h.pos_dog_access  || 0 },
-      { icon: '⛅', label: 'weather',     cls: 'pos-weather',   val: h.pos_weather     || 0 },
+      { icon: '🌡️', label: 'temp',        cls: 'pos-temp', val: h.pos_temp || 0, note: h.feels_like != null ? Math.round(h.feels_like) + '°F' : '' },
+      { icon: '💨', label: 'wind',        cls: 'pos-wind', val: h.pos_wind || 0, note: h.wind_speed != null ? Math.round(h.wind_speed) + ' mph' : '' },
+      { icon: wxIcon(h.weather_code) || '☀️', label: 'sky', cls: 'pos-sky', val: h.pos_sky || 0 },
       { icon: '🚗', label: 'short drive', cls: 'pos-drive',     val: drivePos },
     ];
     const NEG_DEFS = v3AdvComps(h).map(c => ({
@@ -1308,7 +1312,7 @@ function renderHourlyBarsV2(p, nowH) {
     } else {
       tipLines.push(`${h.hour_label} · ${scoreV3 ?? 0}`);
       if (gated) tipLines.push(`⛔ ${_gateReason(h)} — unsafe, score 0`);
-      for (const d of [...posSorted].reverse()) tipLines.push(`${d.icon} +${d.val}`);
+      for (const d of [...posSorted].reverse()) tipLines.push(`${d.icon} ${d.note ? d.note + ' ' : ''}+${d.val}`);
       for (const d of negSorted) tipLines.push(`${d.icon} ${d.label} −${d.val}`);
     }
     const tip = tipLines.join('\n');

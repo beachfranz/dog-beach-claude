@@ -254,6 +254,7 @@
   /* positives: one light cerulean. cautions: light severity tints. */
   .hourbar-seg.pos-amenities,
   .hourbar-seg.pos-dog,
+  .hourbar-seg.pos-water,
   .hourbar-seg.pos-temp,
   .hourbar-seg.pos-wind,
   .hourbar-seg.pos-sky,
@@ -1238,7 +1239,7 @@ function renderHourlyBarsV2(p, nowH) {
     : 'unsafe';
   const v3Pos = h => {
     const drivePos = Math.max(0, h.drive || 0);
-    return (h.pos_features_v3 || 0) + (h.pos_dog_access || 0)
+    return (h.pos_features_v3 || 0) + (h.pos_dog_access || 0) + (h.pos_water || 0)
       + (h.pos_temp || 0) + (h.pos_wind || 0) + (h.pos_sky || 0) + drivePos;
   };
   const v3AdvComps = h => Array.isArray(h.advisory_components) ? h.advisory_components : [];
@@ -1267,6 +1268,7 @@ function renderHourlyBarsV2(p, nowH) {
     const POS_DEFS = [
       { icon: '🛎️', label: 'amenities',   cls: 'pos-amenities', val: h.pos_features_v3 || 0 },
       { icon: '🐕', label: 'dog access',  cls: 'pos-dog',       val: h.pos_dog_access  || 0 },
+      { icon: '💧', label: 'water',       cls: 'pos-water', val: h.pos_water || 0, note: h.water_temp_f != null ? Math.round(h.water_temp_f) + '°F' : '' },
       { icon: '🌡️', label: 'temp',        cls: 'pos-temp', val: h.pos_temp || 0, note: h.feels_like != null ? Math.round(h.feels_like) + '°F' : '' },
       { icon: '💨', label: 'wind',        cls: 'pos-wind', val: h.pos_wind || 0, note: h.wind_speed != null ? Math.round(h.wind_speed) + ' mph' : '' },
       { icon: wxIcon(h.weather_code) || '☀️', label: 'sky', cls: 'pos-sky', val: h.pos_sky || 0 },

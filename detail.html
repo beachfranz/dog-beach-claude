@@ -640,11 +640,14 @@
     // Alias v2 values onto the original v1 keys so all downstream metric
     // definitions + reasonFns automatically read v2 without per-call
     // changes. v1 fallback preserved during transition. Per Franz
+    // v3-first → v1 alias: prefer the advisory-driven v3 score, v2 fallback.
     for (const h of hours) {
-      if (h.hour_score_v2 != null) h.hour_score = h.hour_score_v2;
+      const _v = h.hour_score_v3 ?? h.hour_score_v2;
+      if (_v != null) h.hour_score = _v;
     }
     if (day) {
-      if (day.composite_score_v2 != null) day.composite_score = day.composite_score_v2;
+      const _c = day.composite_score_v3 ?? day.composite_score_v2;
+      if (_c != null) day.composite_score = _c;
     }
 
     // Header

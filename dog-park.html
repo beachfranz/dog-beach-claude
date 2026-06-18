@@ -481,7 +481,17 @@
     font-size: 14px; line-height: 1;
     pointer-events: none;
   }
-  .hourbar-seg { width: 100%; }
+  .hourbar-seg { width: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .hourbar-seg .seg-ic { font-size: 9px; line-height: 1; filter: drop-shadow(0 0 1px rgba(255,255,255,0.95)); }
+  /* positive contribution colors — by type */
+  .hourbar-seg.pos-amenities { background: #3d5a80; }
+  .hourbar-seg.pos-weather   { background: #e0a32e; }
+  .hourbar-seg.pos-drive     { background: #8d99ae; }
+  /* negative contribution colors — by advisory severity */
+  .hourbar-seg.sev-severe    { background: #dc2626; }
+  .hourbar-seg.sev-moderate  { background: #f97316; }
+  .hourbar-seg.sev-minor     { background: #f5c542; }
+  .hourbar-seg.sev-drive     { background: #9aa3b2; }
   /* Rank-based shading at HALF saturation (Franz 2026-05-27 LATE).
    * Tailwind blue / red HSL values with saturation × 0.5. Lightness
    * preserved so the rank progression still reads dark→light. */
@@ -923,6 +933,13 @@ function renderHourlyBars(p, nowH) {
     swim_advisory: '🏊', powerful_surf: '🌊', paw_cold_status: '🐾', unfenced_status: '🚧',
   };
   const advLabel = et => (et || '').replace(/_(status|risk)$/, '').replace(/_/g, ' ').trim();
+  const SEV_CLS = { extreme: 'sev-severe', severe: 'sev-severe', moderate: 'sev-moderate', minor: 'sev-minor' };
+  const sevCls = s => SEV_CLS[s] || 'sev-moderate';
+  const seg = (cls, icon, val, MAX) => {
+    const hpct = MAX > 0 ? (val / MAX * 100) : 0;
+    const ic = hpct >= 9 ? `<span class="seg-ic">${icon}</span>` : '';
+    return `<div class="hourbar-seg ${cls}" style="height:${hpct.toFixed(1)}%">${ic}</div>`;
+  };
   const _gateReasonDP = h =>
       (h.asphalt_temp >= 125) ? `hot asphalt ${Math.round(h.asphalt_temp)}°F`
     : (h.uv_index     >= 11)  ? `extreme UV ${Math.round(h.uv_index)}`
@@ -956,31 +973,28 @@ function renderHourlyBars(p, nowH) {
     const scoreV3 = h.score_v3 ?? h.score;
 
     const POS_DEFS = [
-      { icon: '🛎️', label: 'features',    val: h.pos_features_v3 || 0 },
-      { icon: '⛅', label: 'weather',     val: h.pos_weather     || 0 },
-      { icon: '🚗', label: 'short drive', val: drivePos },
+      { icon: '🛎️', label: 'features',    cls: 'pos-amenities', val: h.pos_features_v3 || 0 },
+      { icon: '⛅', label: 'weather',     cls: 'pos-weather',   val: h.pos_weather     || 0 },
+      { icon: '🚗', label: 'short drive', cls: 'pos-drive',     val: drivePos },
     ];
     const NEG_DEFS = v3AdvComps(h).map(c => ({
       icon: ADV_ICON[c.event_type] || '⚠️',
       label: advLabel(c.event_type),
       sev: c.severity,
+      cls: sevCls(c.severity),
       val: Number(c.contribution) || 0,
-    })).concat(driveNeg > 0 ? [{ icon: '🚗', label: 'long drive', val: driveNeg }] : []);
+    })).concat(driveNeg > 0 ? [{ icon: '🚗', label: 'long drive', cls: 'sev-drive', val: driveNeg }] : []);
 
+    // largest contribution closest to the axis; color carries identity now.
     const posSorted = POS_DEFS.filter(d => d.val > 0).sort((a, b) => b.val - a.val);
     const negSorted = NEG_DEFS.filter(d => d.val > 0).sort((a, b) => b.val - a.val);
-    posSorted.forEach((d, i) => { d.rank = i + 1; });
-    negSorted.forEach((d, i) => { d.rank = i + 1; });
 
     const posHtml = (isClosed || gated) ? '' : posSorted
-      .map(d => `<div class="hourbar-seg pos-rank-${Math.min(d.rank, 11)}" style="height:${(d.val / POS_MAX * 100).toFixed(1)}%"></div>`)
-      .join('');
-    // Gate → one full red bar (score 0); else itemized advisory penalties.
+      .map(d => seg(d.cls, d.icon, d.val, POS_MAX)).join('');
+    // Gate → one full red bar (score 0); else advisory penalties by severity.
     const negHtml = isClosed ? '' : (gated
-      ? `<div class="hourbar-seg neg-rank-1" style="height:100%"></div>`
-      : negSorted
-          .map(d => `<div class="hourbar-seg neg-rank-${Math.min(d.rank, 4)}" style="height:${(d.val / NEG_MAX * 100).toFixed(1)}%"></div>`)
-          .join(''));
+      ? seg('sev-severe', '⛔', NEG_MAX, NEG_MAX)
+      : negSorted.map(d => seg(d.cls, d.icon, d.val, NEG_MAX)).join(''));
 
     const isNow = h.local_hour === nowH;
     const isInBest = bestStart != null && bestEnd != null

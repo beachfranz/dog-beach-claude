@@ -488,14 +488,14 @@
   .hourbar-seg { width: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
   .hourbar-seg .seg-ic { font-size: 9px; line-height: 1; filter: drop-shadow(0 0 1px rgba(255,255,255,0.95)); }
   /* positive contribution colors — by type */
-  .hourbar-seg.pos-amenities { background: #3d5a80; }
-  .hourbar-seg.pos-weather   { background: #e0a32e; }
-  .hourbar-seg.pos-drive     { background: #8d99ae; }
+  .hourbar-seg.pos-amenities { background: #4e5c6f; }
+  .hourbar-seg.pos-weather   { background: #b3955b; }
+  .hourbar-seg.pos-drive     { background: #959ba6; }
   /* negative contribution colors — by advisory severity */
-  .hourbar-seg.sev-severe    { background: #dc2626; }
-  .hourbar-seg.sev-moderate  { background: #f97316; }
-  .hourbar-seg.sev-minor     { background: #f5c542; }
-  .hourbar-seg.sev-drive     { background: #9aa3b2; }
+  .hourbar-seg.sev-severe    { background: #ae5353; }
+  .hourbar-seg.sev-moderate  { background: #c07d4f; }
+  .hourbar-seg.sev-minor     { background: #c8b06f; }
+  .hourbar-seg.sev-drive     { background: #a0a4ac; }
   /* Rank-based shading at HALF saturation (Franz 2026-05-27 LATE).
    * Tailwind blue / red HSL values with saturation × 0.5. Lightness
    * preserved so the rank progression still reads dark→light. */
@@ -1017,7 +1017,7 @@ function renderHourlyBars(p, nowH) {
       tipLines.push(`${h.hour_label} · ${scoreV3 ?? 0}`);
       if (gated) tipLines.push(`⛔ ${_gateReasonDP(h)} — unsafe, score 0`);
       for (const d of [...posSorted].reverse()) tipLines.push(`${d.icon} +${d.val}`);
-      for (const d of negSorted) tipLines.push(`${d.icon} −${d.val}${d.sev ? ' (' + d.sev + ')' : ''}`);
+      for (const d of negSorted) tipLines.push(`${d.icon} ${d.label} −${d.val}`);
     }
     const tip = tipLines.join('\n');
 

@@ -251,15 +251,15 @@
   .hourbar-seg { width: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
   .hourbar-seg .seg-ic { font-size: 9px; line-height: 1; filter: drop-shadow(0 0 1px rgba(255,255,255,0.95)); }
   /* positive contribution colors — by type */
-  .hourbar-seg.pos-amenities { background: #3d5a80; }
-  .hourbar-seg.pos-dog       { background: #2a9d8f; }
-  .hourbar-seg.pos-weather   { background: #e0a32e; }
-  .hourbar-seg.pos-drive     { background: #8d99ae; }
+  .hourbar-seg.pos-amenities { background: #4e5c6f; }
+  .hourbar-seg.pos-dog       { background: #478079; }
+  .hourbar-seg.pos-weather   { background: #b3955b; }
+  .hourbar-seg.pos-drive     { background: #959ba6; }
   /* negative contribution colors — by advisory severity */
-  .hourbar-seg.sev-severe    { background: #dc2626; }
-  .hourbar-seg.sev-moderate  { background: #f97316; }
-  .hourbar-seg.sev-minor     { background: #f5c542; }
-  .hourbar-seg.sev-drive     { background: #9aa3b2; }
+  .hourbar-seg.sev-severe    { background: #ae5353; }
+  .hourbar-seg.sev-moderate  { background: #c07d4f; }
+  .hourbar-seg.sev-minor     { background: #c8b06f; }
+  .hourbar-seg.sev-drive     { background: #a0a4ac; }
   .hourbar-seg.pos-rank-1 { background: hsl(224, 32%, 33%); }
   .hourbar-seg.pos-rank-2 { background: hsl(226, 35%, 40%); }
   .hourbar-seg.pos-rank-3 { background: hsl(224, 38%, 48%); }
@@ -1309,7 +1309,7 @@ function renderHourlyBarsV2(p, nowH) {
       tipLines.push(`${h.hour_label} · ${scoreV3 ?? 0}`);
       if (gated) tipLines.push(`⛔ ${_gateReason(h)} — unsafe, score 0`);
       for (const d of [...posSorted].reverse()) tipLines.push(`${d.icon} +${d.val}`);
-      for (const d of negSorted) tipLines.push(`${d.icon} −${d.val}${d.sev ? ' (' + d.sev + ')' : ''}`);
+      for (const d of negSorted) tipLines.push(`${d.icon} ${d.label} −${d.val}`);
     }
     const tip = tipLines.join('\n');
 

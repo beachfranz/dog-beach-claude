@@ -55,10 +55,17 @@ Deno.serve(async (req: Request) => {
     const wantOff = wantOffParam === null ? null : wantOffParam === "true";
     const wantOn  = wantOnParam  === null ? null : wantOnParam  === "true";
 
+    // Free-text search. When ?q= is present the RPC searches the full catalog
+    // by name (overriding leash/want/scored gates) — see 20260620c.
+    const q = url.searchParams.get("q");
+    const query = q && q.trim() ? q.trim() : null;
+
     // Spatial-KNN result cap. When the client passes ?limit= it's honored
     // up to MAX_LIMIT. Without an explicit limit, the RPC's default of 500
-    // applies (set in the SQL function signature).
-    const MAX_LIMIT   = 50;
+    // applies (set in the SQL function signature). Search mode gets a higher
+    // cap so name matches across the catalog aren't truncated to the nearby
+    // pool size.
+    const MAX_LIMIT   = query ? 80 : 50;
     const limitParam  = url.searchParams.get("limit");
     const limitParsed = limitParam ? parseInt(limitParam, 10) : NaN;
     const limit       = Number.isFinite(limitParsed) && limitParsed > 0
@@ -95,6 +102,7 @@ Deno.serve(async (req: Request) => {
       p_want_off:     wantOff,
       p_want_on:      wantOn,
       p_now_hour:     nowHour,
+      p_query:        query,
     }, { count: "exact" });
     ensureNotTruncated(rpcResult as never, "find_beaches RPC");
     const { data: beaches, error: rpcErr } = rpcResult;

@@ -1053,6 +1053,13 @@
   let amenityFilters = restoreAmenitiesFromStorage();
   let distanceFilterMi = restoreDistanceFromStorage();
   let searchQuery = '';
+  // Search mode: when a query is active, results come from a server-side
+  // name search across the FULL catalog (overriding the leash/amenity/
+  // distance chips) merged with geocoded-nearby fill. _searchHitFids tags
+  // the name matches so they pin ahead of the nearby results.
+  let searchMode = false;
+  let searchAnchor = null;          // {lat,lng} geocoded from the query, or null
+  let _searchHitFids = new Set();   // 'b:<fid>' / 'p:<fid>' tags for name matches
 
   // selectedDay = 'now' (live current-hour view) | 'YYYY-MM-DD' (forecast).
   // NOW is the default; pill is keyboard/persisted to localStorage so a
@@ -2087,6 +2094,24 @@
       ...beachResults.map(normalizeBeach),
       ...dogParkResults.map(normalizeDogPark),
     ];
+    // Search mode: results are already the server-side name search + nearby
+    // fill. Skip the chip filters entirely (search overrides filters) and
+    // order name matches first, then nearby — each tier by score/distance.
+    if (searchMode) {
+      all.forEach(c => {
+        c._searchHit = _searchHitFids.has(`${c.kind === 'beach' ? 'b' : 'p'}:${c.fid}`);
+      });
+      // Distance-first within each tier: a name-matched beach shouldn't sink
+      // below a far-off dog park just because today's daily score hasn't been
+      // computed yet. Score only breaks distance ties.
+      const sk = c => (c.kind === 'dog_park') ? (c.rankScore ?? 60) : (c.rankScore != null ? c.rankScore : 0);
+      return all.sort((a, b) => {
+        if (a._searchHit !== b._searchHit) return a._searchHit ? -1 : 1;
+        const da = a.distanceMi ?? Infinity, db = b.distanceMi ?? Infinity;
+        if (da !== db) return da - db;
+        return sk(b) - sk(a);
+      });
+    }
     const filtered = all
       .filter(matchesWant)
       .filter(matchesAmenities)
@@ -2156,10 +2181,13 @@
     const head = document.getElementById('results-count');
 
     if (!cards.length) {
+      const msg = searchMode
+        ? `No beaches, parks, or places match “${escapeHtml(searchQuery)}”. Try a different name or spelling.`
+        : 'No places match — try widening the radius or unpicking an amenity.';
       list.innerHTML = `
         <div class="empty-state">
           <div class="empty-icon">🐾</div>
-          <div class="empty-text">No places match — try widening the radius or unpicking an amenity.</div>
+          <div class="empty-text">${msg}</div>
         </div>`;
       head.textContent = '0 PLACES';
       renderPins([]);
@@ -2218,6 +2246,10 @@
       windowHtml = `<span class="result-name-sep">·</span><span class="result-window ${toneClass}">${escapeHtml(c.bestWindow)}</span>`;
     } else if (c.kind === 'beach' && c.score != null) {
       windowHtml = `<span class="result-name-sep">·</span><span class="result-window tone-unk">No window</span>`;
+    } else if (c.kind === 'beach' && c.score == null) {
+      // Full-catalog search can surface unscored beaches (scoring_tier='none').
+      // Neutral chip keeps them honest + clickable through to beach.html.
+      windowHtml = `<span class="result-name-sep">·</span><span class="result-window tone-unk">Not scored yet</span>`;
     }
 
     // Info row — bacteria + dog-hour warnings only (mileage moved up
@@ -2709,23 +2741,134 @@
   }
 
   // ─── Search ─────────────────────────────────────────────────────────
+  // "Beach, park, or city" → smart server-side search across the FULL
+  // catalog. Two intents run together: (1) name match on beaches + parks
+  // (overriding the leash/amenity/distance chips), (2) geocode the query as
+  // a place → nearby fill. Name matches pin first, then nearby. Debounce is
+  // 350ms (Nominatim is ~1 req/s).
   let _searchDebounce = null;
+  let _searchSeq = 0;   // guards against out-of-order async responses
   function onSearchInput(value) {
     const clear = document.getElementById('search-clear');
     clear.classList.toggle('visible', !!value);
     if (_searchDebounce) clearTimeout(_searchDebounce);
     _searchDebounce = setTimeout(() => {
-      searchQuery = (value || '').trim();
-      renderCards();
-    }, 120);
+      const q = (value || '').trim();
+      searchQuery = q;
+      if (q) runSearch(q);
+      else exitSearch();
+    }, 350);
   }
   function clearSearch() {
     const inp = document.getElementById('search-input');
     inp.value = '';
     document.getElementById('search-clear').classList.remove('visible');
     searchQuery = '';
-    renderCards();
+    exitSearch();
     inp.focus();
+  }
+  function exitSearch() {
+    if (!searchMode) return;
+    searchMode = false;
+    searchAnchor = null;
+    _searchHitFids = new Set();
+    loadEverything();   // restore the normal ranked / nearby view
+  }
+
+  function _todayLocal() {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  }
+
+  // Forward-geocode the query as a US place (best-effort; null on miss).
+  async function geocodePlace(q) {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&countrycodes=us&format=json&limit=1`,
+        { headers: { 'User-Agent': 'DogBeachScout/1.0' } });
+      const data = await res.json();
+      if (!data || !data[0]) return null;
+      return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+    } catch { return null; }
+  }
+
+  async function fetchBeachRows({ q = null, lat = null, lng = null, limit }) {
+    const date = selectedDay === 'now' ? _todayLocal() : selectedDay;
+    const params = new URLSearchParams({ date, scored: 'false', limit: String(limit) });
+    if (q) params.set('q', q);
+    if (lat != null && lng != null) { params.set('lat', String(lat)); params.set('lng', String(lng)); }
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/get-beaches-find?${params}`,
+        { headers: { 'Authorization': `Bearer ${ANON_KEY}` } });
+      const data = await res.json();
+      return Array.isArray(data.beaches) ? data.beaches : [];
+    } catch { return []; }
+  }
+
+  async function fetchParkRows({ q = null, lat = null, lng = null, limit }) {
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/nearest_dog_parks`, {
+        method: 'POST',
+        headers: { 'apikey': ANON_KEY, 'Authorization': `Bearer ${ANON_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          p_lat: lat, p_lng: lng, p_limit: limit, p_state: null,
+          p_date: selectedDay === 'now' ? null : selectedDay, p_query: q,
+        }),
+      });
+      if (!res.ok) return [];
+      const rows = await res.json();
+      return Array.isArray(rows) ? rows : [];
+    } catch { return []; }
+  }
+
+  function _dedupBy(rows, keyFn) {
+    const seen = new Set(); const out = [];
+    for (const r of rows) {
+      const k = keyFn(r);
+      if (k == null || seen.has(k)) continue;
+      seen.add(k); out.push(r);
+    }
+    return out;
+  }
+
+  async function runSearch(q) {
+    const seq = ++_searchSeq;
+    searchMode = true;
+    showLoadingSkeletons();
+
+    // Geocode first so the distance anchor for name matches is the searched
+    // place when the user has no location of their own (e.g. "Coronado" →
+    // distances measured from Coronado, so the actual Coronado beaches lead).
+    const place = await geocodePlace(q);
+    if (seq !== _searchSeq) return;
+    searchAnchor = place;
+    const anchor = (userLat != null && userLng != null)
+      ? { lat: userLat, lng: userLng } : place;
+
+    const [nameBeaches, nameParks] = await Promise.all([
+      fetchBeachRows({ q, lat: anchor?.lat ?? null, lng: anchor?.lng ?? null, limit: 80 }),
+      fetchParkRows({ q, lat: anchor?.lat ?? null, lng: anchor?.lng ?? null, limit: 80 }),
+    ]);
+    if (seq !== _searchSeq) return;   // a newer keystroke superseded us
+
+    let nearbyBeaches = [], nearbyParks = [];
+    if (place) {
+      [nearbyBeaches, nearbyParks] = await Promise.all([
+        fetchBeachRows({ lat: place.lat, lng: place.lng, limit: 20 }),
+        fetchParkRows({ lat: place.lat, lng: place.lng, limit: 20 }),
+      ]);
+      if (seq !== _searchSeq) return;
+    }
+
+    // Tag name matches so buildRanked pins them first.
+    _searchHitFids = new Set();
+    for (const b of nameBeaches) _searchHitFids.add(`b:${b.arena_group_id}`);
+    for (const p of nameParks)   _searchHitFids.add(`p:${p.fid}`);
+
+    // Name matches first (kept by dedup's first-wins), then nearby fill.
+    beachResults  = _dedupBy([...nameBeaches, ...nearbyBeaches], b => b.arena_group_id ?? b.location_id);
+    dogParkResults = _dedupBy([...nameParks, ...nearbyParks],   p => p.fid);
+
+    renderCards();
   }
 
   // ─── Directions sheet ───────────────────────────────────────────────
@@ -2783,6 +2926,10 @@
 
   // ─── Orchestrator ───────────────────────────────────────────────────
   async function loadEverything() {
+    // While a search is active, search owns the result set — any refresh
+    // trigger (day pill, chip toggle, location update) re-runs the search
+    // with the current selectedDay rather than reverting to the ranked view.
+    if (searchMode && searchQuery) { await runSearch(searchQuery); return; }
     // Parallel: beach list, dog-park list, user-coord weather
     await Promise.all([
       loadBeaches(),

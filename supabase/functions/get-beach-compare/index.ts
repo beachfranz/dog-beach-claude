@@ -118,7 +118,7 @@ Deno.serve(async (req: Request) => {
       display_name:      beach.display_name_override ?? beach.name,
       latitude:          beach.lat,
       longitude:         beach.lon,
-      composite_score_v2: day?.composite_score_v3 ?? day?.composite_score_v2 ?? null,
+      composite_score_v3: day?.composite_score_v3 ?? day?.composite_score_v2 ?? null,
       best_window_label: day?.best_window_label ?? null,
       go_hours_count:    day?.go_hours_count ?? 0,
       busyness_category: day?.busyness_category ?? null,

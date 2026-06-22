@@ -1720,7 +1720,7 @@
     // selectedDay='now' → today (the RPC will also populate
     // current_hour_score). selectedDay='YYYY-MM-DD' → that forecast
     // day; current_hour_score will be null and disc falls back to
-    // composite_score_v2 (peak for that day).
+    // composite_score_v3 (peak for that day).
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
     const date = selectedDay === 'now' ? today : selectedDay;
 
@@ -1787,22 +1787,22 @@
   function normalizeBeach(b) {
     // Disc semantics:
     //  NOW pill: prefer current_hour_score (live signal, colored tone);
-    //  fall back to composite_score_v2 (today's peak) when current is
+    //  fall back to composite_score_v3 (today's peak) when current is
     //  null — disc renders grey with label "Best" so the user sees the
     //  beach IS scored, just not for this exact hour (tier-3 limited-
     //  access at noon, etc.). Truly unscored → "—" with tone-unk.
     //
-    //  Day pills (TDY / TMW / SAT / ...): always show composite_score_v2
+    //  Day pills (TDY / TMW / SAT / ...): always show composite_score_v3
     //  for that date — "best window" peak. NOW vs TDY would otherwise
     //  render identically when both query today's date. Disc label
     //  reads "Best" with tone colored by the peak (these dates have no
     //  "right now" so the peak IS the headline signal for the day).
     let score, scoreIsCurrent;
     if (selectedDay === 'now') {
-      score = b.current_hour_score ?? b.composite_score_v2 ?? null;
+      score = b.current_hour_score ?? b.composite_score_v3 ?? null;
       scoreIsCurrent = b.current_hour_score != null;
     } else {
-      score = b.composite_score_v2 ?? null;
+      score = b.composite_score_v3 ?? null;
       scoreIsCurrent = false;
     }
     const rankScore = score;
@@ -2058,7 +2058,7 @@
   // for this signal aren't punished, they just don't get the green ✓ dot.
   // Explicit false filters the entity out.
   //
-  // Why hard not soft: composite_score_v2 ALREADY rewards amenities (the
+  // Why hard not soft: composite_score_v3 ALREADY rewards amenities (the
   // bulk SQL apply adds +3 for parking, +4 for restrooms, +1 for drinking
   // water, etc., per 20260606f_apply_v2_best_window_bulk.sql). Soft-blending
   // here would double-count what the score already says. The chip's job is
@@ -2120,9 +2120,9 @@
       .filter(matchesSearch);
     if (!filtered.length) return [];
     // Sort by rankScore (current_hour_score if available, else today's
-    // composite_score_v2 — both already amenity/feature-baked at the SQL
+    // composite_score_v3 — both already amenity/feature-baked at the SQL
     // layer). Distance as tiebreaker so an equal-scored closer pick wins.
-    // Dog parks have no v2 composite — anchor them at 60 (slightly above
+    // Dog parks have no composite score — anchor them at 60 (slightly above
     // neutral) so verified nearby parks can interleave alongside beaches.
     const sortKey = c => {
       if (c.kind === 'dog_park') return c.rankScore ?? 60;

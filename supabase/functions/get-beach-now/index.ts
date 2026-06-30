@@ -238,7 +238,7 @@ async function refreshNow(
     // W2.3 cutover: weather reads from weather_grid_hourly (current hour
     // row) via weather_for_point RPC instead of live Open-Meteo. Falls
     // back to direct fetch if grid cell is unloaded. Per [[weather-grid-reference-layer]].
-    const [weather, tide, crowdRow] = await Promise.all([
+    const [weather, tide, crowdRow, closedRow] = await Promise.all([
       fetchCurrentWeatherFromGrid(beach.latitude, beach.longitude, beach.timezone, supabase)
         .catch(() => null)
         .then(w => w ?? fetchCurrentWeather(beach.latitude, beach.longitude, beach.timezone)),
@@ -249,16 +249,23 @@ async function refreshNow(
         .eq("local_date", localDate)
         .eq("local_hour", localHour)
         .maybeSingle(),
+      // W1 (2026-06-30): seasonal-aware closure. dogs_closed_for_hour reuses
+      // the SAME helpers as the v3 SQL score (zone_rules.seasons[] +
+      // _v2_is_hour_closed) so the NOW card honors seasonal windows the
+      // season-less flat dogs_prohibited_* fields can't express.
+      supabase.rpc("dogs_closed_for_hour", {
+        p_fid: beach.arena_group_id, p_local_date: localDate, p_local_hour: localHour,
+      }),
     ]);
 
     // ── Build RawHourData ───────────────────────────────────────────────────
     const openMinutes  = timeToMinutes(beach.open_time  ?? "00:00");
     const closeMinutes = timeToMinutes(beach.close_time ?? "23:59");
     const isBeachOpen  = (localHour * 60) >= openMinutes && (localHour * 60) < closeMinutes;
-    const prohibStart  = beach.dogs_prohibited_start ? timeToMinutes(beach.dogs_prohibited_start) : null;
-    const prohibEnd    = beach.dogs_prohibited_end   ? timeToMinutes(beach.dogs_prohibited_end)   : null;
-    const isProhibited = prohibStart !== null && prohibEnd !== null &&
-                         (localHour * 60) >= prohibStart && (localHour * 60) < prohibEnd;
+    // Seasonal-aware: closure comes from dogs_closed_for_hour (zone_rules,
+    // matches the v3 SQL score) rather than the season-less flat fields, which
+    // now carry only year-round daily prohibitions (mig 20260630c).
+    const isProhibited = closedRow.data === true;
 
     const rawHour: RawHourData = {
       forecastTs:    localToUtcIso(localDate, localHour, beach.timezone),

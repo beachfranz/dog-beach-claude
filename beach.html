@@ -3041,6 +3041,44 @@ function _collapseSelfNamedRegions(regions, beachName) {
   return out;
 }
 
+// Drop FOREIGN regions — zone_rules.regions that name a DIFFERENT beach/place,
+// not a physical sub-zone of THIS beach (Franz 2026-06-30). ~743 in-scope
+// beaches carry contamination from shared multi-place policy sources: Fort
+// Funston's regions include the whole GGNRA compendium (Baker Beach, Crissy
+// Field, Lands End, Fort Miley, Ocean Beach, campgrounds…), so the Amenities
+// card renders a zone group per OTHER beach. Per
+// [[zone-rules-regions-are-physical-only]] a region must be a sub-zone of THIS
+// beach. Keep the default (unnamed) region + regions whose name contains this
+// beach's name; drop the rest. Returns a CLONE so both the multi-zone render
+// (regions) AND the single-zone rule map (re-derived from the whole object)
+// see the cleaned set. Display-only — scoring uses server-side zone_rules.
+// TRADE-OFF (fast rendering fix): a genuine non-self-named sub-feature (e.g.
+// "Bluebird Park" on Fisherman's Cove) is also dropped; the root-cause data
+// fix (guard the zone_rules injector + clean the 743) restores those.
+function _dropForeignRegionsFromZr(zr, beachName) {
+  if (!zr) return zr;
+  const nameLower = String(beachName || '').toLowerCase().trim();
+  const keep = (r) => r && (
+    r.name == null ||
+    (nameLower.length >= 4 && String(r.name).toLowerCase().includes(nameLower))
+  );
+  const filterList = (regs) => {
+    if (!Array.isArray(regs)) return regs;
+    const kept = regs.filter(keep);
+    // Never strip a beach down to zero regions — if nothing matches, leave the
+    // list untouched rather than blank the card (likely a beach whose own rule
+    // lives in a non-self-named default-less shape).
+    return kept.length ? kept : regs;
+  };
+  const clone = JSON.parse(JSON.stringify(zr));
+  if (Array.isArray(clone.seasons)) {
+    for (const s of clone.seasons) s.regions = filterList(s.regions);
+  } else if (Array.isArray(clone.regions)) {
+    clone.regions = filterList(clone.regions);
+  }
+  return clone;
+}
+
 function buildAmenitiesSection(amenities, dogPolicy, beach) {
   if (!amenities && !dogPolicy?.zone_rules) return '';
 
@@ -3070,10 +3108,13 @@ function buildAmenitiesSection(amenities, dogPolicy, beach) {
     }
     return clone;
   };
-  const effectiveZoneRules = _synthesizeWaterFromSand(dogPolicy?.zone_rules);
+  const beachNameForRegions = beach?.display_name || beach?.name;
+  let effectiveZoneRules = _synthesizeWaterFromSand(dogPolicy?.zone_rules);
+  // Strip foreign (other-beach) regions before deriving anything from them.
+  effectiveZoneRules = _dropForeignRegionsFromZr(effectiveZoneRules, beachNameForRegions);
 
   let regions = _zrRegions(effectiveZoneRules);
-  regions = _collapseSelfNamedRegions(regions, beach?.display_name || beach?.name);
+  regions = _collapseSelfNamedRegions(regions, beachNameForRegions);
 
   // Build the all-zones amenity tiles (has_X=true items not tied to
   // a specific zone) — lifeguards, drinking_water, fire_pits, food,

@@ -10,20 +10,26 @@ from "off-leash is at some OTHER place" (e.g. "dogs off-leash only in designated
 dog areas" reads genuine but means the beach is leashed). That distinction is
 semantic, so we ask the model per (beach, clause).
 
-Sets `beach_policy_source.is_carveout`. This has NO consumer effect until the
-roll-up fix (step 3) reads it, so it's safe to run + validate before flipping
-the surface. Idempotent/resumable via a tmp checkpoint.
+Sets `beach_policy_source.is_carveout` + stamps `carveout_classified_at`. The
+dogs roll-up (mig 20260623c) excludes is_carveout rows, and the bps UPDATE
+statement trigger auto-re-promotes the affected beaches, so corrections flow to
+the consumer surface on write. Idempotent/resumable via the DB marker
+(carveout_classified_at) — only rows not yet classified are fetched, so re-runs
+(and the recurring post-codify pipeline phase) never re-burn LLM cost.
+
+Run the free deterministic pass first: SELECT tag_offleash_carveouts_deterministic('<state>');
 
 Usage:
-  python scripts/classify_offleash_carveout.py --limit 25            # dry-run sample
-  python scripts/classify_offleash_carveout.py --apply --model haiku # full run
-  python scripts/classify_offleash_carveout.py --apply --model sonnet
+  python scripts/classify_offleash_carveout.py --limit 25                    # dry-run sample
+  python scripts/classify_offleash_carveout.py --apply --model haiku         # full run (all active scoring states)
+  python scripts/classify_offleash_carveout.py --apply --state CA,OR,WA      # scope to states
+  python scripts/classify_offleash_carveout.py --apply --fids 8472,8333      # scope to fids
+  python scripts/classify_offleash_carveout.py --apply --reclassify --state CA  # re-examine already-classified rows
 """
 from __future__ import annotations
 
 import sys
 import os
-import json
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -63,8 +69,6 @@ A clause naming a DIFFERENT place than this beach -> true.
 
 Return ONLY JSON: {"is_carveout": true|false, "confidence": "high"|"medium"|"low", "reason": "<one short sentence>"}"""
 
-CKPT = "tmp/carveout_progress.jsonl"
-
 
 def classify(row, model):
     """Worker (runs in a thread). Returns (row, is_carveout, parsed, usage)."""
@@ -81,19 +85,21 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--model", choices=["haiku", "sonnet"], default="haiku")
     ap.add_argument("--workers", type=int, default=8, help="concurrent LLM calls")
+    ap.add_argument("--state", default=None, help="comma-separated state codes to scope to (e.g. CA,OR,WA)")
+    ap.add_argument("--fids", default=None, help="comma-separated beach fids to scope to")
+    ap.add_argument("--reclassify", action="store_true",
+                    help="re-examine rows already classified (ignores carveout_classified_at; for validation re-runs)")
     args = ap.parse_args()
     model = {"haiku": HAIKU, "sonnet": SONNET}[args.model]
 
-    done = set()
-    if os.path.exists(CKPT):
-        for line in open(CKPT, encoding="utf-8"):
-            try:
-                done.add(json.loads(line)["id"])
-            except Exception:
-                pass
+    states = [s.strip().upper() for s in args.state.split(",")] if args.state else None
+    fids = [int(x) for x in args.fids.split(",")] if args.fids else None
 
     conn = connect()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    # Marker-gated: only rows not yet carve-out-classified, unless --reclassify.
+    # No tmp checkpoint — the DB marker (carveout_classified_at) is the resumable
+    # source of truth + stops the recurring pipeline phase re-burning LLM cost.
     cur.execute(
         """
         SELECT bps.id, bps.beach_fid, bps.evidence_verbatim AS ev,
@@ -104,19 +110,22 @@ def main() -> int:
          WHERE g.is_active AND g.scoring_tier IN ('daily','hourly')
            AND bps.operative_status = 'operative'
            AND bps.rule IN ('off_leash','off_leash_voice_control')
-           AND bps.is_carveout = false
+           AND (%(reclassify)s OR bps.carveout_classified_at IS NULL)
+           AND (%(states)s::text[] IS NULL OR g.state = ANY(%(states)s::text[]))
+           AND (%(fids)s::bigint[] IS NULL OR bps.beach_fid = ANY(%(fids)s::bigint[]))
          ORDER BY bps.id
-        """
+        """,
+        {"reclassify": args.reclassify, "states": states, "fids": fids},
     )
-    rows = [r for r in cur.fetchall() if r["id"] not in done]
+    rows = cur.fetchall()
     if args.limit:
         rows = rows[: args.limit]
-    print(f"to classify: {len(rows)} rows (model={args.model}, apply={args.apply}, already_done={len(done)})", flush=True)
+    scope = args.state or (args.fids and f"fids={args.fids}") or "all active scoring states"
+    print(f"to classify: {len(rows)} rows (model={args.model}, apply={args.apply}, scope={scope}, reclassify={args.reclassify})", flush=True)
 
     n_cv = n_gen = 0
     tin = tcr = tout = 0  # token tallies: input / cache_read / output
     rate = RATES.get(model, RATES[SONNET])
-    fout = open(CKPT, "a", encoding="utf-8") if args.apply else None
     done_n = 0
 
     def cost_now():
@@ -135,10 +144,14 @@ def main() -> int:
             tin += ui; tcr += ucr; tout += uo
             n_cv += int(cv); n_gen += int(not cv); done_n += 1
             if args.apply:
-                cur.execute("UPDATE public.beach_policy_source SET is_carveout=%s WHERE id=%s", (cv, r["id"]))
+                # Stamp the marker so re-runs / the recurring pipeline phase skip
+                # this row. The bps UPDATE trigger auto-re-promotes the beach.
+                cur.execute(
+                    "UPDATE public.beach_policy_source "
+                    "SET is_carveout=%s, carveout_classified_at=now() WHERE id=%s",
+                    (cv, r["id"]),
+                )
                 conn.commit()
-                fout.write(json.dumps({"id": r["id"], "cv": cv}) + "\n")
-                fout.flush()
             if done_n <= 25 or done_n % 100 == 0:
                 tag = "CARVEOUT" if cv else "genuine "
                 print(f"  [{done_n:4}/{len(rows)}] {tag} {r['name'][:24]:24} {r['state']}  ${cost_now():.3f}  {str(p.get('reason',''))[:52]}", flush=True)

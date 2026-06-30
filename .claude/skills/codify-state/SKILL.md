@@ -126,6 +126,38 @@ END
 $$;
 ```
 
+## Step 7.5 — Classify off-leash carve-outs (R1 recurrence guard) — MANDATORY
+
+Codify emits `beach_policy_source` rows for EVERY off-leash clause in a
+jurisdiction's code — including carve-outs that do NOT make the beach off-leash:
+a fenced dog park, private property / "at home", an activity exemption
+(service/police/herding), a DIFFERENT named place, or a mere DEFINITION of "at
+large". `_canonical_dogs_from_policy_sources` rolls up `off_leash_flag` as
+`bool_or(any operative off_leash row)`, so an un-tagged carve-out **re-inflates
+the whole beach off-leash** (regression R1, 2026-06-23). New off-leash rows
+default `is_carveout=false`, so this recurs on every codify run unless tagged.
+
+**Principle:** off-leash *permissions* are beach-specific, never territorial —
+the inverse of [[citywide-leash-inference]] (which is correct for *restrictions*).
+
+`run_state_pipeline.py` does this automatically (phase `offleash_carveout`, after
+`zone_rules_v2_refresh`). For an **ad-hoc** codify run (the manual steps above),
+run it yourself after Step 7:
+
+```bash
+# Pass 1 — free deterministic high-precision regex (idempotent):
+supabase db query --linked "SELECT public.tag_offleash_carveouts_deterministic('<STATE>');"
+# Pass 2 — Haiku for the genuine/ambiguous boundary (~$0.0006/row, marker-gated):
+python scripts/classify_offleash_carveout.py --apply --state <STATE> --model haiku
+```
+
+Marker-gated via `beach_policy_source.carveout_classified_at` — only newly-extracted
+rows are processed, so re-runs are nearly free. The bps UPDATE statement trigger
+(`_refresh_beaches_from_ps`) auto-re-promotes each corrected beach; no manual
+promote needed. Genuine off-leash (voice-control, named off-leash beaches like
+Fort Funston / Pacifica Esplanade, on-beach off-leash zones) is preserved — the
+classifier is conservative and the deterministic pass guards voice-control / dog-beach.
+
 ## Step 8 — Verify sweep
 
 Build a verify page per the **`verify-sweep`** skill. Sample 6-8 beaches across the state's attribution paths:

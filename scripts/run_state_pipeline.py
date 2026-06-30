@@ -869,6 +869,54 @@ PHASES = [
             "select d.n done, t.n total from d, t",
     },
     {
+        # Off-leash carve-out classification — recurrence plug for the R1
+        # off-leash-flag inflation (regression register 2026-06-23 / wired
+        # 2026-06-30). zone_rules_v2_refresh (above) re-inserts off_leash
+        # beach_policy_source rows with is_carveout=false (default); without
+        # this phase a carve-out clause (dog-park / private-property / activity
+        # / definition / other-named-place) re-flips the whole beach off-leash
+        # via _canonical_dogs_from_policy_sources' bool_or. This phase tags
+        # carve-outs so the roll-up (mig 20260623c) excludes them.
+        #
+        # Two passes: the free deterministic regex (tag_offleash_carveouts_
+        # deterministic) then Haiku for the genuine/ambiguous boundary
+        # (classify_offleash_carveout.py). Marker-gated (carveout_classified_at)
+        # so only newly-extracted rows are processed — steady-state runs are
+        # nearly free. The bps UPDATE statement trigger (_refresh_beaches_from_ps)
+        # auto-re-promotes each corrected beach; no manual promote needed.
+        #
+        # Principle encoded: off-leash PERMISSIONS are beach-specific, never
+        # territorial — the inverse of citywide-leash-inference (correct for
+        # restrictions). Classifier-only fix (Franz 2026-06-30) — the load-
+        # bearing extraction prompt is intentionally left untouched.
+        'key': 'offleash_carveout',
+        'kind': 'python',
+        'action': 'offleash_carveout',
+        'criterion':
+            "select not exists("
+            "  select 1 from public.beach_policy_source bps "
+            "    join public.beaches_gold g on g.fid = bps.beach_fid "
+            "   where g.state=$STATE and g.is_active "
+            "     and g.scoring_tier in ('daily','hourly') "
+            "     and bps.operative_status='operative' "
+            "     and bps.rule in ('off_leash','off_leash_voice_control') "
+            "     and bps.carveout_classified_at is null)::boolean",
+        'criterion_text':
+            'every in-scope off-leash bps row is carve-out-classified '
+            '(carveout_classified_at not null)',
+        'progress_sql':
+            "with base as (select bps.carveout_classified_at "
+            "                from public.beach_policy_source bps "
+            "                join public.beaches_gold g on g.fid=bps.beach_fid "
+            "               where g.state=$STATE and g.is_active "
+            "                 and g.scoring_tier in ('daily','hourly') "
+            "                 and bps.operative_status='operative' "
+            "                 and bps.rule in ('off_leash','off_leash_voice_control')), "
+            "     t as (select count(*)::int n from base), "
+            "     d as (select count(*)::int n from base where carveout_classified_at is not null) "
+            "select d.n done, t.n total from d, t",
+    },
+    {
         # 2026-05-22: canonical operating hours per beach (task #118).
         # Populates beaches_gold.operating_hours via populate_operating_hours()
         # priority chain (manual_curator > operator > osm > agency > legacy
@@ -2700,6 +2748,34 @@ def action_zone_rules_v2_refresh(state: str) -> int:
         'scripts/reextract_beach_all_ps.py', fids,
         flag_name='--fids', chunk_size=30, per_chunk_timeout=900,
         extra_args=['--skip-if-fresh-within', '7'],
+        parse_fn=None,
+    )
+
+
+def action_offleash_carveout(state: str) -> int:
+    """Tag off-leash carve-out bps rows so they don't inflate the beach-wide
+    off_leash flag (R1 recurrence plug, wired 2026-06-30).
+
+    Pass 1 (free): deterministic regex tagger over the state's unclassified
+    off-leash rows. Pass 2: Haiku for the genuine/ambiguous boundary, chunked
+    by fid. Both gate on carveout_classified_at IS NULL, so steady-state runs
+    only touch newly-extracted rows. The bps UPDATE trigger
+    (_refresh_beaches_from_ps) auto-re-promotes each corrected beach.
+
+    Classifier-only fix (Franz 2026-06-30): the load-bearing clause-extraction
+    prompt is intentionally left untouched.
+    """
+    fids = _state_tier12_fids(state)
+    if not fids:
+        return 0
+    # Pass 1 — free deterministic high-precision regex (idempotent, marker-gated).
+    with open_conn() as c, c.cursor() as cur:
+        cur.execute('select public.tag_offleash_carveouts_deterministic(%s)', (state,))
+    # Pass 2 — Haiku for the remainder. Chunked per chunked-subprocess HARD rule.
+    return _chunked_subprocess(
+        'scripts/classify_offleash_carveout.py', fids,
+        flag_name='--fids', chunk_size=80, per_chunk_timeout=600,
+        extra_args=['--apply', '--model', 'haiku'],
         parse_fn=None,
     )
 

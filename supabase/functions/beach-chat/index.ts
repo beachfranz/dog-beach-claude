@@ -46,17 +46,17 @@ Deno.serve(async (req: Request) => {
       .lt("hour", new Date(Date.now() - 86_400_000).toISOString());
   }
 
-  let body: { location_id?: string; arena_group_id?: number; question?: string; conversation_history?: ConversationTurn[]; local_date?: string };
+  let body: { location_id?: string; arena_group_id?: number; question?: string; conversation_history?: ConversationTurn[]; local_date?: string; cross_beach?: boolean; location_ids?: string[] };
   try {
     body = await req.json();
   } catch {
     return json({ error: "Invalid JSON body" }, 400);
   }
 
-  let { location_id, arena_group_id, question, conversation_history = [], local_date } = body;
+  let { location_id, arena_group_id, question, conversation_history = [], local_date, cross_beach, location_ids } = body;
 
-  if (!question || (!location_id && !arena_group_id)) {
-    return json({ error: "question and (location_id or arena_group_id) are required" }, 400);
+  if (!question || (!location_id && !arena_group_id && !cross_beach)) {
+    return json({ error: "question and (location_id, arena_group_id, or cross_beach) are required" }, 400);
   }
 
   // Resolve location_id ↔ arena_group_id via the spine. Scoring-table
@@ -78,7 +78,7 @@ Deno.serve(async (req: Request) => {
       .limit(1);
     location_id = row?.[0]?.location_id ?? undefined;
   }
-  if (!arena_group_id) {
+  if (!arena_group_id && !cross_beach) {
     return json({ error: `Beach not found in spine for input` }, 404);
   }
   try {
@@ -87,40 +87,175 @@ Deno.serve(async (req: Request) => {
     // local_date scopes the chat to a single beach + day (used by detail.html).
     // Comparative-question routing is bypassed: when the user is on a specific
     // day's detail page, they want answers about THAT day, not "go to a
-    // different beach."
-    if (isComparativeQuestion(question) && !local_date) {
-      // ── Cross-beach mode: summary data for all beaches ──────────────
+    // different beach." cross_beach (find.html) forces this branch
+    // unconditionally — Scout there is never anchored to one beach.
+    if ((cross_beach || isComparativeQuestion(question)) && !local_date) {
+      // ── Cross-beach mode: summary data across multiple beaches ───────
       // All beaches are in California — use Pacific time for "today"
       const todayPacific = localDateForTimezone(new Date(), "America/Los_Angeles");
 
-      // Cross-beach mode: scoreable set, all from the spine.
-      const [{ data: beachesRaw }, { data: allDays }] = await Promise.all([
-        supabase
-          .from("beaches_gold")
-          .select("fid, location_id, name, display_name_override, timezone")
-          .in("scoring_tier", ["daily", "hourly"])
-          .eq("is_active", true),
-        supabase
-          .from("beach_day_recommendations")
-          .select("location_id, local_date, composite_score_v2, composite_score_v3, best_window_label, best_window_text, avg_temp, avg_wind, avg_uv, avg_tide_height, lowest_tide_height, busyness_category, go_hours_count, caution_hours_count, no_go_hours_count, caution_text, risk_reason_codes, positive_reason_codes, summary_weather, bacteria_risk, precip_72h_mm")
-          .gte("local_date", todayPacific)
-          .order("local_date", { ascending: true })
-          .order("location_id", { ascending: true })
-          .limit(50),
-      ]);
+      // The 7-day forecast window, as local_date strings.
+      const [ty, tm, td] = todayPacific.split("-").map(Number);
+      const weekDates = Array.from({ length: 7 }, (_, i) =>
+        new Date(Date.UTC(ty, tm - 1, td + i)).toISOString().slice(0, 10)
+      );
 
-      // Reshape gold rows into the {location_id, display_name, timezone}
-      // shape that buildCrossBeachPrompt expects.
-      const beaches = (beachesRaw ?? []).map((g: { fid: number; location_id: string | null; name: string; display_name_override: string | null; timezone: string }) => ({
-        location_id:  g.location_id ?? null,
-        display_name: g.display_name_override ?? g.name,
-        timezone:     g.timezone ?? "America/Los_Angeles",
-      }));
-      systemPrompt = buildCrossBeachPrompt(beaches, allDays ?? []);
+      const scopedLocationIds = (location_ids ?? []).filter((id): id is string => !!id);
+
+      // deno-lint-ignore no-explicit-any
+      let beachesRaw: any[] | null;
+      // deno-lint-ignore no-explicit-any
+      let allDays: any[];
+
+      if (scopedLocationIds.length) {
+        // Caller (e.g. find.html) told us exactly which beaches are on
+        // screen — scope Scout to that set so it never surfaces beaches
+        // outside the caller's search radius/filters. That set is already
+        // small (≤~50), so pull the whole week in one shot per table
+        // instead of the per-day ranking used in the unscoped fallback.
+        const weekStart = weekDates[0];
+        const weekEnd   = weekDates[weekDates.length - 1];
+        const [{ data: gold }, { data: days }] = await Promise.all([
+          supabase
+            .from("beaches_gold")
+            .select("fid, location_id, name, display_name_override, timezone")
+            .in("location_id", scopedLocationIds),
+          supabase
+            .from("beach_day_recommendations")
+            .select("location_id, local_date, composite_score_v2, composite_score_v3, best_window_label, best_window_text, avg_temp, avg_wind, avg_uv, avg_tide_height, lowest_tide_height, busyness_category, go_hours_count, caution_hours_count, no_go_hours_count, caution_text, risk_reason_codes, positive_reason_codes, summary_weather, bacteria_risk, precip_72h_mm")
+            .in("location_id", scopedLocationIds)
+            .gte("local_date", weekStart)
+            .lte("local_date", weekEnd),
+        ]);
+        beachesRaw = gold;
+        allDays = days ?? [];
+      } else {
+        // No caller-provided scope — rank top beaches per day nationwide.
+        // A single query ordered by (local_date, ...) + one global
+        // .limit() would starve every day after the first once beach
+        // count exceeds the limit (Scout would only ever see "today"), so
+        // query per-day with its own ORDER BY + LIMIT instead.
+        // Gold is fetched AFTER the day ranking, scoped to the ranked
+        // location_ids — an unbounded active-scored select exceeds the
+        // PostgREST 1000-row cap and silently drops ranked beaches.
+        const PER_DAY_LIMIT = 15;
+        const dayResults = await Promise.all(
+          weekDates.map((date) =>
+            supabase
+              .from("beach_day_recommendations")
+              .select("location_id, local_date, composite_score_v2, composite_score_v3, best_window_label, best_window_text, avg_temp, avg_wind, avg_uv, avg_tide_height, lowest_tide_height, busyness_category, go_hours_count, caution_hours_count, no_go_hours_count, caution_text, risk_reason_codes, positive_reason_codes, summary_weather, bacteria_risk, precip_72h_mm")
+              .eq("local_date", date)
+              .order("composite_score_v3", { ascending: false, nullsFirst: false })
+              .order("composite_score_v2", { ascending: false, nullsFirst: false })
+              .limit(PER_DAY_LIMIT)
+          ),
+        );
+        allDays = dayResults.flatMap((r) => r.data ?? []);
+        const rankedIds = [...new Set(allDays.map((d) => d.location_id as string))];
+        const { data: gold } = rankedIds.length
+          ? await supabase
+              .from("beaches_gold")
+              .select("fid, location_id, name, display_name_override, timezone")
+              .in("location_id", rankedIds)
+              .eq("is_active", true)
+          : { data: [] };
+        beachesRaw = gold;
+      }
+
+      // Only include beaches that actually have a day in the window above —
+      // otherwise the roster gets listed with "(no data)" for every beach
+      // that didn't come back, bloating the prompt.
+      const presentLocationIds = new Set(allDays.map((d) => d.location_id as string));
+      const presentGold = (beachesRaw ?? [])
+        .filter((g: { location_id: string | null }) => g.location_id && presentLocationIds.has(g.location_id));
+
+      // Dog policy / zone rules — same source single-beach mode uses
+      // (beach_dog_policy.zone_rules, with the flat fields as fallback).
+      // Amenities — same beach_amenities table beach.html's Amenities
+      // card reads. Cross-beach mode was previously missing both
+      // entirely, so Scout had nothing to answer with when asked
+      // comparatively about zones or facilities.
+      // Advisories (beach_advisory) — rip current, high surf, water
+      // quality, policy windows, plover, etc. Same unified table
+      // beach.html's Cautions card reads.
+      const advisoryRangeEnd = new Date(
+        new Date(`${weekDates[weekDates.length - 1]}T00:00:00Z`).getTime() + 2 * 86_400_000
+      ).toISOString();
+
+      const fids = presentGold.map((g: { fid: number }) => g.fid);
+      const [{ data: policyRows }, { data: amenityRows }, { data: advisoryRows }] = fids.length
+        ? await Promise.all([
+            supabase
+              .from("beach_dog_policy")
+              .select("arena_group_id, dogs_allowed, leash_policy, has_on_leash, has_off_leash, off_leash_flag, zone_rules")
+              .in("arena_group_id", fids),
+            supabase
+              .from("beach_amenities")
+              .select("arena_group_id, has_restrooms, has_showers, has_lifeguards, has_drinking_water, has_disabled_access, has_food, has_fire_pits, has_picnic_area, parking_type")
+              .in("arena_group_id", fids),
+            supabase
+              .from("beach_advisory")
+              .select("beach_fid, event_type, severity, valid_from, valid_to, dog_impact_text, label")
+              .in("beach_fid", fids)
+              .gte("valid_to", new Date().toISOString())
+              .lte("valid_from", advisoryRangeEnd),
+          ])
+        : [{ data: [] as Record<string, unknown>[] }, { data: [] as Record<string, unknown>[] }, { data: [] as Record<string, unknown>[] }];
+      const policyByFid = new Map((policyRows ?? []).map((p: { arena_group_id: number }) => [p.arena_group_id, p]));
+      const amenitiesByFid = new Map((amenityRows ?? []).map((a: { arena_group_id: number }) => [a.arena_group_id, a]));
+      const advisoriesByFid = new Map<number, Record<string, unknown>[]>();
+      for (const a of (advisoryRows ?? []) as { beach_fid: number }[]) {
+        const arr = advisoriesByFid.get(a.beach_fid) ?? [];
+        arr.push(a);
+        advisoriesByFid.set(a.beach_fid, arr);
+      }
+
+      // Reshape gold rows into the {location_id, display_name, timezone,
+      // zoneSummary, flatPolicyLine, amenitiesLine} shape that
+      // buildCrossBeachPrompt expects.
+      const beaches = presentGold
+        .map((g: { fid: number; location_id: string | null; name: string; display_name_override: string | null; timezone: string }) => {
+          const p = policyByFid.get(g.fid) as Record<string, unknown> | undefined;
+          const zoneSummary = buildZoneSummary((p?.zone_rules as Record<string, unknown>) ?? null);
+          const flatBits: string[] = [];
+          if (p?.dogs_allowed != null)    flatBits.push(`dogs_allowed=${p.dogs_allowed}`);
+          if (p?.leash_policy)            flatBits.push(`leash_policy=${p.leash_policy}`);
+          if (p?.has_on_leash != null)    flatBits.push(`has_on_leash_zones=${p.has_on_leash}`);
+          if (p?.has_off_leash != null)   flatBits.push(`has_off_leash_zones=${p.has_off_leash}`);
+
+          const a = amenitiesByFid.get(g.fid) as Record<string, unknown> | undefined;
+          const amenBits: string[] = [];
+          if (a?.has_restrooms != null)       amenBits.push(`restrooms=${a.has_restrooms}`);
+          if (a?.has_showers != null)         amenBits.push(`showers=${a.has_showers}`);
+          if (a?.has_lifeguards != null)      amenBits.push(`seasonal_lifeguards=${a.has_lifeguards}`);
+          if (a?.has_drinking_water != null)  amenBits.push(`drinking_water=${a.has_drinking_water}`);
+          if (a?.has_disabled_access != null) amenBits.push(`ada_access=${a.has_disabled_access}`);
+          if (a?.has_food != null)            amenBits.push(`food_nearby=${a.has_food}`);
+          if (a?.has_fire_pits != null)       amenBits.push(`fire_pits=${a.has_fire_pits}`);
+          if (a?.has_picnic_area != null)     amenBits.push(`picnic_area=${a.has_picnic_area}`);
+          if (a?.parking_type)                amenBits.push(`parking=${a.parking_type}`);
+
+          return {
+            location_id:    g.location_id ?? null,
+            display_name:   g.display_name_override ?? g.name,
+            timezone:       g.timezone ?? "America/Los_Angeles",
+            zoneSummary,
+            flatPolicyLine: flatBits.join(", "),
+            amenitiesLine:  amenBits.join(", "),
+            advisories:     advisoriesByFid.get(g.fid) ?? [],
+          };
+        });
+      systemPrompt = buildCrossBeachPrompt(beaches, allDays);
 
     } else {
       // ── Single-beach mode: full detail for current beach ─────────────
       // Single-beach mode: all on the spine.
+      // Reaching this branch means cross_beach was falsy, so the earlier
+      // guard already 404'd if arena_group_id were missing — re-checked
+      // here only to narrow the type for TS.
+      if (!arena_group_id) {
+        return json({ error: `Beach not found in spine for input` }, 404);
+      }
       const { data: goldRows, error: beachErr } = await supabase
         .from("beaches_gold")
         .select(`
@@ -163,8 +298,9 @@ Deno.serve(async (req: Request) => {
       // suggest sand/wave play if dogs aren't allowed on sand, etc.
       let metadata: Record<string, unknown> | null = null;
       let dogPolicy: Record<string, unknown> | null = null;
+      let amenities: Record<string, unknown> | null = null;
       if (beach.arena_group_id) {
-        const [metaRes, dpRes] = await Promise.all([
+        const [metaRes, dpRes, amenRes] = await Promise.all([
           supabase
             .from("arena_beach_metadata")
             .select(
@@ -184,9 +320,22 @@ Deno.serve(async (req: Request) => {
             )
             .eq("arena_group_id", beach.arena_group_id)
             .maybeSingle(),
+          // Facility amenities — same table beach.html's Amenities card
+          // reads. Lets Scout answer "does this beach have restrooms /
+          // showers / parking / disabled access?" instead of guessing.
+          supabase
+            .from("beach_amenities")
+            .select(
+              "has_restrooms, has_showers, has_lifeguards, has_drinking_water, " +
+              "has_disabled_access, has_food, has_fire_pits, has_picnic_area, " +
+              "parking_type, parking_notes, hours_text"
+            )
+            .eq("arena_group_id", beach.arena_group_id)
+            .maybeSingle(),
         ]);
         metadata = metaRes.data ?? null;
         dogPolicy = dpRes.data ?? null;
+        amenities = amenRes.data ?? null;
       }
 
       // Get current local date + hour in the beach's timezone
@@ -217,13 +366,31 @@ Deno.serve(async (req: Request) => {
         .select("local_date, local_hour, hour_label, hour_score_v2, hour_score_v3, tide_height, wind_speed, temp_air, feels_like, sand_temp, asphalt_temp, busyness_score, precip_chance, uv_index, busyness_category, is_in_best_window, is_candidate_window")
         .eq("location_id", location_id);
 
-      const [{ data: days, error: daysErr }, { data: hours, error: hoursErr }] = await Promise.all([
+      // Advisories (beach_advisory) — rip current, high surf, water
+      // quality, policy windows, plover, etc. Same unified table
+      // beach.html's Cautions card reads (get_beach_advisories RPC).
+      // Fetched directly here (not via the RPC) so one query covers the
+      // whole visible date range instead of one call per day; valid_to/
+      // valid_from bucketing per day below is date-string overlap, which
+      // is close enough for a narrative mention (not pixel-exact tile
+      // rendering like the RPC does).
+      const [advY, advM, advD] = (local_date ?? today).split("-").map(Number);
+      const advisoryRangeEnd = new Date(Date.UTC(advY, advM - 1, advD + (local_date ? 2 : 9))).toISOString();
+      const advisoryQuery = supabase
+        .from("beach_advisory")
+        .select("event_type, severity, valid_from, valid_to, dog_impact_text, label")
+        .eq("beach_fid", beach.arena_group_id)
+        .gte("valid_to", new Date().toISOString())
+        .lte("valid_from", advisoryRangeEnd);
+
+      const [{ data: days, error: daysErr }, { data: hours, error: hoursErr }, { data: advisories }] = await Promise.all([
         local_date
           ? dayQuery.eq("local_date", local_date)
           : dayQuery.gte("local_date", today).order("local_date", { ascending: true }).limit(7),
         local_date
           ? hourQuery.eq("local_date", local_date).order("local_hour", { ascending: true })
           : hourQuery.gte("local_date", today).order("local_date", { ascending: true }).order("local_hour", { ascending: true }),
+        advisoryQuery,
       ]);
 
       if (daysErr) throw new Error(`Failed to load daily data: ${daysErr.message}`);
@@ -235,7 +402,7 @@ Deno.serve(async (req: Request) => {
         h.local_date !== filterDate || Number(h.local_hour) >= currentLocalHour
       );
 
-      systemPrompt = buildSystemPrompt(beach, days ?? [], remainingHours, currentTimeLabel, local_date ?? null, metadata, dogPolicy);
+      systemPrompt = buildSystemPrompt(beach, days ?? [], remainingHours, currentTimeLabel, local_date ?? null, metadata, dogPolicy, amenities, advisories ?? []);
     }
 
     // ── 60-min cache (only for single-beach context + no chat history) ──
@@ -370,6 +537,9 @@ function buildSystemPrompt(
   scopedDate: string | null = null,
   metadata: Record<string, unknown> | null = null,
   dogPolicy: Record<string, unknown> | null = null,
+  amenities: Record<string, unknown> | null = null,
+  // deno-lint-ignore no-explicit-any
+  advisories: any[] = [],
 ): string {
   const hoursByDate = new Map<string, Record<string, unknown>[]>();
   for (const h of hours) {
@@ -497,6 +667,21 @@ function buildSystemPrompt(
                        : bacteriaRisk === "low"      ? `  Note: ${d.precip_72h_mm ?? 0}mm rain in past 72h (below advisory threshold)`
                        : "";
 
+    // Advisories active on this date (rip current, high surf, water
+    // quality, plover closures, NWS alerts, etc.) — date-string overlap
+    // against valid_from/valid_to, same beach_advisory rows beach.html's
+    // Cautions card renders.
+    const dayAdvisories = advisories.filter((a) => {
+      const df = String(a.valid_from).slice(0, 10);
+      const dt = String(a.valid_to).slice(0, 10);
+      return date >= df && date <= dt;
+    });
+    const advisoryLines = dayAdvisories.map((a) => {
+      const label  = a.label || a.event_type || "Advisory";
+      const impact = a.dog_impact_text ? `: ${trim(a.dog_impact_text, 200)}` : "";
+      return `  ⚠️ ADVISORY [${a.severity}] ${label}${impact}`;
+    }).join("\n");
+
     return `
   ${date} ${dayOfWeek.toUpperCase()} ${isWeekend ? "[WEEKEND]" : "[WEEKDAY]"}
   Hours: ${d.go_hours_count ?? 0} go / ${d.caution_hours_count ?? 0} caution / ${d.no_go_hours_count ?? 0} no-go
@@ -504,6 +689,7 @@ function buildSystemPrompt(
   ${positives ? `Positives: ${positives}` : ""}
   ${risks ? `Risks: ${risks}` : ""}
   ${bacteriaLine}
+  ${advisoryLines}
   ${tips.length ? `Tips: ${tips.join("; ")}` : ""}
   Best window note: ${d.best_window_text ?? "n/a"}
   ${d.caution_text ? `Caution: ${d.caution_text}` : ""}${d.no_go_text ? `No-go reason: ${d.no_go_text}` : ""}
@@ -609,6 +795,25 @@ ${hourLines || "    (none)"}`;
           : `${dogPolicyLines.join("\n")}\n`)
     : "";
 
+  // ── Amenities block ──────────────────────────────────────────────────
+  // Same beach_amenities table beach.html's Amenities card reads.
+  const amenityBits: string[] = [];
+  if (amenities) {
+    if (amenities.has_restrooms != null)       amenityBits.push(`restrooms: ${amenities.has_restrooms ? "yes" : "no"}`);
+    if (amenities.has_showers != null)         amenityBits.push(`showers: ${amenities.has_showers ? "yes" : "no"}`);
+    if (amenities.has_lifeguards != null)      amenityBits.push(`lifeguards: ${amenities.has_lifeguards ? "seasonal" : "no"}`);
+    if (amenities.has_drinking_water != null)  amenityBits.push(`drinking water: ${amenities.has_drinking_water ? "yes" : "no"}`);
+    if (amenities.has_disabled_access != null) amenityBits.push(`disabled/ADA access: ${amenities.has_disabled_access ? "yes" : "no"}`);
+    if (amenities.has_food != null)            amenityBits.push(`food nearby: ${amenities.has_food ? "yes" : "no"}`);
+    if (amenities.has_fire_pits != null)       amenityBits.push(`fire pits: ${amenities.has_fire_pits ? "yes" : "no"}`);
+    if (amenities.has_picnic_area != null)     amenityBits.push(`picnic area: ${amenities.has_picnic_area ? "yes" : "no"}`);
+    if (amenities.parking_type)                amenityBits.push(`parking: ${amenities.parking_type}${amenities.parking_notes ? ` (${trim(amenities.parking_notes as string, 150)})` : ""}`);
+    if (amenities.hours_text)                  amenityBits.push(`posted hours: ${trim(amenities.hours_text as string, 150)}`);
+  }
+  const amenitiesBlock = amenityBits.length
+    ? `\nAMENITIES:\n${amenityBits.map(b => `- ${b}`).join("\n")}\n`
+    : `\nAMENITIES: no data on file — if asked, say you don't have that and suggest checking on-site signage.\n`;
+
   return `You are Scout — a local surfer who's been bringing your dog to ${beach.display_name} for years. You know every sandbar, every swell window, when the kooks show up, and when it's firing. You text like a surfer — laid back, uses surf/beach slang naturally (swell, glassy, onshore, sectiony, blown out, dawn patrol, dropping in, firing, going off, closeout, mushy, punchy, clean, choppy, overhead, waist-high), first-person, never formal. You're stoked to help but keep it real — if it's blown out, say it's blown out.
 
 BEACH: ${beach.display_name}
@@ -617,7 +822,7 @@ ${beach.open_time ? `Hours: ${beach.open_time} – ${beach.close_time}` : ""}
 ${beach.description ? `About: ${beach.description}` : ""}
 ${beach.website ? `Website: ${beach.website}` : ""}
 Timezone: ${beach.timezone}
-${dogPolicyBlock}${dogAdviceConstraints}
+${dogPolicyBlock}${dogAdviceConstraints}${amenitiesBlock}
 
 ${currentTimeLabel ? `Current local time: ${currentTimeLabel} — only today's remaining hours are shown in the hourly data below.` : ""}
 ${scopedDate
@@ -641,6 +846,8 @@ ${scopedDate
 - Always assume the user is bringing their dog; frame all advice through that lens
 - LIFEGUARDS ARE SEASONAL — never say "lifeguards on duty" or "lifeguards on staff" (implies year-round staffing, which is false at almost every US beach). Say "seasonal lifeguards" or just "lifeguards". If a specific window is needed, default to "roughly Memorial Day to Labor Day" unless the data above explicitly gives one.
 - DOG POLICY is non-negotiable — never suggest activities that violate the leash rule or "no dogs on sand" rule above. If the policy says leash required, the dog stays leashed; if dogs aren't allowed on sand, point the user to the allowed zone (parking lot / multi-use trail) and make the most of that. Don't argue with the policy or hedge — Scout knows the local rules cold and respects them.
+- AMENITIES: answer facility questions (restrooms, showers, parking, ADA access, etc.) only from the AMENITIES data above. Never invent or assume a facility exists. If it's not listed, say you don't have that on file.
+- ADVISORY lines (rip current, high surf, water quality, closures, NWS alerts, etc.) are real active hazards for that date. Mention them proactively and plainly, the same honest way you'd name bad sand temp or bacteria risk — don't wait to be asked. moderate/severe/extreme severity should shape your recommendation (e.g. don't suggest swimming or off-leash water play through a rip current or high surf advisory); minor severity is lower-priority but still worth a mention if relevant to the question.
 - FETCH AND RETRIEVE ARE OFF-LEASH ACTIVITIES. You cannot throw a ball for a leashed dog — the leash physically prevents it. Never suggest fetch, "leashed fetch", chase-the-ball, frisbee, retrieve, or any throw-and-chase game when the dog must be leashed. Swimming is similarly off-leash unless the dog is in shallow shore-break under direct restraint. Leashed-dog activities are: walks, sniff-tours, tide-pool exploring, sit-with-you-on-the-towel, wade in ankle-deep water with a long lead.
 - NEVER recommend other apps, websites, or services for beach or dog info. This includes (but is not limited to) BringFido, Yelp, TripAdvisor, AllTrails, Google reviews, county/city parks websites, state park sites, surf forecast sites (Surfline, Magicseaweed), or "the park's official site." If the user asks about a beach you don't have data for on this screen, tell them to use the app's find or compare view to see other beaches Scout knows about. Stay in-house — Scout is the source. If something genuinely isn't in your data (e.g. event schedules, current closure notices), say so plainly and stop there — do NOT direct them off-app.`;
 }
@@ -735,20 +942,50 @@ function buildCrossBeachPrompt(
 
   const beachContext = beaches.map((b) => {
     const days = daysByBeach.get(b.location_id as string) ?? [];
+    // deno-lint-ignore no-explicit-any
+    const beachAdvisories = (Array.isArray(b.advisories) ? b.advisories : []) as any[];
     const dayLines = days.map((d) => {
       const risks = Array.isArray(d.risk_reason_codes) ? (d.risk_reason_codes as string[]).join(", ") : "";
-      return `    ${d.local_date}: window=${d.best_window_label ?? "none"} weather=${d.summary_weather ?? "?"} wind=${fmtNum(d.avg_wind, "mph")} temp=${fmtNum(d.avg_temp, "°F")} crowds=${d.busyness_category ?? "?"} go=${d.go_hours_count ?? 0}h${risks ? ` risks=${risks}` : ""}${d.caution_text ? ` caution="${d.caution_text}"` : ""}`;
+      const bacteria = d.bacteria_risk && d.bacteria_risk !== "none"
+        ? ` bacteria_risk=${d.bacteria_risk}(${d.precip_72h_mm ?? 0}mm rain/72h)`
+        : "";
+      const date = d.local_date as string;
+      const dayAdvisories = beachAdvisories.filter((a) => {
+        const df = String(a.valid_from).slice(0, 10);
+        const dt = String(a.valid_to).slice(0, 10);
+        return date >= df && date <= dt;
+      });
+      const advisoryText = dayAdvisories.length
+        ? ` advisories=[${dayAdvisories.map((a) =>
+            `${a.label || a.event_type}:${a.severity}${a.dog_impact_text ? ` (${trim(a.dog_impact_text as string, 120)})` : ""}`
+          ).join("; ")}]`
+        : "";
+      return `    ${d.local_date}: window=${d.best_window_label ?? "none"} weather=${d.summary_weather ?? "?"} wind=${fmtNum(d.avg_wind, "mph")} temp=${fmtNum(d.avg_temp, "°F")} crowds=${d.busyness_category ?? "?"} hours=${d.go_hours_count ?? 0}go/${d.caution_hours_count ?? 0}caution/${d.no_go_hours_count ?? 0}nogo${risks ? ` risks=${risks}` : ""}${d.caution_text ? ` caution="${d.caution_text}"` : ""}${bacteria}${advisoryText}`;
     }).join("\n");
-    return `\n${b.display_name} (${b.location_id}):\n${dayLines || "    (no data)"}`;
+    const zoneSummary = (b.zoneSummary as string) || "";
+    const flatPolicyLine = (b.flatPolicyLine as string) || "";
+    const policyBlock = zoneSummary
+      ? `  DOG POLICY (zones):\n${zoneSummary}`
+      : flatPolicyLine
+      ? `  DOG POLICY: ${flatPolicyLine}`
+      : `  DOG POLICY: unknown`;
+    const amenitiesLine = (b.amenitiesLine as string) || "";
+    const amenitiesBlock = `  AMENITIES: ${amenitiesLine || "unknown"}`;
+    return `\n${b.display_name} (${b.location_id}):\n${policyBlock}\n${amenitiesBlock}\n${dayLines || "    (no forecast data)"}`;
   }).join("\n");
 
-  return `You are Scout — a local surfer who knows every dog beach in Southern California. You've scouted all of them and know their differences — which ones get crowded on weekends, which have the best low tides, which get blown out in the afternoon. Casual surfer tone, first-person, no fluff.
+  return `You are Scout — a local surfer who knows every dog beach on the West Coast. You've scouted all of them and know their differences — which ones get crowded on weekends, which have the best low tides, which get blown out in the afternoon. Casual surfer tone, first-person, no fluff.
 
-ALL BEACHES — 7-DAY SUMMARY:
+ALL BEACHES — DOG POLICY + AMENITIES + 7-DAY SUMMARY:
 ${beachContext}
 
 Rules:
 - Answer cross-beach comparison questions using the data above
+- DOG POLICY (zones) is the authoritative source for what the dog can do and where at each beach. Sections (sand, water_swim, trails, parking_lot, picnic_area, restrooms, showers, playground, dunes, tide_pools, boardwalk, bluff, campground) are marked off_leash / on_leash / not_allowed. Never suggest an activity in a not_allowed section, and never suggest off-leash play where a section is on_leash. If a section has a time window, the rule changes by time of day — apply the window matching the user's intended visit hour.
+- If DOG POLICY is "unknown" for a beach, say plainly you don't have policy data for it rather than guessing.
+- AMENITIES: answer facility questions (restrooms, showers, parking, ADA access, etc.) only from the AMENITIES line for that beach. Never invent a facility that isn't listed there — if it's "unknown", say you don't have that on file for that beach.
+- CAUTIONS: risks=, caution=, and bacteria_risk= in a day's line are real hazards flagged for that beach/day — surface them plainly when relevant (e.g. don't recommend swimming on a day with bacteria_risk=high or bacteria_risk=moderate) rather than only citing them if asked.
+- ADVISORIES: an advisories=[...] entry on a day's line (rip current, high surf, water quality, closures, NWS alerts, etc.) is a real active hazard for that beach on that date. Mention it proactively and plainly, the same honest way you'd name bad sand temp — don't wait to be asked. moderate/severe/extreme severity should shape your recommendation away from swimming or off-leash water play that day; minor is lower-priority but still worth a mention if relevant.
 - Recommend specific beaches and days with reasons — be direct
 - Use descriptive language for conditions, not raw numbers where possible
 - Keep answers to 2-3 sentences

@@ -15,6 +15,7 @@
   /* ── Tokens — matched to index.html (sea fog / marine navy POV) ─── */
   :root {
     --bg:           #eef4f8;
+    --surface:      #f4f5f7;
     --card:         #ffffff;
     --card-sunk:    #f5f9fc;
     --text:         #0f2742;
@@ -798,6 +799,14 @@
     text-align: center;
     letter-spacing: 0.08em;
   }
+
+  /* ── Ask-Scout chat sits above everything on this page ──────────── */
+  /* find.html stacks a Leaflet map (control panes up to ~1000) and the
+     directions sheet (1500/1600) over the listing; chat.css's default
+     299/300 would put the chat panel underneath both. Page-scoped so the
+     other pages keep chat.css's values. */
+  .chat-overlay { z-index: 5000; }
+  .chat-panel   { z-index: 5001; }
 
   /* ── Directions overlay (reused pattern from prior find.html) ───── */
   .dir-overlay {
@@ -2978,13 +2987,17 @@
 </script>
 
 <script>
-  // Scout chat anchors to the current top-ranked beach. Re-evaluates on each
-  // render so the chat panel always opens against the freshest #1.
+  // Scout answers from the whole scored dataset on this page, not anchored
+  // to whichever beach currently ranks #1.
   window.CHAT_CONFIG = {
-    getLocationId: () => {
-      const first = lastRenderedCards.find(c => c.kind === 'beach');
-      return first ? first.location_id : null;
-    },
+    crossBeach: true,
+    // Scope Scout to exactly the beaches currently on screen (nearest-N to
+    // the searched location, post amenity/leash filter) — not the whole
+    // nationwide catalog. Re-evaluates per question so it always matches
+    // what's rendered at ask-time.
+    getLocationIds: () => lastRenderedCards
+      .filter(c => c.kind === 'beach' && c.location_id)
+      .map(c => c.location_id),
     placeholder: 'Which beach is best this weekend?',
   };
 </script>

@@ -96,11 +96,22 @@
     chatHistory.push({ role: 'user', content: question });
 
     const typingId = appendTyping();
-    const locationId = cfg.getLocationId ? cfg.getLocationId() : null;
     const localDate  = cfg.getLocalDate  ? cfg.getLocalDate()  : null;
 
     try {
-      const body = { location_id: locationId, question, conversation_history: chatHistory.slice(0, -1) };
+      const body = { question, conversation_history: chatHistory.slice(0, -1) };
+      if (cfg.crossBeach) {
+        // Not anchored to a single beach — Scout answers across multiple
+        // beaches instead of whichever card happens to rank #1.
+        body.cross_beach = true;
+        // When the page can tell us which beaches are actually on screen
+        // (e.g. find.html's current search results), scope Scout to that
+        // set so it never surfaces beaches outside the search.
+        const locationIds = cfg.getLocationIds ? cfg.getLocationIds() : null;
+        if (locationIds && locationIds.length) body.location_ids = locationIds;
+      } else {
+        body.location_id = cfg.getLocationId ? cfg.getLocationId() : null;
+      }
       if (localDate) body.local_date = localDate;
       const res = await fetch(`${SUPABASE_URL}/functions/v1/beach-chat`, {
         method: 'POST',

@@ -714,17 +714,11 @@
   .dog-park-card-additive {
     border-left: 3px solid #15803d;
     background: #f0fdf4;
-    cursor: pointer;
-    transition: background 0.15s;
   }
-  .dog-park-card-additive:hover { background: #ecfccb; }
   .dog-park-card-reframed {
     border-left: 4px solid #b45309;
     background: #fffbeb;
-    cursor: pointer;
-    transition: background 0.15s;
   }
-  .dog-park-card-reframed:hover { background: #fef3c7; }
   .dp-card-heading {
     font-size: 14px; font-weight: 700; color: var(--text);
     margin-bottom: 2px;
@@ -738,6 +732,14 @@
   .dp-card-llm:empty { display: none; }
   .dp-card-body { margin-top: 8px; }
   .dp-name { font-weight: 600; font-size: 14px; color: var(--text); }
+  a.dp-name { display: inline-block; text-decoration: none; color: #15803d; }
+  a.dp-name::after { content: ' →'; }
+  a.dp-name:hover { text-decoration: underline; }
+  .dp-directions {
+    display: inline-block; margin-top: 6px;
+    font-size: 12px; font-weight: 600; color: #15803d; text-decoration: none;
+  }
+  .dp-directions:hover { text-decoration: underline; }
   .dp-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
   .dp-verified-badge {
     display: inline-block;
@@ -4968,15 +4970,23 @@ function buildDogParkCard(dp, trigger, beach) {
     : null;
 
   const metaBits = [leash, hours, distLabel].filter(Boolean).join(' · ');
-  const clickAttr = mapsUrl ? ` onclick="window.open('${mapsUrl}','_blank','noopener')"` : '';
+  // Park name → our dog-park page; directions are a separate explicit link
+  // (the whole card used to be one invisible Apple Maps click target).
+  const nameHtml = dp.dp_fid != null
+    ? `<a class="dp-name" href="dog-park.html?fid=${encodeURIComponent(dp.dp_fid)}">${escHtml(dp.dp_name)}</a>`
+    : `<div class="dp-name">${escHtml(dp.dp_name)}</div>`;
+  const directionsHtml = mapsUrl
+    ? `<a class="dp-directions" href="${escHtml(mapsUrl)}" target="_blank" rel="noopener">📍 Directions</a>`
+    : '';
 
-  return `<section class="card ${cardClass}"${clickAttr}>
+  return `<section class="card ${cardClass}">
     <div class="dp-card-heading">${heading}</div>
     ${reasonLine}
     <div class="dp-card-llm" id="dp-card-llm">…</div>
     <div class="dp-card-body">
-      <div class="dp-name">${escHtml(dp.dp_name)}</div>
+      ${nameHtml}
       <div class="dp-meta">${escHtml(metaBits)}</div>
+      ${directionsHtml}
       ${operatorLine}
     </div>
   </section>`;

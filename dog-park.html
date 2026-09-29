@@ -1267,12 +1267,6 @@ function buildAmenitiesSection(park) {
   const surface = pol.surface_overlay ?? park.surface;
   if (surface) tiles.push(amenityTile('🌱', surface, ''));
 
-  // Area
-  if (park.area_m2) {
-    const acres = (park.area_m2 * 0.000247).toFixed(1);
-    tiles.push(amenityTile('📐', `${acres} acres`, ''));
-  }
-
   return `<section class="card amenities-card"><h2>Amenities</h2>
     <div class="amenity-grid">${tiles.join('')}</div></section>`;
 }

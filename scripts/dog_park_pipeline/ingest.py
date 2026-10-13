@@ -19,7 +19,11 @@ def ingest_discovery_queue(state: str, apply: bool = True) -> dict:
     conn = connect(); conn.set_client_encoding("UTF8")
     try:
         cur = conn.cursor()
-        cur.execute("SELECT count(*) FROM public.dog_park_discovery_queue WHERE status='pending'")
+        cur.execute("""
+            SELECT count(*) FROM public.dog_park_discovery_queue q
+              JOIN public.operators op ON op.id = q.operator_id
+             WHERE q.status = 'pending' AND op.state_code = %s
+        """, (state,))
         n_pending_before = cur.fetchone()[0]
         cur.execute("SELECT count(*) FROM public.dog_parks_gold WHERE state=%s AND is_active AND is_scoreable", (state,))
         n_gold_before = cur.fetchone()[0]
@@ -33,7 +37,7 @@ def ingest_discovery_queue(state: str, apply: bool = True) -> dict:
     sys.path.insert(0, _repo)
     importlib.invalidate_caches()
     from scripts.ingest_dog_park_discovery_queue import main as ingest_main
-    args = ["--apply"] if apply else []
+    args = ["--state", state] + (["--apply"] if apply else [])
     exit_code, stdout = call_main(ingest_main, "ingest_dog_park_discovery_queue.py", args)
 
     conn = connect(); conn.set_client_encoding("UTF8")

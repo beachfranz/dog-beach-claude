@@ -42,18 +42,24 @@ from scripts.common.db import connect
 from scripts.harvest.geocode import google_places_searchtext, derive_city_state
 
 
-def fetch_queue(cur, op_id: int | None, limit: int | None) -> list[dict]:
-    where = ["status = 'pending'"]
+def fetch_queue(cur, op_id: int | None, limit: int | None,
+                state: str | None = None) -> list[dict]:
+    where = ["q.status = 'pending'"]
     params: list = []
     if op_id is not None:
-        where.append("operator_id = %s")
+        where.append("q.operator_id = %s")
         params.append(op_id)
+    if state is not None:
+        where.append("op.state_code = %s")
+        params.append(state)
     sql = f"""
-      SELECT id, operator_id, operator_name, catalog_park_name,
-             catalog_park_url, blurb, catalog_source_url, best_similarity
-        FROM public.dog_park_discovery_queue
+      SELECT q.id, q.operator_id, q.operator_name, q.catalog_park_name,
+             q.catalog_park_url, q.blurb, q.catalog_source_url, q.best_similarity,
+             op.state_code AS operator_state
+        FROM public.dog_park_discovery_queue q
+        LEFT JOIN public.operators op ON op.id = q.operator_id
        WHERE {' AND '.join(where)}
-       ORDER BY operator_id, id
+       ORDER BY q.operator_id, q.id
     """
     if limit:
         sql += f" LIMIT {int(limit)}"
@@ -83,11 +89,21 @@ def extract_places_fields(place: dict) -> dict:
     }
 
 
-def insert_dog_park(cur, queue_row: dict, fields: dict) -> int | None:
-    """INSERT into dog_parks_gold. Triggers fire for weather_grid + dog_park_dog_policy."""
+def insert_dog_park(cur, queue_row: dict, fields: dict, op_state: str) -> int | None:
+    """INSERT into dog_parks_gold. Triggers fire for weather_grid + dog_park_dog_policy.
+
+    state comes from point-in-polygon against public.states (same as the
+    20260519 OSM seed), falling back to the operator's state. Google's
+    address_state is a long name ("Maryland"), so slicing it is wrong."""
     name = queue_row['catalog_park_name']
     source_id = f"discovery_queue_{queue_row['id']}"
-    state = (fields.get('address_state') or 'CA')[:2].upper() if fields.get('address_state') else 'CA'
+    cur.execute("""
+        SELECT state_code FROM public.states
+         WHERE ST_Contains(geom, ST_SetSRID(ST_MakePoint(%s, %s), 4326))
+         LIMIT 1
+    """, (fields['lng'], fields['lat']))
+    r = cur.fetchone()
+    state = r['state_code'] if r else op_state
 
     cur.execute("""
         INSERT INTO public.dog_parks_gold
@@ -142,20 +158,24 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--op-id", type=int, default=None,
                     help="Only process queue rows for this operator_id")
+    ap.add_argument("--state", type=str, default=None,
+                    help="Only process queue rows whose operator is in this state")
     args = ap.parse_args()
 
     conn = connect()
     conn.set_client_encoding("UTF8")
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    rows = fetch_queue(cur, args.op_id, args.limit)
+    rows = fetch_queue(cur, args.op_id, args.limit, args.state)
     print(f"discovery queue → ingest: {len(rows)} pending rows; apply={args.apply}")
 
     summary = {"ingested": 0, "no_match": 0, "no_lat_lng": 0,
                "duplicate": 0, "error": 0}
 
     for q in rows:
-        op_city, op_state = derive_city_state(q['operator_name'] or '')
+        op_city, _ = derive_city_state(q['operator_name'] or '')
+        # derive_city_state() always answers 'CA'; the operator row knows better.
+        op_state = q['operator_state'] or args.state or 'CA'
         query_parts = [q['catalog_park_name']]
         if op_city: query_parts.append(op_city)
         query_parts.append(op_state)
@@ -190,7 +210,8 @@ def main() -> int:
                 ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography,
                 geom::geography)) / 1000.0 AS km
               FROM public.dog_parks_gold
-             WHERE inferred_operator_id = %s AND is_active AND geom IS NOT NULL
+             WHERE COALESCE(canonical_operator_id, inferred_operator_id) = %s
+               AND is_active AND geom IS NOT NULL
         """, (fields['lng'], fields['lat'], q['operator_id']))
         nearest = cur.fetchone()
         nearest_km = nearest['km'] if nearest and nearest['km'] is not None else None
@@ -227,7 +248,7 @@ def main() -> int:
 
         if args.apply:
             try:
-                new_fid = insert_dog_park(cur, q, fields)
+                new_fid = insert_dog_park(cur, q, fields, op_state)
                 mark_queue_row(cur, q['id'], 'ingested', new_fid,
                                f'new_park_fid={new_fid}')
                 conn.commit()

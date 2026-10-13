@@ -21,7 +21,16 @@ Decision tree (in priority order):
 
 Output:
   tmp/dog_park_attribution_<ts>.jsonl  (per-park classification)
-  tmp/dog_park_attribution_<ts>.md     (summary report)
+  tmp/dog_park_attribution_<ts>.md     (summary report + audit section)
+
+Role since 2026-10-13: CROSS-CHECK, not the source of truth. The pipeline
+(walker + ingester) keys on COALESCE(canonical_operator_id,
+inferred_operator_id); canonical_operator_id is the polygon cascade in
+_resolve_dog_park_operator. This script's tag-based answer is resolved to
+an operators.id with a normalized + fuzzy (pg_trgm) match scoped to the
+park's state (it used to need an exact canonical_name match, which left
+~83% of parks unresolved), and the report lists every park where the tag
+answer and the polygon answer disagree — those go to human review.
 
 Per Franz "audit the tags jsonb + build pass A" 2026-05-18.
 """
@@ -186,8 +195,67 @@ def _build(park, classification, attribution, confidence, reason, **extras):
         "inferred_operator_name": attribution,
         "confidence": confidence,
         "reason": reason,
+        "canonical_operator_id": park.get("canonical_operator_id"),
         **extras,
     }
+
+
+# Suffixes the decision tree (and raw OSM operator tags) add that canonical
+# operator names don't carry: "City of Portland Parks & Recreation" →
+# "City of Portland"; "Portland Parks & Recreation" → "Portland".
+_OP_SUFFIX_RX = re.compile(
+    r"\s+(parks?\s*(&|and)\s*rec(reation)?|parks?\s*(&|and)\s*open\s*space|"
+    r"parks?\s*department|parks?\s*dept\.?|parks?)\s*$", re.I)
+_FUZZY_MIN_SIMILARITY = 0.7
+
+
+def _operator_name_candidates(name: str) -> list[str]:
+    base = _OP_SUFFIX_RX.sub("", name.strip()).strip()
+    cands = [name.strip(), base]
+    low = base.lower()
+    if not (low.startswith("city of") or low.startswith("town of")
+            or "county" in low or "district" in low):
+        cands += [f"City of {base}", f"Town of {base}"]
+    seen, out = set(), []
+    for c in cands:
+        if c and c.lower() not in seen:
+            seen.add(c.lower()); out.append(c)
+    return out
+
+
+def resolve_operator_ids(cur, classifications) -> None:
+    """Set c['inferred_operator_id'] for each classification: exact
+    (case-insensitive) match on any normalized candidate name first, then
+    the best pg_trgm match >= _FUZZY_MIN_SIMILARITY. Scoped to the park's
+    state, canonical + active operators only."""
+    cache: dict[tuple, int | None] = {}
+    for c in classifications:
+        name, state = c.get("inferred_operator_name"), c.get("state")
+        c["inferred_operator_id"] = None
+        if not name or not state:
+            continue
+        key = (name.lower(), state)
+        if key not in cache:
+            cands = [x.lower() for x in _operator_name_candidates(name)]
+            cur.execute("""
+                SELECT id FROM public.operators
+                 WHERE is_canonical AND is_active AND state_code = %s
+                   AND lower(canonical_name) = ANY(%s)
+                 ORDER BY id LIMIT 1
+            """, (state, cands))
+            r = cur.fetchone()
+            if r is None:
+                cur.execute("""
+                    SELECT id, max(similarity(lower(canonical_name), cand)) AS sim
+                      FROM public.operators, unnest(%s::text[]) AS cand
+                     WHERE is_canonical AND is_active AND state_code = %s
+                     GROUP BY id
+                    HAVING max(similarity(lower(canonical_name), cand)) >= %s
+                     ORDER BY sim DESC, id LIMIT 1
+                """, (cands, state, _FUZZY_MIN_SIMILARITY))
+                r = cur.fetchone()
+            cache[key] = r[0] if r else None
+        c["inferred_operator_id"] = cache[key]
 
 
 def main():
@@ -209,6 +277,9 @@ def main():
         with conn, conn.cursor() as cur:
             # Pull every dog park + spatial county + spatial city polygon.
             # Reads from dog_parks_gold (curated) so we can write back via fid.
+            # LATERAL + ORDER BY so a park near two cities / on a county
+            # line gets a deterministic answer (was: first row of a
+            # multi-match join, arbitrary).
             sql = """
                 SELECT
                     g.fid                            AS fid,
@@ -218,16 +289,25 @@ def main():
                     COALESCE(g.tags->>'operator:type', g.tags->>'operator_type') AS operator_type,
                     g.tags,
                     g.state                          AS state_code,
+                    g.canonical_operator_id,
                     c.name                           AS county_name,
                     j.name                           AS jurisdiction_name
                 FROM public.dog_parks_gold g
-                LEFT JOIN public.counties c    ON ST_Intersects(g.geom, c.geom)
+                LEFT JOIN LATERAL (
+                    SELECT c.name FROM public.counties c
+                     WHERE ST_Contains(c.geom, ST_PointOnSurface(g.geom))
+                     LIMIT 1
+                ) c ON true
                 -- 200m DWithin for jurisdictions (TIGER places) per
                 -- [[pip-for-places-uses-200m]] — coastal-city polygons
                 -- stop at high-water line; waterfront parks just outside.
-                LEFT JOIN public.jurisdictions j
-                  ON j.place_type LIKE 'C%%'
-                  AND ST_DWithin(g.geom, j.geom, 0.0018)
+                LEFT JOIN LATERAL (
+                    SELECT j.name FROM public.jurisdictions j
+                     WHERE j.place_type LIKE 'C%%'
+                       AND ST_DWithin(g.geom, j.geom, 0.0018)
+                     ORDER BY ST_Distance(g.geom, j.geom), ST_Area(j.geom)
+                     LIMIT 1
+                ) j ON true
                 WHERE g.is_active = true
             """
             params: tuple = ()
@@ -251,6 +331,27 @@ def main():
     print(f"Total dog parks ({scope_label}): {len(parks)}")
 
     classifications = [classify_park(p) for p in parks]
+
+    # Resolve tag-based names → operators.id, then audit against the
+    # polygon cascade (canonical_operator_id).
+    conn = _connect_pg()
+    try:
+        with conn, conn.cursor() as cur:
+            resolve_operator_ids(cur, classifications)
+            op_ids = sorted({x for c in classifications
+                             for x in (c.get("inferred_operator_id"),
+                                       c.get("canonical_operator_id")) if x})
+            cur.execute("SELECT id, canonical_name FROM public.operators WHERE id = ANY(%s)",
+                        (op_ids,))
+            op_names = dict(cur.fetchall())
+    finally:
+        conn.close()
+    disagreements = [c for c in classifications
+                     if c.get("inferred_operator_id") and c.get("canonical_operator_id")
+                     and c["inferred_operator_id"] != c["canonical_operator_id"]]
+    n_resolved = sum(1 for c in classifications if c.get("inferred_operator_id"))
+    print(f"Tag attribution resolved to operators.id: {n_resolved}/{len(classifications)}")
+    print(f"Disagree with polygon operator (canonical_operator_id): {len(disagreements)}")
 
     # Tally
     tally: dict[str, int] = {}
@@ -330,6 +431,19 @@ def main():
         if len(nm) > 50:
             md.append(f"\n*(... {len(nm)-50} more)*")
 
+    md.append(f"\n## Audit: tag operator vs polygon operator ({len(disagreements)} disagree)")
+    md.append("")
+    md.append(f"Tag answer resolved to an operator for {n_resolved}/{len(classifications)} parks. "
+              "Rows below have both answers and they differ — review these "
+              "(often a county or district park inside a city).")
+    md.append("")
+    md.append("| fid | name | state | tag operator | polygon operator |")
+    md.append("|---:|---|---|---|---|")
+    for c in disagreements:
+        md.append(f"| {c['fid']} | {(c.get('name') or '')[:40]} | {c['state']} | "
+                  f"{op_names.get(c['inferred_operator_id'], c['inferred_operator_id'])} | "
+                  f"{op_names.get(c['canonical_operator_id'], c['canonical_operator_id'])} |")
+
     md_path = tmp / f"dog_park_attribution_{ts}.md"
     md_path.write_text("\n".join(md), encoding="utf-8")
     print(f"Markdown: {md_path}")
@@ -344,33 +458,21 @@ def _write_to_gold(classifications):
     """UPDATE dog_parks_gold.inferred_operator_id + attribution_method +
     attribution_confidence for every classified park.
 
-    Operator name → id resolution is best-effort against public.operator
-    (singular). Most inferred names ("City of X Parks & Recreation") won't
-    match yet — that's fine; inferred_operator_id stays NULL but
-    attribution_method + attribution_confidence still get recorded.
+    Uses c['inferred_operator_id'] from resolve_operator_ids() (normalized
+    + fuzzy, state-scoped). Unresolved names leave inferred_operator_id
+    NULL; attribution_method + attribution_confidence still get recorded.
     """
     if not classifications:
         return
     conn = _connect_pg()
     try:
         with conn, conn.cursor() as cur:
-            # Build lowercase name → id lookup for canonical operators.
-            # Post Phase 5a: public.operator (singular) was dropped; the unified
-            # table is public.operators with is_canonical=true marking the
-            # canonical subset. Column name → canonical_name.
-            cur.execute(
-                "SELECT id, lower(canonical_name) FROM public.operators "
-                "WHERE is_canonical = true"
-            )
-            op_lookup = {name: oid for oid, name in cur.fetchall()}
-
             updates = 0
             with_op_id = 0
             for c in classifications:
                 if c.get("fid") is None:
                     continue
-                inferred_name = c.get("inferred_operator_name")
-                op_id = op_lookup.get((inferred_name or "").lower()) if inferred_name else None
+                op_id = c.get("inferred_operator_id")
                 if op_id is not None:
                     with_op_id += 1
                 cur.execute(

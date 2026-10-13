@@ -154,7 +154,7 @@ def dp_generic_display_names(context: AssetExecutionContext) -> MaterializeResul
     partitions_def=DOG_PARK_STATES,
     group_name="dog_park_coverage",
     deps=[dp_generic_display_names],
-    description="Seed city operators from state_operator_seeds.json. PIP-backfills inferred_operator_id. Walker needs ≥3 ops with ≥3 attributed parks each.",
+    description="Read-only operator-coverage check (parks with canonical / inferred / no operator; registry cities lacking an operator row). No writes since 2026-10-13 — walker keys on canonical_operator_id.",
 )
 def dp_seed_operators(context: AssetExecutionContext) -> MaterializeResult:
     state = context.partition_key

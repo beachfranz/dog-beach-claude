@@ -13,7 +13,7 @@ The pipeline encodes lessons from CA's wandering 3-hour discovery into a strict-
 
 1. **State has dog parks in `dog_parks_gold`** — usually from OSM bulk-load. Check: `SELECT count(*) FROM dog_parks_gold WHERE state='<STATE>' AND is_active`. Need ≥20 to be worth running.
 2. **City operators seeded for big cities** — most states already have these from prior runs. Check: `SELECT count(*) FROM operator WHERE state_code='<STATE>'`. Need ≥3-5 city operators for walker to do anything useful.
-3. **`scripts/dog_park_pipeline/state_operator_seeds.json` has the state's city list** for `seed_operators` step (only matters if seeding new states).
+3. **City/county operator rows exist for the state** (state launch operator seeding). The walker keys on `COALESCE(canonical_operator_id, inferred_operator_id)`; `seed_operators` reports which `state_operator_seeds.json` cities lack an operator row.
 4. **Playwright installed** — `.venv-pipeline/Scripts/playwright install chromium`. Preflight checks this.
 
 If 1+2 are sparse for a new state (e.g., FL with no operators seeded), the pipeline still runs but `walk_catalogs` and `retry_no_match` are no-ops — expected coverage ceiling drops to ~60-70% on the extractor + no-website routes alone.
@@ -26,7 +26,7 @@ If 1+2 are sparse for a new state (e.g., FL with no operators seeded), the pipel
 | 2 | `pip_address_city` | `UPDATE address_city` via ST_Contains on jurisdictions | Steps 4/7/8 need address_city for web_search queries |
 | 3 | `reclassify_junk` | Flip tiny/HOA/commercial parks inactive | Don't waste LLM on parks we'll deactivate |
 | 4 | `generic_display_names` | "Lake Elsinore Small Dog Park" not "Small Dog Park" | LLM web_search much better with city prefix |
-| 5 | `seed_operators` (Dagster only) | Auto-create city operators from state_operator_seeds.json | Walker needs operator pool |
+| 5 | `seed_operators` (Dagster only) | Read-only check: parks with/without an operator, registry cities lacking an operator row (no writes since 2026-10-13) | Walker keys on `canonical_operator_id`; missing city operator rows mean the TIGER-city tier can't attribute |
 | 6 | `walk_catalogs` | Top-N city operators → web_search → discovery queue | Discovers NEW parks not in OSM |
 | 7 | `ingest_queue` | Geocode pending + 150m dup check → INSERT new gold | Creates gold rows with website tag |
 | 8 | `run_extractor` | Extract amenities for ALL default-source parks | Routes: OSM-website / URL-slug / web_search |

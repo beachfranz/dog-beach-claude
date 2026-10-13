@@ -40,13 +40,13 @@ RETRY_PROMPT_USER = """No authoritative source was found in the prior search for
 
 PARK: {name}
 CITY: {city}
-STATE: California
+STATE: {state}
 
 Suggested query angles (use at least 2):
   1. "{name}" {city} dog park rules hours
   2. {city} parks recreation "{name}" off-leash
   3. site:.gov "{name}" {city} dog
-  4. "{name}" {city} CA fence water hours
+  4. "{name}" {city} {state} fence water hours
 
 If after multiple searches you still can't find an AUTHORITATIVE source (operator's .gov / .org site, NOT BringFido/Yelp/aggregators), return name_match=false. If the park name is too generic ("Dog Park", "Small Dog Park", "Green Belt"), name_match=false is the right call.
 
@@ -70,8 +70,8 @@ Return JSON exactly in this flat shape:
 }}"""
 
 
-def call_retry_llm(name: str, city: str | None) -> dict:
-    user = RETRY_PROMPT_USER.format(name=name, city=city or "California")
+def call_retry_llm(name: str, city: str | None, state: str) -> dict:
+    user = RETRY_PROMPT_USER.format(name=name, city=city or state, state=state)
     body = {
         "model": SONNET,
         "max_tokens": 1500,
@@ -111,6 +111,7 @@ def call_retry_llm(name: str, city: str | None) -> dict:
 
 def process(park: dict, apply: bool) -> str:
     fid, name, city = park['fid'], park['name'], park.get('address_city')
+    state = park['state']
 
     def say(msg: str) -> None:
         with PRINT_LOCK:
@@ -118,7 +119,7 @@ def process(park: dict, apply: bool) -> str:
 
     say(f"\n[{fid}] retry: {name} ({city or '?'})")
     try:
-        extracted = call_retry_llm(name, city)
+        extracted = call_retry_llm(name, city, state)
     except Exception as e:
         say(f"    [!] [{fid}] LLM error: {e}")
         return "llm_error"
@@ -184,7 +185,8 @@ def main():
     cur.execute("""
         SELECT DISTINCT dpg.fid,
                COALESCE(dpg.display_name_override, dpg.name) AS name,
-               dpg.address_city
+               dpg.address_city,
+               dpg.state
           FROM public.dog_park_enrichment_provenance dpep
           JOIN public.dog_parks_gold dpg ON dpg.fid = dpep.dog_park_fid
           JOIN public.dog_park_dog_policy ddp ON ddp.dog_park_fid = dpg.fid

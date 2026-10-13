@@ -69,16 +69,22 @@ CA_OPERATOR_TARGETS = [
 ]  # kept for backward compat / known-good set
 
 
+# Effective operator for a dog park: the polygon cascade answer
+# (_resolve_dog_park_operator, trigger-maintained) first, the OSM-tag
+# attribution as fallback. inferred_operator_id alone covers ~17% of parks.
+EFFECTIVE_OPERATOR_SQL = "COALESCE(dpg.canonical_operator_id, dpg.inferred_operator_id)"
+
+
 def auto_operator_targets(state: str, min_parks: int = 3) -> list[int]:
     """Query top operators by park count for a state.
-    Returns operator (singular) IDs to walk."""
+    Returns operators.id values to walk."""
     conn = connect(); conn.set_client_encoding("UTF8")
     try:
         cur = conn.cursor()
-        cur.execute("""
+        cur.execute(f"""
             SELECT op.id
               FROM public.dog_parks_gold dpg
-              JOIN public.operators op ON op.id = dpg.inferred_operator_id
+              JOIN public.operators op ON op.id = {EFFECTIVE_OPERATOR_SQL}
              WHERE dpg.state = %s AND dpg.is_active
                AND op.is_canonical = true
                AND op.level IN ('city','county')
@@ -397,7 +403,8 @@ def spatial_match(catalog_name: str, operator_city: str | None,
     query_parts = [catalog_name]
     if operator_city:
         query_parts.append(operator_city)
-    query_parts.append(operator_state or 'CA')
+    if operator_state:
+        query_parts.append(operator_state)
     query = ", ".join(p for p in query_parts if p)
 
     try:
@@ -438,7 +445,8 @@ def spatial_match(catalog_name: str, operator_city: str | None,
 # ── Per-park extraction (reuses extract_dog_park_amenities substrate) ───
 
 def extract_one_park(park_fid: int, park_name: str, city: str | None,
-                     per_park_url: str, apply: bool) -> str:
+                     per_park_url: str, apply: bool,
+                     state: str | None = None) -> str:
     """Adapted from extract_dog_park_amenities.process_park — different URL source."""
     def say(msg: str) -> None:
         with PRINT_LOCK:
@@ -492,7 +500,7 @@ def extract_one_park(park_fid: int, park_name: str, city: str | None,
         return "no_match"
 
     try:
-        extracted = call_llm_amenities(text, park_name, city)
+        extracted = call_llm_amenities(text, park_name, city, state=state)
     except Exception as e:
         say(f"      [!] [{park_fid}] LLM error: {e}")
         return "llm_error"
@@ -617,8 +625,8 @@ def walk_one_operator(op_id: int, op_name: str, catalog_url: str | None,
             try:
                 cur2 = conn2.cursor()
                 cur2.execute(
-                    "SELECT address_city FROM public.dog_parks_gold "
-                    " WHERE inferred_operator_id=%s AND address_city IS NOT NULL "
+                    "SELECT address_city FROM public.dog_parks_gold dpg "
+                    f" WHERE {EFFECTIVE_OPERATOR_SQL}=%s AND address_city IS NOT NULL "
                     " LIMIT 1", (op_id,))
                 r = cur2.fetchone()
                 if r:
@@ -640,10 +648,10 @@ def walk_one_operator(op_id: int, op_name: str, catalog_url: str | None,
     conn = connect(); conn.set_client_encoding("UTF8")
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("""
+        cur.execute(f"""
             SELECT fid, name, address_city
-              FROM public.dog_parks_gold
-             WHERE inferred_operator_id = %s AND is_active
+              FROM public.dog_parks_gold dpg
+             WHERE {EFFECTIVE_OPERATOR_SQL} = %s AND is_active
         """, (op_id,))
         candidates = list(cur.fetchall())
     finally:
@@ -672,7 +680,7 @@ def walk_one_operator(op_id: int, op_name: str, catalog_url: str | None,
         if (gold is None and 0.40 <= sim < 0.60) or (gold is not None and sim < 0.80):
             # Skip if no city context (geocoding will be noisy)
             op_city = candidates[0].get('address_city') if candidates else None
-            spat_gold, dist_m, status = spatial_match(cat_name, op_city, 'CA', candidates)
+            spat_gold, dist_m, status = spatial_match(cat_name, op_city, op_state, candidates)
             used_spatial = True
             if spat_gold and dist_m < 150:
                 # Strong spatial confirm — promote/override fuzzy decision
@@ -759,7 +767,8 @@ def walk_one_operator(op_id: int, op_name: str, catalog_url: str | None,
     say(f"  extracting {len(matches)} matched parks (workers={workers})...")
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futures = [ex.submit(extract_one_park, gold['fid'], gold['name'],
-                             gold.get('address_city'), cat_url, apply)
+                             gold.get('address_city'), cat_url, apply,
+                             state=op_state)
                    for entry, gold, cat_url in matches]
         for fut in as_completed(futures):
             try:

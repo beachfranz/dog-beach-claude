@@ -524,7 +524,7 @@ Seattle pattern: `seattle.gov/parks/recreation/dog-off-leash-areas` is one share
 
 | Table | Role |
 |---|---|
-| `dog_parks_gold` | Identity (1 row per park). `inferred_operator_id` drives walker. |
+| `dog_parks_gold` | Identity (1 row per park). `COALESCE(canonical_operator_id, inferred_operator_id)` drives walker + ingester; `canonical_operator_id` is the polygon cascade (`_resolve_dog_park_operator`). |
 | `dog_park_dog_policy` | Curated overlay (consumer reads). `source='operator_posted_v2'` marks extracted. |
 | `dog_park_enrichment_provenance` | Per-source claims with verbatim cite quotes. Promoted via `promote_canonical_dog_park_policy()`. |
 | `dog_park_discovery_queue` | Walker-found parks not yet in gold; ingest target. Statuses: pending / ingested / duplicate / needs_review / rejected. |

@@ -107,7 +107,7 @@ PROMPT_USER_TEMPLATE = """SOURCE URL: {source_url}
 SOURCE PAGE CONTENT:
 {content}
 
-PARK: {name} ({city}, CA)
+PARK: {name} ({place})
 
 Extract the following 17 fields about THIS specific dog park. Return null if not stated. For booleans, only true/false when the page explicitly says so.
 
@@ -158,14 +158,20 @@ Return JSON exactly in this flat shape (no nested blocks):
 }}"""
 
 
+def park_place(city: str | None, state: str | None) -> str:
+    """'Portland, OR' / 'OR' / 'the US' — location hint for prompts."""
+    return ", ".join(p for p in (city, state) if p) or "the US"
+
+
 def call_llm_amenities(content: str, name: str, city: str | None,
                        source_url: str = "",
-                       enable_web_search: bool = False) -> dict:
+                       enable_web_search: bool = False,
+                       state: str | None = None) -> dict:
     user = PROMPT_USER_TEMPLATE.format(
         source_url=source_url,
         content=content[:30000],
         name=name,
-        city=city or "California",
+        place=park_place(city, state),
     )
     body = {
         "model": SONNET,
@@ -368,7 +374,8 @@ PRINT_LOCK = threading.Lock()
 
 
 def extract_via_web_search(park_fid: int, name: str, city: str | None,
-                           original_url: str, apply: bool) -> str:
+                           original_url: str, apply: bool,
+                           state: str | None = None) -> str:
     """Web_search route. Two callsites:
       - SPA listings where per-park URLs don't exist (sfrecpark.org etc.)
       - Parks with no OSM website tag — use park name + city for discovery
@@ -378,11 +385,12 @@ def extract_via_web_search(park_fid: int, name: str, city: str | None,
         with PRINT_LOCK:
             print(msg, flush=True)
 
+    place = park_place(city, state)
     if original_url:
         instruction = (
             f"The page at {original_url} is a generic facility-search SPA — no "
             f"per-park data. Use web_search to find AUTHORITATIVE info about "
-            f"'{name}' dog park/play area in {city or 'California'}. "
+            f"'{name}' dog park/play area in {place}. "
             f"Prefer the operator's own .gov / .org pages over aggregators. "
             f"Extract the 17 fields per the schema, with a verbatim cite quote."
         )
@@ -391,7 +399,7 @@ def extract_via_web_search(park_fid: int, name: str, city: str | None,
         instruction = (
             f"No source URL on file for this park. Use web_search to find "
             f"AUTHORITATIVE info about '{name}' dog park in "
-            f"{city or 'California'}. Prefer the operator's official .gov "
+            f"{place}. Prefer the operator's official .gov "
             f"/ .org pages (city parks-rec department, county parks site) "
             f"over aggregators (BringFido, Yelp, BarkPark). Extract the 13 "
             f"fields per the schema with a verbatim cite quote from the "
@@ -403,6 +411,7 @@ def extract_via_web_search(park_fid: int, name: str, city: str | None,
             instruction, name, city,
             source_url=original_url,
             enable_web_search=True,
+            state=state,
         )
     except Exception as e:
         say(f"      [!] [{park_fid}] web_search LLM error: {e}")
@@ -466,6 +475,7 @@ def process_park(p: dict, apply: bool) -> str:
     Opens + closes its own DB connection (psycopg2 conns are not thread-safe)."""
     fid, name = p['fid'], p['name']
     city = p.get('address_city')
+    state = p.get('state')
     url  = p.get('osm_website')
 
     def say(msg: str) -> None:
@@ -480,13 +490,13 @@ def process_park(p: dict, apply: bool) -> str:
             say(f"    [-] [{fid}] no website + no city — cannot route")
             return "no_url_no_city"
         say(f"    [route] {fid} → web_search (no OSM website)")
-        return extract_via_web_search(fid, name, city, "", apply)
+        return extract_via_web_search(fid, name, city, "", apply, state=state)
 
     # Host-specific route: for SPA listings with no per-park URLs (e.g.
     # sfrecpark.org), skip the fetch and go straight to web_search.
     if host_lacks_per_park_pages(url):
         say(f"    [route] {fid} → web_search (host lacks per-park URLs)")
-        return extract_via_web_search(fid, name, city, url, apply)
+        return extract_via_web_search(fid, name, city, url, apply, state=state)
 
     # Per-host shared-page route (Seattle OLA + other registry entries)
     section_handler = find_section_extractor(url)
@@ -495,7 +505,7 @@ def process_park(p: dict, apply: bool) -> str:
         if section_text and len(section_text) > 200:
             say(f"    [route] {fid} → host section ({section_handler.__name__}, {len(section_text)} chars)")
             try:
-                extracted = call_llm_amenities(section_text, name, city, source_url=url)
+                extracted = call_llm_amenities(section_text, name, city, source_url=url, state=state)
             except Exception as e:
                 say(f"    [!] [{fid}] LLM error: {e}")
                 return "llm_error"
@@ -528,7 +538,7 @@ def process_park(p: dict, apply: bool) -> str:
             return "extracted" if claimed else "empty"
         else:
             say(f"    [-] [{fid}] host section not found → fall through to web_search")
-            return extract_via_web_search(fid, name, city, url, apply)
+            return extract_via_web_search(fid, name, city, url, apply, state=state)
 
     if not is_url_deep_enough(url):
         say(f"    [-] [{fid}] not deep enough")
@@ -586,7 +596,7 @@ def process_park(p: dict, apply: bool) -> str:
         return "no_match"
 
     try:
-        extracted = call_llm_amenities(text, name, city, source_url=url)
+        extracted = call_llm_amenities(text, name, city, source_url=url, state=state)
     except Exception as e:
         say(f"    [!] [{fid}] LLM error: {e}")
         return "llm_error"
@@ -662,7 +672,7 @@ def main() -> int:
         # If --include-no-website, drop the website-required filter
         website_clause = "" if args.include_no_website else " AND dpg.website IS NOT NULL"
         cur.execute(f"""
-            SELECT dpg.fid, dpg.name, dpg.address_city, dpg.website AS osm_website
+            SELECT dpg.fid, dpg.name, dpg.address_city, dpg.state, dpg.website AS osm_website
               FROM public.dog_parks_gold dpg
              WHERE dpg.fid = ANY(%s){website_clause}
         """, (target_fids,))
@@ -679,7 +689,7 @@ def main() -> int:
                WHERE field_group = 'park_v1'
                ORDER BY dog_park_fid, updated_at DESC
             )
-            SELECT dpg.fid, dpg.name, dpg.address_city, dpg.website AS osm_website
+            SELECT dpg.fid, dpg.name, dpg.address_city, dpg.state, dpg.website AS osm_website
               FROM public.dog_parks_gold dpg
               JOIN latest_bep lb ON lb.dog_park_fid = dpg.fid
              WHERE dpg.is_active = true
@@ -698,7 +708,7 @@ def main() -> int:
             " website IS NOT NULL"
         )
         cur.execute(f"""
-            SELECT fid, name, address_city, website AS osm_website
+            SELECT fid, name, address_city, state, website AS osm_website
               FROM public.dog_parks_gold
              WHERE is_active = true
                AND {website_filter}
@@ -716,7 +726,7 @@ def main() -> int:
             " osm_website IS NOT NULL"
         )
         cur.execute(f"""
-            SELECT fid, name, address_city, osm_website
+            SELECT fid, name, address_city, state, osm_website
               FROM public.dog_parks_active_unsourced
              WHERE {website_filter} {state_filter}
              ORDER BY (osm_website IS NULL), fid

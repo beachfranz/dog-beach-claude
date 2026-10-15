@@ -1,6 +1,6 @@
 # Dog Beach Scout — CLAUDE.md
 
-Project reference for Claude Code. Authoritative guide to architecture, data model, scoring, frontend, edge functions, and orchestration. Last refreshed 2026-06-11 (post weather-grid + marine-grid + NWS-SRF + ADA arc; pre-Phase-W4). Memory files (`~/.claude/projects/C--Users-beach/memory/`) carry the moving parts — this file is the stable map.
+Project reference for Claude Code. Authoritative guide to architecture, data model, scoring, frontend, edge functions, and orchestration. Last refreshed 2026-10-15 for the CA/OR/WA rescope (2026-06-30); the architecture sections otherwise date from 2026-06-11 (post weather-grid + marine-grid + NWS-SRF + ADA arc; pre-Phase-W4). Memory files (`~/.claude/projects/C--Users-beach/memory/`) carry the moving parts — this file is the stable map.
 
 ---
 
@@ -8,10 +8,24 @@ Project reference for Claude Code. Authoritative guide to architecture, data mod
 
 **Dog Beach Scout** is a mobile-first web app that tells dog owners when and where to take their dogs to the beach. Two parallel pipelines:
 
-1. **Catalog ingest** — collects + classifies + dedups beach inventory across 14 states, enriches with operator / dog policy / CPAD / PAD-US / CCC overlays. ~3,962 scoring-tier-gated beaches in `beaches_gold` as of 2026-06-11 (CA + MA + MI + WA + HI + OR + MD + VA + OH + NH + ME + DE + RI + AL).
+1. **Catalog ingest** — collects + classifies + dedups beach inventory, enriches with operator / dog policy / CPAD / PAD-US / CCC overlays. **Active scope is CA, OR, WA only** since the 2026-06-30 rescope (see "Scope" below): 1,442 active beaches + 681 active dog parks. Inventory for 11 other states (MA, MI, HI, ME, NH, MD, VA, OH, DE, RI, AL) is still in the tables, deactivated, and can be switched back on.
 2. **Consumer scoring** — for the curated subset (`scoring_tier IN ('daily','hourly')`), runs daily 7-day forecasts (weather + tides + crowds + marine + NWS rip-current → composite score + best window) and hourly NOW updates.
 
 Hosted on GitHub Pages (`beachfranz.github.io`), backed by Supabase (Postgres + Edge Functions). Orchestrated by Dagster (`scripts/dagster/dog_beach`) with dbt models (`scripts/dbt/dog_beach`) for staging/marts.
+
+### Scope: CA / OR / WA (rescoped 2026-06-30, reversible)
+
+On 2026-06-30 the active project was narrowed from 14 states to CA, OR and WA (`20260630a_rescope_deactivate_non_ca_or_wa.sql`, commit `1b8bdb0`). The migration sets `is_active=false` on `beaches_gold` and `dog_parks_gold` rows outside the three states, including NULL-state rows (155 dog parks that are cross-border OSM junk from metro Vancouver, BC). Active set right after the cut: **1,442 beaches / 681 dog parks**.
+
+- **Nothing else changed.** `scoring_tier` (and `is_scoreable` on dog parks) were left intact, and no rows were deleted. All 21 scoring / grid / search consumers already gate on `is_active`, so the flip alone stopped scoring, grid loading and `find.html` visibility for the other states, with no consumer code change.
+- **Reversal is a single `is_active` flip per state**, keyed on explicit state codes so the NULL-state junk stays off:
+  ```sql
+  UPDATE public.beaches_gold   SET is_active = true WHERE state IN ('MA','MI', ...);
+  UPDATE public.dog_parks_gold SET is_active = true WHERE state IN ('MA','MI', ...);
+  ```
+  The daily/hourly tier distinction comes back with it. Grids re-warm on the next loader tick; the per-cell warmth gate keeps consumers from racing a cold grid.
+- **Deactivated states:** MA, MI, HI, ME, NH, MD, VA, OH, DE, RI, AL. Their pipeline code (state-directory handlers, state-park loaders, codify output, `state_operator_seeds.json` entries) is still in the repo. References to those states elsewhere in this file describe that dormant tooling, not live scope.
+- **Re-expansion or a new state** goes through `run_state_pipeline.py` / `new-state-onboard` as before.
 
 ---
 
@@ -40,11 +54,11 @@ The pipeline touches three populations, in increasing curation:
 
 | Layer | Table | Purpose | Approx count |
 |---|---|---|---|
-| Master inventory | `arena` | Per-state dedup'd beach catalog (POI + OSM + CCC + GNIS sources) | ~1,250 active CA + per-state pools |
-| Cross-state spine | `beaches_gold` | Promoted heads from arena. The post-path-3 spine. | ~4,000 active across 14 states |
-| Scoring set | `beaches_gold WHERE scoring_tier IN ('daily','hourly')` | Beaches the daily pipeline actually scores | ~3,962 as of 2026-06-11 |
+| Master inventory | `arena` | Per-state dedup'd beach catalog (POI + OSM + CCC + GNIS sources) | ~1,250 active CA + OR/WA pools (other states' pools retained, out of scope) |
+| Cross-state spine | `beaches_gold` | Promoted heads from arena. The post-path-3 spine. | 1,442 active across CA/OR/WA (2026-06-30); ~4,000 incl. deactivated states |
+| Scoring set | `beaches_gold WHERE scoring_tier IN ('daily','hourly')` | Beaches the daily pipeline actually scores (`is_active` also required) | ~1,260 (CA 718 + WA 380 + OR 162, per 2026-06-11 tiers); query for live count |
 
-`scoring_tier` (column on `beaches_gold`) is the fan-out gate — values `'hourly'`, `'daily'`, or `'none'`. Set by `run_state_pipeline.py` scoring-tier-assign phase based on `catchment_score` + state-pct cutoffs. The earlier `is_scoreable` boolean was retired 2026-05-13 (`20260513_retire_is_scoreable.sql`). For live per-state counts: `SELECT state, count(*) FROM beaches_gold WHERE is_active AND scoring_tier IN ('daily','hourly') GROUP BY state ORDER BY state`.
+`scoring_tier` (column on `beaches_gold`) is the fan-out gate, together with `is_active` (which carries the CA/OR/WA scope; see "Scope" above) — values `'hourly'`, `'daily'`, or `'none'`. Set by `run_state_pipeline.py` scoring-tier-assign phase based on `catchment_score` + state-pct cutoffs. The earlier `is_scoreable` boolean was retired 2026-05-13 (`20260513_retire_is_scoreable.sql`). For live per-state counts: `SELECT state, count(*) FROM beaches_gold WHERE is_active AND scoring_tier IN ('daily','hourly') GROUP BY state ORDER BY state`.
 
 `beaches_gold.location_id` is the human-readable slug (e.g. `coronado-dog-beach`); `beaches_gold.fid` is the canonical numeric ID inherited from arena. HTML pages prefer `?fid=<n>` and fall back to `?location_id=<slug>`.
 
@@ -366,7 +380,7 @@ Weather is a **reference layer** in the same shape as `jurisdictions` / `cpad_un
 
 ### Tables + helpers
 
-- **`weather_grid`** — materialized inventory of 0.025° (~3km) cells with ≥1 consumer entity. ~4,000 cells across CA + OR + WA + early eastern states. Auto-populated by triggers on entity tables.
+- **`weather_grid`** — materialized inventory of 0.025° (~3km) cells with ≥1 consumer entity. ~4,000 cells across CA + OR + WA + early eastern states (eastern cells go cold after the 2026-06-30 rescope; daily inventory rebuild drops cells with no active consumers). Auto-populated by triggers on entity tables.
 - **`weather_grid_hourly`** — 168-hour rolling forecast per cell + past 3 days observed. PK `(grid_lat, grid_lon, forecast_ts)`. `is_observed=true` for past hours (bacteria-grade), `false` for forecast.
 - **`weather_for_point(lat, lng, start_ts, end_ts)`** — primary consumer read entry point. Returns hourly weather rows for the cell containing the point within a time window.
 - **`weather_grid_bin_lat(lat)` / `weather_grid_bin_lon(lng)`** — bin-floor helpers used by the entity-table triggers + consumers.
@@ -755,9 +769,9 @@ Major post-path-3 shape-changers (2026-05-03 onward):
 
 ---
 
-## Current State (2026-06-11)
+## Current State (2026-10-15)
 
-- **14 states active** in `beaches_gold` scoring set (~3,962 fids, `scoring_tier IN ('daily','hourly')`): CA 718, MA 739, MI 596, WA 380, HI 371, ME 269, NH 237, OR 162, MD 138, VA 103, OH 101, DE 50, RI 43, AL 35. Per-state counts via `SELECT state, count(*) FROM beaches_gold WHERE is_active AND scoring_tier IN ('daily','hourly') GROUP BY state`.
+- **3 states active: CA, OR, WA** (rescoped 2026-06-30, reversible; see "Scope" near the top). 1,442 active beaches + 681 active dog parks at the cut. Scoring-tier counts as of 2026-06-11 for the three states: CA 718, WA 380, OR 162 (~1,260). The other 11 states (MA 739, MI 596, HI 371, ME 269, NH 237, MD 138, VA 103, OH 101, DE 50, RI 43, AL 35 at 2026-06-11) are deactivated, not deleted. Live per-state counts via `SELECT state, count(*) FROM beaches_gold WHERE is_active AND scoring_tier IN ('daily','hourly') GROUP BY state`.
 - **`beaches_gold` cross-state spine** has been the canonical surface since path-3b (2026-05-02); `scoring_tier` replaced `is_scoreable` on 2026-05-13; `operators` table unified on 2026-06-04 (Phase 5a).
 - **Weather + Marine + Tide reference layers** all live; consumer functions read from grids, not direct API fetches. Per-cell warmth gate everywhere. ~165× reduction in Open-Meteo call volume.
 - **NWS Surf Zone Forecast + rip-current advisories** propagate daily 14:35 UTC → `beach_advisory` rows → `find.html` chips.
